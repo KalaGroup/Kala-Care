@@ -1,0 +1,171 @@
+@import "tailwindcss";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Toast container - top right positioning */
+.react-hot-toast-container {
+  top: 1rem !important;
+  right: 1rem !important;
+  left: auto !important;
+}
+
+/* Individual toast styling */
+.react-hot-toast {
+  padding: 8px 12px !important;
+  border-radius: 6px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
+  min-width: 260px !important;
+  max-width: 350px !important;
+  margin: 0 0 6px 0 !important;
+  animation: slideIn 0.2s ease !important;
+  background: #ffffff !important;
+  color: #333333 !important;
+}
+
+/* Success toast - Your cyan color */
+.react-hot-toast[data-type="success"] {
+  background: #71C9CE !important;
+  color: #1a1a1a !important;
+}
+
+/* Error toast - Your orange color */
+.react-hot-toast[data-type="error"] {
+  background: #F97316 !important;
+  color: #ffffff !important;
+}
+
+/* Loading toast */
+.react-hot-toast[data-type="loading"] {
+  background: #ffffff !important;
+  color: #333333 !important;
+  border-left: 3px solid #71C9CE !important;
+}
+
+/* Icons */
+.react-hot-toast[data-type="success"] svg,
+.react-hot-toast[data-type="success"] svg path {
+  color: #1a1a1a !important;
+  fill: #1a1a1a !important;
+  stroke: #1a1a1a !important;
+  width: 14px !important;
+  height: 14px !important;
+}
+
+.react-hot-toast[data-type="error"] svg,
+.react-hot-toast[data-type="error"] svg path {
+  color: #ffffff !important;
+  fill: #ffffff !important;
+  stroke: #ffffff !important;
+  width: 14px !important;
+  height: 14px !important;
+}
+
+.react-hot-toast[data-type="loading"] svg,
+.react-hot-toast[data-type="loading"] svg path {
+  color: #71C9CE !important;
+  fill: #71C9CE !important;
+  stroke: #71C9CE !important;
+  width: 14px !important;
+  height: 14px !important;
+}
+
+/* Animation */
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .react-hot-toast {
+    min-width: 220px !important;
+    max-width: 280px !important;
+    padding: 8px 10px !important;
+    font-size: 11px !important;
+  }
+  
+  .react-hot-toast[data-type="success"] svg,
+  .react-hot-toast[data-type="success"] svg path,
+  .react-hot-toast[data-type="error"] svg,
+  .react-hot-toast[data-type="error"] svg path,
+  .react-hot-toast[data-type="loading"] svg,
+  .react-hot-toast[data-type="loading"] svg path {
+    width: 12px !important;
+    height: 12px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .react-hot-toast {
+    min-width: auto !important;
+    max-width: 90vw !important;
+    width: 90vw !important;
+    padding: 8px 10px !important;
+    font-size: 11px !important;
+    margin: 0 auto 6px auto !important;
+  }
+  
+  .react-hot-toast-container {
+    top: 0.5rem !important;
+    right: 0.5rem !important;
+    left: 0.5rem !important;
+  }
+  
+  .react-hot-toast[data-type="success"] svg,
+  .react-hot-toast[data-type="success"] svg path,
+  .react-hot-toast[data-type="error"] svg,
+  .react-hot-toast[data-type="error"] svg path,
+  .react-hot-toast[data-type="loading"] svg,
+  .react-hot-toast[data-type="loading"] svg path {
+    width: 11px !important;
+    height: 11px !important;
+  }
+}
+
+
+
+
+/* Reduce SweetAlert font size and padding */
+.swal2-popup {
+  font-size: 0.8rem !important;
+  padding: 1rem !important;
+}
+
+.swal2-title {
+  font-size: 1.1rem !important;
+  padding: 0.5rem 0 0.5rem 0 !important;
+}
+
+.swal2-html-container {
+  font-size: 0.8rem !important;
+  padding: 0.5rem !important;
+}
+
+.swal2-actions {
+  padding: 0.5rem 0 0 0 !important;
+  gap: 0.5rem !important;
+}
+
+.swal2-confirm,
+.swal2-cancel {
+  font-size: 0.75rem !important;
+  padding: 0.4rem 1rem !important;
+}
+
+.swal2-icon {
+  margin: 0.5rem auto 0.5rem !important;
+}
+
+.swal2-icon .swal2-icon-content {
+  font-size: 2rem !important;
+}
