@@ -426,7 +426,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
     task_status: '', kms_travelled: '', task_start_date: '', task_end_date: '',
   };
   const BW_BM_HEADER_INITIAL = {
-    customer_name: '', sr_invoice_engine_no: '', work_description: '', remark: '', work_status: '',
+    customer_name: '', sr_invoice_engine_no: '', installation_site_address: '', work_description: '', remark: '', work_status: '',
   };
   const BW_NEW_BILL = () => ({
     date: new Date().toISOString().slice(0, 10),
@@ -743,6 +743,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
       const reqd = [
         ['customer_name', 'Customer Name'],
         ['sr_invoice_engine_no', 'SR No. / Invoice No. / Engine No.'],
+        ['installation_site_address', 'Location'],
         ['work_description', 'Work Description'],
         ['remark', 'Remark'],
         ['work_status', 'Work Status'],
@@ -1639,6 +1640,12 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
                       <input type="text" value={bwBmHeader.sr_invoice_engine_no}
                         onChange={e => setBwBmHeader(p => ({ ...p, sr_invoice_engine_no: e.target.value }))}
                         placeholder="Enter any one" className={inputCls} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Location <span className="text-red-500">*</span></label>
+                      <input type="text" value={bwBmHeader.installation_site_address}
+                        onChange={e => setBwBmHeader(p => ({ ...p, installation_site_address: e.target.value }))}
+                        placeholder="Enter Location" className={inputCls} />
                     </div>
                     <div>
                       <label className={labelCls}>Work Description <span className="text-red-500">*</span></label>
@@ -3978,6 +3985,7 @@ const BranchAdminExpense = () => {
           <td>${r.date ? new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</td>
           <td class="al">${escape(r.customer_name || '-')}</td>
           <td>${escape(r.sr_invoice_engine_no || '-')}</td>
+          <td class="al" contenteditable="true">${escape(r.installation_site_address || '-')}</td>
           <td>${escape(r.expenses_head || '-')}</td>
           <td>${money(r.amount)}</td>
           <td class="al">${escape(r.work_description || '-')}</td>
@@ -3990,7 +3998,7 @@ const BranchAdminExpense = () => {
           <td>${r.date ? new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</td>
           <td>${escape(r.service_request_no || '-')}</td>
           <td class="al">${escape(r.account || '-')}</td>
-          <td class="al">${escape(r.installation_site_address || '-')}</td>
+          <td class="al" contenteditable="true">${escape(r.installation_site_address || '-')}</td>
           <td>${escape(r.sr_type || '-')}</td>
           <td>${escape(r.expenses_head || '-')}</td>
           <td>${money(r.amount)}</td>
@@ -4002,9 +4010,9 @@ const BranchAdminExpense = () => {
     const uid = (records.find(r => r.service_engineer_uid && String(r.service_engineer_uid).trim() !== '') || {}).service_engineer_uid || '-';
 
     const headHtml = isBM
-      ? `<th>Sr.No.</th><th>Date</th><th>Customer Name</th><th>SR No. / Inv / Engine</th><th>Expense Head</th><th>Amount</th><th>Work Description</th><th>Remark</th>`
+      ? `<th>Sr.No.</th><th>Date</th><th>Customer Name</th><th>SR No. / Inv / Engine</th><th>Location</th><th>Expense Head</th><th>Amount</th><th>Work Description</th><th>Remark</th>`
       : `<th>Sr.No.</th><th>Date</th><th>SR No.</th><th>Account</th><th>Installation Site Address</th><th>SR Type</th><th>Expense Head</th><th>Amount</th><th>Work Description</th>`;
-    const footColspan = isBM ? 5 : 7;
+    const footColspan = isBM ? 6 : 7;
     const footTail = isBM ? 2 : 1;
 
     const html = `<!DOCTYPE html>
@@ -4027,10 +4035,15 @@ const BranchAdminExpense = () => {
     table.data tfoot td { font-weight: bold; background: #e8e8e8; }
     .print-btn { position: fixed; top: 10px; right: 10px; padding: 8px 16px; background: #2f3192; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; z-index: 1000; }
     .print-btn:hover { background: #1e1f6b; }
-    @media print { .print-btn { display: none; } }
+    [contenteditable="true"] { outline: none; cursor: text; transition: background 0.15s; }
+    [contenteditable="true"]:hover { background: #fff9c4 !important; box-shadow: inset 0 0 0 1px #fbc02d; }
+    [contenteditable="true"]:focus { background: #fff59d !important; box-shadow: inset 0 0 0 2px #f57f17; }
+    .edit-hint { position: fixed; top: 10px; left: 10px; padding: 8px 14px; background: #fef3c7; color: #92400e; border: 1px solid #f59e0b; border-radius: 4px; font-size: 11px; font-weight: bold; z-index: 1000; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    @media print { .print-btn, .edit-hint { display: none; } [contenteditable="true"]:hover, [contenteditable="true"]:focus { background: transparent !important; box-shadow: none !important; } }
   </style>
 </head>
 <body>
+  <div class="edit-hint">✎ Click the "${isBM ? 'Location' : 'Installation Site Address'}" cells to edit · Press Print when ready</div>
   <button class="print-btn" onclick="window.print()">🖨 Print</button>
 
   <div class="company-header">KALA Care Global LLP, ${escape(getBranchLabel(userBranch))}</div>
@@ -4048,7 +4061,13 @@ const BranchAdminExpense = () => {
     </tr>
   </table>
 
-  <table class="data">
+  <table class="data" style="table-layout:fixed;">
+    <colgroup>
+      ${isBM
+        ? `<col style="width:4%;" /><col style="width:8%;" /><col style="width:14%;" /><col style="width:13%;" /><col style="width:20%;" /><col style="width:11%;" /><col style="width:8%;" /><col style="width:13%;" /><col style="width:9%;" />`
+        : `<col style="width:4%;" /><col style="width:8%;" /><col style="width:10%;" /><col style="width:13%;" /><col style="width:16%;" /><col style="width:9%;" /><col style="width:13%;" /><col style="width:8%;" /><col style="width:19%;" />`
+      }
+    </colgroup>
     <thead><tr>${headHtml}</tr></thead>
     <tbody>${rowsHtml}</tbody>
     <tfoot>
@@ -4194,8 +4213,8 @@ const BranchAdminExpense = () => {
       <tr>
         <th style="width: 45px;">SL no.</th>
         <th style="width: 80px;">Paid Date</th>
-        <th style="width: 110px;">Expenses Head</th>
-        <th style="width: 95px;">Expense Code</th>
+        <th style="width: 110px;">Exps. Sub Head</th>
+        <th style="width: 95px;">Expense Head (GL Code)</th>
         <th>Expenses Description</th>
         <th style="width: 110px;">Paid TO</th>
         <th style="width: 110px;">Invoice No. / Stock transfer No. / SR no. / DC no.</th>
@@ -5890,12 +5909,12 @@ const BranchAdminExpense = () => {
           <span className="text-[11px] text-gray-600">Total:</span><span className="text-[11px] font-bold text-purple-700">₹{billWiseDraftPeriod.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
         </div>
         <div className="overflow-auto" style={{ maxHeight: '650px', scrollbarWidth: 'thin' }}>
-          <table className="border-collapse w-full" style={{ minWidth: isBM ? '1360px' : '2450px' }}>
+          <table className="border-collapse w-full" style={{ minWidth: isBM ? '1510px' : '2450px' }}>
 
             <thead className="sticky top-0 z-10">
               <tr style={{ backgroundColor: '#f0f1ff' }}>
                 {(isBM
-                  ? [{ l: 'Sel', w: 40 }, { l: 'Sr.', w: 50 }, { l: 'Date', w: 100 }, { l: 'Customer', w: 170 }, { l: 'SR/Inv/Engine', w: 160 }, { l: 'Expense Head', w: 150 }, { l: 'Amount', w: 110 }, { l: 'Bill Submitted', w: 100 }, { l: 'Work Description', w: 200 }, { l: 'Remark', w: 160 }, { l: 'Work Status', w: 110 }, { l: 'Employee Name', w: 170 }, { l: 'Action', w: 70 }]
+                  ? [{ l: 'Sel', w: 40 }, { l: 'Sr.', w: 50 }, { l: 'Date', w: 100 }, { l: 'Customer', w: 170 }, { l: 'SR/Inv/Engine', w: 160 }, { l: 'Location', w: 150 }, { l: 'Expense Head', w: 150 }, { l: 'Amount', w: 110 }, { l: 'Bill Submitted', w: 100 }, { l: 'Work Description', w: 200 }, { l: 'Remark', w: 160 }, { l: 'Work Status', w: 110 }, { l: 'Employee Name', w: 170 }, { l: 'Action', w: 70 }]
                   : [{ l: 'Sel', w: 40 }, { l: 'Sr.', w: 50 }, { l: 'Date', w: 100 }, { l: 'SR No.', w: 130 }, { l: 'Account', w: 150 }, { l: 'Installation Site Address', w: 110 }, { l: 'SR Type', w: 110 }, { l: 'Expense Head', w: 150 }, { l: 'Amount', w: 110 }, { l: 'Work Description', w: 180 },
                   { l: 'KMs Travelled', w: 100 }, { l: 'Task Status', w: 110 }, { l: 'Appt No.', w: 120 }, { l: 'Task Start Date', w: 120 }, { l: 'Task End Date', w: 120 }, { l: 'Engineer', w: 150 }, { l: 'Emp ID', w: 90 }, { l: 'UID', w: 100 }, { l: 'Bill Subm.', w: 90 }, { l: 'Action', w: 70 }]
                 ).map((c, i) => (
@@ -5915,6 +5934,7 @@ const BranchAdminExpense = () => {
                     <>
                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.customer_name || ''}>{rec.customer_name || '-'}</div></td>
                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.sr_invoice_engine_no || ''}>{rec.sr_invoice_engine_no || '-'}</div></td>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.installation_site_address || ''}>{rec.installation_site_address || '-'}</div></td>
                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.expenses_head || ''}>{rec.expenses_head || '-'}</div></td>
                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 font-bold text-blue-700">{money(rec.amount)}</td>
                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.bill_submitted || '-'}</td>
@@ -6560,7 +6580,7 @@ const BranchAdminExpense = () => {
     return out;
   }, [expenseHeads]);
 
-  // Pick a subhead (labelled "Expenses Head") → auto-fill parent head (labelled "Expense Code")
+  // Pick a subhead (labelled "Exps. Sub Head") → auto-fill parent head (labelled "Expense Head (GL Code)")
   const handleSubheadSelect = (e) => {
     const sub = e.target.value;
     const match = allSubheads.find(x => x.subhead === sub);
@@ -9051,6 +9071,7 @@ const BranchAdminExpense = () => {
                           const bmCols = [
                             { label: 'Sr.No.', w: '50px' }, { label: 'Date', w: '100px' },
                             { label: 'Customer Name', w: '170px' }, { label: 'SR No. / Inv / Engine', w: '170px' },
+                            { label: 'Location', w: '150px' },
                             { label: 'Expense Head', w: '150px' }, { label: 'Amount', w: '110px' },
                             { label: 'Bill Submitted', w: '100px' },
                             { label: 'Work Description', w: '220px' }, { label: 'Remark', w: '160px' }, { label: 'Work Status', w: '110px' },
@@ -9061,7 +9082,7 @@ const BranchAdminExpense = () => {
 
                           return (
                             <div className="overflow-auto" style={{ maxHeight: '650px', scrollbarWidth: 'thin' }}>
-                              <table className="border-collapse w-full" style={{ minWidth: isBM ? '1610px' : '2550px' }}>
+                              <table className="border-collapse w-full" style={{ minWidth: isBM ? '1760px' : '2550px' }}>
                                 <thead className="sticky top-0 z-10">
                                   <tr style={{ backgroundColor: '#f0f1ff' }}>
                                     {cols.map((c, i) => (
@@ -9087,6 +9108,7 @@ const BranchAdminExpense = () => {
                                           <>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.customer_name || ''}>{rec.customer_name || '-'}</div></td>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.sr_invoice_engine_no || ''}>{rec.sr_invoice_engine_no || '-'}</div></td>
+                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.installation_site_address || ''}>{rec.installation_site_address || '-'}</div></td>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.expenses_head || ''}>{rec.expenses_head || '-'}</div></td>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 font-bold text-blue-700">{money(rec.amount)}</td>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.bill_submitted || '-'}</td>
@@ -11270,9 +11292,9 @@ const BranchAdminExpense = () => {
                     />
                   </div>
 
-                  {/* Expenses Head — lists ALL subheads across every head */}
+                  {/* Exps. Sub Head — lists ALL subheads across every head */}
                   <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Expenses Head *</label>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Exps. Sub Head *</label>
                     <select
                       name="sub_head"
                       value={officeExpenseForm.sub_head}
@@ -11289,16 +11311,16 @@ const BranchAdminExpense = () => {
                     </select>
                   </div>
 
-                  {/* Expense Code — read-only, auto-filled from the chosen head's parent */}
+                  {/* Expense Head (GL Code) — read-only, auto-filled from the chosen head's parent */}
                   <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Expense Code *</label>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Expense Head (GL Code) *</label>
                     <input
                       type="text"
                       name="expenses_head"
                       value={officeExpenseForm.expenses_head}
                       readOnly
                       className="w-full px-2.5 py-1.5 text-xs border border-gray-100 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed"
-                      placeholder="Auto-filled from Expenses Head"
+                      placeholder="Auto-filled from Exps. Sub Head"
                     />
                   </div>
 
@@ -11487,8 +11509,8 @@ const BranchAdminExpense = () => {
                         `oe_drafts_${userBranch}.xlsx`,
                         [
                           { key: 'paid_date', label: 'Date' },
-                          { key: 'sub_head', label: 'Expenses Head' },
-                          { key: 'expenses_head', label: 'Expense Code' },
+                          { key: 'sub_head', label: 'Exps. Sub Head' },
+                          { key: 'expenses_head', label: 'Expense Head (GL Code)' },
                           { key: 'paid_to', label: 'Paid To' },
                           { key: 'invoice_no', label: 'Invoice / SR No.' },
                           { key: 'amount', label: 'Amount (₹)' },
@@ -11551,7 +11573,7 @@ const BranchAdminExpense = () => {
                             }}
                           />
                         </th>
-                        {['Sr.No.', 'Date', 'Expenses Head', 'Expense Code', 'Paid To', 'Invoice / SR No.', 'Amount (₹)', 'Voucher No.', 'Paid By', 'Remark', 'Description', 'Actions'].map((c, i) => (
+                        {['Sr.No.', 'Date', 'Exps. Sub Head', 'Expense Head (GL Code)', 'Paid To', 'Invoice / SR No.', 'Amount (₹)', 'Voucher No.', 'Paid By', 'Remark', 'Description', 'Actions'].map((c, i) => (
                           <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-b-2 border-r border-gray-200 last:border-r-0 uppercase tracking-wide whitespace-nowrap text-center">{c}</th>
                         ))}
                       </tr>
@@ -11579,13 +11601,13 @@ const BranchAdminExpense = () => {
                                 ? <input type="date" value={oeTempEditForm.paid_date} onChange={e => setOeTempEditForm(p => ({ ...p, paid_date: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
                                 : (d.paid_date ? new Date(d.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-')}
                             </td>
-                            {/* Expenses Head = sub_head */}
+                            {/* Exps. Sub Head = sub_head */}
                             <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
                               {isEditing
                                 ? <input value={oeTempEditForm.sub_head} onChange={e => setOeTempEditForm(p => ({ ...p, sub_head: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
                                 : (d.sub_head || '-')}
                             </td>
-                            {/* Expense Code = expenses_head */}
+                            {/* Expense Head (GL Code) = expenses_head */}
                             <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
                               {isEditing
                                 ? <input value={oeTempEditForm.expenses_head} onChange={e => setOeTempEditForm(p => ({ ...p, expenses_head: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
@@ -11810,8 +11832,8 @@ const BranchAdminExpense = () => {
                         `office_expenses_${userBranch}.xlsx`,
                         [
                           { key: 'paid_date', label: 'Date' },
-                          { key: 'sub_head', label: 'Expenses Head' },
-                          { key: 'expenses_head', label: 'Expense Code' },
+                          { key: 'sub_head', label: 'Exps. Sub Head' },
+                          { key: 'expenses_head', label: 'Expense Head (GL Code)' },
                           { key: 'paid_to', label: 'Paid To' },
                           { key: 'invoice_no', label: 'Invoice / SR No.' },
                           { key: 'amount', label: 'Amount (₹)' },
@@ -11949,8 +11971,8 @@ const BranchAdminExpense = () => {
                           {[
                             { label: 'Sr.No.', w: '45px' },
                             { label: 'Date', w: '90px' },
-                            { label: 'Expenses Head', w: '130px' },
-                            { label: 'Expense Code', w: '110px' },
+                            { label: 'Exps. Sub Head', w: '130px' },
+                            { label: 'Expense Head (GL Code)', w: '110px' },
                             { label: 'Paid To', w: '130px' },
                             { label: 'Invoice / SR No.', w: '110px' },
                             { label: 'Amount (₹)', w: '100px' },
@@ -13482,8 +13504,8 @@ const BranchAdminExpense = () => {
                               `oe_history_period_${oeSelectedPeriod.period_start_display}_${userBranch}.xlsx`,
                               [
                                 { key: 'paid_date', label: 'Date' },
-                                { key: 'sub_head', label: 'Expenses Head' },
-                                { key: 'expenses_head', label: 'Expense Code' },
+                                { key: 'sub_head', label: 'Exps. Sub Head' },
+                                { key: 'expenses_head', label: 'Expense Head (GL Code)' },
                                 { key: 'paid_to', label: 'Paid To' },
                                 { key: 'invoice_no', label: 'Invoice No.' },
                                 { key: 'amount', label: 'Amount (₹)' },
@@ -13583,8 +13605,8 @@ const BranchAdminExpense = () => {
                         const toExport = window.__oeHistoryFilteredBranch || oeHistoryRecords;
                         exportToExcel(toExport, `office_expense_history_${userBranch}.xlsx`, [
                           { key: 'paid_date', label: 'Date' },
-                          { key: 'sub_head', label: 'Expenses Head' },
-                          { key: 'expenses_head', label: 'Expense Code' },
+                          { key: 'sub_head', label: 'Exps. Sub Head' },
+                          { key: 'expenses_head', label: 'Expense Head (GL Code)' },
                           { key: 'paid_to', label: 'Paid To' },
                           { key: 'invoice_no', label: 'Invoice No.' },
                           { key: 'amount', label: 'Amount (₹)' },
@@ -13666,7 +13688,7 @@ const BranchAdminExpense = () => {
                     <table className="border-collapse w-full" style={{ minWidth: '1400px' }}>
                       <thead className="sticky top-0 z-10">
                         <tr style={{ backgroundColor: '#f0f1ff' }}>
-                          {['Sr.No.', 'Date', 'Expenses Head', 'Expense Code', 'Paid To', 'Invoice No.', 'Amount (₹)', 'Voucher No.', 'Paid By', 'Remark', 'Description', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date'].map((col, i) => (
+                          {['Sr.No.', 'Date', 'Exps. Sub Head', 'Expense Head (GL Code)', 'Paid To', 'Invoice No.', 'Amount (₹)', 'Voucher No.', 'Paid By', 'Remark', 'Description', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date'].map((col, i) => (
                             <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 last:border-r-0 uppercase tracking-wide whitespace-nowrap text-center" style={{ backgroundColor: '#f0f1ff' }}>
                               {col}
                             </th>
@@ -13842,7 +13864,7 @@ const BranchAdminExpense = () => {
                       <table className="border-collapse w-full" style={{ minWidth: '1400px' }}>
                         <thead className="sticky top-0 z-10">
                           <tr style={{ backgroundColor: '#f0f1ff' }}>
-                            {['Sr.No.', 'Date', 'Expenses Head', 'Expense Code', 'Paid To', 'Invoice No.', 'Amount (₹)', 'Voucher No.', 'Paid By', 'Remark', 'Description', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date'].map((col, i) => (
+                            {['Sr.No.', 'Date', 'Exps. Sub Head', 'Expense Head (GL Code)', 'Paid To', 'Invoice No.', 'Amount (₹)', 'Voucher No.', 'Paid By', 'Remark', 'Description', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date'].map((col, i) => (
                               <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 last:border-r-0 uppercase tracking-wide whitespace-nowrap text-center" style={{ backgroundColor: '#f0f1ff' }}>
                                 {col}
                               </th>
