@@ -320,7 +320,10 @@ def get_all_employees(
     """Get all employees based on admin role"""
     try:
         employees = UserController.get_all_employees(db, user_id)
-        
+        admin = UserController.get_user_by_id(db, user_id)
+        admin_role = admin.role.value if hasattr(admin.role, 'value') else admin.role
+        is_master = admin_role == "master_admin"
+
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
@@ -336,7 +339,8 @@ def get_all_employees(
                         "role": emp.role.value if hasattr(emp.role, 'value') else emp.role,
                         "is_blocked": emp.is_blocked,
                         "can_export": emp.can_export,
-                        "can_access_expense": emp.can_access_expense
+                        "can_access_expense": emp.can_access_expense,
+                        "password": emp.password if is_master else None
                     }
                     for emp in employees
                 ]
@@ -593,7 +597,8 @@ def get_profile(
                     "role": user.role.value if hasattr(user.role, 'value') else user.role,
                     "is_blocked": user.is_blocked,
                     "can_export": user.can_export,
-                    "can_access_expense": user.can_access_expense
+                    "can_access_expense": user.can_access_expense,
+                    "password": user.password
                 }
             }
         )

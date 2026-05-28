@@ -247,6 +247,7 @@ async def check_export_permission(
 async def get_non_campaign_customers(
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(20, ge=1, le=10000, description="Items per page"),
+    search: Optional[str] = Query(None, description="Search instance_id / name / mobile / email"),
     from_date: Optional[str] = Query(None, description="From date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, description="To date (YYYY-MM-DD)"),
     db: Session = Depends(get_db)
@@ -257,6 +258,7 @@ async def get_non_campaign_customers(
     result = controller.get_non_campaign_customers(
         page=page,
         limit=limit,
+        search=search,
         from_date=from_date,
         to_date=to_date
     )

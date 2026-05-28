@@ -1622,11 +1622,14 @@ class EngagementController:
                 detail=f"Failed to delete reject reason: {str(e)}"
             )
     
-    def get_non_campaign_customers(self, page: int = 1, limit: int = 20, from_date: Optional[str] = None, to_date: Optional[str] = None) -> Dict[str, Any]:
+    def get_non_campaign_customers(self, page: int = 1, limit: int = 20, search: Optional[str] = None, from_date: Optional[str] = None, to_date: Optional[str] = None) -> Dict[str, Any]:
         """Get customers who are not in any campaign with their engagement data"""
         
-        # First update flags for latest follow-ups
-        self.update_latest_followup_flags()
+        is_search = bool(search and search.strip())
+        
+        # Skip the global flag recompute on search — it scans the whole DB and is the biggest hidden cost
+        if not is_search:
+            self.update_latest_followup_flags()
         
         # Parse dates if provided
         start_date = None
@@ -1660,6 +1663,20 @@ class EngagementController:
         customers_query = self.db.query(Customer).filter(
             Customer.instance_id.isnot(None)
         )
+        
+        # Server-side search — instance_id is unique+indexed so exact/prefix match is instant.
+        if is_search:
+            term = search.strip()
+            like = f"%{term}%"
+            customers_query = customers_query.filter(
+                or_(
+                    Customer.instance_id == term,            # exact → unique index, instant
+                    Customer.instance_id.like(f"{term}%"),   # prefix → still uses index
+                    Customer.phone_number.like(f"{term}%"),
+                    Customer.customer_name.like(like),
+                    Customer.email.like(like),
+                )
+            ).limit(1000)  # safety cap
         
         # Filter out customers that are in any campaign
         all_customers = customers_query.all()
@@ -1696,10 +1713,15 @@ class EngagementController:
         # Calculate total count
         total_count = len(non_campaign_customers)
         
-        # Apply pagination
-        start_idx = (page - 1) * limit
-        end_idx = start_idx + limit
-        paginated_customers = non_campaign_customers[start_idx:end_idx]
+        # Apply pagination (on search, return ALL matches in a single page)
+        if is_search:
+            start_idx = 0
+            end_idx = total_count
+            paginated_customers = non_campaign_customers
+        else:
+            start_idx = (page - 1) * limit
+            end_idx = start_idx + limit
+            paginated_customers = non_campaign_customers[start_idx:end_idx]
         
         # Build warranty + agreement maps only for paginated customers (efficient)
         paginated_instance_ids = [

@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from fastapi import HTTPException
 from typing import Optional, List
 from datetime import datetime, timedelta
@@ -9,6 +9,10 @@ from app.models.TADA_bill_wise_model import TADABillWise
 from app.models.TADA_bill_wise_history_model import TADABillWiseHistory
 from app.models.branch_submit_limit_model import BranchSubmitLimit
 from app.models.TADA_bill_wise_temp_model import TADABillWiseTemp
+# Guard tables for Bill Wise (SE) duplicate check
+from app.models.TADAImport_temp_model import TADAImportTemp   # Drafts (Pending) / Verified
+from app.models.TADA_model import TADAImport                 # Submitted to HO (main)
+from app.models.TADA_history_model import TADAHistory        # Archived
 from app.controllers.voucher_controller import generate_voucher_no
 
 logger = logging.getLogger(__name__)
@@ -86,12 +90,62 @@ def create_bill_wise_entries(db: Session, header: dict, bills: List[dict],
     """
     Create MULTIPLE Bill Wise DRAFT rows (TADABillWiseTemp) in a loop.
     One row per bill, all sharing the same header fields.
+
+    SE-only guard on {Employee ID + SR No. + Appointment No.}:
+      • TADAImportTemp Pending  → ALLOW (Bill Wise saves; that draft is blocked from verify on frontend)
+      • TADAImportTemp Verified → BLOCK
+      • TADAImport (submitted)  → BLOCK (any status)
+      • TADAHistory (archived)  → BLOCK (any status)
     """
     try:
         if not bills:
             raise HTTPException(status_code=400, detail="No bill line items provided")
 
         et = "BM" if str(entry_type).upper() == "BM" else "SE"
+
+        # ── SE-only duplicate guard ──
+        if et == "SE":
+            emp_id = str(header.get("employee_id") or "").strip()
+            sr_no = str(header.get("service_request_no") or "").strip()
+            appt_no = str(header.get("appointment_number") or "").strip()
+
+            if sr_no and appt_no:
+                def _match(model, status_filter=None):
+                    q = db.query(model).filter(
+                        func.trim(func.coalesce(model.employee_id, "")) == emp_id,
+                        func.trim(func.coalesce(model.service_request_no, "")) == sr_no,
+                        func.trim(func.coalesce(model.appointment_number, "")) == appt_no,
+                    )
+                    if status_filter is not None:
+                        q = q.filter(func.trim(func.coalesce(model.verification_status, "")) == status_filter)
+                    return q.first()
+
+                combo_txt = f"Employee ID {emp_id or '-'}, SR No. {sr_no}, Appointment No. {appt_no}"
+
+                # 1) TADAImportTemp — block ONLY if Verified (Pending is allowed)
+                if _match(TADAImportTemp, status_filter="Verified"):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(f"This record is already Verified in TADA for {combo_txt}. "
+                                f"Bill Wise (Service Engineer) entry cannot be saved."),
+                    )
+
+                # 2) TADAImport (submitted to HO) — block on any status
+                if _match(TADAImport):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(f"This record is already submitted to HO for {combo_txt}. "
+                                f"Bill Wise (Service Engineer) entry cannot be saved."),
+                    )
+
+                # 3) TADAHistory (archived) — block on any status
+                if _match(TADAHistory):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(f"This record already exists in TADA History for {combo_txt}. "
+                                f"Bill Wise (Service Engineer) entry cannot be saved."),
+                    )
+
         created = []
 
         for bill in bills:
@@ -100,7 +154,7 @@ def create_bill_wise_entries(db: Session, header: dict, bills: List[dict],
                 date=bill.get("date"),
                 expenses_head=bill.get("expenses_head"),
                 amount=str(bill.get("amount") or ""),
-                bill_submitted=bill.get("bill_submitted") if et == "SE" else None,
+                bill_submitted=bill.get("bill_submitted"),  # now saved for both SE and BM
                 # SE header
                 engineer_name=header.get("engineer_name"),
                 employee_id=header.get("employee_id"),
@@ -539,3 +593,31 @@ def bulk_update_bill_wise_history_paid_date(db: Session, record_ids: List[int], 
     )
     db.commit()
     return {"updated_count": updated}
+
+def get_blocked_se_combos(db: Session, branch_code: str) -> list:
+    """
+    Return all SE Bill Wise {Employee ID}__{SR No.}__{Appointment No.} combos
+    that exist in temp + main + history for this branch.
+
+    A TADA draft matching any of these combos must stay BLOCKED from verification
+    for as long as the Bill Wise record exists anywhere (temp/main/history).
+    Deleting the Bill Wise record removes its combo here → TADA draft unblocks.
+    """
+    combos = set()
+
+    def _collect(model):
+        rows = db.query(model).filter(model.branch_code == branch_code).all()
+        for r in rows:
+            if (getattr(r, "entry_type", "SE") or "SE") != "SE":
+                continue
+            k = (
+                f"{str(getattr(r, 'employee_id', '') or '').strip()}__"
+                f"{str(getattr(r, 'service_request_no', '') or '').strip()}__"
+                f"{str(getattr(r, 'appointment_number', '') or '').strip()}"
+            )
+            combos.add(k)
+
+    _collect(TADABillWiseTemp)        # drafts (Verify tab)
+    _collect(TADABillWise)            # submitted to HO (main)
+    _collect(TADABillWiseHistory)     # archived
+    return sorted(combos)    

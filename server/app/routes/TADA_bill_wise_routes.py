@@ -431,3 +431,15 @@ def submitted_bill_wise(
     except Exception as e:
         logger.error(f"submitted_bill_wise error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))        
+
+@router.get("/blocked-combos")
+def blocked_se_combos(branch_code: str, db: Session = Depends(get_db)):
+    """SE combos (emp_id + sr_no + appt_no) that must block TADA verification —
+    sourced from temp + main + history."""
+    try:
+        return {"combos": bill_controller.get_blocked_se_combos(db, unquote(branch_code))}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"blocked_se_combos error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))        

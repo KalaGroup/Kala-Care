@@ -220,6 +220,9 @@ const CustomerEng2 = () => {
   // Data states with pagination
   const [customers, setCustomers] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
+  // Server-side search results
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   // Faster debounce: numeric (instance IDs) gets near-instant, text gets 120ms
   const debouncedSearchTerm = useDebounce(searchTerm, /^\d+$/.test(searchTerm) ? 20 : 80);
 
@@ -294,6 +297,9 @@ const CustomerEng2 = () => {
 
   // Table container ref for scroll synchronization
   const tableContainerRef = useRef();
+  const topScrollRef = useRef(null);
+  const tableElRef = useRef(null);
+  const [tableScrollWidth, setTableScrollWidth] = useState(0);
   const savedScrollPosition = useRef(0);
   const savedPageCount = useRef(0);
 
@@ -528,6 +534,55 @@ const CustomerEng2 = () => {
     };
   }, [showCustomerDetails]);
 
+  // === Sync top horizontal scrollbar <-> table body (one-way per gesture, listeners attached once) ===
+  useEffect(() => {
+    if (showCustomerDetails) return;
+    const topEl = topScrollRef.current;
+    const mainEl = tableContainerRef.current;
+    if (!topEl || !mainEl) return;
+
+    let isSyncing = false;
+    const syncFromTop = () => {
+      if (isSyncing) { isSyncing = false; return; }
+      isSyncing = true;
+      mainEl.scrollLeft = topEl.scrollLeft;
+    };
+    const syncFromMain = () => {
+      if (isSyncing) { isSyncing = false; return; }
+      isSyncing = true;
+      topEl.scrollLeft = mainEl.scrollLeft;
+    };
+
+    topEl.addEventListener('scroll', syncFromTop, { passive: true });
+    mainEl.addEventListener('scroll', syncFromMain, { passive: true });
+
+    return () => {
+      topEl.removeEventListener('scroll', syncFromTop);
+      mainEl.removeEventListener('scroll', syncFromMain);
+    };
+  }, [showCustomerDetails, columnOrder.length, customers.length]);
+
+  // === Keep the top-bar spacer EXACTLY as wide as the real table so the bar can scroll to the last column ===
+  useEffect(() => {
+    if (showCustomerDetails) return;
+    const tableEl = tableElRef.current;
+    if (!tableEl) return;
+
+    const measure = () => {
+      // offsetWidth = the table's true rendered width (incl. borders/padding)
+      const w = tableEl.offsetWidth || tableEl.scrollWidth || 0;
+      setTableScrollWidth(prev => (prev !== w ? w : prev));
+    };
+
+    measure(); // initial
+
+    const ro = new ResizeObserver(measure);
+    ro.observe(tableEl);
+
+    return () => ro.disconnect();
+    // re-bind when the table can re-mount/re-layout
+  }, [showCustomerDetails, columnOrder.length, customers.length]);
+
   // Check if date is past or today
   const isDatePastOrToday = (dateString) => {
     if (!dateString) return false;
@@ -568,41 +623,18 @@ const CustomerEng2 = () => {
   }, [tierSortedCustomers]);
 
   const filteredCustomers = useMemo(() => {
-    if (!tierSortedCustomers.length) return [];
+    const searching = !!debouncedSearchTerm.trim();
 
     let filtered;
 
-    // Fast-path search using flat parallel arrays
-    if (debouncedSearchTerm) {
-      const searchLower = debouncedSearchTerm.toLowerCase().trim();
-      const isNumeric = /^\d+$/.test(searchLower);
-      const { instanceIdsLower, mobiles, namesLower, emailsLower } = searchIndex;
-      const n = tierSortedCustomers.length;
-      filtered = [];
-
-      if (isNumeric) {
-        for (let i = 0; i < n; i++) {
-          if (
-            (instanceIdsLower[i] && instanceIdsLower[i].indexOf(searchLower) !== -1) ||
-            (mobiles[i] && mobiles[i].indexOf(searchLower) !== -1)
-          ) {
-            filtered.push(tierSortedCustomers[i]);
-          }
-        }
-      } else {
-        for (let i = 0; i < n; i++) {
-          if (
-            (namesLower[i] && namesLower[i].indexOf(searchLower) !== -1) ||
-            (emailsLower[i] && emailsLower[i].indexOf(searchLower) !== -1) ||
-            (instanceIdsLower[i] && instanceIdsLower[i].indexOf(searchLower) !== -1)
-          ) {
-            filtered.push(tierSortedCustomers[i]);
-          }
-        }
-      }
+    // When searching, use server-matched rows (instance/name/mobile/email already filtered in SQL)
+    if (searching) {
+      filtered = searchResults;
     } else {
       filtered = tierSortedCustomers;
     }
+
+    if (!filtered.length) return [];
 
     // Branch filter
     if (!isAdmin && userBranch && userBranch !== 'HO') {
@@ -666,7 +698,7 @@ const CustomerEng2 = () => {
 
     // 3-tier sort is NOT redone here — already applied in tierSortedCustomers (filter preserves order)
     return filtered;
-  }, [debouncedSearchTerm, tierSortedCustomers, searchIndex, selectedFlag, isAdmin, userBranch, selectedBranches, statusColumnFilter, warrantyDateRange, agreementDateRange]);
+  }, [debouncedSearchTerm, searchResults, tierSortedCustomers, selectedFlag, isAdmin, userBranch, selectedBranches, statusColumnFilter, warrantyDateRange, agreementDateRange]);
 
   // Find other assets belonging to the same customer (same phone OR same name)
   // Searches across currently-loaded customers. As user scrolls, more load, so this recomputes.
@@ -698,17 +730,35 @@ const CustomerEng2 = () => {
     return matches;
   }, [customerDetails, customers]);
 
-  // Auto-load next chunk when SEARCHING and current page has no match yet.
-  // Keeps fetching sequentially in the background until either the customer is found
-  // or all pages are loaded. Spinner stays visible the entire time (no blink).
+  // Server-side search — one indexed query instead of fetching page after page.
   useEffect(() => {
-    if (!debouncedSearchTerm) return;
+    const term = debouncedSearchTerm.trim();
+    if (!term) { setSearchResults([]); setSearchLoading(false); return; }
     if (showCustomerDetails) return;
-    if (loading || loadingMore) return;
-    if (!hasMore) return;
-    if (filteredCustomers.length > 0) return; // found match, stop
-    fetchNonCampaignCustomers(page + 1, false);
-  }, [debouncedSearchTerm, filteredCustomers.length, hasMore, loading, loadingMore, showCustomerDetails, page]);
+
+    let cancelled = false;
+    setSearchLoading(true);
+    (async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/v1/engagement/non-campaign-customers?page=1&limit=1000&search=${encodeURIComponent(term)}`
+        );
+        if (!res.ok) throw new Error("search failed");
+        const data = await res.json();
+        if (cancelled) return;
+        let rows = data.customers || [];
+        if (!isAdmin && userBranch && userBranch !== 'HO') {
+          rows = rows.filter(c => !c.branch_id || String(c.branch_id) === String(userBranch));
+        }
+        setSearchResults(rows);
+      } catch {
+        if (!cancelled) setSearchResults([]);
+      } finally {
+        if (!cancelled) setSearchLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [debouncedSearchTerm, isAdmin, userBranch, showCustomerDetails]);
 
 
   const sortCustomers = useCallback((customersToSort, sortKey, sortDirection) => {
@@ -3399,7 +3449,13 @@ const CustomerEng2 = () => {
                   className="w-full pl-7 pr-7 py-1.5 text-xs border-2 border-black rounded-md bg-white text-black placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
                   autoComplete="off"
                 />
-                {searchTerm && (
+                {/* Spinner while searching, clear button otherwise */}
+                {searchLoading ? (
+                  <ArrowPathIcon
+                    className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin"
+                    style={{ color: themeColor }}
+                  />
+                ) : searchTerm ? (
                   <button
                     onClick={() => {
                       setSearchTerm('');
@@ -3409,7 +3465,7 @@ const CustomerEng2 = () => {
                   >
                     <XMarkIcon className="h-3.5 w-3.5" />
                   </button>
-                )}
+                ) : null}
               </div>
 
               <button
@@ -3508,47 +3564,18 @@ const CustomerEng2 = () => {
           <div className="bg-white rounded-xl shadow-lg overflow-hidden">
             {/* Horizontal scroll bar at top */}
             <div
+              ref={topScrollRef}
               className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200 overflow-x-auto"
               style={{
                 scrollbarWidth: 'thin',
                 msOverflowStyle: 'auto',
                 WebkitOverflowScrolling: 'touch'
               }}
-              ref={(el) => {
-                if (el && tableContainerRef.current) {
-                  // Sync top scroll with main container
-                  const handleMainScroll = () => {
-                    if (el.scrollLeft !== tableContainerRef.current.scrollLeft) {
-                      el.scrollLeft = tableContainerRef.current.scrollLeft;
-                    }
-                  };
-
-                  tableContainerRef.current.addEventListener('scroll', handleMainScroll);
-
-                  // Set initial scroll position
-                  setTimeout(() => {
-                    if (el.scrollLeft !== tableContainerRef.current.scrollLeft) {
-                      el.scrollLeft = tableContainerRef.current.scrollLeft;
-                    }
-                  }, 100);
-
-                  return () => {
-                    tableContainerRef.current?.removeEventListener('scroll', handleMainScroll);
-                  };
-                }
-              }}
-              onScroll={(e) => {
-                if (tableContainerRef.current) {
-                  tableContainerRef.current.scrollLeft = e.currentTarget.scrollLeft;
-                }
-              }}
             >
               <div
                 style={{
-                  width: `${Math.max(
-                    columnOrder.length * 110, // Further reduced minimum width
-                    tableContainerRef.current?.scrollWidth || 0
-                  )}px`,
+                  // Fall back to the min-width estimate only until the real table is measured
+                  width: `${tableScrollWidth || columnOrder.length * 105}px`,
                   height: '1px'
                 }}
               />
@@ -3596,6 +3623,7 @@ const CustomerEng2 = () => {
               }}
             >
               <table
+                ref={tableElRef}
                 className="w-full border-collapse border border-gray-200"
                 style={{ minWidth: `${columnOrder.length * 105}px` }}
               >
@@ -3663,97 +3691,101 @@ const CustomerEng2 = () => {
                               >
                                 <div className="relative flex items-center gap-1" ref={branchFilterRef}>
                                   <span>Branch ID</span>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setShowBranchFilter(prev => !prev);
-                                    }}
-                                    className={`p-0.5 rounded hover:bg-gray-200 transition-colors ${selectedBranches.length > 0 ? 'text-blue-600' : 'text-gray-400'}`}
-                                    title="Filter branches"
-                                  >
-                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                      <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V17a1 1 0 01-.553.894l-4 2A1 1 0 017 19v-8.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd" />
-                                    </svg>
-                                  </button>
+                                  {!(currentUser?.role === 'employee' && userBranch !== 'HO') && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setShowBranchFilter(prev => !prev);
+                                        }}
+                                        className={`p-0.5 rounded hover:bg-gray-200 transition-colors ${selectedBranches.length > 0 ? 'text-blue-600' : 'text-gray-400'}`}
+                                        title="Filter branches"
+                                      >
+                                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                          <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V17a1 1 0 01-.553.894l-4 2A1 1 0 017 19v-8.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd" />
+                                        </svg>
+                                      </button>
 
-                                  {showBranchFilter && (
-                                    <div
-                                      className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-2xl min-w-[220px]"
-                                      style={{ fontSize: '11px', zIndex: 99999 }}
-                                      onClick={e => e.stopPropagation()}
-                                    >
-                                      {/* Header */}
-                                      <div className="px-2 py-1.5 border-b border-gray-200 flex justify-between items-center bg-gray-50 rounded-t-lg">
-                                        <span className="font-bold text-black text-[11px]">Filter Branch</span>
-                                        {selectedBranches.length > 0 && (
-                                          <button
-                                            onClick={() => setSelectedBranches([])}
-                                            className="text-[10px] text-red-500 hover:text-red-700 font-medium"
-                                          >
-                                            Clear ({selectedBranches.length})
-                                          </button>
-                                        )}
-                                      </div>
+                                      {showBranchFilter && (
+                                        <div
+                                          className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-2xl min-w-[220px]"
+                                          style={{ fontSize: '11px', zIndex: 99999 }}
+                                          onClick={e => e.stopPropagation()}
+                                        >
+                                          {/* Header */}
+                                          <div className="px-2 py-1.5 border-b border-gray-200 flex justify-between items-center bg-gray-50 rounded-t-lg">
+                                            <span className="font-bold text-black text-[11px]">Filter Branch</span>
+                                            {selectedBranches.length > 0 && (
+                                              <button
+                                                onClick={() => setSelectedBranches([])}
+                                                className="text-[10px] text-red-500 hover:text-red-700 font-medium"
+                                              >
+                                                Clear ({selectedBranches.length})
+                                              </button>
+                                            )}
+                                          </div>
 
-                                      {/* Select All */}
-                                      <div className="px-2 py-1 border-b border-gray-200 hover:bg-gray-50">
-                                        <label className="flex items-center gap-1.5 cursor-pointer">
-                                          <input
-                                            type="checkbox"
-                                            checked={selectedBranches.length === 0}
-                                            onChange={() => setSelectedBranches([])}
-                                            className="h-3 w-3 rounded border-gray-300"
-                                            style={{ accentColor: '#2f3192' }}
-                                          />
-                                          <span className="text-black font-semibold text-[11px]">(Select All)</span>
-                                        </label>
-                                      </div>
-
-                                      {/* Branch options with name */}
-                                      <div className="max-h-[220px] overflow-y-auto">
-                                        {uniqueBranches.map(branch => (
-                                          <div key={branch} className="px-2 py-1 hover:bg-blue-50 border-b border-gray-50">
+                                          {/* Select All */}
+                                          <div className="px-2 py-1 border-b border-gray-200 hover:bg-gray-50">
                                             <label className="flex items-center gap-1.5 cursor-pointer">
                                               <input
                                                 type="checkbox"
-                                                checked={selectedBranches.includes(branch)}
-                                                onChange={() => {
-                                                  setSelectedBranches(prev =>
-                                                    prev.includes(branch)
-                                                      ? prev.filter(b => b !== branch)
-                                                      : [...prev, branch]
-                                                  );
-                                                }}
-                                                className="h-3 w-3 rounded border-gray-300 flex-shrink-0"
+                                                checked={selectedBranches.length === 0}
+                                                onChange={() => setSelectedBranches([])}
+                                                className="h-3 w-3 rounded border-gray-300"
                                                 style={{ accentColor: '#2f3192' }}
                                               />
-                                              <div className="flex flex-col min-w-0">
-                                                <span className="text-black text-[11px] font-medium leading-tight text-left">
-                                                  {branch === '' ? '(Blank)' : branch}
-                                                </span>
-                                                {branch !== '' && branchMap[branch] && (
-                                                  <span className="text-gray-500 text-[10px] leading-tight truncate">
-                                                    {branchMap[branch]}
-                                                  </span>
-                                                )}
-                                              </div>
+                                              <span className="text-black font-semibold text-[11px]">(Select All)</span>
                                             </label>
                                           </div>
-                                        ))}
-                                      </div>
 
-                                      {/* Footer */}
-                                      <div className="px-2 py-1.5 border-t border-gray-200 bg-gray-50 rounded-b-lg">
-                                        <button
-                                          onClick={() => setShowBranchFilter(false)}
-                                          className="w-full text-[11px] text-white rounded px-2 py-1 font-medium hover:opacity-90"
-                                          style={{ backgroundColor: '#2f3192' }}
-                                        >
-                                          Apply
-                                        </button>
-                                      </div>
-                                    </div>
+                                          {/* Branch options with name */}
+                                          <div className="max-h-[220px] overflow-y-auto">
+                                            {uniqueBranches.map(branch => (
+                                              <div key={branch} className="px-2 py-1 hover:bg-blue-50 border-b border-gray-50">
+                                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={selectedBranches.includes(branch)}
+                                                    onChange={() => {
+                                                      setSelectedBranches(prev =>
+                                                        prev.includes(branch)
+                                                          ? prev.filter(b => b !== branch)
+                                                          : [...prev, branch]
+                                                      );
+                                                    }}
+                                                    className="h-3 w-3 rounded border-gray-300 flex-shrink-0"
+                                                    style={{ accentColor: '#2f3192' }}
+                                                  />
+                                                  <div className="flex flex-col min-w-0">
+                                                    <span className="text-black text-[11px] font-medium leading-tight text-left">
+                                                      {branch === '' ? '(Blank)' : branch}
+                                                    </span>
+                                                    {branch !== '' && branchMap[branch] && (
+                                                      <span className="text-gray-500 text-[10px] leading-tight truncate">
+                                                        {branchMap[branch]}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                </label>
+                                              </div>
+                                            ))}
+                                          </div>
+
+                                          {/* Footer */}
+                                          <div className="px-2 py-1.5 border-t border-gray-200 bg-gray-50 rounded-b-lg">
+                                            <button
+                                              onClick={() => setShowBranchFilter(false)}
+                                              className="w-full text-[11px] text-white rounded px-2 py-1 font-medium hover:opacity-90"
+                                              style={{ backgroundColor: '#2f3192' }}
+                                            >
+                                              Apply
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </>
                                   )}
                                 </div>
                               </SortableTableHeader>
@@ -4206,6 +4238,16 @@ const CustomerEng2 = () => {
                   </DndContext>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
+                  {searchLoading && debouncedSearchTerm && (
+                    <tr>
+                      <td colSpan={columnOrder.length} className="px-2 py-6 text-center">
+                        <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
+                          <ArrowPathIcon className="h-4 w-4 animate-spin" style={{ color: themeColor }} />
+                          <span>Searching for "{debouncedSearchTerm}"…</span>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                   {loading && customers.length === 0 && (
                     Array.from({ length: 15 }).map((_, i) => (
                       <tr key={`skeleton-${i}`} className="animate-pulse">
@@ -4483,25 +4525,28 @@ const CustomerEng2 = () => {
               )}
             </div>
 
-            <div className="text-center py-8 sm:py-12">
-              <ArrowPathIcon
-                className="h-10 w-10 mx-auto mb-3 animate-spin"
-                style={{ color: themeColor }}
-              />
-              <p className="text-xs sm:text-sm text-gray-600 font-medium">
-                Loading more customers...
-              </p>
-              <p className="text-[11px] sm:text-xs text-gray-500 mt-2 tabular-nums">
-                Searched{' '}
-                <span
-                  className="font-bold text-sm sm:text-base inline-block"
-                  style={{ color: themeColor, minWidth: '4ch' }}
-                >
-                  {animatedLoadedCount.toLocaleString()}
-                </span>
-                {' '}customers so far
-              </p>
-            </div>
+            {/* Background-load progress — hidden while searching and once everything is loaded */}
+            {hasMore && !debouncedSearchTerm.trim() && (
+              <div className="text-center py-8 sm:py-12">
+                <ArrowPathIcon
+                  className="h-10 w-10 mx-auto mb-3 animate-spin"
+                  style={{ color: themeColor }}
+                />
+                <p className="text-xs sm:text-sm text-gray-600 font-medium">
+                  Loading more customers...
+                </p>
+                <p className="text-[11px] sm:text-xs text-gray-500 mt-2 tabular-nums">
+                  Searched{' '}
+                  <span
+                    className="font-bold text-sm sm:text-base inline-block"
+                    style={{ color: themeColor, minWidth: '4ch' }}
+                  >
+                    {animatedLoadedCount.toLocaleString()}
+                  </span>
+                  {' '}customers so far
+                </p>
+              </div>
+            )}
           </div>
         </div>
         {/* Diary Modal — Personal Notes / Thoughts */}
@@ -4737,7 +4782,7 @@ const CustomerEng2 = () => {
             className="bg-white rounded-xl shadow-lg mb-3 border-2 overflow-hidden"
             style={{ borderColor: themeColor }}
           >
-          <button
+            <button
               onClick={() => !loadingRelatedAssets && relatedAssets.length > 0 && setIsMultiAssetsExpanded(prev => !prev)}
               disabled={loadingRelatedAssets || relatedAssets.length === 0}
               className="w-full px-3 sm:px-5 py-3 sm:py-3.5 flex items-center justify-between transition-colors disabled:cursor-default"
@@ -4808,53 +4853,78 @@ const CustomerEng2 = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {/* Currently viewed asset — highlighted */}
-                      <tr style={{ backgroundColor: themeShades.light }} className="border-b border-gray-100">
-                        <td className="px-2 py-1 text-center text-[11px] text-black border-r border-gray-100">1</td>
-                        <td className="px-2 py-1 text-center text-[11px] font-bold border-r border-gray-100" style={{ color: themeColor }}>
-                          {customerDetails?.instance_id || '-'}
-                        </td>
-                        <td className="px-2 py-1 text-center text-[11px] text-black border-r border-gray-100">
-                          {customerDetails?.customer_name || '-'}
-                        </td>
-                        <td className="px-2 py-1 text-center text-[11px] text-black border-r border-gray-100">
-                          {formatPhoneNumber(customerDetails?.phone_number)}
-                        </td>
-                        <td className="px-2 py-1 text-center text-[11px] text-black border-r border-gray-100">
-                          {customerDetails?.branch_id || '-'}
-                        </td>
-                        <td className="px-2 py-1 text-center text-[11px] text-black border-r border-gray-100">
-                          {customerCompleteData?.asset_detailed?.[0]?.segment || '-'}
-                        </td>
-                        <td className="px-2 py-1 text-center text-[11px] text-black border-r border-gray-100">
-                          {customerCompleteData?.asset_detailed?.[0]?.engine_model || '-'}
-                        </td>
-                        <td className="px-2 py-1 text-center text-[11px]">
-                          <span className="font-semibold text-[10px]" style={{ color: themeColor }}>● Viewing</span>
-                        </td>
-                      </tr>
+                      {(() => {
+                        // Current asset (the one open right now)
+                        const currentAsset = {
+                          customer_id: customerDetails?.customer_id,
+                          instance_id: customerDetails?.instance_id,
+                          customer_name: customerDetails?.customer_name,
+                          mobile: customerDetails?.phone_number,
+                          branch_id: customerDetails?.branch_id,
+                          segment: customerCompleteData?.asset_detailed?.[0]?.segment || '-',
+                          engine_model: customerCompleteData?.asset_detailed?.[0]?.engine_model || '-',
+                          isCurrent: true,
+                        };
 
-                      {/* Other assets */}
-                      {relatedAssets.map((asset, idx) => (
-                        <tr key={`${asset.customer_id}-${asset.instance_id}`} className="hover:bg-gray-50 border-b border-gray-100">
-                          <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{idx + 2}</td>
-                          <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.instance_id || '-'}</td>
-                          <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.customer_name || '-'}</td>
-                          <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{formatPhoneNumber(asset.mobile)}</td>
-                          <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.branch_id || '-'}</td>
-                          <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.segment || '-'}</td>
-                          <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.engine_model || '-'}</td>
-                          <td className="px-2 py-1.5 text-center">
-                            <button
-                              onClick={() => handleViewCustomer(asset.customer_id)}
-                              className="px-2 py-0.5 text-white rounded-md text-[10px] font-medium hover:opacity-90"
-                              style={{ backgroundColor: themeColor }}
+                        // The other assets of the same customer
+                        const others = relatedAssets.map(a => ({
+                          customer_id: a.customer_id,
+                          instance_id: a.instance_id,
+                          customer_name: a.customer_name,
+                          mobile: a.mobile,
+                          branch_id: a.branch_id,
+                          segment: a.segment || '-',
+                          engine_model: a.engine_model || '-',
+                          isCurrent: false,
+                        }));
+
+                        // FREEZE the order: stable numeric sort by Instance ID.
+                        // Same set of assets => same order, no matter which one is open.
+                        const allAssets = [currentAsset, ...others].sort((a, b) =>
+                          String(a.instance_id || '').localeCompare(
+                            String(b.instance_id || ''),
+                            undefined,
+                            { numeric: true }
+                          )
+                        );
+
+                        return allAssets.map((asset, idx) => {
+                          const isViewing = asset.isCurrent;
+                          return (
+                            <tr
+                              key={`${asset.customer_id}-${asset.instance_id}`}
+                              className={isViewing ? 'border-b border-gray-100' : 'hover:bg-gray-50 border-b border-gray-100'}
+                              style={isViewing ? { backgroundColor: themeShades.light } : {}}
                             >
-                              View
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                              <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{idx + 1}</td>
+                              <td
+                                className="px-2 py-1.5 text-center text-[11px] border-r border-gray-100"
+                                style={isViewing ? { color: themeColor, fontWeight: 700 } : { color: '#000' }}
+                              >
+                                {asset.instance_id || '-'}
+                              </td>
+                              <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.customer_name || '-'}</td>
+                              <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{formatPhoneNumber(asset.mobile)}</td>
+                              <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.branch_id || '-'}</td>
+                              <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.segment || '-'}</td>
+                              <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.engine_model || '-'}</td>
+                              <td className="px-2 py-1.5 text-center text-[11px]">
+                                {isViewing ? (
+                                  <span className="font-semibold text-[10px]" style={{ color: themeColor }}>● Viewing</span>
+                                ) : (
+                                  <button
+                                    onClick={() => handleViewCustomer(asset.customer_id)}
+                                    className="px-2 py-0.5 text-white rounded-md text-[10px] font-medium hover:opacity-90"
+                                    style={{ backgroundColor: themeColor }}
+                                  >
+                                    View
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>

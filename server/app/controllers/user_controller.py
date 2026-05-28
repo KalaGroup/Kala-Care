@@ -31,16 +31,18 @@ class UserController:
     
     @staticmethod
     def hash_password(password: str) -> str:
-        """Hash password with Argon2"""
-        return pwd_context.hash(password)
-    
+        """Store password as plain text (no hashing)."""
+        return password
+
     @staticmethod
-    def verify_password(plain_password: str, hashed_password: str) -> bool:
-        """Verify password against hash"""
+    def verify_password(plain_password: str, stored_password: str) -> bool:
+        """Compare password as plain text. Falls back to legacy
+        Argon2/bcrypt verification for users created before this change."""
+        if plain_password == stored_password:
+            return True
         try:
-            return pwd_context.verify(plain_password, hashed_password)
-        except Exception as e:
-            print(f"Password verification error: {e}")
+            return pwd_context.verify(plain_password, stored_password)
+        except Exception:
             return False
     
     @staticmethod

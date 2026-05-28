@@ -1956,6 +1956,14 @@ const Profile = () => {
                                         <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl border border-gray-100 py-1 z-20">
                                             <button
                                                 onClick={() => {
+                                                    if (!showProfileEdit) {
+                                                        setEditProfileData({
+                                                            name: user.name || '',
+                                                            branch: user.branch || '',
+                                                            branch_name: user.branch_name || '',
+                                                            password: user.password || ''
+                                                        });
+                                                    }
                                                     setShowProfileEdit(!showProfileEdit);
                                                     setShowSettings(false);
                                                 }}
@@ -2006,7 +2014,7 @@ const Profile = () => {
                                 <form onSubmit={handleUpdateProfile} className="space-y-4">
                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                                         <div>
-                                            <label className="block text-xs text-black mb-1">New Name</label>
+                                            <label className="block text-xs text-black mb-1">New Name <span className="text-red-500">*</span></label>
                                             <div className="relative">
                                                 <input
                                                     type="text"
@@ -2032,7 +2040,7 @@ const Profile = () => {
                                         </div>
 
                                         <div>
-                                            <label className="block text-xs text-black mb-1">New Branch Code</label>
+                                            <label className="block text-xs text-black mb-1">New Branch Code <span className="text-red-500">*</span></label>
                                             <div className="relative">
                                                 <input
                                                     type="text"
@@ -2058,7 +2066,7 @@ const Profile = () => {
                                         </div>
 
                                         <div>
-                                            <label className="block text-xs text-black mb-1">New Branch Name</label>
+                                            <label className="block text-xs text-black mb-1">New Branch Name <span className="text-red-500">*</span></label>
                                             <div className="relative">
                                                 <input
                                                     type="text"
@@ -2477,7 +2485,7 @@ const Profile = () => {
 
                         <form onSubmit={handleAddEmployee} className="space-y-3">
                             <div>
-                                <label className="block text-xs text-black mb-1">Full Name</label>
+                                <label className="block text-xs text-black mb-1">Full Name <span className="text-red-500">*</span></label>
                                 <div className="relative">
                                     <FaUser className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
                                     <input
@@ -2492,7 +2500,7 @@ const Profile = () => {
                             </div>
 
                             <div>
-                                <label className="block text-xs text-black mb-1">User ID (min 8 characters)</label>
+                                <label className="block text-xs text-black mb-1">User ID (min 8 characters) <span className="text-red-500">*</span></label>
                                 <div className="relative">
                                     <FaIdCard className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
                                     <input
@@ -2508,7 +2516,7 @@ const Profile = () => {
                             </div>
 
                             <div>
-                                <label className="block text-xs text-black mb-1">Branch Code</label>
+                                <label className="block text-xs text-black mb-1">Branch Code <span className="text-red-500">*</span></label>
                                 <div className="relative">
                                     <FaBuilding className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
                                     <input
@@ -2551,7 +2559,7 @@ const Profile = () => {
                             </div>
 
                             <div>
-                                <label className="block text-xs text-black mb-1">Password (min 6 characters)</label>
+                                <label className="block text-xs text-black mb-1">Password (min 6 characters) <span className="text-red-500">*</span></label>
                                 <div className="relative">
                                     <FaKey className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
                                     <input
@@ -2635,7 +2643,7 @@ const Profile = () => {
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 <div className="space-y-4">
                                     <div>
-                                        <label className="block text-xs text-black mb-1">Full Name</label>
+                                        <label className="block text-xs text-black mb-1">Full Name <span className="text-red-500">*</span></label>
                                         <div className="relative">
                                             <FaUser className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
                                             <input
@@ -2649,7 +2657,7 @@ const Profile = () => {
                                     </div>
 
                                     <div>
-                                        <label className="block text-xs text-black mb-1">User ID</label>
+                                        <label className="block text-xs text-black mb-1">User ID <span className="text-red-500">*</span></label>
                                         <div className="relative">
                                             <FaIdCard className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
                                             <input
@@ -2662,7 +2670,7 @@ const Profile = () => {
                                     </div>
 
                                     <div>
-                                        <label className="block text-xs text-black mb-1">Branch Code</label>
+                                        <label className="block text-xs text-black mb-1">Branch Code <span className="text-red-500">*</span></label>
                                         <div className="relative">
                                             <FaBuilding className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
                                             <input
@@ -2704,26 +2712,28 @@ const Profile = () => {
                                         </div>
                                     </div>
 
-                                    <div>
-                                        <label className="block text-xs text-black mb-1">New Password (leave blank to keep current)</label>
-                                        <div className="relative">
-                                            <FaKey className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
-                                            <input
-                                                type={showPassword.edit ? "text" : "password"}
-                                                placeholder="Enter new password"
-                                                value={editingUser.password || ''}
-                                                onChange={(e) => setEditingUser({ ...editingUser, password: e.target.value })}
-                                                className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent text-black"
-                                            />
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowPassword({ ...showPassword, edit: !showPassword.edit })}
-                                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-black hover:text-gray-600"
-                                            >
-                                                {showPassword.edit ? <FaEyeSlash className="text-xs" /> : <FaEye className="text-xs" />}
-                                            </button>
+                                    {isMasterAdmin && (
+                                        <div>
+                                            <label className="block text-xs text-black mb-1">Password (current shown — edit to change)</label>
+                                            <div className="relative">
+                                                <FaKey className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
+                                                <input
+                                                    type={showPassword.edit ? "text" : "password"}
+                                                    placeholder="Enter password"
+                                                    value={editingUser.password || ''}
+                                                    onChange={(e) => setEditingUser({ ...editingUser, password: e.target.value })}
+                                                    className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent text-black"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowPassword({ ...showPassword, edit: !showPassword.edit })}
+                                                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-black hover:text-gray-600"
+                                                >
+                                                    {showPassword.edit ? <FaEyeSlash className="text-xs" /> : <FaEye className="text-xs" />}
+                                                </button>
+                                            </div>
                                         </div>
-                                    </div>
+                                    )}
                                 </div>
 
                                 <div className="space-y-4">

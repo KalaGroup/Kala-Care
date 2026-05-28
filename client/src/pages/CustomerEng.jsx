@@ -4352,6 +4352,8 @@ const CustomerEng = () => {
                                                             >
                                                                 <div className="relative flex items-center gap-1" ref={branchFilterRef}>
                                                                     <span>Branch ID</span>
+                                                                    {!(currentUser?.role === 'employee' && userBranch !== 'HO') && (
+                                                                    <>
                                                                     <button
                                                                         type="button"
                                                                         onClick={(e) => {
@@ -4454,6 +4456,8 @@ const CustomerEng = () => {
                                                                                 </button>
                                                                             </div>
                                                                         </div>
+                                                                    )}
+                                                                    </>
                                                                     )}
                                                                 </div>
                                                             </SortableTableHeader>
@@ -5244,56 +5248,81 @@ const CustomerEng = () => {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {/* Currently viewed asset — highlighted */}
-                                            <tr style={{ backgroundColor: themeShades.light }} className="border-b border-gray-100">
-                                                <td className="px-2 py-1 text-center text-[11px] text-black border-r border-gray-100">1</td>
-                                                <td className="px-2 py-1 text-center text-[11px] font-bold border-r border-gray-100" style={{ color: themeColor }}>
-                                                    {customerDetails?.instance_id || '-'}
-                                                </td>
-                                                <td className="px-2 py-1 text-center text-[11px] text-black border-r border-gray-100">
-                                                    {customerDetails?.customer_name || '-'}
-                                                </td>
-                                                <td className="px-2 py-1 text-center text-[11px] text-black border-r border-gray-100">
-                                                    {formatPhoneNumber(customerDetails?.phone_number)}
-                                                </td>
-                                                <td className="px-2 py-1 text-center text-[11px] text-black border-r border-gray-100">
-                                                    {customerDetails?.branch_id || '-'}
-                                                </td>
-                                                <td className="px-2 py-1 text-center text-[11px] text-black border-r border-gray-100">
-                                                    {customerCompleteData?.asset_detailed?.[0]?.segment || '-'}
-                                                </td>
-                                                <td className="px-2 py-1 text-center text-[11px] text-black border-r border-gray-100">
-                                                    {customerCompleteData?.asset_detailed?.[0]?.engine_model || '-'}
-                                                </td>
-                                                <td className="px-2 py-1 text-center text-[11px] text-black border-r border-gray-100">
-                                                    {customerCampaigns?.length || 0}
-                                                </td>
-                                                <td className="px-2 py-1 text-center text-[11px]">
-                                                    <span className="font-semibold text-[10px]" style={{ color: themeColor }}>● Viewing</span>
-                                                </td>
-                                            </tr>
+                                            {(() => {
+                                                // Current asset (the one open right now)
+                                                const currentAsset = {
+                                                    customer_id: customerDetails?.customer_id,
+                                                    instance_id: customerDetails?.instance_id,
+                                                    customer_name: customerDetails?.customer_name,
+                                                    mobile: customerDetails?.phone_number,
+                                                    branch_id: customerDetails?.branch_id,
+                                                    segment: customerCompleteData?.asset_detailed?.[0]?.segment || '-',
+                                                    engine_model: customerCompleteData?.asset_detailed?.[0]?.engine_model || '-',
+                                                    campaigns_count: customerCampaigns?.length || 0,
+                                                    isCurrent: true,
+                                                };
 
-                                            {relatedAssets.map((asset, idx) => (
-                                                <tr key={`${asset.customer_id}-${asset.instance_id}`} className="hover:bg-gray-50 border-b border-gray-100">
-                                                    <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{idx + 2}</td>
-                                                    <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.instance_id || '-'}</td>
-                                                    <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.customer_name || '-'}</td>
-                                                    <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{formatPhoneNumber(asset.mobile)}</td>
-                                                    <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.branch_id || '-'}</td>
-                                                    <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.segment || '-'}</td>
-                                                    <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.engine_model || '-'}</td>
-                                                    <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.campaigns?.length || 0}</td>
-                                                    <td className="px-2 py-1.5 text-center">
-                                                        <button
-                                                            onClick={() => handleViewCustomer(asset.customer_id)}
-                                                            className="px-2 py-0.5 text-white rounded-md text-[10px] font-medium hover:opacity-90"
-                                                            style={{ backgroundColor: themeColor }}
+                                                // The other assets of the same customer
+                                                const others = relatedAssets.map(a => ({
+                                                    customer_id: a.customer_id,
+                                                    instance_id: a.instance_id,
+                                                    customer_name: a.customer_name,
+                                                    mobile: a.mobile,
+                                                    branch_id: a.branch_id,
+                                                    segment: a.segment || '-',
+                                                    engine_model: a.engine_model || '-',
+                                                    campaigns_count: a.campaigns?.length || 0,
+                                                    isCurrent: false,
+                                                }));
+
+                                                // FREEZE the order: stable numeric sort by Instance ID.
+                                                // Same set of assets => same order, no matter which one is open.
+                                                const allAssets = [currentAsset, ...others].sort((a, b) =>
+                                                    String(a.instance_id || '').localeCompare(
+                                                        String(b.instance_id || ''),
+                                                        undefined,
+                                                        { numeric: true }
+                                                    )
+                                                );
+
+                                                return allAssets.map((asset, idx) => {
+                                                    const isViewing = asset.isCurrent;
+                                                    return (
+                                                        <tr
+                                                            key={`${asset.customer_id}-${asset.instance_id}`}
+                                                            className={isViewing ? 'border-b border-gray-100' : 'hover:bg-gray-50 border-b border-gray-100'}
+                                                            style={isViewing ? { backgroundColor: themeShades.light } : {}}
                                                         >
-                                                            View
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{idx + 1}</td>
+                                                            <td
+                                                                className="px-2 py-1.5 text-center text-[11px] border-r border-gray-100"
+                                                                style={isViewing ? { color: themeColor, fontWeight: 700 } : { color: '#000' }}
+                                                            >
+                                                                {asset.instance_id || '-'}
+                                                            </td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.customer_name || '-'}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{formatPhoneNumber(asset.mobile)}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.branch_id || '-'}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.segment || '-'}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.engine_model || '-'}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.campaigns_count}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px]">
+                                                                {isViewing ? (
+                                                                    <span className="font-semibold text-[10px]" style={{ color: themeColor }}>● Viewing</span>
+                                                                ) : (
+                                                                    <button
+                                                                        onClick={() => handleViewCustomer(asset.customer_id)}
+                                                                        className="px-2 py-0.5 text-white rounded-md text-[10px] font-medium hover:opacity-90"
+                                                                        style={{ backgroundColor: themeColor }}
+                                                                    >
+                                                                        View
+                                                                    </button>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                });
+                                            })()}
                                         </tbody>
                                     </table>
                                 </div>

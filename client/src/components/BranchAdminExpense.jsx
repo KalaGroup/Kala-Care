@@ -693,11 +693,16 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
   const handleAddBwBmBill = () => {
     const b = bwBmBillDraft;
     if (!String(b.date || '').trim() || !String(b.expenses_head || '').trim() ||
-      !String(b.amount || '').trim()) {
-      toast.error('Fill Date, Expense Head and Amount before adding');
+      !String(b.amount || '').trim() || !String(b.bill_submitted || '').trim()) {
+      toast.error('Fill Date, Expense Head, Amount and Bill Submitted before adding');
       return;
     }
-    setBwBmBills(prev => [...prev, { date: b.date, expenses_head: b.expenses_head, amount: b.amount }]);
+    setBwBmBills(prev => [...prev, {
+      date: b.date,
+      expenses_head: b.expenses_head,
+      amount: b.amount,
+      bill_submitted: b.bill_submitted,
+    }]);
     setBwBmBillDraft(BW_NEW_BILL());
   };
 
@@ -717,8 +722,10 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
         return;
       }
 
-      // Block save if {Employee ID + SR No. + Appointment No.} is already VERIFIED
-      // in the Service Engineer (Verified) tab.
+      // Block save if {Employee ID + SR No. + Appointment No.} already exists in TADA —
+      // ANY status (Pending OR Verified). existingRecords = [...allRecords, ...submittedRecords],
+      // i.e. drafts (TADAImportTemp) + submitted-to-HO (TADAImport). Backend additionally
+      // guards TADAHistory, which isn't loaded here.
       const seCombo = `${String(bwSeHeader.employee_id || '').trim()}__${String(bwSeHeader.service_request_no || '').trim()}__${String(bwSeHeader.appointment_number || '').trim()}`;
       const verifiedClash = (existingRecords || []).some(r => {
         if (String(r.verification_status || '').trim() !== 'Verified') return false;
@@ -727,7 +734,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
       });
       if (verifiedClash) {
         toast.error(
-          'This record is already Verified in the Service Engineer tab. Bill Wise entry cannot be saved.',
+          'This record is already Verified in TADA. Bill Wise (Service Engineer) entry cannot be saved.',
           { duration: 7000 }
         );
         return;
@@ -842,14 +849,14 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
     { key: 'Employee ID', type: 'text' },
     { key: 'SR Status', type: 'select', required: true, options: ['Closed', 'Service Engineer Assigned', 'Cancelled'] },
     { key: 'SR Closed Date', type: 'date', required: _srClosedRequired },
-    { key: 'KMs Travelled', type: 'number' },
+    { key: 'KMs Travelled(1 Way)', type: 'number' },
   ];
   const VISIBLE_KEYS = new Set([
     'Installation Site Address', 'Account', 'Service Request No.', 'Appointment Number',
     'SR Type', 'SR Sub Type', 'SR Due date', 'Task Start Date', 'Task End Date',
     'Task Status', 'Task Assigned Date & Time', 'SR Trip Start Date & Time',
     'SR Reach at Site Date & Time', 'SR Trip Start Lat Long', 'SR Reach at site Lat long',
-    'KMs Travelled', 'SR Closed Date', 'SR Status',
+    'KMs Travelled(1 Way)', 'SR Closed Date', 'SR Status',
     'Service Engineer Name', 'Service Engineer UID', 'Employee ID',
   ]);
   const visibleFields = fields.filter(f => VISIBLE_KEYS.has(f.key));
@@ -929,7 +936,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
           const NO_SR_KEYS = [
             'Installation Site Address', 'Account', 'SR Type',
             'SR Trip Start Date & Time', 'SR Reach at Site Date & Time',
-            'Service Engineer Name', 'Service Engineer UID', 'Employee ID', 'KMs Travelled',
+            'Service Engineer Name', 'Service Engineer UID', 'Employee ID', 'KMs Travelled(1 Way)',
           ];
 
           // Renders one field either editable or as a read-only display box
@@ -1089,16 +1096,16 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
                   <>
                     {/* FIRST ROW - 4 fields */}
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-2.5 gap-y-2 mb-3">
-                      {['Installation Site Address', 'Account', 'SR Type', 'SR Trip Start Date & Time'].map((key, fi) => {
-                        const f = fields.find(x => x.key === key) || { key, type: 'text' };
+                      {['Installation Site Address', 'Account', 'SR Type', 'SR Trip Start Date & Time(MM/DD/YYYY)'].map((key, fi) => {
+                        const f = fields.find(x => x.key === key) || { key, type: 'text', required: key === 'SR Trip Start Date & Time(MM/DD/YYYY)' };
                         return renderManualField(f, fi, true);
                       })}
                     </div>
 
                     {/* SECOND ROW - 5 fields: SR Reach at Site Date & Time, Service Engineer Name, Service Engineer UID, Employee ID, KMs Travelled */}
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-2.5 gap-y-2">
-                      {['SR Reach at Site Date & Time', 'Service Engineer Name', 'Service Engineer UID', 'Employee ID', 'KMs Travelled'].map((key, fi) => {
-                        const f = fields.find(x => x.key === key) || { key, type: 'text' };
+                      {['SR Reach at Site Date & Time(MM/DD/YYYY)', 'Service Engineer Name', 'Service Engineer UID', 'Employee ID', 'KMs Travelled(1 Way)'].map((key, fi) => {
+                        const f = fields.find(x => x.key === key) || { key, type: 'text', required: key === 'SR Reach at Site Date & Time(MM/DD/YYYY)' };
                         return renderManualField(f, fi, true);
                       })}
                     </div>
@@ -1661,7 +1668,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
 
                   {/* Repeatable bill sub-section */}
                   <div className="mt-4 p-3 rounded-lg border" style={{ borderColor: themeColor, backgroundColor: themeLight }}>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-3 gap-y-2.5 items-end">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-x-3 gap-y-2.5 items-end">
                       <div>
                         <label className={labelCls}>Date <span className="text-red-500">*</span></label>
                         <input type="date" value={bwBmBillDraft.date}
@@ -1684,6 +1691,16 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
                           placeholder="0.00" className={inputCls} />
                       </div>
                       <div>
+                        <label className={labelCls}>Bill Submitted <span className="text-red-500">*</span></label>
+                        <select value={bwBmBillDraft.bill_submitted}
+                          onChange={e => setBwBmBillDraft(p => ({ ...p, bill_submitted: e.target.value }))}
+                          className={`${inputCls} bg-white`}>
+                          <option value="">— Select —</option>
+                          <option value="Yes">Yes</option>
+                          <option value="No">No</option>
+                        </select>
+                      </div>
+                      <div>
                         <button type="button" onClick={handleAddBwBmBill}
                           className="w-full px-3 py-1.5 text-white text-[11px] font-bold rounded-md"
                           style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeDark})` }}>
@@ -1699,7 +1716,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
                       <table className="w-full border-collapse">
                         <thead>
                           <tr style={{ backgroundColor: '#f0f1ff' }}>
-                            {['Sr.', 'Date', 'Expense Head', 'Amount (₹)', ''].map((h, i) => (
+                            {['Sr.', 'Date', 'Expense Head', 'Amount (₹)', 'Bill Submitted', ''].map((h, i) => (
                               <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-b border-r last:border-r-0 border-gray-200 uppercase text-center">{h}</th>
                             ))}
                           </tr>
@@ -1711,6 +1728,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
                               <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{b.date}</td>
                               <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{b.expenses_head}</td>
                               <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 font-bold">₹{parseFloat(b.amount || 0).toFixed(2)}</td>
+                              <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{b.bill_submitted || '-'}</td>
                               <td className="px-2 py-1 text-center">
                                 <button type="button" onClick={() => setBwBmBills(prev => prev.filter((_, i) => i !== idx))}
                                   className="text-red-600 hover:text-red-800" title="Remove">
@@ -1728,7 +1746,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
                             <td className="px-2 py-1 text-[11px] font-bold text-center border-t-2 border-gray-200 text-purple-700">
                               ₹{bwBmBills.reduce((s, b) => s + (parseFloat(b.amount) || 0), 0).toFixed(2)}
                             </td>
-                            <td className="border-t-2 border-gray-200" />
+                            <td colSpan={2} className="border-t-2 border-gray-200" />
                           </tr>
                         </tfoot>
                       </table>
@@ -2013,6 +2031,19 @@ const BranchAdminExpense = () => {
   const [billWiseDraftSelected, setBillWiseDraftSelected] = useState({});
   const [submittingBillWiseToHo, setSubmittingBillWiseToHo] = useState(false);
 
+  // Persisted SE block combos across temp + main + history (block stays after submit/move)
+  const [billWiseBlockedCombos, setBillWiseBlockedCombos] = useState([]);
+  const fetchBillWiseBlockedCombos = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${API_BASE_URL}/tada-bill-wise/blocked-combos`, {
+        params: { branch_code: userBranch }
+      });
+      setBillWiseBlockedCombos(data?.combos || []);
+    } catch {
+      // non-fatal — frontend draft-derived combos still apply
+    }
+  }, [userBranch]);
+
   const fetchBillWiseDrafts = useCallback(async () => {
     setLoadingBillWiseDrafts(true);
     try {
@@ -2043,6 +2074,7 @@ const BranchAdminExpense = () => {
       await axios.delete(`${API_BASE_URL}/tada-bill-wise/records/${id}`);
       setBillWiseDrafts(prev => prev.filter(r => r.id !== id));
       setBillWiseDraftSelected(prev => { const n = { ...prev }; delete n[id]; return n; });
+      fetchBillWiseBlockedCombos();   // delete removes the combo → TADA draft unblocks
       toast.success('Record deleted');
     } catch (err) {
       if (err.response?.status === 404) {
@@ -2091,6 +2123,7 @@ const BranchAdminExpense = () => {
       toast.success(data.voucher_no ? `Submitted! Voucher: ${data.voucher_no}` : (data.message || 'Submitted to HO'));
       setBillWiseDrafts(prev => prev.filter(r => !ids.includes(r.id)));
       setBillWiseDraftSelected({});
+      fetchBillWiseBlockedCombos();   // combos persist via main table — keep block list fresh
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to submit');
     } finally {
@@ -2248,13 +2281,14 @@ const BranchAdminExpense = () => {
     }
   }, [activeTab, tadaSubTab, verifiedInnerTab, fetchBillWiseDrafts]);
 
-  // Drafts (Pending for Verification): load Bill Wise SE drafts so we can block
-  // any TADA draft that already has a Bill Wise (Service Engineer) entry.
+  // Drafts (Pending for Verification): load Bill Wise SE drafts + persisted block
+  // combos (temp+main+history) so any TADA draft with a Bill Wise (SE) entry stays blocked.
   useEffect(() => {
     if (activeTab === 'tada' && tadaSubTab === 'drafts') {
       fetchBillWiseDrafts();
+      fetchBillWiseBlockedCombos();
     }
-  }, [activeTab, tadaSubTab, fetchBillWiseDrafts]);
+  }, [activeTab, tadaSubTab, fetchBillWiseDrafts, fetchBillWiseBlockedCombos]);
 
   // Fetch Bill Wise records when user opens Submitted → Bill Wise
   useEffect(() => {
@@ -2291,7 +2325,9 @@ const BranchAdminExpense = () => {
     if (pendingVerifiedTabRef.current) {
       setVerifiedInnerTab(pendingVerifiedTabRef.current);
       pendingVerifiedTabRef.current = null;
-    } else {
+    } else if (tadaSubTab !== 'verified') {
+      // Only reset to 'se' when actually leaving the Verified tab,
+      // never when we just navigated INTO it from a save.
       setVerifiedInnerTab('se');
     }
     setSalesBmDraftPeriod(null);
@@ -3072,6 +3108,29 @@ const BranchAdminExpense = () => {
       return;
     }
 
+    // 🚫 Block any selected row that has a Branch Verified KM entered
+    // (typed, held as pending, or already saved) but NO valid saved remark.
+    const kmWithoutRemark = selectedRows.filter(r => {
+      const typed = localValues[`${r.id}_branch_verified_km`];
+      const pending = pendingKM[r.id];
+      const saved = r.branch_verified_km;
+      const hasKm =
+        (typed !== undefined && String(typed).trim() !== '') ||
+        (pending !== undefined && String(pending).trim() !== '') ||
+        (saved !== null && saved !== undefined && String(saved).trim() !== '');
+      const remark = String(r.km_verification_remark ?? '').trim();
+      return hasKm && remark.length < REMARK_MIN_LEN;
+    });
+    if (kmWithoutRemark.length > 0) {
+      toast.error(
+        `${kmWithoutRemark.length} record(s) have a Branch Verified KM but no saved remark. ` +
+        `Add a remark (min ${REMARK_MIN_LEN} characters) and let it save before verifying — ` +
+        `KM cannot be saved without a remark.`,
+        { duration: 7000 }
+      );
+      return;
+    }
+
     // Calculate counts by Task Status from the selected records
     const taskStatusCounts = {};
     selectedRows.forEach(r => {
@@ -3179,7 +3238,7 @@ const BranchAdminExpense = () => {
   /* ─────────────────────────────────────────────────────────────────────────────
      PRINT — Engineer TADA Report
   ───────────────────────────────────────────────────────────────────────────── */
-  const printEngineerTadaReport = (records, engineerName, engineerUid) => {
+  const printEngineerTadaReport = (records, engineerName, engineerUid, voucherNo = '') => {
     if (!records || records.length === 0) {
       toast.error('No records to print');
       return;
@@ -3195,6 +3254,9 @@ const BranchAdminExpense = () => {
     const toDate = dates.length ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
     const fmtDt = d => d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
     const fmtDateOnly = d => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
+
+    // Employee ID — take the first non-empty value from the records
+    const employeeId = (records.find(r => r.employee_id && String(r.employee_id).trim() !== '') || {}).employee_id || '-';
 
     // 2-Way KM priority: branch_verified_km (if non-empty) → two_way_km
     const getRowKm = (r) => {
@@ -3274,31 +3336,31 @@ const BranchAdminExpense = () => {
 <style>
     @page { size: A4 landscape; margin: 5mm; }
     * { box-sizing: border-box; }
-    body { font-family: Arial, sans-serif; font-size: 7px; margin: 0; padding: 5px; color: #000; }
+    body { font-family: Arial, sans-serif; font-size: 11px; margin: 0; padding: 6px; color: #000; }
     .company-header {
       text-align: center;
-      font-size: 14px;
+      font-size: 18px;
       font-weight: bold;
-      margin-bottom: 5px;
-      padding: 5px;
+      margin-bottom: 8px;
+      padding: 7px;
       border: 1.5px solid #000;
       background: #f5f5f5;
     }
-    .info-table { width: 100%; margin-bottom: 5px; border-collapse: collapse; }
-    .info-table td { padding: 3px 5px; font-size: 8px; border: 1px solid #666; }
+    .info-table { width: 100%; margin-bottom: 8px; border-collapse: collapse; }
+    .info-table td { padding: 5px 7px; font-size: 12px; border: 1px solid #666; }
     .info-table .label { font-weight: bold; background: #ececec; width: 14%; }
     table.data { width: 100%; border-collapse: collapse; table-layout: fixed; }
     table.data th, table.data td {
       border: 1px solid #000;
-      padding: 2px 2px;
+      padding: 4px 3px;
       text-align: center;
-      font-size: 6px;
+      font-size: 10px;
       word-wrap: break-word;
       overflow-wrap: break-word;
       vertical-align: middle;
     }
     table.data td.al { text-align: left; }
-    table.data th { background: #c5c5c5; font-weight: bold; font-size: 6.5px; }
+    table.data th { background: #c5c5c5; font-weight: bold; font-size: 10.5px; }
     table.data tfoot td { font-weight: bold; background: #e8e8e8; }
     .print-btn {
       position: fixed; top: 10px; right: 10px;
@@ -3353,24 +3415,39 @@ const BranchAdminExpense = () => {
 
   <table class="info-table">
     <tr>
+      <td class="label">Voucher No. :</td>
+      <td>${escape(voucherNo || '-')}</td>
       <td class="label">Service Engineer Name :</td>
       <td>${escape(engineerName)}</td>
-      <td class="label">From date :</td>
-      <td>${fmtDt(fromDate)}</td>
       <td class="label">Branch Name:</td>
-      <td>${escape(getBranchLabel(userBranch))}</td>
+      <td>${escape(getBranchLabel(userBranch))} (${escape(userBranch)})</td>
     </tr>
     <tr>
       <td class="label">UID:</td>
       <td>${escape(engineerUid || '-')}</td>
-      <td class="label">To Date :</td>
-      <td>${fmtDt(toDate)}</td>
-      <td class="label">Branch Code:</td>
-      <td>${escape(userBranch)}</td>
+      <td class="label">Period :</td>
+      <td>${fmtDt(fromDate)} - ${fmtDt(toDate)}</td>
+      <td class="label">Employee ID :</td>
+      <td>${escape(employeeId)}</td>
     </tr>
   </table>
 
-  <table class="data">
+  <table class="data" style="table-layout:fixed;">
+    <colgroup>
+      <col style="width:3%;" />
+      <col style="width:22%;" />
+      <col style="width:12%;" />
+      <col style="width:8%;" />
+      <col style="width:5%;" />
+      <col style="width:8%;" />
+      <col style="width:8%;" />
+      <col style="width:5%;" />
+      <col style="width:6%;" />
+      <col style="width:5%;" />
+      <col style="width:5%;" />
+      <col style="width:6%;" />
+      <col style="width:7%;" />
+    </colgroup>
     <thead>
       <tr>
         <th>SL.NO</th>
@@ -3417,6 +3494,579 @@ const BranchAdminExpense = () => {
     printWindow.document.close();
   };
 
+  /* ─── PRINT — Voucher Engineer Summary (one row per engineer only) ─── */
+  const printVoucherTadaReport = (voucherGroup) => {
+    if (!voucherGroup || !voucherGroup.rows || voucherGroup.rows.length === 0) {
+      toast.error('No records to print');
+      return;
+    }
+    const voucherNo = voucherGroup.voucher || '-';
+
+    // Group voucher rows by engineer (name + uid) — same shape as the on-screen summary
+    const groups = new Map();
+    voucherGroup.rows.forEach(r => {
+      const name = String(r.service_engineer_name || 'Unknown').trim() || 'Unknown';
+      const uid = String(r.service_engineer_uid || '').trim();
+      const key = `${name}__${uid}`;
+      if (!groups.has(key)) groups.set(key, { name, uid, rows: [] });
+      groups.get(key).rows.push(r);
+    });
+    const engineerGroups = Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name));
+
+    const escape = (val) => {
+      if (val === null || val === undefined) return '';
+      return String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    };
+    const fmtDt = d => d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
+
+    const getRowKm = (r) => {
+      if (r.branch_verified_km !== null && r.branch_verified_km !== undefined && String(r.branch_verified_km).trim() !== '') {
+        const v = parseFloat(r.branch_verified_km);
+        if (!isNaN(v)) return v;
+      }
+      const t = parseFloat(r.two_way_km);
+      return isNaN(t) ? 0 : t;
+    };
+    const getRowAmount = (r) => {
+      const eb = getEffectiveBranchForRecord(r, voucherGroup.rows);
+      const rate = getBranchDARate(eb);
+      const km = getRowKm(r);
+      return km * (rate ? (rate.km_rate || 0) : 0);
+    };
+    const getRowDA = (r) => calculateDAmount(r, getRowKm(r), voucherGroup.rows) || 0;
+    const getRowFreight = (r) => parseFloat(r.freight_charges || 0) || 0;
+
+    let gKm = 0, gAmount = 0, gDA = 0, gFreight = 0, gCount = 0, gVerified = 0;
+
+    const rowsHtml = engineerGroups.map((eng, idx) => {
+      const dates = eng.rows.map(r => r.sr_reach_at_site_datetime).filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
+      const fromDate = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
+      const toDate = dates.length ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
+
+      let km = 0, amount = 0, da = 0, freight = 0, verified = 0;
+      eng.rows.forEach(r => {
+        const rKm = getRowKm(r);
+        const rAmount = getRowAmount(r);
+        const rDA = getRowDA(r);
+        const rFreight = getRowFreight(r);
+        const rTotal = rAmount + rDA + rFreight;
+        km += rKm; amount += rAmount; da += rDA; freight += rFreight;
+        if (r.verification_status === 'Verified') verified += rTotal;
+      });
+      const total = amount + da + freight;
+      // Show verified amount when it exists (> 0), else fall back to total
+      const displayAmount = verified > 0 ? verified : total;
+
+      gKm += km; gAmount += amount; gDA += da; gFreight += freight; gCount += eng.rows.length;
+      gVerified += verified;
+
+      return `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${fromDate && toDate ? `${fmtDt(fromDate)} - ${fmtDt(toDate)}` : '-'}</td>
+          <td class="al">${escape(eng.name)}</td>
+          <td>${escape(eng.uid || '-')}</td>
+          <td>${eng.rows.length}</td>
+          <td>${displayAmount > 0 ? '₹' + displayAmount.toFixed(2) : '-'}</td>
+        </tr>`;
+    }).join('');
+
+    const gTotal = gAmount + gDA + gFreight;
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>TADA Voucher Summary — ${escape(voucherNo)}</title>
+  <style>
+    @page { size: A4 landscape; margin: 8mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 13px; margin: 0; padding: 10px; color: #000; }
+    .company-header { text-align: center; font-size: 20px; font-weight: bold; margin-bottom: 10px; padding: 8px; border: 1.5px solid #000; background: #f5f5f5; }
+    .info-table { width: 100%; margin-bottom: 10px; border-collapse: collapse; }
+    .info-table td { padding: 6px 10px; font-size: 13px; border: 1px solid #666; }
+    .info-table .label { font-weight: bold; background: #ececec; width: 18%; }
+    table.data { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    table.data th, table.data td { border: 1px solid #000; padding: 7px 5px; text-align: center; font-size: 13px; word-wrap: break-word; overflow-wrap: break-word; vertical-align: middle; }
+    table.data td.al { text-align: left; }
+    table.data th { background: #c5c5c5; font-weight: bold; font-size: 13px; }
+    table.data tfoot td { font-weight: bold; background: #e8e8e8; }
+    .print-btn { position: fixed; top: 10px; right: 10px; padding: 8px 16px; background: #2f3192; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; z-index: 1000; }
+    .print-btn:hover { background: #1e1f6b; }
+    @media print { .print-btn { display: none; } }
+  </style>
+</head>
+<body>
+  <button class="print-btn" onclick="window.print()">🖨 Print</button>
+  <div class="company-header">KALA Care Global LLP, ${escape(getBranchLabel(userBranch))}</div>
+  <table class="info-table">
+    <tr>
+      <td class="label">Voucher No. :</td>
+      <td>${escape(voucherNo)}</td>
+      <td class="label">Submitted By :</td>
+      <td>${escape(voucherGroup.submittedBy || '-')}</td>
+    </tr>
+    <tr>
+      <td class="label">Branch :</td>
+      <td>${escape(getBranchLabel(userBranch))} (${escape(userBranch)})</td>
+      <td class="label">No. of Engineers :</td>
+      <td>${engineerGroups.length}</td>
+    </tr>
+  </table>
+  <table class="data">
+    <thead>
+      <tr>
+        <th style="width:50px;">Sr. No.</th>
+        <th style="width:220px;">Period (SR Reach at Site)</th>
+        <th>Employee Name</th>
+        <th style="width:110px;">UID</th>
+        <th style="width:120px;">No. of Activity</th>
+        <th style="width:150px;">Total Amount</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="4" style="text-align:right;">Grand Total (${engineerGroups.length} engineer${engineerGroups.length === 1 ? '' : 's'}):</td>
+        <td>${gCount}</td>
+        <td>₹${(gVerified > 0 ? gVerified : gTotal).toFixed(2)}</td>
+      </tr>
+    </tfoot>
+  </table>
+</body>
+</html>`;
+
+    const printWindow = window.open('', '_blank', 'width=1400,height=900');
+    if (!printWindow) { toast.error('Please allow pop-ups for this site to print'); return; }
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
+  /* ─── PRINT — Sales & BM: single engineer detail ─── */
+  const printSalesEngineerReport = (records, engineerName, voucherNo = '') => {
+    if (!records || records.length === 0) { toast.error('No records to print'); return; }
+
+    const dates = records.map(r => r.date).filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
+    const fromDate = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
+    const toDate = dates.length ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
+    const fmtDt = d => d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
+
+    const uidRec = records.find(r => r.engineer_uid || r.service_engineer_uid) || {};
+    const uid = uidRec.engineer_uid || uidRec.service_engineer_uid || '-';
+    const employeeId = (records.find(r => r.employee_id && String(r.employee_id).trim() !== '') || {}).employee_id || '-';
+
+    const escape = (val) => {
+      if (val === null || val === undefined) return '';
+      return String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    };
+
+    let gOne = 0, gTwo = 0, gAmt = 0, gDA = 0, gTot = 0, gLab = 0, gPart = 0;
+    const rowsHtml = records.map((r, idx) => {
+      const one = parseFloat(r.one_way_km) || 0;
+      const two = parseFloat(r.two_way_km) || 0;
+      const amt = parseFloat(r.amount) || 0;
+      const da = parseFloat(r.da) || 0;
+      const tot = parseFloat(r.total_amount) || 0;
+      const lab = parseFloat(r.labour_sale_expected) || 0;
+      const part = parseFloat(r.part_sale_expected) || 0;
+      gOne += one; gTwo += two; gAmt += amt; gDA += da; gTot += tot; gLab += lab; gPart += part;
+      return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${r.date ? new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</td>
+        <td>${escape(r.sr_invoice_engine_no || '-')}</td>
+        <td class="al">${escape(r.customer_name || '-')}</td>
+        <td class="al">${escape(r.location || '-')}</td>
+        <td>${one > 0 ? one.toFixed(2) : '-'}</td>
+        <td>${two > 0 ? two.toFixed(2) : '-'}</td>
+        <td>${amt > 0 ? '₹' + amt.toFixed(2) : '-'}</td>
+        <td>${da > 0 ? '₹' + da.toFixed(2) : '-'}</td>
+        <td>${tot > 0 ? '₹' + tot.toFixed(2) : '-'}</td>
+        <td class="al">${escape(r.work_description || '-')}</td>
+        <td>${lab > 0 ? '₹' + lab.toFixed(2) : '-'}</td>
+        <td>${part > 0 ? '₹' + part.toFixed(2) : '-'}</td>
+        <td class="al" contenteditable="true">${escape(r.remark || '-')}</td>
+      </tr>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Sales & BM TADA — ${escape(engineerName)}</title>
+  <style>
+    @page { size: A4 landscape; margin: 5mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 11px; margin: 0; padding: 6px; color: #000; }
+    .company-header { text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 8px; padding: 7px; border: 1.5px solid #000; background: #f5f5f5; }
+    .info-table { width: 100%; margin-bottom: 8px; border-collapse: collapse; }
+    .info-table td { padding: 5px 7px; font-size: 12px; border: 1px solid #666; }
+    .info-table .label { font-weight: bold; background: #ececec; width: 14%; }
+    table.data { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    table.data th, table.data td { border: 1px solid #000; padding: 4px 3px; text-align: center; font-size: 10px; word-wrap: break-word; overflow-wrap: break-word; vertical-align: middle; }
+    table.data td.al { text-align: left; }
+    table.data th { background: #c5c5c5; font-weight: bold; font-size: 10.5px; }
+    table.data tfoot td { font-weight: bold; background: #e8e8e8; }
+    .print-btn { position: fixed; top: 10px; right: 10px; padding: 8px 16px; background: #2f3192; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; z-index: 1000; }
+    .print-btn:hover { background: #1e1f6b; }
+    [contenteditable="true"] { outline: none; cursor: text; }
+    [contenteditable="true"]:hover { background: #fff9c4 !important; box-shadow: inset 0 0 0 1px #fbc02d; }
+    [contenteditable="true"]:focus { background: #fff59d !important; box-shadow: inset 0 0 0 2px #f57f17; }
+    .edit-hint { position: fixed; top: 10px; left: 10px; padding: 8px 14px; background: #fef3c7; color: #92400e; border: 1px solid #f59e0b; border-radius: 4px; font-size: 11px; font-weight: bold; z-index: 1000; }
+    @media print { .print-btn, .edit-hint { display: none; } [contenteditable="true"]:hover, [contenteditable="true"]:focus { background: transparent !important; box-shadow: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="edit-hint">✎ Click "Remark" cells to edit · Press Print when ready</div>
+  <button class="print-btn" onclick="window.print()">🖨 Print</button>
+
+  <div class="company-header">KALA Care Global LLP, ${escape(getBranchLabel(userBranch))}</div>
+
+  <table class="info-table">
+    <tr>
+      <td class="label">Voucher No. :</td><td>${escape(voucherNo || '-')}</td>
+      <td class="label">Engineer Name :</td><td>${escape(engineerName)}</td>
+      <td class="label">Branch Name:</td><td>${escape(getBranchLabel(userBranch))} (${escape(userBranch)})</td>
+    </tr>
+    <tr>
+      <td class="label">UID:</td><td>${escape(uid)}</td>
+      <td class="label">Period :</td><td>${fmtDt(fromDate)} - ${fmtDt(toDate)}</td>
+      <td class="label">Employee ID :</td><td>${escape(employeeId)}</td>
+    </tr>
+  </table>
+
+  <table class="data">
+    <colgroup>
+      <col style="width:3%;" /><col style="width:7%;" /><col style="width:9%;" /><col style="width:11%;" />
+      <col style="width:9%;" /><col style="width:5%;" /><col style="width:5%;" /><col style="width:6%;" />
+      <col style="width:5%;" /><col style="width:6%;" /><col style="width:13%;" /><col style="width:6%;" />
+      <col style="width:5%;" /><col style="width:10%;" />
+    </colgroup>
+    <thead>
+      <tr>
+        <th>Sr.No.</th><th>Date</th><th>SR/Invoice/Engine</th><th>Customer Name</th><th>Location</th>
+        <th>1 Way KM</th><th>2 Way KM</th><th>Amount</th><th>DA</th><th>Total Amount</th>
+        <th>Work Description</th><th>Labour Sale Exp.</th><th>Part Sale Exp.</th><th>Remark</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="5" style="text-align:right;">Grand Total (${records.length} record${records.length === 1 ? '' : 's'}):</td>
+        <td>${gOne.toFixed(2)}</td>
+        <td>${gTwo.toFixed(2)}</td>
+        <td>₹${gAmt.toFixed(2)}</td>
+        <td>₹${gDA.toFixed(2)}</td>
+        <td>₹${gTot.toFixed(2)}</td>
+        <td>-</td>
+        <td>₹${gLab.toFixed(2)}</td>
+        <td>₹${gPart.toFixed(2)}</td>
+        <td>-</td>
+      </tr>
+    </tfoot>
+  </table>
+</body>
+</html>`;
+
+    const w = window.open('', '_blank', 'width=1400,height=900');
+    if (!w) { toast.error('Please allow pop-ups for this site to print'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+  };
+
+  /* ─── PRINT — Sales & BM: voucher summary (one row per engineer) ─── */
+  const printSalesVoucherReport = (voucherGroup) => {
+    if (!voucherGroup || !voucherGroup.rows || voucherGroup.rows.length === 0) { toast.error('No records to print'); return; }
+    const voucherNo = voucherGroup.voucher || '-';
+    const engineerGroups = groupSalesByEngineer(voucherGroup.rows);
+
+    const escape = (val) => {
+      if (val === null || val === undefined) return '';
+      return String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    };
+    const fmtDt = d => d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
+
+    let gCount = 0, gTotal = 0, gVerified = 0;
+    const rowsHtml = engineerGroups.map((g, idx) => {
+      gCount += g.records.length; gTotal += g.totalAmount; gVerified += g.verifiedAmount;
+      const display = g.verifiedAmount > 0 ? g.verifiedAmount : g.totalAmount;
+      return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${g.periodStart && g.periodEnd ? `${fmtDt(g.periodStart)} - ${fmtDt(g.periodEnd)}` : '-'}</td>
+        <td class="al">${escape(g.engineerName)}</td>
+        <td>${g.records.length}</td>
+        <td>${display > 0 ? '₹' + display.toFixed(2) : '-'}</td>
+      </tr>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Sales & BM TADA Voucher Summary — ${escape(voucherNo)}</title>
+  <style>
+    @page { size: A4 landscape; margin: 8mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 13px; margin: 0; padding: 10px; color: #000; }
+    .company-header { text-align: center; font-size: 20px; font-weight: bold; margin-bottom: 10px; padding: 8px; border: 1.5px solid #000; background: #f5f5f5; }
+    .info-table { width: 100%; margin-bottom: 10px; border-collapse: collapse; }
+    .info-table td { padding: 6px 10px; font-size: 13px; border: 1px solid #666; }
+    .info-table .label { font-weight: bold; background: #ececec; width: 18%; }
+    table.data { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    table.data th, table.data td { border: 1px solid #000; padding: 7px 5px; text-align: center; font-size: 13px; word-wrap: break-word; vertical-align: middle; }
+    table.data td.al { text-align: left; }
+    table.data th { background: #c5c5c5; font-weight: bold; }
+    table.data tfoot td { font-weight: bold; background: #e8e8e8; }
+    .print-btn { position: fixed; top: 10px; right: 10px; padding: 8px 16px; background: #2f3192; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; z-index: 1000; }
+    .print-btn:hover { background: #1e1f6b; }
+    @media print { .print-btn { display: none; } }
+  </style>
+</head>
+<body>
+  <button class="print-btn" onclick="window.print()">🖨 Print</button>
+  <div class="company-header">KALA Care Global LLP, ${escape(getBranchLabel(userBranch))}</div>
+  <table class="info-table">
+    <tr>
+      <td class="label">Voucher No. :</td><td>${escape(voucherNo)}</td>
+      <td class="label">Submitted By :</td><td>${escape(voucherGroup.submittedBy || '-')}</td>
+    </tr>
+    <tr>
+      <td class="label">Branch :</td><td>${escape(getBranchLabel(userBranch))} (${escape(userBranch)})</td>
+      <td class="label">No. of Engineers :</td><td>${engineerGroups.length}</td>
+    </tr>
+  </table>
+  <table class="data">
+    <thead>
+      <tr>
+        <th style="width:50px;">Sr. No.</th>
+        <th style="width:220px;">Period (Date)</th>
+        <th>Engineer Name</th>
+        <th style="width:120px;">No. of Activity</th>
+        <th style="width:150px;">Total Amount</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="3" style="text-align:right;">Grand Total (${engineerGroups.length} engineer${engineerGroups.length === 1 ? '' : 's'}):</td>
+        <td>${gCount}</td>
+        <td>₹${(gVerified > 0 ? gVerified : gTotal).toFixed(2)}</td>
+      </tr>
+    </tfoot>
+  </table>
+</body>
+</html>`;
+
+    const w = window.open('', '_blank', 'width=1400,height=900');
+    if (!w) { toast.error('Please allow pop-ups for this site to print'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+  };
+
+  /* ─── PRINT — Bill Wise: voucher summary (one row per engineer/customer) ─── */
+  const printBillWiseVoucherReport = (voucherGroup) => {
+    if (!voucherGroup || !voucherGroup.rows || voucherGroup.rows.length === 0) { toast.error('No records to print'); return; }
+    const voucherNo = voucherGroup.voucher || '-';
+    const engineerGroups = groupBillWiseByEngineer(voucherGroup.rows);
+
+    const escape = (val) => {
+      if (val === null || val === undefined) return '';
+      return String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    };
+    const fmtDt = d => d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
+
+    let gCount = 0, gTotal = 0, gVerified = 0;
+    const rowsHtml = engineerGroups.map((g, idx) => {
+      gCount += g.records.length; gTotal += g.totalAmount; gVerified += g.verifiedAmount;
+      const display = g.verifiedAmount > 0 ? g.verifiedAmount : g.totalAmount;
+      return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${g.periodStart && g.periodEnd ? `${fmtDt(g.periodStart)} - ${fmtDt(g.periodEnd)}` : '-'}</td>
+        <td class="al">${escape(g.engineerName)}</td>
+        <td>${g.records.length}</td>
+        <td>${display > 0 ? '₹' + display.toFixed(2) : '-'}</td>
+      </tr>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Bill Wise Voucher Summary — ${escape(voucherNo)}</title>
+  <style>
+    @page { size: A4 landscape; margin: 8mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 13px; margin: 0; padding: 10px; color: #000; }
+    .company-header { text-align: center; font-size: 20px; font-weight: bold; margin-bottom: 10px; padding: 8px; border: 1.5px solid #000; background: #f5f5f5; }
+    .info-table { width: 100%; margin-bottom: 10px; border-collapse: collapse; }
+    .info-table td { padding: 6px 10px; font-size: 13px; border: 1px solid #666; }
+    .info-table .label { font-weight: bold; background: #ececec; width: 18%; }
+    table.data { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    table.data th, table.data td { border: 1px solid #000; padding: 7px 5px; text-align: center; font-size: 13px; word-wrap: break-word; vertical-align: middle; }
+    table.data td.al { text-align: left; }
+    table.data th { background: #c5c5c5; font-weight: bold; }
+    table.data tfoot td { font-weight: bold; background: #e8e8e8; }
+    .print-btn { position: fixed; top: 10px; right: 10px; padding: 8px 16px; background: #2f3192; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; z-index: 1000; }
+    .print-btn:hover { background: #1e1f6b; }
+    @media print { .print-btn { display: none; } }
+  </style>
+</head>
+<body>
+  <button class="print-btn" onclick="window.print()">🖨 Print</button>
+  <div class="company-header">KALA Care Global LLP, ${escape(getBranchLabel(userBranch))}</div>
+  <table class="info-table">
+    <tr>
+      <td class="label">Voucher No. :</td><td>${escape(voucherNo)}</td>
+      <td class="label">Submitted By :</td><td>${escape(voucherGroup.submittedBy || '-')}</td>
+    </tr>
+    <tr>
+      <td class="label">Branch :</td><td>${escape(getBranchLabel(userBranch))} (${escape(userBranch)})</td>
+      <td class="label">No. of Records :</td><td>${engineerGroups.length}</td>
+    </tr>
+  </table>
+  <table class="data">
+    <thead>
+      <tr>
+        <th style="width:50px;">Sr. No.</th>
+        <th style="width:200px;">Period (Date)</th>
+        <th>Engineer / Customer</th>
+        <th style="width:120px;">No. of Activity</th>
+        <th style="width:150px;">Total Amount</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="3" style="text-align:right;">Grand Total (${engineerGroups.length} record${engineerGroups.length === 1 ? '' : 's'}):</td>
+        <td>${gCount}</td>
+        <td>₹${(gVerified > 0 ? gVerified : gTotal).toFixed(2)}</td>
+      </tr>
+    </tfoot>
+  </table>
+</body>
+</html>`;
+
+    const w = window.open('', '_blank', 'width=1400,height=900');
+    if (!w) { toast.error('Please allow pop-ups for this site to print'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+  };
+
+  /* ─── PRINT — Bill Wise: single engineer/customer detail ─── */
+  const printBillWiseEngineerReport = (records, engineerName, voucherNo = '') => {
+    if (!records || records.length === 0) { toast.error('No records to print'); return; }
+    const isBM = (records[0]?.entry_type) === 'BM';
+
+    const dates = records.map(r => r.date).filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
+    const fromDate = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
+    const toDate = dates.length ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
+    const fmtDt = d => d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
+
+    const escape = (val) => {
+      if (val === null || val === undefined) return '';
+      return String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    };
+    const money = v => v && parseFloat(v) !== 0 ? '₹' + parseFloat(v).toFixed(2) : '-';
+
+    let gTotal = 0;
+    const rowsHtml = records.map((r, idx) => {
+      gTotal += parseFloat(r.amount || 0) || 0;
+      if (isBM) {
+        return `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${r.date ? new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</td>
+          <td class="al">${escape(r.customer_name || '-')}</td>
+          <td>${escape(r.sr_invoice_engine_no || '-')}</td>
+          <td>${escape(r.expenses_head || '-')}</td>
+          <td>${money(r.amount)}</td>
+          <td class="al">${escape(r.work_description || '-')}</td>
+          <td class="al">${escape(r.remark || '-')}</td>
+        </tr>`;
+      }
+      return `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${r.date ? new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</td>
+          <td>${escape(r.service_request_no || '-')}</td>
+          <td class="al">${escape(r.account || '-')}</td>
+          <td class="al">${escape(r.installation_site_address || '-')}</td>
+          <td>${escape(r.sr_type || '-')}</td>
+          <td>${escape(r.expenses_head || '-')}</td>
+          <td>${money(r.amount)}</td>
+          <td class="al">${escape(r.work_description || '-')}</td>
+        </tr>`;
+    }).join('');
+
+    const empId = (records.find(r => r.employee_id && String(r.employee_id).trim() !== '') || {}).employee_id || '-';
+    const uid = (records.find(r => r.service_engineer_uid && String(r.service_engineer_uid).trim() !== '') || {}).service_engineer_uid || '-';
+
+    const headHtml = isBM
+      ? `<th>Sr.No.</th><th>Date</th><th>Customer Name</th><th>SR No. / Inv / Engine</th><th>Expense Head</th><th>Amount</th><th>Work Description</th><th>Remark</th>`
+      : `<th>Sr.No.</th><th>Date</th><th>SR No.</th><th>Account</th><th>Installation Site Address</th><th>SR Type</th><th>Expense Head</th><th>Amount</th><th>Work Description</th>`;
+    const footColspan = isBM ? 5 : 7;
+    const footTail = isBM ? 2 : 1;
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Bill Wise — ${escape(engineerName)}</title>
+  <style>
+    @page { size: A4 landscape; margin: 5mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 11px; margin: 0; padding: 6px; color: #000; }
+    .company-header { text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 8px; padding: 7px; border: 1.5px solid #000; background: #f5f5f5; }
+    .info-table { width: 100%; margin-bottom: 8px; border-collapse: collapse; }
+    .info-table td { padding: 5px 7px; font-size: 12px; border: 1px solid #666; }
+    .info-table .label { font-weight: bold; background: #ececec; width: 14%; }
+    table.data { width: 100%; border-collapse: collapse; }
+    table.data th, table.data td { border: 1px solid #000; padding: 4px 3px; text-align: center; font-size: 10px; word-wrap: break-word; overflow-wrap: break-word; vertical-align: middle; }
+    table.data td.al { text-align: left; }
+    table.data th { background: #c5c5c5; font-weight: bold; font-size: 10.5px; }
+    table.data tfoot td { font-weight: bold; background: #e8e8e8; }
+    .print-btn { position: fixed; top: 10px; right: 10px; padding: 8px 16px; background: #2f3192; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; z-index: 1000; }
+    .print-btn:hover { background: #1e1f6b; }
+    @media print { .print-btn { display: none; } }
+  </style>
+</head>
+<body>
+  <button class="print-btn" onclick="window.print()">🖨 Print</button>
+
+  <div class="company-header">KALA Care Global LLP, ${escape(getBranchLabel(userBranch))}</div>
+
+  <table class="info-table">
+    <tr>
+      <td class="label">Voucher No. :</td><td>${escape(voucherNo || '-')}</td>
+      <td class="label">${isBM ? 'Customer / Employee' : 'Engineer Name'} :</td><td>${escape(engineerName)}</td>
+      <td class="label">Branch Name:</td><td>${escape(getBranchLabel(userBranch))} (${escape(userBranch)})</td>
+    </tr>
+    <tr>
+      <td class="label">UID:</td><td>${escape(uid)}</td>
+      <td class="label">Period :</td><td>${fmtDt(fromDate)} - ${fmtDt(toDate)}</td>
+      <td class="label">Employee ID :</td><td>${escape(empId)}</td>
+    </tr>
+  </table>
+
+  <table class="data">
+    <thead><tr>${headHtml}</tr></thead>
+    <tbody>${rowsHtml}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="${footColspan}" style="text-align:right;">Grand Total (${records.length} record${records.length === 1 ? '' : 's'}):</td>
+        <td>₹${gTotal.toFixed(2)}</td>
+        <td colspan="${footTail}"></td>
+      </tr>
+    </tfoot>
+  </table>
+</body>
+</html>`;
+
+    const w = window.open('', '_blank', 'width=1400,height=900');
+    if (!w) { toast.error('Please allow pop-ups for this site to print'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+  };
+
   /* ─────────────────────────────────────────────────────────────────────────────
      CLIENT-SIDE FILTER
   ───────────────────────────────────────────────────────────────────────────── */
@@ -3459,8 +4109,8 @@ const BranchAdminExpense = () => {
         <tr>
           <td>${idx + 1}</td>
           <td>${fmtDate(r.paid_date)}</td>
-          <td class="al">${escape(r.expenses_head || '-')}</td>
           <td class="al">${escape(r.sub_head || '-')}</td>
+          <td class="al">${escape(r.expenses_head || '-')}</td>
           <td class="al">${escape(r.expenses_description || '-')}</td>
           <td class="al">${escape(r.paid_to || '-')}</td>
           <td>${escape(r.invoice_no || '-')}</td>
@@ -3544,8 +4194,8 @@ const BranchAdminExpense = () => {
       <tr>
         <th style="width: 45px;">SL no.</th>
         <th style="width: 80px;">Paid Date</th>
-        <th style="width: 110px;">Expenses Head (GL Code)</th>
-        <th style="width: 95px;">Sub Head</th>
+        <th style="width: 110px;">Expenses Head</th>
+        <th style="width: 95px;">Expense Code</th>
         <th>Expenses Description</th>
         <th style="width: 110px;">Paid TO</th>
         <th style="width: 110px;">Invoice No. / Stock transfer No. / SR no. / DC no.</th>
@@ -3895,13 +4545,18 @@ const BranchAdminExpense = () => {
   // Bill Wise (Service Engineer) entry. Such TADA drafts must NOT be verified.
   const billWiseSeBlockedCombos = useMemo(() => {
     const set = new Set();
+    // Currently-loaded SE drafts → immediate reflection right after a new save
     (billWiseDrafts || []).forEach(r => {
       if ((r.entry_type || 'SE') !== 'SE') return;
       const k = `${String(r.employee_id || '').trim()}__${String(r.service_request_no || '').trim()}__${String(r.appointment_number || '').trim()}`;
       set.add(k);
     });
+    // Persisted combos across temp + main + history → block stays even after
+    // the Bill Wise record is submitted to HO / moved to history. Only deleting
+    // the Bill Wise record removes its combo, which unblocks the TADA draft.
+    (billWiseBlockedCombos || []).forEach(k => set.add(k));
     return set;
-  }, [billWiseDrafts]);
+  }, [billWiseDrafts, billWiseBlockedCombos]);
 
   const isRecordBlockedByBillWise = useCallback((record) => {
     if (!record) return false;
@@ -5048,6 +5703,9 @@ const BranchAdminExpense = () => {
       <>
         <div className="px-3 py-2 border-b bg-blue-50 flex items-center gap-2 flex-wrap">
           <button onClick={() => setSalesBmDraftPeriod(null)} className="inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md" style={{ background: 'linear-gradient(135deg, #64748b, #475569)' }}>← Back</button>
+          <span className="text-[11px] text-gray-600">Engineer:</span>
+          <span className="text-[11px] font-bold text-purple-700">{salesBmDraftPeriod.engineerName}</span>
+          <span className="text-gray-300">|</span>
           <span className="text-[11px] text-gray-600">Period:</span>
           <span className="text-[11px] font-bold text-gray-800">{fmt(salesBmDraftPeriod.periodStart)} → {fmt(salesBmDraftPeriod.periodEnd)}</span>
           <span className="text-gray-300">|</span>
@@ -5056,15 +5714,19 @@ const BranchAdminExpense = () => {
           <span className="text-[11px] text-gray-600">Total:</span><span className="text-[11px] font-bold text-purple-700">₹{salesBmDraftPeriod.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
         </div>
         <div className="overflow-auto" style={{ maxHeight: '650px', scrollbarWidth: 'thin' }}>
-          <table className="border-collapse w-full" style={{ minWidth: '1570px' }}>
+          <table className="border-collapse w-full" style={{ minWidth: '2020px' }}>
             <thead className="sticky top-0 z-10">
               <tr style={{ backgroundColor: '#f0f1ff' }}>
                 {[
                   { l: 'Sel', w: 40 }, { l: 'Sr.', w: 50 }, { l: 'Date', w: 100 },
-                  { l: 'SR/Invoice/Engine', w: 150 }, { l: 'Engineer', w: 150 }, { l: 'Customer', w: 160 },
-                  { l: 'Location', w: 140 }, { l: 'Work Description', w: 160 },
-                  { l: '1 Way KM', w: 80 }, { l: '2 Way KM', w: 80 }, { l: 'Rate', w: 70 },
-                  { l: 'DA', w: 80 }, { l: 'Total', w: 100 }, { l: 'Remark', w: 150 },
+                  { l: 'SR/Invoice/Engine', w: 150 },
+                  { l: 'Customer', w: 160 }, { l: 'Location', w: 140 },
+                  { l: '1 Way KM', w: 80 }, { l: '2 Way KM', w: 80 },
+                  { l: 'Amount', w: 90 }, { l: 'DA', w: 80 }, { l: 'Total', w: 100 },
+                  { l: 'Work Description', w: 160 },
+                  { l: 'Labour Sale Exp.', w: 110 }, { l: 'Part Sale Exp.', w: 100 },
+                  { l: 'Remark', w: 150 },
+                  { l: 'Engineer', w: 150 }, { l: 'Engineer UID', w: 110 }, { l: 'Employee ID', w: 100 },
                   { l: 'Action', w: 70 },
                 ].map((c, i) => {
                   return (
@@ -5082,16 +5744,20 @@ const BranchAdminExpense = () => {
                   <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{idx + 1}</td>
                   <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 whitespace-nowrap">{rec.date ? new Date(rec.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</td>
                   <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.sr_invoice_engine_no || ''}>{rec.sr_invoice_engine_no || '-'}</div></td>
-                  <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate font-semibold text-black" title={rec.engineer_name || ''}>{rec.engineer_name || '-'}</div></td>
                   <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.customer_name || ''}>{rec.customer_name || '-'}</div></td>
                   <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.location || ''}>{rec.location || '-'}</div></td>
-                  <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.work_description || ''}>{rec.work_description || '-'}</div></td>
                   <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.one_way_km || '-'}</td>
                   <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 font-semibold">{rec.two_way_km || '-'}</td>
-                  <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.rate ? `₹${rec.rate}` : '-'}</td>
+                  <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.amount && parseFloat(rec.amount) !== 0 ? `₹${parseFloat(rec.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
                   <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 text-green-700 font-semibold">{rec.da && parseFloat(rec.da) !== 0 ? `₹${rec.da}` : '-'}</td>
                   <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 font-bold text-blue-700">{rec.total_amount && parseFloat(rec.total_amount) !== 0 ? `₹${parseFloat(rec.total_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
+                  <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.work_description || ''}>{rec.work_description || '-'}</div></td>
+                  <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.labour_sale_expected && parseFloat(rec.labour_sale_expected) !== 0 ? `₹${parseFloat(rec.labour_sale_expected).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
+                  <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.part_sale_expected && parseFloat(rec.part_sale_expected) !== 0 ? `₹${parseFloat(rec.part_sale_expected).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
                   <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.remark || ''}>{rec.remark || '-'}</div></td>
+                  <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate font-semibold text-black" title={rec.engineer_name || ''}>{rec.engineer_name || '-'}</div></td>
+                  <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.engineer_uid || ''}>{rec.engineer_uid || '-'}</div></td>
+                  <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.employee_id || ''}>{rec.employee_id || '-'}</div></td>
                   <td className="px-2 py-1 text-center">
                     <button
                       onClick={() => { console.log('Deleting Sales&BM rec:', rec); handleDeleteSalesBmDraft(rec.id); }}
@@ -5216,7 +5882,7 @@ const BranchAdminExpense = () => {
           <span className="text-[11px] text-gray-600">Period:</span>
           <span className="text-[11px] font-bold text-gray-800">{fmt(billWiseDraftPeriod.periodStart)} → {fmt(billWiseDraftPeriod.periodEnd)}</span>
           <span className="text-gray-300">|</span>
-          <span className="text-[11px] text-gray-600">{isBM ? 'Customer' : 'Engineer'}:</span>
+          <span className="text-[11px] text-gray-600">{isBM ? 'Employee' : 'Engineer'}:</span>
           <span className="text-[11px] font-bold text-purple-700">{billWiseDraftPeriod.name}</span>
           <span className="text-gray-300">|</span>
           <span className="text-[11px] text-gray-600">Records:</span><span className="text-[11px] font-bold">{billWiseDraftPeriod.records.length}</span>
@@ -5224,14 +5890,14 @@ const BranchAdminExpense = () => {
           <span className="text-[11px] text-gray-600">Total:</span><span className="text-[11px] font-bold text-purple-700">₹{billWiseDraftPeriod.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
         </div>
         <div className="overflow-auto" style={{ maxHeight: '650px', scrollbarWidth: 'thin' }}>
-          <table className="border-collapse w-full" style={{ minWidth: isBM ? '1260px' : '2450px' }}>
+          <table className="border-collapse w-full" style={{ minWidth: isBM ? '1360px' : '2450px' }}>
 
             <thead className="sticky top-0 z-10">
               <tr style={{ backgroundColor: '#f0f1ff' }}>
                 {(isBM
-                  ? [{ l: 'Sel', w: 40 }, { l: 'Sr.', w: 50 }, { l: 'Date', w: 100 }, { l: 'Customer', w: 170 }, { l: 'SR/Inv/Engine', w: 160 }, { l: 'Expense Head', w: 150 }, { l: 'Amount', w: 110 }, { l: 'Work Description', w: 200 }, { l: 'Remark', w: 160 }, { l: 'Work Status', w: 110 }, { l: 'Action', w: 70 }]
-                  : [{ l: 'Sel', w: 40 }, { l: 'Sr.', w: 50 }, { l: 'Date', w: 100 }, { l: 'Engineer', w: 150 }, { l: 'Emp ID', w: 90 }, { l: 'UID', w: 100 }, { l: 'SR No.', w: 130 }, { l: 'Appt No.', w: 120 }, { l: 'Account', w: 150 }, { l: 'Installation Site Address', w: 110 }, { l: 'SR Type', w: 110 },
-                  { l: 'Task Status', w: 110 }, { l: 'KMs Travelled', w: 100 }, { l: 'Task Start Date', w: 120 }, { l: 'Task End Date', w: 120 }, { l: 'Expense Head', w: 150 }, { l: 'Amount', w: 110 }, { l: 'Bill Subm.', w: 90 }, { l: 'Work Description', w: 180 }, { l: 'Action', w: 70 }]
+                  ? [{ l: 'Sel', w: 40 }, { l: 'Sr.', w: 50 }, { l: 'Date', w: 100 }, { l: 'Customer', w: 170 }, { l: 'SR/Inv/Engine', w: 160 }, { l: 'Expense Head', w: 150 }, { l: 'Amount', w: 110 }, { l: 'Bill Submitted', w: 100 }, { l: 'Work Description', w: 200 }, { l: 'Remark', w: 160 }, { l: 'Work Status', w: 110 }, { l: 'Employee Name', w: 170 }, { l: 'Action', w: 70 }]
+                  : [{ l: 'Sel', w: 40 }, { l: 'Sr.', w: 50 }, { l: 'Date', w: 100 }, { l: 'SR No.', w: 130 }, { l: 'Account', w: 150 }, { l: 'Installation Site Address', w: 110 }, { l: 'SR Type', w: 110 }, { l: 'Expense Head', w: 150 }, { l: 'Amount', w: 110 }, { l: 'Work Description', w: 180 },
+                  { l: 'KMs Travelled', w: 100 }, { l: 'Task Status', w: 110 }, { l: 'Appt No.', w: 120 }, { l: 'Task Start Date', w: 120 }, { l: 'Task End Date', w: 120 }, { l: 'Engineer', w: 150 }, { l: 'Emp ID', w: 90 }, { l: 'UID', w: 100 }, { l: 'Bill Subm.', w: 90 }, { l: 'Action', w: 70 }]
                 ).map((c, i) => (
                   <th key={i} className="px-2 py-2 text-[10px] font-bold text-gray-700 uppercase border-b-2 border-r border-gray-200 last:border-r-0 text-center whitespace-nowrap" style={{ width: `${c.w}px`, minWidth: `${c.w}px`, backgroundColor: '#f0f1ff' }}>{c.l}</th>
                 ))}
@@ -5247,31 +5913,35 @@ const BranchAdminExpense = () => {
                   <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 whitespace-nowrap">{fmtD(rec.date)}</td>
                   {isBM ? (
                     <>
-                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate font-semibold text-black" title={rec.created_by || ''}>{rec.created_by || '-'}</div></td>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.customer_name || ''}>{rec.customer_name || '-'}</div></td>
                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.sr_invoice_engine_no || ''}>{rec.sr_invoice_engine_no || '-'}</div></td>
                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.expenses_head || ''}>{rec.expenses_head || '-'}</div></td>
                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 font-bold text-blue-700">{money(rec.amount)}</td>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.bill_submitted || '-'}</td>
                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.work_description || ''}>{rec.work_description || '-'}</div></td>
                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.remark || ''}>{rec.remark || '-'}</div></td>
                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.work_status || '-'}</td>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate font-semibold text-black" title={rec.created_by || ''}>{rec.created_by || '-'}</div></td>
                     </>
                   ) : (
                     <>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.service_request_no || ''}>{rec.service_request_no || '-'}</div></td>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.account || ''}>{rec.account || '-'}</div></td>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate max-w-[110px] mx-auto" title={rec.installation_site_address || ''}>{rec.installation_site_address || '-'}</div></td>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.sr_type || ''}>{rec.sr_type || '-'}</div></td>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.expenses_head || ''}>{rec.expenses_head || '-'}</div></td>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 font-bold text-blue-700">{money(rec.amount)}</td>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.work_description || ''}>{rec.work_description || '-'}</div></td>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.kms_travelled || '-'}</td>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.task_status || '-'}</td>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.appointment_number || ''}>{rec.appointment_number || '-'}</div></td>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.task_start_date || '-'}</td>
+                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.task_end_date || '-'}</td>
                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate font-semibold text-black" title={rec.engineer_name || ''}>{rec.engineer_name || '-'}</div></td>
                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.employee_id || ''}>{rec.employee_id || '-'}</div></td>
                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.service_engineer_uid || ''}>{rec.service_engineer_uid || '-'}</div></td>
-                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.service_request_no || ''}>{rec.service_request_no || '-'}</div></td>
-                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.appointment_number || ''}>{rec.appointment_number || '-'}</div></td>
-                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.account || ''}>{rec.account || '-'}</div></td>
-                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate max-w-[110px] mx-auto" title={rec.installation_site_address || ''}>{rec.installation_site_address || '-'}</div></td>
-                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.sr_type || ''}>{rec.sr_type || '-'}</div></td>                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.task_status || '-'}</td>
-                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.kms_travelled || '-'}</td>
-                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.task_start_date || '-'}</td>
-                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.task_end_date || '-'}</td>
-                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.expenses_head || ''}>{rec.expenses_head || '-'}</div></td>
-                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 font-bold text-blue-700">{money(rec.amount)}</td>
                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.bill_submitted || '-'}</td>
-                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.work_description || ''}>{rec.work_description || '-'}</div></td>                    </>
+                    </>
                   )}
                   <td className="px-2 py-1 text-center">
                     <button onClick={() => handleDeleteBillWiseDraft(rec.id)} className="text-red-600 hover:text-red-800" title={`Delete (id=${rec.id})`}>
@@ -5876,14 +6546,29 @@ const BranchAdminExpense = () => {
     }
   };
 
-  // Handle expense head change to load subheads
-  const handleExpenseHeadChange = (e) => {
-    const selectedHeadName = e.target.value;
-    setOfficeExpenseForm(prev => ({ ...prev, expenses_head: selectedHeadName, sub_head: '' }));
+  // One entry per subhead, carrying its parent head. Handles ["a"] or [{id,name}].
+  const allSubheads = useMemo(() => {
+    const out = [];
+    (expenseHeads || []).forEach(h => {
+      let subs = h.subheads;
+      if (typeof subs === 'string') { try { subs = JSON.parse(subs || '[]'); } catch { subs = []; } }
+      (subs || []).forEach(s => {
+        const name = typeof s === 'string' ? s : (s?.name || '');
+        if (name) out.push({ subhead: name, head: h.name });
+      });
+    });
+    return out;
+  }, [expenseHeads]);
 
-    // Find selected head and its subheads
-    const selectedHead = expenseHeads.find(head => head.name === selectedHeadName);
-    setSelectedSubheads(selectedHead ? selectedHead.subheads : []);
+  // Pick a subhead (labelled "Expenses Head") → auto-fill parent head (labelled "Expense Code")
+  const handleSubheadSelect = (e) => {
+    const sub = e.target.value;
+    const match = allSubheads.find(x => x.subhead === sub);
+    setOfficeExpenseForm(prev => ({
+      ...prev,
+      sub_head: sub,
+      expenses_head: match ? match.head : '',
+    }));
   };
 
   // ─── Paid Date limits: branch users restricted to office_expense_days (from DB) ──
@@ -6829,7 +7514,7 @@ const BranchAdminExpense = () => {
                           </button>
 
                           {/* KM Rate */}
-                          <button
+                          {/* <button
                             onClick={() => { setShowActionMenu(false); setShowBranchRateModal(true); }}
                             className="w-full px-3 py-2 text-left text-[11px] font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
                             title="View KM rate & DA slabs for your branch"
@@ -6840,7 +7525,7 @@ const BranchAdminExpense = () => {
                               </svg>
                             </span>
                             KM Rate
-                          </button>
+                          </button> */}
 
                           {/* Export — only if user has export permission */}
                           {canExport && (
@@ -6913,8 +7598,8 @@ const BranchAdminExpense = () => {
                             </>
                           )}
 
-                          {/* Manual — also on Verified tab */}
-                          {tadaSubTab === 'verified' && (
+                          {/* Manual — also on Verified and Submitted tabs */}
+                          {(tadaSubTab === 'verified' || tadaSubTab === 'submitted') && (
                             <button
                               onClick={() => { setShowActionMenu(false); setShowManualEntryModal(true); }}
                               className="w-full px-3 py-2 text-left text-[11px] font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors"
@@ -7101,7 +7786,7 @@ const BranchAdminExpense = () => {
                       className="text-[9px] px-1.5 py-0.5 rounded-md bg-yellow-50 border border-yellow-200 text-yellow-700 font-semibold whitespace-nowrap"
                       title="KM rates not loaded yet — totals may be incomplete"
                     >
-                      ⚠ Rates loading…
+                      {/* ⚠ Rates loading… */}
                     </span>
                   )}
                 </div>
@@ -7298,6 +7983,17 @@ const BranchAdminExpense = () => {
                       <span className="text-gray-300">|</span>
                       <span className="text-[11px] text-gray-600">Submitted By:</span>
                       <span className="text-[11px] font-bold text-purple-700">{selectedVoucher.submittedBy}</span>
+                      <button
+                        onClick={() => printVoucherTadaReport(selectedVoucher)}
+                        className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md shadow-sm"
+                        style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)' }}
+                        title={`Print all engineers in voucher ${selectedVoucher.voucher}`}
+                      >
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                        </svg>
+                        Print All Engineers
+                      </button>
                     </div>
                   )}
 
@@ -7424,7 +8120,20 @@ const BranchAdminExpense = () => {
                                           ) : '-'}
                                         </td>
                                         <td className="px-2 py-1 border-r border-gray-100 text-[11px] text-center">
-                                          <div className="font-semibold text-gray-800">{eng.name}</div>
+                                          <div className="flex items-center justify-center gap-1.5">
+                                            <span className="font-semibold text-gray-800">{eng.name}</span>
+                                            {tadaSubTab === 'submitted' && submittedInnerTab === 'se' && selectedVoucher && (
+                                              <button
+                                                onClick={(e) => { e.stopPropagation(); printEngineerTadaReport(eng.rows, eng.name, eng.uid, selectedVoucher.voucher); }}
+                                                className="inline-flex items-center justify-center text-purple-600 hover:text-purple-800"
+                                                title={`Print ${eng.name}'s records (Voucher ${selectedVoucher.voucher})`}
+                                              >
+                                                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                                                </svg>
+                                              </button>
+                                            )}
+                                          </div>
                                         </td>
                                         <td className="px-2 py-1 border-r border-gray-100 text-[11px] text-center font-semibold">{eng.count}</td>
                                         <td className="px-2 py-1 border-r border-gray-100 text-[11px] text-center font-bold text-purple-700">
@@ -7573,6 +8282,17 @@ const BranchAdminExpense = () => {
                               </button>
                               <span className="text-[11px] text-gray-600">Voucher:</span>
                               <span className="text-[11px] font-bold font-mono text-gray-800">{selectedSalesVoucher.voucher}</span>
+                              <button
+                                onClick={() => printSalesVoucherReport(selectedSalesVoucher)}
+                                className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md shadow-sm"
+                                style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)' }}
+                                title={`Print all engineers in voucher ${selectedSalesVoucher.voucher}`}
+                              >
+                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                                </svg>
+                                Print All Engineers
+                              </button>
                             </div>
                             <div className="overflow-auto" style={{ maxHeight: '650px', scrollbarWidth: 'thin' }}>
                               <table className="border-collapse w-full" style={{ minWidth: '1280px' }}>
@@ -7599,7 +8319,20 @@ const BranchAdminExpense = () => {
                                             <span>{fmt(g.periodEnd)}</span>
                                           </span>
                                         </td>
-                                        <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100 font-semibold text-black">{g.engineerName}</td>
+                                        <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100">
+                                          <div className="flex items-center justify-center gap-1.5">
+                                            <span className="font-semibold text-black">{g.engineerName}</span>
+                                            <button
+                                              onClick={(e) => { e.stopPropagation(); printSalesEngineerReport(g.records, g.engineerName, selectedSalesVoucher.voucher); }}
+                                              className="inline-flex items-center justify-center text-purple-600 hover:text-purple-800"
+                                              title={`Print ${g.engineerName}'s records (Voucher ${selectedSalesVoucher.voucher})`}
+                                            >
+                                              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                                              </svg>
+                                            </button>
+                                          </div>
+                                        </td>
                                         <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100 font-bold">{g.records.length}</td>
                                         <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100 font-bold text-purple-700 whitespace-nowrap">₹{g.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                                         <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100 font-bold text-emerald-700 whitespace-nowrap">₹{g.verifiedAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
@@ -7656,6 +8389,9 @@ const BranchAdminExpense = () => {
                               </svg>
                             </button>
                           )}
+                          <span className="text-[11px] text-gray-600">Engineer:</span>
+                          <span className="text-[11px] font-bold text-purple-700">{salesSelectedPeriod.engineerName}</span>
+                          <span className="text-gray-300">|</span>
                           <span className="text-[11px] text-gray-600">Period:</span>
                           <span className="text-[11px] font-bold text-gray-800">
                             {salesSelectedPeriod.periodStart.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
@@ -7704,22 +8440,27 @@ const BranchAdminExpense = () => {
                         </div>
 
                         <div className="overflow-auto" style={{ maxHeight: '650px', scrollbarWidth: 'thin' }}>
-                          <table className="border-collapse w-full" style={{ minWidth: '1850px' }}>
+                          <table className="border-collapse w-full" style={{ minWidth: '2320px' }}>
                             <thead className="sticky top-0 z-10">
                               <tr style={{ backgroundColor: '#f0f1ff' }}>
                                 {[
                                   { label: 'Sr.', w: '50px' },
                                   { label: 'Date', w: '100px' },
                                   { label: 'SR/Invoice/Engine', w: '150px' },
-                                  { label: 'Engineer Name', w: '150px' },
                                   { label: 'Customer Name', w: '160px' },
                                   { label: 'Location', w: '140px' },
-                                  { label: 'Work Description', w: '200px' },
                                   { label: '1 Way KM', w: '90px' },
-                                  { label: 'KM 2 Way', w: '90px' },
-                                  { label: 'Rate', w: '80px' },
+                                  { label: '2 Way KM', w: '90px' },
+                                  { label: 'Amount', w: '100px' },
                                   { label: 'DA', w: '80px' },
                                   { label: 'Total Amount', w: '110px' },
+                                  { label: 'Work Description', w: '200px' },
+                                  { label: 'Labour Sale Exp.', w: '110px' },
+                                  { label: 'Part Sale Exp.', w: '110px' },
+                                  { label: 'Remark', w: '150px' },
+                                  { label: 'Engineer Name', w: '150px' },
+                                  { label: 'Engineer UID', w: '110px' },
+                                  { label: 'Employee ID', w: '100px' },
                                   { label: 'HO Corrected KM', w: '110px' },
                                   { label: 'HO Remark', w: '160px' },
                                   { label: 'Status', w: '95px' },
@@ -7745,23 +8486,17 @@ const BranchAdminExpense = () => {
                                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 whitespace-nowrap">
                                         {rec.date ? new Date(rec.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
                                       </td>
-                                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.sr_number || '-'}</td>
-                                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">
-                                        <div className="truncate font-semibold text-black" title={rec.engineer_name || ''}>{rec.engineer_name || '-'}</div>
-                                      </td>
+                                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.sr_invoice_engine_no || rec.sr_number || '-'}</td>
                                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">
                                         <div className="truncate" title={rec.customer_name || ''}>{rec.customer_name || '-'}</div>
                                       </td>
                                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">
                                         <div className="truncate" title={rec.location || ''}>{rec.location || '-'}</div>
                                       </td>
-                                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">
-                                        <div className="truncate" title={rec.description_of_work || ''}>{rec.description_of_work || '-'}</div>
-                                      </td>
                                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.one_way_km || '-'}</td>
-                                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 font-semibold">{rec.two_way_km || '-'}</td>
+                                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 font-semibold">{rec.two_way_km || rec.km_two_way || '-'}</td>
                                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">
-                                        {rec.rate ? `₹${rec.rate}` : '-'}
+                                        {rec.amount && parseFloat(rec.amount) !== 0 ? `₹${parseFloat(rec.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}
                                       </td>
                                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 text-green-700 font-semibold">
                                         {rec.da && parseFloat(rec.da) !== 0 ? `₹${rec.da}` : '-'}
@@ -7770,6 +8505,25 @@ const BranchAdminExpense = () => {
                                         {rec.total_amount && parseFloat(rec.total_amount) !== 0
                                           ? `₹${parseFloat(rec.total_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                                           : '-'}
+                                      </td>
+                                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">
+                                        <div className="truncate" title={rec.work_description || rec.description_of_work || ''}>{rec.work_description || rec.description_of_work || '-'}</div>
+                                      </td>
+                                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">
+                                        {rec.labour_sale_expected && parseFloat(rec.labour_sale_expected) !== 0 ? `₹${parseFloat(rec.labour_sale_expected).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}
+                                      </td>
+                                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">
+                                        {rec.part_sale_expected && parseFloat(rec.part_sale_expected) !== 0 ? `₹${parseFloat(rec.part_sale_expected).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}
+                                      </td>
+                                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.remark || ''}>{rec.remark || '-'}</div></td>
+                                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">
+                                        <div className="truncate font-semibold text-black" title={rec.engineer_name || ''}>{rec.engineer_name || '-'}</div>
+                                      </td>
+                                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">
+                                        <div className="truncate" title={rec.engineer_uid || rec.service_engineer_uid || ''}>{rec.engineer_uid || rec.service_engineer_uid || '-'}</div>
+                                      </td>
+                                      <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">
+                                        <div className="truncate" title={rec.employee_id || ''}>{rec.employee_id || '-'}</div>
                                       </td>
                                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.ho_corrected_km || '-'}</td>
                                       <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">
@@ -7990,7 +8744,7 @@ const BranchAdminExpense = () => {
                             <thead className="sticky top-0 z-10">
                               <tr style={{ backgroundColor: '#f0f1ff' }}>
                                 {[
-                                  { label: 'Sr.', w: '50px' },
+                                  { label: 'Sr.No', w: '50px' },
                                   { label: 'Date', w: '100px' },
                                   { label: 'Engineer Name', w: '150px' },
                                   { label: 'Customer Name', w: '160px' },
@@ -8146,6 +8900,17 @@ const BranchAdminExpense = () => {
                               </button>
                               <span className="text-[11px] text-gray-600">Voucher:</span>
                               <span className="text-[11px] font-bold font-mono text-gray-800">{selectedBillWiseVoucher.voucher}</span>
+                              <button
+                                onClick={() => printBillWiseVoucherReport(selectedBillWiseVoucher)}
+                                className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md shadow-sm"
+                                style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)' }}
+                                title={`Print all records in voucher ${selectedBillWiseVoucher.voucher}`}
+                              >
+                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                                </svg>
+                                Print All Engineers
+                              </button>
                             </div>
                             <div className="overflow-auto" style={{ maxHeight: '650px', scrollbarWidth: 'thin' }}>
                               <table className="border-collapse w-full" style={{ minWidth: '1200px' }}>
@@ -8175,8 +8940,20 @@ const BranchAdminExpense = () => {
                                         <td className="px-3 py-1 text-center border-r border-gray-100">
                                           <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold ${g.entryType === 'BM' ? 'bg-indigo-100 text-indigo-700' : 'bg-cyan-100 text-cyan-700'}`}>{g.entryType || 'SE'}</span>
                                         </td>
-                                        <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100 font-semibold text-black">{g.engineerName}</td>
-                                        <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100 font-bold">{g.records.length}</td>
+                                        <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100">
+                                          <div className="flex items-center justify-center gap-1.5">
+                                            <span className="font-semibold text-black">{g.engineerName}</span>
+                                            <button
+                                              onClick={(e) => { e.stopPropagation(); printBillWiseEngineerReport(g.records, g.engineerName, selectedBillWiseVoucher.voucher); }}
+                                              className="inline-flex items-center justify-center text-purple-600 hover:text-purple-800"
+                                              title={`Print ${g.engineerName}'s records (Voucher ${selectedBillWiseVoucher.voucher})`}
+                                            >
+                                              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                                              </svg>
+                                            </button>
+                                          </div>
+                                        </td>                                        <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100 font-bold">{g.records.length}</td>
                                         <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100 font-bold text-purple-700 whitespace-nowrap">₹{g.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                                         <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100 font-bold text-emerald-700 whitespace-nowrap">₹{g.verifiedAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                                         <td className="px-3 py-1 text-center">
@@ -8232,6 +9009,9 @@ const BranchAdminExpense = () => {
                               </svg>
                             </button>
                           )}
+                          <span className="text-[11px] text-gray-600">{billWiseSelectedPeriod.entryType === 'BM' ? 'Employee:' : 'Engineer:'}</span>
+                          <span className="text-[11px] font-bold text-purple-700">{billWiseSelectedPeriod.engineerName}</span>
+                          <span className="text-gray-300">|</span>
                           <span className="text-[11px] text-gray-600">Period:</span>
                           <span className="text-[11px] font-bold text-gray-800">
                             {billWiseSelectedPeriod.periodStart.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
@@ -8258,28 +9038,30 @@ const BranchAdminExpense = () => {
                           const money = v => v && parseFloat(v) !== 0 ? `₹${parseFloat(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-';
 
                           const seCols = [
-                            { label: 'Sr.', w: '50px' }, { label: 'Date', w: '100px' }, { label: 'Engineer', w: '170px' },
-                            { label: 'Emp ID', w: '90px' }, { label: 'UID', w: '100px' }, { label: 'SR No.', w: '150px' },
-                            { label: 'Appointment No.', w: '130px' }, { label: 'Account', w: '150px' },
-                            { label: 'Installation Site Address', w: '110px' }, { label: 'SR Type', w: '110px' },
-                            { label: 'Task Status', w: '110px' }, { label: 'KMs Travelled', w: '100px' },
-                            { label: 'Task Start Date', w: '120px' }, { label: 'Task End Date', w: '120px' },
-                            { label: 'Expense Head', w: '150px' },
-                            { label: 'Amount', w: '110px' }, { label: 'Bill Submitted', w: '100px' }, { label: 'Work Description', w: '200px' },
+                            { label: 'Sr.No.', w: '50px' }, { label: 'Date', w: '100px' }, { label: 'SR No.', w: '150px' },
+                            { label: 'Account', w: '150px' }, { label: 'Installation Site Address', w: '110px' },
+                            { label: 'SR Type', w: '110px' }, { label: 'Expense Head', w: '150px' },
+                            { label: 'Amount', w: '110px' }, { label: 'Work Description', w: '200px' },
+                            { label: 'KMs Travelled', w: '100px' }, { label: 'Task Status', w: '110px' },
+                            { label: 'Appointment No.', w: '130px' }, { label: 'Task Start Date', w: '120px' },
+                            { label: 'Task End Date', w: '120px' }, { label: 'Engineer', w: '170px' },
+                            { label: 'Emp ID', w: '90px' }, { label: 'UID', w: '100px' }, { label: 'Bill Submitted', w: '90px' },
                             { label: 'Status', w: '95px' }, { label: 'Created By', w: '120px' },
                           ];
                           const bmCols = [
-                            { label: 'Sr.', w: '50px' }, { label: 'Date', w: '100px' }, { label: 'Created By', w: '170px' },
+                            { label: 'Sr.No.', w: '50px' }, { label: 'Date', w: '100px' },
                             { label: 'Customer Name', w: '170px' }, { label: 'SR No. / Inv / Engine', w: '170px' },
                             { label: 'Expense Head', w: '150px' }, { label: 'Amount', w: '110px' },
-                            { label: 'Work Description', w: '220px' }, { label: 'Remark', w: '160px' }, { label: 'Work Status', w: '110px' }, { label: 'Status', w: '95px' },
+                            { label: 'Bill Submitted', w: '100px' },
+                            { label: 'Work Description', w: '220px' }, { label: 'Remark', w: '160px' }, { label: 'Work Status', w: '110px' },
+                            { label: 'Employee Name', w: '170px' }, { label: 'Status', w: '95px' },
                           ];
                           const cols = isBM ? bmCols : seCols;
                           const rows = billWiseSelectedPeriod.records.filter(r => !billWiseVerifiedOnly || r.verification_status === 'Verified');
 
                           return (
                             <div className="overflow-auto" style={{ maxHeight: '650px', scrollbarWidth: 'thin' }}>
-                              <table className="border-collapse w-full" style={{ minWidth: isBM ? '1510px' : '2550px' }}>
+                              <table className="border-collapse w-full" style={{ minWidth: isBM ? '1610px' : '2550px' }}>
                                 <thead className="sticky top-0 z-10">
                                   <tr style={{ backgroundColor: '#f0f1ff' }}>
                                     {cols.map((c, i) => (
@@ -8303,32 +9085,35 @@ const BranchAdminExpense = () => {
 
                                         {isBM ? (
                                           <>
-                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate font-semibold text-black" title={rec.created_by || ''}>{rec.created_by || '-'}</div></td>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.customer_name || ''}>{rec.customer_name || '-'}</div></td>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.sr_invoice_engine_no || ''}>{rec.sr_invoice_engine_no || '-'}</div></td>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.expenses_head || ''}>{rec.expenses_head || '-'}</div></td>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 font-bold text-blue-700">{money(rec.amount)}</td>
+                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.bill_submitted || '-'}</td>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.work_description || ''}>{rec.work_description || '-'}</div></td>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.remark || ''}>{rec.remark || '-'}</div></td>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.work_status || '-'}</td>
+                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate font-semibold text-black" title={rec.created_by || ''}>{rec.created_by || '-'}</div></td>
                                           </>
                                         ) : (
                                           <>
+                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.service_request_no || ''}>{rec.service_request_no || '-'}</div></td>
+                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.account || ''}>{rec.account || '-'}</div></td>
+                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate max-w-[110px] mx-auto" title={rec.installation_site_address || ''}>{rec.installation_site_address || '-'}</div></td>
+                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.sr_type || ''}>{rec.sr_type || '-'}</div></td>
+                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.expenses_head || ''}>{rec.expenses_head || '-'}</div></td>
+                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 font-bold text-blue-700">{money(rec.amount)}</td>
+                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.work_description || ''}>{rec.work_description || '-'}</div></td>
+                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.kms_travelled || '-'}</td>
+                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.task_status || '-'}</td>
+                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.appointment_number || ''}>{rec.appointment_number || '-'}</div></td>
+                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.task_start_date || '-'}</td>
+                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.task_end_date || '-'}</td>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate font-semibold text-black" title={rec.engineer_name || ''}>{rec.engineer_name || '-'}</div></td>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.employee_id || ''}>{rec.employee_id || '-'}</div></td>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.service_engineer_uid || ''}>{rec.service_engineer_uid || '-'}</div></td>
-                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.service_request_no || ''}>{rec.service_request_no || '-'}</div></td>
-                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.appointment_number || ''}>{rec.appointment_number || '-'}</div></td>
-                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.account || ''}>{rec.account || '-'}</div></td>
-                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate max-w-[110px] mx-auto" title={rec.installation_site_address || ''}>{rec.installation_site_address || '-'}</div></td>
-                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.sr_type || ''}>{rec.sr_type || '-'}</div></td>                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.task_status || '-'}</td>
-                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.kms_travelled || '-'}</td>
-                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.task_start_date || '-'}</td>
-                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.task_end_date || '-'}</td>
-                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.expenses_head || ''}>{rec.expenses_head || '-'}</div></td>
-                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100 font-bold text-blue-700">{money(rec.amount)}</td>
                                             <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100">{rec.bill_submitted || '-'}</td>
-                                            <td className="px-2 py-1 text-[11px] text-center border-r border-gray-100"><div className="truncate" title={rec.work_description || ''}>{rec.work_description || '-'}</div></td>                                          </>
+                                          </>
                                         )}
 
                                         <td className="px-2 py-1 text-center border-r border-gray-100">
@@ -9979,7 +10764,7 @@ const BranchAdminExpense = () => {
                         <thead className="sticky top-0 z-10">
                           <tr style={{ backgroundColor: '#f3e8ff' }}>
                             {[
-                              { l: 'Sr.', w: 50 }, { l: 'Date', w: 100 }, { l: 'SR No.', w: 110 },
+                              { l: 'Sr.No.', w: 50 }, { l: 'Date', w: 100 }, { l: 'SR No.', w: 110 },
                               { l: 'Engineer', w: 150 }, { l: 'Customer', w: 180 }, { l: 'Location', w: 140 },
                               { l: 'Description', w: 200 }, { l: 'KM 2-Way', w: 85 }, { l: 'HO KM', w: 100 },
                               { l: 'Rate', w: 80 }, { l: 'DA', w: 90 }, { l: 'Total', w: 100 },
@@ -10055,7 +10840,7 @@ const BranchAdminExpense = () => {
                           <thead className="sticky top-0 z-10">
                             <tr style={{ backgroundColor: '#f3e8ff' }}>
                               {[
-                                { l: 'Sr.', w: 50 }, { l: 'Date', w: 100 }, { l: 'SR No.', w: 110 },
+                                { l: 'Sr.No.', w: 50 }, { l: 'Date', w: 100 }, { l: 'SR No.', w: 110 },
                                 { l: 'Engineer', w: 150 }, { l: 'Customer', w: 180 }, { l: 'Location', w: 140 },
                                 { l: 'Description', w: 200 }, { l: 'KM 2-Way', w: 85 }, { l: 'HO KM', w: 100 },
                                 { l: 'Rate', w: 80 }, { l: 'DA', w: 90 }, { l: 'Total', w: 100 },
@@ -10154,7 +10939,7 @@ const BranchAdminExpense = () => {
                         <thead className="sticky top-0 z-10">
                           <tr style={{ backgroundColor: '#cffafe' }}>
                             {[
-                              { l: 'Sr.', w: 50 }, { l: 'Date', w: 100 }, { l: 'Engineer', w: 150 },
+                              { l: 'Sr.No.', w: 50 }, { l: 'Date', w: 100 }, { l: 'Engineer', w: 150 },
                               { l: 'Customer', w: 180 }, { l: 'SR/Inv/Engine', w: 150 }, { l: 'Work Desc.', w: 200 },
                               { l: 'KM', w: 70 }, { l: 'HO KM', w: 100 }, { l: 'Work Status', w: 100 },
                               { l: 'Rate', w: 70 }, { l: 'DA', w: 80 }, { l: 'Amount', w: 100 },
@@ -10230,7 +11015,7 @@ const BranchAdminExpense = () => {
                           <thead className="sticky top-0 z-10">
                             <tr style={{ backgroundColor: '#cffafe' }}>
                               {[
-                                { l: 'Sr.', w: 50 }, { l: 'Date', w: 100 }, { l: 'Engineer', w: 150 },
+                                { l: 'Sr.No.', w: 50 }, { l: 'Date', w: 100 }, { l: 'Engineer', w: 150 },
                                 { l: 'Customer', w: 180 }, { l: 'SR/Inv/Engine', w: 150 }, { l: 'Work Desc.', w: 200 },
                                 { l: 'KM', w: 70 }, { l: 'HO KM', w: 100 }, { l: 'Work Status', w: 100 },
                                 { l: 'Rate', w: 70 }, { l: 'DA', w: 80 }, { l: 'Amount', w: 100 },
@@ -10329,7 +11114,7 @@ const BranchAdminExpense = () => {
                         <thead className="sticky top-0 z-10">
                           <tr style={{ backgroundColor: '#ffedd5' }}>
                             {[
-                              { l: 'Sr.', w: 50 }, { l: 'Type', w: 60 }, { l: 'Date', w: 100 }, { l: 'Engineer / Customer', w: 170 },
+                              { l: 'Sr.No.', w: 50 }, { l: 'Type', w: 60 }, { l: 'Date', w: 100 }, { l: 'Engineer / Customer', w: 170 },
                               { l: 'SR No. / Inv / Engine', w: 160 }, { l: 'Expense Head', w: 150 },
                               { l: 'Bill Subm.', w: 90 }, { l: 'Work Desc.', w: 200 }, { l: 'Remark', w: 160 }, { l: 'Work Status', w: 110 }, { l: 'Amount', w: 110 },
                               { l: 'Submitted By', w: 140 }, { l: 'Submitted At', w: 140 }, { l: 'Paid Date', w: 130 },
@@ -10405,7 +11190,7 @@ const BranchAdminExpense = () => {
                           <thead className="sticky top-0 z-10">
                             <tr style={{ backgroundColor: '#ffedd5' }}>
                               {[
-                                { l: 'Sr.', w: 50 }, { l: 'Date', w: 100 }, { l: 'Engineer', w: 150 },
+                                { l: 'Sr.No.', w: 50 }, { l: 'Date', w: 100 }, { l: 'Engineer', w: 150 },
                                 { l: 'Customer', w: 180 }, { l: 'SR/Inv/Engine', w: 150 }, { l: 'Expense Head', w: 150 },
                                 { l: 'Work Desc.', w: 220 }, { l: 'Remark', w: 160 }, { l: 'Work Status', w: 110 }, { l: 'Amount', w: 110 },
                                 { l: 'Submitted By', w: 140 }, { l: 'Submitted At', w: 140 }, { l: 'Paid Date', w: 130 },
@@ -10485,41 +11270,36 @@ const BranchAdminExpense = () => {
                     />
                   </div>
 
+                  {/* Expenses Head — lists ALL subheads across every head */}
                   <div>
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Expenses Head *</label>
                     <select
-                      name="expenses_head"
-                      value={officeExpenseForm.expenses_head}
-                      onChange={handleExpenseHeadChange}
+                      name="sub_head"
+                      value={officeExpenseForm.sub_head}
+                      onChange={handleSubheadSelect}
                       className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none text-black"
                       onFocus={e => e.target.style.borderColor = themeColor}
                       onBlur={e => e.target.style.borderColor = '#e2e8f0'}
                       required
                     >
-                      <option value="">Select Head</option>
-                      {expenseHeads.map(head => (
-                        <option key={head.id} value={head.name}>{head.name}</option>
+                      <option value="">Select Expense Head</option>
+                      {allSubheads.map((s, idx) => (
+                        <option key={`${s.head}__${s.subhead}__${idx}`} value={s.subhead}>{s.subhead}</option>
                       ))}
                     </select>
                   </div>
 
+                  {/* Expense Code — read-only, auto-filled from the chosen head's parent */}
                   <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Sub Head *</label>
-                    <select
-                      name="sub_head"
-                      value={officeExpenseForm.sub_head}
-                      onChange={handleOfficeExpenseInputChange}
-                      className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none text-black disabled:bg-gray-50 disabled:text-gray-400"
-                      onFocus={e => e.target.style.borderColor = themeColor}
-                      onBlur={e => e.target.style.borderColor = '#e2e8f0'}
-                      disabled={!officeExpenseForm.expenses_head || selectedSubheads.length === 0}
-                      required
-                    >
-                      <option value="">Select Sub Head</option>
-                      {selectedSubheads.map((subhead, idx) => (
-                        <option key={idx} value={subhead}>{subhead}</option>
-                      ))}
-                    </select>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Expense Code *</label>
+                    <input
+                      type="text"
+                      name="expenses_head"
+                      value={officeExpenseForm.expenses_head}
+                      readOnly
+                      className="w-full px-2.5 py-1.5 text-xs border border-gray-100 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed"
+                      placeholder="Auto-filled from Expenses Head"
+                    />
                   </div>
 
                   <div>
@@ -10707,8 +11487,8 @@ const BranchAdminExpense = () => {
                         `oe_drafts_${userBranch}.xlsx`,
                         [
                           { key: 'paid_date', label: 'Date' },
-                          { key: 'expenses_head', label: 'Expense Head' },
-                          { key: 'sub_head', label: 'Sub Head' },
+                          { key: 'sub_head', label: 'Expenses Head' },
+                          { key: 'expenses_head', label: 'Expense Code' },
                           { key: 'paid_to', label: 'Paid To' },
                           { key: 'invoice_no', label: 'Invoice / SR No.' },
                           { key: 'amount', label: 'Amount (₹)' },
@@ -10771,7 +11551,7 @@ const BranchAdminExpense = () => {
                             }}
                           />
                         </th>
-                        {['Sr.', 'Date', 'Expense Head', 'Sub Head', 'Paid To', 'Invoice / SR No.', 'Amount (₹)', 'Voucher No.', 'Paid By', 'Remark', 'Description', 'Actions'].map((c, i) => (
+                        {['Sr.No.', 'Date', 'Expenses Head', 'Expense Code', 'Paid To', 'Invoice / SR No.', 'Amount (₹)', 'Voucher No.', 'Paid By', 'Remark', 'Description', 'Actions'].map((c, i) => (
                           <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-b-2 border-r border-gray-200 last:border-r-0 uppercase tracking-wide whitespace-nowrap text-center">{c}</th>
                         ))}
                       </tr>
@@ -10799,15 +11579,17 @@ const BranchAdminExpense = () => {
                                 ? <input type="date" value={oeTempEditForm.paid_date} onChange={e => setOeTempEditForm(p => ({ ...p, paid_date: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
                                 : (d.paid_date ? new Date(d.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-')}
                             </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                              {isEditing
-                                ? <input value={oeTempEditForm.expenses_head} onChange={e => setOeTempEditForm(p => ({ ...p, expenses_head: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
-                                : (d.expenses_head || '-')}
-                            </td>
+                            {/* Expenses Head = sub_head */}
                             <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
                               {isEditing
                                 ? <input value={oeTempEditForm.sub_head} onChange={e => setOeTempEditForm(p => ({ ...p, sub_head: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
                                 : (d.sub_head || '-')}
+                            </td>
+                            {/* Expense Code = expenses_head */}
+                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
+                              {isEditing
+                                ? <input value={oeTempEditForm.expenses_head} onChange={e => setOeTempEditForm(p => ({ ...p, expenses_head: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
+                                : (d.expenses_head || '-')}
                             </td>
                             <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
                               {isEditing
@@ -11028,8 +11810,8 @@ const BranchAdminExpense = () => {
                         `office_expenses_${userBranch}.xlsx`,
                         [
                           { key: 'paid_date', label: 'Date' },
-                          { key: 'expenses_head', label: 'Expense Head' },
-                          { key: 'sub_head', label: 'Sub Head' },
+                          { key: 'sub_head', label: 'Expenses Head' },
+                          { key: 'expenses_head', label: 'Expense Code' },
                           { key: 'paid_to', label: 'Paid To' },
                           { key: 'invoice_no', label: 'Invoice / SR No.' },
                           { key: 'amount', label: 'Amount (₹)' },
@@ -11119,7 +11901,7 @@ const BranchAdminExpense = () => {
                       onChange={(e) => setOeDetailHead(e.target.value)}
                       className="px-2 py-1 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
                     >
-                      <option value="">All Expense Heads</option>
+                      <option value="">All Expense Codes</option>
                       {Array.from(new Set(selectedOEPeriod.records.map(r => r.expenses_head).filter(Boolean)))
                         .sort()
                         .map(h => <option key={h} value={h}>{h}</option>)}
@@ -11165,10 +11947,10 @@ const BranchAdminExpense = () => {
                       <thead className="sticky top-0 z-10">
                         <tr style={{ backgroundColor: '#f0f1ff' }}>
                           {[
-                            { label: 'Sr.', w: '45px' },
+                            { label: 'Sr.No.', w: '45px' },
                             { label: 'Date', w: '90px' },
-                            { label: 'Expense Head', w: '130px' },
-                            { label: 'Sub Head', w: '110px' },
+                            { label: 'Expenses Head', w: '130px' },
+                            { label: 'Expense Code', w: '110px' },
                             { label: 'Paid To', w: '130px' },
                             { label: 'Invoice / SR No.', w: '110px' },
                             { label: 'Amount (₹)', w: '100px' },
@@ -11205,8 +11987,8 @@ const BranchAdminExpense = () => {
                             <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100 whitespace-nowrap">
                               {expense.paid_date ? new Date(expense.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
                             </td>
-                            <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.expenses_head || ''}>{expense.expenses_head || '-'}</div></td>
                             <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.sub_head || ''}>{expense.sub_head || '-'}</div></td>
+                            <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.expenses_head || ''}>{expense.expenses_head || '-'}</div></td>
                             <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.paid_to || ''}>{expense.paid_to || '-'}</div></td>
                             <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.invoice_no || ''}>{expense.invoice_no || '-'}</div></td>
                             <td className="px-2 py-1 text-[11px] font-bold text-black text-center border-r border-gray-100 whitespace-nowrap">
@@ -11826,7 +12608,7 @@ const BranchAdminExpense = () => {
                             }}
                           />
                         </th>
-                        {['Sr.', 'Invoice Date', 'Vendor Name', 'Type', 'GST No.', 'Invoice No.', 'Amount (₹)', 'Customer Name', 'Cust. Invoice No.', 'SR No.', 'Cust. Invoice Amt (₹)', 'Line Work Amt (₹)', 'Shop Name', 'Description', 'Remark', 'Actions'].map((c, i) => (
+                        {['Sr.No.', 'Invoice Date', 'Vendor Name', 'Type', 'GST No.', 'Invoice No.', 'Amount (₹)', 'Customer Name', 'Cust. Invoice No.', 'SR No.', 'Cust. Invoice Amt (₹)', 'Line Work Amt (₹)', 'Shop Name', 'Description', 'Remark', 'Actions'].map((c, i) => (
                           <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-b-2 border-r border-gray-200 last:border-r-0 uppercase tracking-wide whitespace-nowrap text-center">{c}</th>
                         ))}
                       </tr>
@@ -12218,7 +13000,7 @@ const BranchAdminExpense = () => {
                       <thead className="sticky top-0 z-10">
                         <tr style={{ backgroundColor: '#f0f1ff' }}>
                           {[
-                            { label: 'Sr.', w: '45px' },
+                            { label: 'Sr.No.', w: '45px' },
                             { label: 'Invoice Date', w: '100px' },
                             { label: 'Vendor Name', w: '160px' },
                             { label: 'Type', w: '70px' },
@@ -12700,8 +13482,8 @@ const BranchAdminExpense = () => {
                               `oe_history_period_${oeSelectedPeriod.period_start_display}_${userBranch}.xlsx`,
                               [
                                 { key: 'paid_date', label: 'Date' },
-                                { key: 'expenses_head', label: 'Expense Head' },
-                                { key: 'sub_head', label: 'Sub Head' },
+                                { key: 'sub_head', label: 'Expenses Head' },
+                                { key: 'expenses_head', label: 'Expense Code' },
                                 { key: 'paid_to', label: 'Paid To' },
                                 { key: 'invoice_no', label: 'Invoice No.' },
                                 { key: 'amount', label: 'Amount (₹)' },
@@ -12801,8 +13583,8 @@ const BranchAdminExpense = () => {
                         const toExport = window.__oeHistoryFilteredBranch || oeHistoryRecords;
                         exportToExcel(toExport, `office_expense_history_${userBranch}.xlsx`, [
                           { key: 'paid_date', label: 'Date' },
-                          { key: 'expenses_head', label: 'Expense Head' },
-                          { key: 'sub_head', label: 'Sub Head' },
+                          { key: 'sub_head', label: 'Expenses Head' },
+                          { key: 'expenses_head', label: 'Expense Code' },
                           { key: 'paid_to', label: 'Paid To' },
                           { key: 'invoice_no', label: 'Invoice No.' },
                           { key: 'amount', label: 'Amount (₹)' },
@@ -12884,7 +13666,7 @@ const BranchAdminExpense = () => {
                     <table className="border-collapse w-full" style={{ minWidth: '1400px' }}>
                       <thead className="sticky top-0 z-10">
                         <tr style={{ backgroundColor: '#f0f1ff' }}>
-                          {['Sr.', 'Date', 'Expense Head', 'Sub Head', 'Paid To', 'Invoice No.', 'Amount (₹)', 'Voucher No.', 'Paid By', 'Remark', 'Description', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date'].map((col, i) => (
+                          {['Sr.No.', 'Date', 'Expenses Head', 'Expense Code', 'Paid To', 'Invoice No.', 'Amount (₹)', 'Voucher No.', 'Paid By', 'Remark', 'Description', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date'].map((col, i) => (
                             <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 last:border-r-0 uppercase tracking-wide whitespace-nowrap text-center" style={{ backgroundColor: '#f0f1ff' }}>
                               {col}
                             </th>
@@ -12899,10 +13681,10 @@ const BranchAdminExpense = () => {
                               {rec.paid_date ? new Date(rec.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
                             </td>
                             <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                              <div className="truncate max-w-[150px]" title={rec.expenses_head || ''}>{rec.expenses_head || '-'}</div>
+                              <div className="truncate max-w-[150px]" title={rec.sub_head || ''}>{rec.sub_head || '-'}</div>
                             </td>
                             <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                              <div className="truncate max-w-[150px]" title={rec.sub_head || ''}>{rec.sub_head || '-'}</div>
+                              <div className="truncate max-w-[150px]" title={rec.expenses_head || ''}>{rec.expenses_head || '-'}</div>
                             </td>
                             <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
                               <div className="truncate max-w-[150px]" title={rec.paid_to || ''}>{rec.paid_to || '-'}</div>
@@ -13060,7 +13842,7 @@ const BranchAdminExpense = () => {
                       <table className="border-collapse w-full" style={{ minWidth: '1400px' }}>
                         <thead className="sticky top-0 z-10">
                           <tr style={{ backgroundColor: '#f0f1ff' }}>
-                            {['Sr.', 'Date', 'Expense Head', 'Sub Head', 'Paid To', 'Invoice No.', 'Amount (₹)', 'Voucher No.', 'Paid By', 'Remark', 'Description', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date'].map((col, i) => (
+                            {['Sr.No.', 'Date', 'Expenses Head', 'Expense Code', 'Paid To', 'Invoice No.', 'Amount (₹)', 'Voucher No.', 'Paid By', 'Remark', 'Description', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date'].map((col, i) => (
                               <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 last:border-r-0 uppercase tracking-wide whitespace-nowrap text-center" style={{ backgroundColor: '#f0f1ff' }}>
                                 {col}
                               </th>
@@ -13611,7 +14393,7 @@ const BranchAdminExpense = () => {
                     <table className="border-collapse w-full" style={{ minWidth: '1700px' }}>
                       <thead className="sticky top-0 z-10">
                         <tr style={{ backgroundColor: '#f0f1ff' }}>
-                          {['Sr.', 'Invoice Date', 'Vendor Name', 'Type', 'GST No.', 'Invoice No.', 'Amount (₹)', 'Customer Name', 'Cust. Invoice No.', 'SR No.', 'Cust. Inv. Amt', 'Line Work Amt', 'Shop Name', 'Description', 'Remark', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date']
+                          {['Sr.No.', 'Invoice Date', 'Vendor Name', 'Type', 'GST No.', 'Invoice No.', 'Amount (₹)', 'Customer Name', 'Cust. Invoice No.', 'SR No.', 'Cust. Inv. Amt', 'Line Work Amt', 'Shop Name', 'Description', 'Remark', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date']
                             .map((label, i) => (
                               <th key={i}
                                 className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 uppercase tracking-wide whitespace-nowrap text-center"
@@ -13804,7 +14586,7 @@ const BranchAdminExpense = () => {
                       <table className="border-collapse w-full" style={{ minWidth: '1700px' }}>
                         <thead className="sticky top-0 z-10">
                           <tr style={{ backgroundColor: '#f0f1ff' }}>
-                            {['Sr.', 'Invoice Date', 'Vendor Name', 'Type', 'GST No.', 'Invoice No.', 'Amount (₹)', 'Customer Name', 'Cust. Invoice No.', 'SR No.', 'Cust. Inv. Amt', 'Line Work Amt', 'Shop Name', 'Description', 'Remark', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date']
+                            {['Sr.No.', 'Invoice Date', 'Vendor Name', 'Type', 'GST No.', 'Invoice No.', 'Amount (₹)', 'Customer Name', 'Cust. Invoice No.', 'SR No.', 'Cust. Inv. Amt', 'Line Work Amt', 'Shop Name', 'Description', 'Remark', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date']
                               .map((label, i) => (
                                 <th key={i}
                                   className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 uppercase tracking-wide whitespace-nowrap text-center"
@@ -14067,7 +14849,9 @@ const BranchAdminExpense = () => {
             pendingVerifiedTabRef.current = 'sales_bm';
             setActiveTab('tada');
             setTadaSubTab('verified');
+            setVerifiedInnerTab('sales_bm');
             setSalesBmDraftPeriod(null);
+            setSalesBmDraftSelected({});
             fetchSalesBmDrafts();
           }}
           onBillWiseSaved={() => {
@@ -14075,7 +14859,9 @@ const BranchAdminExpense = () => {
             pendingVerifiedTabRef.current = 'bill_wise';
             setActiveTab('tada');
             setTadaSubTab('verified');
+            setVerifiedInnerTab('bill_wise');
             setBillWiseDraftSelected({});
+            setBillWiseDraftPeriod(null);
             fetchBillWiseDrafts();
           }}
         />
@@ -14291,7 +15077,7 @@ const BranchAdminExpense = () => {
                         <thead>
                           <tr style={{ backgroundColor: themeLight }}>
                             <th className="px-3 py-2 text-[10px] font-bold text-black uppercase tracking-wide text-left border-b" style={{ borderColor: '#E5E7EB', width: '50px' }}>
-                              Sr.
+                              Sr.No.
                             </th>
                             <th className="px-3 py-2 text-[10px] font-bold text-black uppercase tracking-wide text-left border-b" style={{ borderColor: '#E5E7EB' }}>
                               Name
@@ -14494,7 +15280,7 @@ const BranchAdminExpense = () => {
                     <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
-                    <h2 className="text-sm font-bold text-white">Customer Record — Sr. {srNo}</h2>
+                    <h2 className="text-sm font-bold text-white">Customer Record — Sr.No. {srNo}</h2>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/20 text-white font-semibold">
                       {r.appointment_number || '-'}
                     </span>
@@ -14697,6 +15483,10 @@ const BranchAdminExpense = () => {
       </div>
 
       <style>{`
+        /* Freeze header row in every scroll container */
+        thead.sticky { position: sticky; top: 0; z-index: 10; }
+        thead.sticky th { position: sticky; top: 0; }
+
         .overflow-auto::-webkit-scrollbar,
         .overflow-x-auto::-webkit-scrollbar { width:6px; height:6px; }
         .overflow-auto::-webkit-scrollbar-track,
