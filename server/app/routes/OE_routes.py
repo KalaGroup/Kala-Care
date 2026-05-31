@@ -20,6 +20,7 @@ class OfficeExpenseCreate(BaseModel):
     sub_head: Optional[str] = Field(None, max_length=100)
     expenses_description: Optional[str] = None
     description: Optional[str] = None
+    internal_branch_name: Optional[str] = Field(None, max_length=150)
     paid_to: str = Field(..., max_length=255)
     invoice_no: Optional[str] = Field(None, max_length=100)
     amount: float = Field(..., gt=0)
@@ -36,6 +37,7 @@ class OfficeExpenseUpdate(BaseModel):
     sub_head: Optional[str] = Field(None, max_length=100)
     expenses_description: Optional[str] = None
     description: Optional[str] = None
+    internal_branch_name: Optional[str] = Field(None, max_length=150)
     paid_to: Optional[str] = Field(None, max_length=255)
     invoice_no: Optional[str] = Field(None, max_length=100)
     amount: Optional[float] = Field(None, gt=0)
@@ -50,12 +52,14 @@ class OfficeExpenseResponse(BaseModel):
     sub_head: Optional[str]
     expenses_description: Optional[str]
     description: Optional[str]
+    internal_branch_name: Optional[str] = None
     paid_to: str
     invoice_no: Optional[str]
     amount: float
     remark: Optional[str]
     paid_by: str
     voucher_no: Optional[str]
+    submit_voucher_no: Optional[str] = None
     branch_code: str
     created_by: str
     created_by_name: str
@@ -81,6 +85,7 @@ class OfficeExpenseTempCreate(BaseModel):
     sub_head: Optional[str] = Field(None, max_length=100)
     expenses_description: Optional[str] = None
     description: Optional[str] = None
+    internal_branch_name: Optional[str] = Field(None, max_length=150)
     paid_to: str = Field(..., max_length=255)
     invoice_no: Optional[str] = Field(None, max_length=100)
     amount: float = Field(..., gt=0)
@@ -97,6 +102,7 @@ class OfficeExpenseTempUpdate(BaseModel):
     sub_head: Optional[str] = None
     expenses_description: Optional[str] = None
     description: Optional[str] = None
+    internal_branch_name: Optional[str] = None
     paid_to: Optional[str] = None
     invoice_no: Optional[str] = None
     amount: Optional[float] = None
@@ -242,6 +248,105 @@ def get_expenses_count(
     finally:
         db.close()
 
+
+@router.get("/next-voucher-no")
+def get_next_voucher_no(
+    branch_code: str = Query(...),
+    paid_date: Optional[str] = Query(None),
+):
+    """Preview the next voucher number for a branch in the FY of paid_date (defaults today)."""
+    db = get_db_session()
+    try:
+        ref = date.fromisoformat(paid_date) if paid_date else date.today()
+        next_no = OfficeExpenseTempController.get_next_voucher_no(db, branch_code, ref)
+        return {"next_voucher_no": str(next_no)}
+    finally:
+        db.close()            
+
+# ==================== VOUCHER-WISE VERIFICATION (MAIN) ====================
+
+@router.get("/vouchers")
+def oe_vouchers(branch_code: Optional[str] = Query(None)):
+    """Group non-deleted office expenses by submit_voucher_no for HO verification."""
+    db = get_db_session()
+    try:
+        q = db.query(OfficeExpense).filter(OfficeExpense.is_deleted == False)
+        if branch_code:
+            q = q.filter(OfficeExpense.branch_code == branch_code)
+        records = q.all()
+
+        groups_map = {}
+        for r in records:
+            vno = r.submit_voucher_no or 'No Voucher'
+            key = (r.branch_code or '', vno)
+            if key not in groups_map:
+                groups_map[key] = {
+                    'submit_voucher_no': vno,
+                    'branch_code': r.branch_code or '',
+                    'record_count': 0,
+                    'verified_count': 0,
+                    'total_amount': 0.0,
+                    'verified_amount': 0.0,
+                    'record_ids': [],
+                    '_dates': [],
+                    '_submitters': set(),
+                }
+            g = groups_map[key]
+            amt = float(r.amount or 0)
+            g['record_count'] += 1
+            g['total_amount'] += amt
+            g['record_ids'].append(r.id)
+            if r.created_by_name:
+                g['_submitters'].add(r.created_by_name)
+            if r.verification_status == 'Verified':
+                g['verified_count'] += 1
+                g['verified_amount'] += amt
+            if r.paid_date:
+                d = r.paid_date.date() if hasattr(r.paid_date, 'date') else r.paid_date
+                g['_dates'].append(d)
+
+        groups = []
+        for g in groups_map.values():
+            dates = g.pop('_dates')
+            submitters = g.pop('_submitters')
+            g['submitted_by'] = ', '.join(sorted(submitters)) if submitters else 'Unknown'
+            if dates:
+                ps, pe = min(dates), max(dates)
+                g['period_start'] = ps.isoformat()
+                g['period_end'] = pe.isoformat()
+                g['period_start_display'] = ps.strftime('%d %b %Y')
+                g['period_end_display'] = pe.strftime('%d %b %Y')
+            else:
+                g['period_start'] = g['period_end'] = None
+                g['period_start_display'] = g['period_end_display'] = '-'
+            groups.append(g)
+
+        groups.sort(key=lambda x: (x['period_start'] or '', x['submit_voucher_no']), reverse=True)
+        return {'groups': groups}
+    finally:
+        db.close()
+
+
+@router.get("/voucher-records")
+def oe_voucher_records(
+    submit_voucher_no: str = Query(...),
+    branch_code: Optional[str] = Query(None),
+):
+    """All non-deleted office expenses inside one submit voucher."""
+    db = get_db_session()
+    try:
+        q = db.query(OfficeExpense).filter(OfficeExpense.is_deleted == False)
+        if submit_voucher_no == 'No Voucher':
+            q = q.filter(OfficeExpense.submit_voucher_no.is_(None))
+        else:
+            q = q.filter(OfficeExpense.submit_voucher_no == submit_voucher_no)
+        if branch_code:
+            q = q.filter(OfficeExpense.branch_code == branch_code)
+        records = q.order_by(OfficeExpense.paid_date.asc()).all()
+        return [r.to_dict() for r in records]
+    finally:
+        db.close()            
+
 @router.get("/{expense_id}", response_model=OfficeExpenseResponse)
 def get_office_expense(expense_id: int):
     """Get a specific office expense by ID"""
@@ -380,11 +485,13 @@ def submit_verified_to_history(request: SubmitToHistoryRequest):
 
             history = OfficeExpenseHistory(
                 original_id=expense.id,
+                submit_voucher_no=expense.submit_voucher_no,
                 paid_date=expense.paid_date,
                 expenses_head=expense.expenses_head,
                 sub_head=expense.sub_head,
                 expenses_description=expense.expenses_description,
                 description=expense.description,
+                internal_branch_name=expense.internal_branch_name,
                 paid_to=expense.paid_to,
                 invoice_no=expense.invoice_no,
                 amount=expense.amount,
@@ -443,6 +550,97 @@ def get_office_expense_history(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()   
+
+@router.get("/history/vouchers")
+def oe_history_vouchers(branch_code: Optional[str] = Query(None)):
+    """Group office-expense history by submit_voucher_no."""
+    db = get_db_session()
+    try:
+        q = db.query(OfficeExpenseHistory)
+        if branch_code:
+            q = q.filter(OfficeExpenseHistory.branch_code == branch_code)
+        records = q.all()
+
+        groups_map = {}
+        for r in records:
+            vno = r.submit_voucher_no or 'No Voucher'
+            key = (r.branch_code or '', vno)
+            if key not in groups_map:
+                groups_map[key] = {
+                    'submit_voucher_no': vno,
+                    'branch_code': r.branch_code or '',
+                    'record_count': 0,
+                    'total_amount': 0.0,
+                    'record_ids': [],
+                    '_dates': [],
+                    '_submitters': set(),
+                    '_verifiers': set(),
+                    '_paid_set': set(),
+                    'paid_count': 0,
+                }
+            g = groups_map[key]
+            amt = float(r.amount or 0)
+            g['record_count'] += 1
+            g['total_amount'] += amt
+            g['record_ids'].append(r.id)
+            if r.created_by_name:
+                g['_submitters'].add(r.created_by_name)
+            if r.verified_by_name:
+                g['_verifiers'].add(r.verified_by_name)
+            if r.paid_date:
+                d = r.paid_date.date() if hasattr(r.paid_date, 'date') else r.paid_date
+                g['_dates'].append(d)
+            if r.ho_paid_date:
+                g['_paid_set'].add(r.ho_paid_date.isoformat())
+                g['paid_count'] += 1
+
+        groups = []
+        for g in groups_map.values():
+            dates = g.pop('_dates')
+            submitters = g.pop('_submitters')
+            verifiers = g.pop('_verifiers')
+            paid_set = g.pop('_paid_set')
+            g['submitted_by'] = ', '.join(sorted(submitters)) if submitters else 'Unknown'
+            g['verified_by'] = ', '.join(sorted(verifiers)) if verifiers else '-'
+            g['paid_date'] = (list(paid_set)[0]
+                              if len(paid_set) == 1 and g['paid_count'] == g['record_count']
+                              else None)
+            if dates:
+                ps, pe = min(dates), max(dates)
+                g['period_start'] = ps.isoformat()
+                g['period_end'] = pe.isoformat()
+                g['period_start_display'] = ps.strftime('%d %b %Y')
+                g['period_end_display'] = pe.strftime('%d %b %Y')
+            else:
+                g['period_start'] = g['period_end'] = None
+                g['period_start_display'] = g['period_end_display'] = '-'
+            groups.append(g)
+
+        groups.sort(key=lambda x: (x['period_start'] or '', x['submit_voucher_no']), reverse=True)
+        return {'groups': groups}
+    finally:
+        db.close()
+
+
+@router.get("/history/voucher-records")
+def oe_history_voucher_records(
+    submit_voucher_no: str = Query(...),
+    branch_code: Optional[str] = Query(None),
+):
+    """All history rows inside one submit voucher."""
+    db = get_db_session()
+    try:
+        q = db.query(OfficeExpenseHistory)
+        if submit_voucher_no == 'No Voucher':
+            q = q.filter(OfficeExpenseHistory.submit_voucher_no.is_(None))
+        else:
+            q = q.filter(OfficeExpenseHistory.submit_voucher_no == submit_voucher_no)
+        if branch_code:
+            q = q.filter(OfficeExpenseHistory.branch_code == branch_code)
+        records = q.order_by(OfficeExpenseHistory.paid_date.asc()).all()
+        return [r.to_dict() for r in records]
+    finally:
+        db.close()        
 
 @router.post("/temp", status_code=201)
 def create_temp_expense(payload: OfficeExpenseTempCreate):
@@ -505,9 +703,11 @@ def delete_temp_expense(temp_id: int):
 def submit_temp_to_main(payload: SubmitTempToMainRequest):
     db = get_db_session()
     try:
-        count = OfficeExpenseTempController.submit_to_main(db, payload.temp_ids, payload.branch_code)
+        count, submit_voucher_no = OfficeExpenseTempController.submit_to_main(
+            db, payload.temp_ids, payload.branch_code
+        )
         db.commit()
-        return {"moved_count": count}
+        return {"moved_count": count, "submit_voucher_no": submit_voucher_no}
     except Exception as e:
         db.rollback(); raise HTTPException(status_code=400, detail=str(e))
     finally:

@@ -376,6 +376,7 @@ const CustomerEng2 = () => {
   });
   const [isDragging, setIsDragging] = useState(false);
   const dragStartPos = useRef({ x: 0, y: 0 });
+  const activeCustomerRequestRef = useRef(null);
 
   // New state for multiple campaign follow-ups
   const [selectedCampaignsForFollowup, setSelectedCampaignsForFollowup] = useState([]);
@@ -804,7 +805,8 @@ const CustomerEng2 = () => {
     });
   }, []);
 
-  const fetchNonCampaignCustomers = async (pageNum = 1, reset = false) => {
+  const fetchNonCampaignCustomers = async (pageNum = 1, reset = false, completedFirstOverride = null) => {
+    const completedFirst = completedFirstOverride !== null ? completedFirstOverride : showCompletedFirst;
     if (reset) {
       setLoading(true);
       setCustomers([]);
@@ -815,7 +817,7 @@ const CustomerEng2 = () => {
     }
 
     try {
-      const url = `${API_BASE_URL}/v1/engagement/non-campaign-customers?page=${pageNum}&limit=500`;
+      const url = `${API_BASE_URL}/v1/engagement/non-campaign-customers?page=${pageNum}&limit=2000&completed_first=${completedFirst}`;
 
       const response = await fetch(url);
       if (!response.ok) throw new Error("Failed to fetch non-campaign customers");
@@ -999,6 +1001,7 @@ const CustomerEng2 = () => {
   };
 
   const fetchCustomerDetails = async (customerId) => {
+    activeCustomerRequestRef.current = customerId;
     setLoading(true);
     const loadingToast = toast.loading("Loading customer details...");
     try {
@@ -1029,6 +1032,16 @@ const CustomerEng2 = () => {
 
       if (!response.ok) throw new Error("Failed to fetch customer details");
       const data = await response.json();
+
+      // User navigated back while this fetch was still running → abort,
+      // so we don't re-open the customer details view (prevents the jump).
+      if (activeCustomerRequestRef.current !== customerId) {
+        toast.dismiss(loadingToast);
+        setLoading(false);
+        setLoadingCompleteData(false);
+        setLoadingEditInfo(false);
+        return;
+      }
 
       let nonFollowups = [];
       if (nonFollowupsResponse.ok) {
@@ -1189,6 +1202,7 @@ const CustomerEng2 = () => {
   };
 
   const handleBackToList = () => {
+    activeCustomerRequestRef.current = null;
     setShowCustomerDetails(false);
     setSelectedCustomer(null);
     setCustomerDetails(null);
@@ -1643,25 +1657,6 @@ const CustomerEng2 = () => {
     }));
   };
 
-  // Load PDFs for selected campaign
-  const loadCampaignPdfs = (campaignId) => {
-    const campaign = customerCampaigns.find(
-      (c) => c.id === parseInt(campaignId),
-    );
-    if (campaign) {
-      const pdfs = (campaign.scripts || []).filter(
-        (script) => script.type === "pdf",
-      );
-      setCampaignPdfs(pdfs);
-      setSelectedPdf(pdfs.length > 0 ? pdfs[0] : null);
-      setCurrentPdfIndex(0);
-      setPdfViewerCampaign(campaign);
-      setShowPdfViewer(true);
-      setIsPdfPanelMinimized(false);
-      setActiveCampaignTab(campaignId);
-    }
-  };
-
   // Close PDF panel
   const handleClosePdfPanel = () => {
     setShowPdfViewer(false);
@@ -1801,6 +1796,7 @@ const CustomerEng2 = () => {
         // Check if reject reason is 'wrong number' or 'call not connected'
         if (
           rejectReason.includes("wrong number") ||
+          rejectReason.includes("Incorrect contact details") ||
           rejectReason.includes("call not connected")
         ) {
           const result = await Swal.fire({
@@ -2159,9 +2155,32 @@ const CustomerEng2 = () => {
       setCommonNextFollowupDate("");
       setEditingFollowup(null);
 
-      // Refresh data
+      // Refresh the details panel (you're still on this screen)
       await fetchCustomerDetails(selectedCustomer);
-      await fetchNonCampaignCustomers(1, true);
+
+      // FAST PATH: the non-campaign list's status comes only from the latest
+      // "other" follow-up, so patch just this customer in place — no network
+      // refetch, instant re-sort, scroll position and loaded rows preserved.
+      const otherData = campaignFollowupData['other'];
+      if (otherData?.status) {
+        setCustomers(prev =>
+          prev.map(c =>
+            c.customer_id === selectedCustomer
+              ? {
+                ...c,
+                latest_status: otherData.status,
+                last_followup_date: new Date().toISOString(),
+                last_followup_user: currentUser?.name || c.last_followup_user,
+                last_followup_remark: otherData.remark || c.last_followup_remark,
+                next_followup_date:
+                  (otherData.status === 'rescheduled' || otherData.status === 'wip')
+                    ? (otherData.next_followup_date || commonNextFollowupDate || c.next_followup_date)
+                    : null,
+              }
+              : c
+          )
+        );
+      }
     } catch (err) {
       toast.dismiss(submitToast);
       toast.error(err.message || "Failed to save follow-ups");
@@ -2263,19 +2282,68 @@ const CustomerEng2 = () => {
     }
   };
 
+  // Fetch one script's base64 content on demand
+  const fetchPdfContent = async (campaignId, scriptIndex) => {
+    const res = await fetch(
+      `${API_BASE_URL}/v1/engagement/campaigns/${campaignId}/scripts/${scriptIndex}`,
+    );
+    if (!res.ok) throw new Error("Failed to load PDF");
+    return res.json(); // { type, name, content }
+  };
+
+  // Show the PDF at `index`, fetching its content if not already cached
+  const showPdfAt = async (campaignId, pdfsArr, index) => {
+    setCurrentPdfIndex(index);
+    const pdf = pdfsArr[index];
+    if (!pdf) {
+      setSelectedPdf(null);
+      return;
+    }
+    if (pdf.content) {
+      setSelectedPdf(pdf);
+      return;
+    }
+    setSelectedPdf({ ...pdf, content: null }); // brief empty state while loading
+    try {
+      const full = await fetchPdfContent(campaignId, pdf.index);
+      const withContent = { ...pdf, content: full.content };
+      setCampaignPdfs((prev) =>
+        prev.map((p, i) => (i === index ? withContent : p)),
+      );
+      setSelectedPdf(withContent);
+    } catch {
+      toast.error("Failed to load PDF");
+      setSelectedPdf({ ...pdf, content: null });
+    }
+  };
+
+  // Load PDFs for selected campaign (metadata first, content lazily)
+  const loadCampaignPdfs = (campaignId) => {
+    const campaign = customerCampaigns.find((c) => c.id === parseInt(campaignId));
+    if (!campaign) return;
+    const pdfs = (campaign.scripts || []).filter((script) => script.type === "pdf");
+    setCampaignPdfs(pdfs);
+    setPdfViewerCampaign(campaign);
+    setShowPdfViewer(true);
+    setIsPdfPanelMinimized(false);
+    setActiveCampaignTab(campaignId);
+    setCurrentPdfIndex(0);
+    if (pdfs.length > 0) {
+      showPdfAt(campaign.id, pdfs, 0);
+    } else {
+      setSelectedPdf(null);
+    }
+  };
+
   const handlePrevPdf = () => {
-    if (currentPdfIndex > 0) {
-      const newIndex = currentPdfIndex - 1;
-      setCurrentPdfIndex(newIndex);
-      setSelectedPdf(campaignPdfs[newIndex]);
+    if (currentPdfIndex > 0 && pdfViewerCampaign) {
+      showPdfAt(pdfViewerCampaign.id, campaignPdfs, currentPdfIndex - 1);
     }
   };
 
   const handleNextPdf = () => {
-    if (currentPdfIndex < campaignPdfs.length - 1) {
-      const newIndex = currentPdfIndex + 1;
-      setCurrentPdfIndex(newIndex);
-      setSelectedPdf(campaignPdfs[newIndex]);
+    if (currentPdfIndex < campaignPdfs.length - 1 && pdfViewerCampaign) {
+      showPdfAt(pdfViewerCampaign.id, campaignPdfs, currentPdfIndex + 1);
     }
   };
 
@@ -3545,7 +3613,13 @@ const CustomerEng2 = () => {
               {/* RIGHT SIDE : Completed Button with Customer Count */}
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => setShowCompletedFirst(!showCompletedFirst)}
+                  onClick={() => {
+                    const newVal = !showCompletedFirst;
+                    setShowCompletedFirst(newVal);
+                    if (tableContainerRef.current) tableContainerRef.current.scrollTop = 0;
+                    setTableScrollTop(0);
+                    fetchNonCampaignCustomers(1, true, newVal); // reset + override
+                  }}
                   className={`px-3 py-1.5 text-sm rounded-md flex items-center gap-2 transition-all ${showCompletedFirst
                     ? "bg-[#2f3192] text-white"
                     : "text-black hover:underline"
@@ -6445,10 +6519,7 @@ const CustomerEng2 = () => {
                         <button
                           key={index}
                           type="button"
-                          onClick={() => {
-                            setCurrentPdfIndex(index);
-                            setSelectedPdf(pdf);
-                          }}
+                          onClick={() => showPdfAt(pdfViewerCampaign.id, campaignPdfs, index)}
                           className={`px-1.5 xs:px-2 py-0.5 xs:py-1 text-[10px] xs:text-xs whitespace-nowrap rounded ${currentPdfIndex === index
                             ? "bg-gray-200 text-gray-900 font-medium"
                             : "bg-gray-100 text-gray-600 hover:bg-gray-200"

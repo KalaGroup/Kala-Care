@@ -84,6 +84,14 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const [statusFilter, setStatusFilter] = useState('all');
     const [showCancelledCspModal, setShowCancelledCspModal] = useState(false);
 
+    // Non-Campaign Customers modal
+    const [showNonCampaignModal, setShowNonCampaignModal] = useState(false);
+    const [nonCampaignData, setNonCampaignData] = useState({ total_customers: 0, customers: [] });
+    const [loadingNonCampaign, setLoadingNonCampaign] = useState(false);
+    const [nonCampaignSearchTerm, setNonCampaignSearchTerm] = useState('');
+    const [nonCampaignStatusFilter, setNonCampaignStatusFilter] = useState('all');
+    const [nonCampaignServiceFilter, setNonCampaignServiceFilter] = useState('all');
+
     const [showCspModal, setShowCspModal] = useState(false);
     const [cspData, setCspData] = useState({ total_instances: 0, total_rows: 0, rows: [] });
     const [loadingCsp, setLoadingCsp] = useState(false);
@@ -732,6 +740,50 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         [allFollowupsData]
     );
 
+    // Memoized filtered follow-ups for the All-Follow-ups modal
+    const visibleFollowups = useMemo(() => {
+        return allFollowupsData.filter(fu => {
+            if (quotationFilterActive && !quotationFollowupIds.has(fu.id)) return false;
+            if (quotationSentFilterActive && !fu.quotation_sent) return false;
+            if (cspQuotationFilterActive && !cspQuotationFollowupIds.has(fu.id)) return false;
+            if (cspQuotationSentFilterActive && !(fu.quotation_sent && isCspFollowup(fu))) return false;
+            if (statusFilter !== 'all') {
+                if ((fu.status || '').toLowerCase() !== statusFilter) return false;
+            }
+            if (debouncedSearch.trim()) {
+                const t = debouncedSearch.toLowerCase();
+                const matchesSearch = (
+                    (fu.customer_name || '').toLowerCase().includes(t) ||
+                    (fu.campaign_name || '').toLowerCase().includes(t) ||
+                    (fu.followup_remark || '').toLowerCase().includes(t) ||
+                    (fu.customer_instance_id || '').toString().toLowerCase().includes(t) ||
+                    (fu.phone_number || '').toString().toLowerCase().includes(t) ||
+                    (fu.email || '').toLowerCase().includes(t)
+                );
+                if (!matchesSearch) return false;
+            }
+            if (createdFromDate || createdToDate) {
+                if (!fu.created_at) return false;
+                const created = new Date(fu.created_at);
+                created.setHours(0, 0, 0, 0);
+                if (createdFromDate) {
+                    const from = new Date(createdFromDate);
+                    from.setHours(0, 0, 0, 0);
+                    if (created < from) return false;
+                }
+                if (createdToDate) {
+                    const to = new Date(createdToDate);
+                    to.setHours(23, 59, 59, 999);
+                    if (created > to) return false;
+                }
+            }
+            return true;
+        });
+    }, [allFollowupsData, quotationFilterActive, quotationSentFilterActive,
+        cspQuotationFilterActive, cspQuotationSentFilterActive, statusFilter,
+        debouncedSearch, createdFromDate, createdToDate,
+        quotationFollowupIds, cspQuotationFollowupIds, isCspFollowup]);
+
     // Quotation sent count grouped by local date (YYYY-MM-DD) — derived from allFollowupsData
     const quotationSentByDate = useMemo(() => {
         const toLocalDateKey = (dateInput) => {
@@ -777,6 +829,82 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             setNonFollowupCount(0);
         }
     }, [userData]);
+
+    const statusBarData = useMemo(() => ({
+        labels: ['Completed', 'WIP', 'Rejected', 'Rescheduled'],
+        datasets: [{
+            label: 'Status Count',
+            data: [
+                performance.completed_count || 0,
+                performance.wip_count || 0,
+                performance.rejected_count || 0,
+                performance.rescheduled_count || 0
+            ],
+            backgroundColor: [
+                'rgba(34, 197, 94, 0.85)',
+                'rgba(234, 179, 8, 0.85)',
+                'rgba(239, 68, 68, 0.85)',
+                'rgba(168, 85, 247, 0.85)'
+            ],
+            borderColor: ['#22c55e', '#eab308', '#ef4444', '#a855f7'],
+            borderWidth: 2,
+            borderRadius: 12,
+            barPercentage: 0.7,
+            categoryPercentage: 0.8,
+            shadowOffsetX: 2,
+            shadowOffsetY: 2,
+            shadowBlur: 4,
+            shadowColor: 'rgba(0, 0, 0, 0.1)'
+        }]
+    }), [performance.completed_count, performance.wip_count, performance.rejected_count, performance.rescheduled_count]);
+
+    const statusBarOptions = useMemo(() => ({
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                position: 'bottom',
+                labels: {
+                    usePointStyle: true,
+                    boxWidth: 10,
+                    boxHeight: 10,
+                    font: { size: 11, weight: '500' },
+                    padding: 12
+                }
+            },
+            tooltip: {
+                backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                titleColor: '#fff',
+                bodyColor: '#e5e7eb',
+                borderColor: '#3b82f6',
+                borderWidth: 1,
+                cornerRadius: 8,
+                callbacks: {
+                    label: function (context) {
+                        const value = context.raw;
+                        const total = performance.completed_count + performance.wip_count +
+                            performance.rejected_count + performance.rescheduled_count;
+                        const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                        return `${value.toLocaleString()} (${percentage}%)`;
+                    }
+                }
+            }
+        },
+        scales: {
+            x: {
+                grid: { display: false },
+                ticks: { font: { size: 12, weight: '600' }, color: '#374151' }
+            },
+            y: {
+                beginAtZero: true,
+                grid: { color: '#f0f0f0', dash: [5, 5] },
+                ticks: {
+                    font: { size: 11 },
+                    callback: function (value) { return value.toLocaleString(); }
+                }
+            }
+        }
+    }), [performance.completed_count, performance.wip_count, performance.rejected_count, performance.rescheduled_count]);
 
     const followupTypeChartData = useMemo(() => {
         const breakdown = performance?.followup_type_breakdown || {};
@@ -896,28 +1024,28 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             'Start Time (IST)': '',
             'End Time (IST)': '',
             'Working Hours': '',
-            'Toal Calls and Follow-ups': filteredDailyPerformance.reduce((sum, day) => sum + (day.total_followups || 0), 0),
-            'By Call': filteredDailyPerformance.reduce((sum, day) => sum + (day.followup_by_call || 0), 0),
-            'Call Completed': filteredDailyPerformance.reduce((sum, day) => sum + (day.call_completed || 0), 0),
-            'Call WIP': filteredDailyPerformance.reduce((sum, day) => sum + (day.call_wip || 0), 0),
-            'Call Rejected': filteredDailyPerformance.reduce((sum, day) => sum + (day.call_rejected || 0), 0),
-            'Call Rescheduled': filteredDailyPerformance.reduce((sum, day) => sum + (day.call_rescheduled || 0), 0),
-            'By WhatsApp': filteredDailyPerformance.reduce((sum, day) => sum + (day.followup_by_whatsapp || 0), 0),
-            'WhatsApp Completed': filteredDailyPerformance.reduce((sum, day) => sum + (day.whatsapp_completed || 0), 0),
-            'WhatsApp WIP': filteredDailyPerformance.reduce((sum, day) => sum + (day.whatsapp_wip || 0), 0),
-            'WhatsApp Rejected': filteredDailyPerformance.reduce((sum, day) => sum + (day.whatsapp_rejected || 0), 0),
-            'WhatsApp Rescheduled': filteredDailyPerformance.reduce((sum, day) => sum + (day.whatsapp_rescheduled || 0), 0),
-            'By Email': filteredDailyPerformance.reduce((sum, day) => sum + (day.followup_by_email || 0), 0),
-            'Email Completed': filteredDailyPerformance.reduce((sum, day) => sum + (day.email_completed || 0), 0),
-            'Email WIP': filteredDailyPerformance.reduce((sum, day) => sum + (day.email_wip || 0), 0),
-            'Email Rejected': filteredDailyPerformance.reduce((sum, day) => sum + (day.email_rejected || 0), 0),
-            'Email Rescheduled': filteredDailyPerformance.reduce((sum, day) => sum + (day.email_rescheduled || 0), 0),
-            'By Visit': filteredDailyPerformance.reduce((sum, day) => sum + (day.followup_by_visit || 0), 0),
-            'Visit Completed': filteredDailyPerformance.reduce((sum, day) => sum + (day.visit_completed || 0), 0),
-            'Visit WIP': filteredDailyPerformance.reduce((sum, day) => sum + (day.visit_wip || 0), 0),
-            'Visit Rejected': filteredDailyPerformance.reduce((sum, day) => sum + (day.visit_rejected || 0), 0),
-            'Visit Rescheduled': filteredDailyPerformance.reduce((sum, day) => sum + (day.visit_rescheduled || 0), 0),
-            'Quotation Sent': filteredDailyPerformance.reduce((sum, day) => sum + getQuotationSentForDay(day.date), 0)   // ← NEW LINE
+            'Toal Calls and Follow-ups': dailyTotals.total_followups,
+            'By Call': dailyTotals.by_call,
+            'Call Completed': dailyTotals.call_completed,
+            'Call WIP': dailyTotals.call_wip,
+            'Call Rejected': dailyTotals.call_rejected,
+            'Call Rescheduled': dailyTotals.call_rescheduled,
+            'By WhatsApp': dailyTotals.by_whatsapp,
+            'WhatsApp Completed': dailyTotals.whatsapp_completed,
+            'WhatsApp WIP': dailyTotals.whatsapp_wip,
+            'WhatsApp Rejected': dailyTotals.whatsapp_rejected,
+            'WhatsApp Rescheduled': dailyTotals.whatsapp_rescheduled,
+            'By Email': dailyTotals.by_email,
+            'Email Completed': dailyTotals.email_completed,
+            'Email WIP': dailyTotals.email_wip,
+            'Email Rejected': dailyTotals.email_rejected,
+            'Email Rescheduled': dailyTotals.email_rescheduled,
+            'By Visit': dailyTotals.by_visit,
+            'Visit Completed': dailyTotals.visit_completed,
+            'Visit WIP': dailyTotals.visit_wip,
+            'Visit Rejected': dailyTotals.visit_rejected,
+            'Visit Rescheduled': dailyTotals.visit_rescheduled,
+            'Quotation Sent': dailyTotals.quotation_sent
         };
 
         exportData.push(totalRow);
@@ -928,6 +1056,103 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         ws['!cols'] = Object.keys(exportData[0]).map(() => ({ wch: 20 }));
 
         XLSX.writeFile(wb, `daily_performance_${filterLabel}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    };
+
+    const fetchNonCampaignCustomers = useCallback(async () => {
+        if (!userData || !userData.user_id) return;
+        setLoadingNonCampaign(true);
+        try {
+            const payload = {
+                user_id: userData.user_id || userData.id,
+                name: userData.name,
+                role: userData.role,
+                branch: userData.branch
+            };
+            const response = await axios.post(
+                `${API_BASE_URL}/performance/my-performance/non-campaign-customers`,
+                payload
+            );
+            setNonCampaignData(response.data || { total_customers: 0, customers: [] });
+        } catch (error) {
+            console.error('Error fetching non-campaign customers:', error);
+            setNonCampaignData({ total_customers: 0, customers: [] });
+        } finally {
+            setLoadingNonCampaign(false);
+        }
+    }, [userData]);
+
+    const handleOpenNonCampaignModal = () => {
+        setShowNonCampaignModal(true);
+        setNonCampaignSearchTerm('');
+        setNonCampaignStatusFilter('all');
+        setNonCampaignServiceFilter('all');
+        fetchNonCampaignCustomers();
+    };
+
+    // Service/product dropdown options
+    const nonCampaignServiceOptions = useMemo(() => {
+        const set = new Set();
+        (nonCampaignData.customers || []).forEach(c => {
+            if (c.service && c.service !== 'N/A') set.add(c.service);
+        });
+        return Array.from(set).sort();
+    }, [nonCampaignData.customers]);
+
+    // Search + status + service filtered rows
+    const filteredNonCampaignCustomers = useMemo(() => {
+        return (nonCampaignData.customers || []).filter(c => {
+            if (nonCampaignStatusFilter !== 'all') {
+                if ((c.last_status || '').toLowerCase() !== nonCampaignStatusFilter) return false;
+            }
+            if (nonCampaignServiceFilter !== 'all') {
+                if ((c.service || '') !== nonCampaignServiceFilter) return false;
+            }
+            if (nonCampaignSearchTerm.trim()) {
+                const t = nonCampaignSearchTerm.toLowerCase();
+                const m = (
+                    (c.customer_name || '').toLowerCase().includes(t) ||
+                    (c.instance_id || '').toString().toLowerCase().includes(t) ||
+                    (c.phone_number || '').toString().toLowerCase().includes(t) ||
+                    (c.email || '').toLowerCase().includes(t) ||
+                    (c.service || '').toLowerCase().includes(t) ||
+                    (c.latest_remark || '').toLowerCase().includes(t)
+                );
+                if (!m) return false;
+            }
+            return true;
+        });
+    }, [nonCampaignData.customers, nonCampaignStatusFilter, nonCampaignServiceFilter, nonCampaignSearchTerm]);
+
+    const exportNonCampaignToExcel = () => {
+        if (!filteredNonCampaignCustomers.length) return;
+        const exportData = filteredNonCampaignCustomers.map((c, idx) => ({
+            'S.No': idx + 1,
+            'Instance ID': c.instance_id || '-',
+            'Customer Name': c.customer_name || '-',
+            'Phone': c.phone_number || '-',
+            'Email': c.email || '-',
+            'Branch': c.branch_id || '-',
+            'Service / Product': c.service || '-',
+            'Remark Type': c.remark_type || '-',
+            'Follow-up By': c.followup_by || '-',
+            'Status': c.last_status || '-',
+            'Flag': c.latest_flag || '-',
+            'Remark': c.latest_remark || '-',
+            'Quotation Sent': c.quotation_sent ? 'Yes' : 'No',
+            'Quotation No': c.quotation_no || '-',
+            'Quotation Value': c.quotation_value || 0,
+            'Last Follow-up': c.last_followup_date
+                ? new Date(c.last_followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                : '-',
+            'Next Follow-up': c.next_followup_date
+                ? new Date(c.next_followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                : '-',
+        }));
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Non-Campaign Customers');
+        ws['!cols'] = Object.keys(exportData[0]).map(() => ({ wch: 20 }));
+        XLSX.writeFile(wb, `non_campaign_customers_${new Date().toISOString().split('T')[0]}.xlsx`);
     };
 
     const fetchNonFollowupCustomerStats = useCallback(async () => {
@@ -1000,7 +1225,40 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
     const getFilterLabel = useCallback(() => filterLabel, [filterLabel]);
 
-    const chartOptions = {
+    // Precomputed daily-table totals (used by <tfoot> and exportToExcel)
+    const dailyTotals = useMemo(() => {
+        const sum = (fn) => filteredDailyPerformance.reduce((s, day) => s + fn(day), 0);
+        return {
+            total_followups:      sum(d => d.total_followups || 0),
+            completed_all:        sum(d => (d.call_completed || 0) + (d.whatsapp_completed || 0) + (d.email_completed || 0) + (d.visit_completed || 0)),
+            wip_all:              sum(d => (d.call_wip || 0) + (d.whatsapp_wip || 0) + (d.email_wip || 0) + (d.visit_wip || 0)),
+            rejected_all:         sum(d => (d.call_rejected || 0) + (d.whatsapp_rejected || 0) + (d.email_rejected || 0) + (d.visit_rejected || 0)),
+            rescheduled_all:      sum(d => (d.call_rescheduled || 0) + (d.whatsapp_rescheduled || 0) + (d.email_rescheduled || 0) + (d.visit_rescheduled || 0)),
+            by_call:              sum(d => d.followup_by_call || 0),
+            call_completed:       sum(d => d.call_completed || 0),
+            call_wip:             sum(d => d.call_wip || 0),
+            call_rejected:        sum(d => d.call_rejected || 0),
+            call_rescheduled:     sum(d => d.call_rescheduled || 0),
+            by_whatsapp:          sum(d => d.followup_by_whatsapp || 0),
+            whatsapp_completed:   sum(d => d.whatsapp_completed || 0),
+            whatsapp_wip:         sum(d => d.whatsapp_wip || 0),
+            whatsapp_rejected:    sum(d => d.whatsapp_rejected || 0),
+            whatsapp_rescheduled: sum(d => d.whatsapp_rescheduled || 0),
+            by_email:             sum(d => d.followup_by_email || 0),
+            email_completed:      sum(d => d.email_completed || 0),
+            email_wip:            sum(d => d.email_wip || 0),
+            email_rejected:       sum(d => d.email_rejected || 0),
+            email_rescheduled:    sum(d => d.email_rescheduled || 0),
+            by_visit:             sum(d => d.followup_by_visit || 0),
+            visit_completed:      sum(d => d.visit_completed || 0),
+            visit_wip:            sum(d => d.visit_wip || 0),
+            visit_rejected:       sum(d => d.visit_rejected || 0),
+            visit_rescheduled:    sum(d => d.visit_rescheduled || 0),
+            quotation_sent:       filteredDailyPerformance.reduce((s, day) => s + getQuotationSentForDay(day.date), 0),
+        };
+    }, [filteredDailyPerformance, getQuotationSentForDay]);
+
+    const chartOptions = useMemo(() => ({
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
@@ -1036,7 +1294,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 ticks: { font: { size: 10 } }
             }
         }
-    };
+    }), []);
 
     // Loading state — show skeleton cards instead of full-page spinner
     if (loading) {
@@ -1314,102 +1572,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
                     {/* Chart Container */}
                     <div className="h-56 w-full">
-                        <Bar
-                            data={{
-                                labels: ['Completed', 'WIP', 'Rejected', 'Rescheduled'],
-                                datasets: [{
-                                    label: 'Status Count',
-                                    data: [
-                                        performance.completed_count || 0,
-                                        performance.wip_count || 0,
-                                        performance.rejected_count || 0,
-                                        performance.rescheduled_count || 0
-                                    ],
-                                    backgroundColor: [
-                                        'rgba(34, 197, 94, 0.85)',    // Green for completed
-                                        'rgba(234, 179, 8, 0.85)',    // Yellow for WIP
-                                        'rgba(239, 68, 68, 0.85)',    // Red for rejected
-                                        'rgba(168, 85, 247, 0.85)'    // Purple for rescheduled
-                                    ],
-                                    borderColor: [
-                                        '#22c55e',
-                                        '#eab308',
-                                        '#ef4444',
-                                        '#a855f7'
-                                    ],
-                                    borderWidth: 2,
-                                    borderRadius: 12,
-                                    barPercentage: 0.7,
-                                    categoryPercentage: 0.8,
-                                    // Add shadow effect
-                                    shadowOffsetX: 2,
-                                    shadowOffsetY: 2,
-                                    shadowBlur: 4,
-                                    shadowColor: 'rgba(0, 0, 0, 0.1)'
-                                }]
-                            }}
-                            options={{
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                plugins: {
-                                    legend: {
-                                        position: 'bottom',
-                                        labels: {
-                                            usePointStyle: true,
-                                            boxWidth: 10,
-                                            boxHeight: 10,
-                                            font: {
-                                                size: 11,
-                                                weight: '500'
-                                            },
-                                            padding: 12
-                                        }
-                                    },
-                                    tooltip: {
-                                        backgroundColor: 'rgba(0, 0, 0, 0.9)',
-                                        titleColor: '#fff',
-                                        bodyColor: '#e5e7eb',
-                                        borderColor: '#3b82f6',
-                                        borderWidth: 1,
-                                        cornerRadius: 8,
-                                        callbacks: {
-                                            label: function (context) {
-                                                const value = context.raw;
-                                                const total = performance.completed_count + performance.wip_count +
-                                                    performance.rejected_count + performance.rescheduled_count;
-                                                const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
-                                                return `${value.toLocaleString()} (${percentage}%)`;
-                                            }
-                                        }
-                                    }
-                                },
-                                scales: {
-                                    x: {
-                                        grid: { display: false },
-                                        ticks: {
-                                            font: {
-                                                size: 12,
-                                                weight: '600'
-                                            },
-                                            color: '#374151'
-                                        }
-                                    },
-                                    y: {
-                                        beginAtZero: true,
-                                        grid: {
-                                            color: '#f0f0f0',
-                                            dash: [5, 5]
-                                        },
-                                        ticks: {
-                                            font: { size: 11 },
-                                            callback: function (value) {
-                                                return value.toLocaleString();
-                                            }
-                                        }
-                                    }
-                                }
-                            }}
-                        />
+                        <Bar data={statusBarData} options={statusBarOptions} />
                     </div>
                 </div>
 
@@ -1431,13 +1594,17 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
             {/* Non-Campaign Unique Customers Card */}
             {nonFollowupCustomerStats && (
-                <div className="bg-white rounded-lg shadow-sm p-2.5 sm:p-3 border border-gray-200 hover:shadow-md transition-shadow col-span-1 sm:col-span-2 lg:col-span-5">
+                <div
+                    onClick={handleOpenNonCampaignModal}
+                    className="group bg-white rounded-lg shadow-sm p-2.5 sm:p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all cursor-pointer col-span-1 sm:col-span-2 lg:col-span-5"
+                    title="Click to view all non-campaign customers"
+                >
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
 
                         {/* Title + Total */}
                         <div className="flex items-center gap-2 shrink-0">
-                            <h3 className="text-[11px] sm:text-sm font-semibold text-black whitespace-nowrap">
-                                Non-Campaign Customers Reached Count
+                            <h3 className="text-[11px] sm:text-sm font-semibold whitespace-nowrap group-hover:font-bold transition-all" style={{ color: themeColor }}>
+                                Non-Drive Customers Reached Count
                             </h3>
                             <span
                                 className="text-sm sm:text-base font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
@@ -1731,65 +1898,65 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         <td className="px-2 py-1 border border-gray-300 bg-gray-100 text-center">
                                             <div className="flex flex-col items-center gap-0.5">
                                                 <span className="px-1.5 py-0.5 text-[11px] font-bold rounded-full" style={{ backgroundColor: `${themeColor}25`, color: themeColor }}>
-                                                    {filteredDailyPerformance.reduce((sum, day) => sum + (day.total_followups || 0), 0)}
+                                                    {dailyTotals.total_followups}
                                                 </span>
                                                 <span className="text-[10px] text-black hidden sm:block whitespace-nowrap">
-                                                    (C-{filteredDailyPerformance.reduce((sum, day) => sum + (day.call_completed || 0) + (day.whatsapp_completed || 0) + (day.email_completed || 0) + (day.visit_completed || 0), 0)},
-                                                    W-{filteredDailyPerformance.reduce((sum, day) => sum + (day.call_wip || 0) + (day.whatsapp_wip || 0) + (day.email_wip || 0) + (day.visit_wip || 0), 0)},
-                                                    R-{filteredDailyPerformance.reduce((sum, day) => sum + (day.call_rejected || 0) + (day.whatsapp_rejected || 0) + (day.email_rejected || 0) + (day.visit_rejected || 0), 0)},
-                                                    FR-{filteredDailyPerformance.reduce((sum, day) => sum + (day.call_rescheduled || 0) + (day.whatsapp_rescheduled || 0) + (day.email_rescheduled || 0) + (day.visit_rescheduled || 0), 0)})
+                                                    (C-{dailyTotals.completed_all},
+                                                    W-{dailyTotals.wip_all},
+                                                    R-{dailyTotals.rejected_all},
+                                                    FR-{dailyTotals.rescheduled_all})
                                                 </span>
                                             </div>
                                         </td>
                                         <td className="px-2 py-1 whitespace-nowrap text-[11px] border border-gray-300 bg-gray-100 text-center">
                                             <div className="flex flex-col items-center">
                                                 <span className="font-bold text-black">
-                                                    {filteredDailyPerformance.reduce((sum, day) => sum + (day.followup_by_call || 0), 0)}
+                                                    {dailyTotals.by_call}
                                                 </span>
                                                 <span className="text-[10px] text-black hidden sm:inline">
-                                                    (C-{filteredDailyPerformance.reduce((sum, day) => sum + (day.call_completed || 0), 0)},
-                                                    W-{filteredDailyPerformance.reduce((sum, day) => sum + (day.call_wip || 0), 0)},
-                                                    R-{filteredDailyPerformance.reduce((sum, day) => sum + (day.call_rejected || 0), 0)},
-                                                    FR-{filteredDailyPerformance.reduce((sum, day) => sum + (day.call_rescheduled || 0), 0)})
+                                                    (C-{dailyTotals.call_completed},
+                                                    W-{dailyTotals.call_wip},
+                                                    R-{dailyTotals.call_rejected},
+                                                    FR-{dailyTotals.call_rescheduled})
                                                 </span>
                                             </div>
                                         </td>
                                         <td className="px-2 py-1 whitespace-nowrap text-[11px] border border-gray-300 bg-gray-100 text-center">
                                             <div className="flex flex-col items-center">
                                                 <span className="font-bold text-black">
-                                                    {filteredDailyPerformance.reduce((sum, day) => sum + (day.followup_by_whatsapp || 0), 0)}
+                                                    {dailyTotals.by_whatsapp}
                                                 </span>
                                                 <span className="text-[10px] text-black hidden sm:inline">
-                                                    (C-{filteredDailyPerformance.reduce((sum, day) => sum + (day.whatsapp_completed || 0), 0)},
-                                                    W-{filteredDailyPerformance.reduce((sum, day) => sum + (day.whatsapp_wip || 0), 0)},
-                                                    R-{filteredDailyPerformance.reduce((sum, day) => sum + (day.whatsapp_rejected || 0), 0)},
-                                                    FR-{filteredDailyPerformance.reduce((sum, day) => sum + (day.whatsapp_rescheduled || 0), 0)})
+                                                    (C-{dailyTotals.whatsapp_completed},
+                                                    W-{dailyTotals.whatsapp_wip},
+                                                    R-{dailyTotals.whatsapp_rejected},
+                                                    FR-{dailyTotals.whatsapp_rescheduled})
                                                 </span>
                                             </div>
                                         </td>
                                         <td className="px-2 py-1 whitespace-nowrap text-[11px] border border-gray-300 bg-gray-100 text-center">
                                             <div className="flex flex-col items-center">
                                                 <span className="font-bold text-black">
-                                                    {filteredDailyPerformance.reduce((sum, day) => sum + (day.followup_by_email || 0), 0)}
+                                                    {dailyTotals.by_email}
                                                 </span>
                                                 <span className="text-[10px] text-black hidden sm:inline">
-                                                    (C-{filteredDailyPerformance.reduce((sum, day) => sum + (day.email_completed || 0), 0)},
-                                                    W-{filteredDailyPerformance.reduce((sum, day) => sum + (day.email_wip || 0), 0)},
-                                                    R-{filteredDailyPerformance.reduce((sum, day) => sum + (day.email_rejected || 0), 0)},
-                                                    FR-{filteredDailyPerformance.reduce((sum, day) => sum + (day.email_rescheduled || 0), 0)})
+                                                    (C-{dailyTotals.email_completed},
+                                                    W-{dailyTotals.email_wip},
+                                                    R-{dailyTotals.email_rejected},
+                                                    FR-{dailyTotals.email_rescheduled})
                                                 </span>
                                             </div>
                                         </td>
                                         <td className="px-2 py-1 whitespace-nowrap text-[11px] border border-gray-300 bg-gray-100 text-center">
                                             <div className="flex flex-col items-center">
                                                 <span className="font-bold text-black">
-                                                    {filteredDailyPerformance.reduce((sum, day) => sum + (day.followup_by_visit || 0), 0)}
+                                                    {dailyTotals.by_visit}
                                                 </span>
                                                 <span className="text-[10px] text-black hidden sm:inline">
-                                                    (C-{filteredDailyPerformance.reduce((sum, day) => sum + (day.visit_completed || 0), 0)},
-                                                    W-{filteredDailyPerformance.reduce((sum, day) => sum + (day.visit_wip || 0), 0)},
-                                                    R-{filteredDailyPerformance.reduce((sum, day) => sum + (day.visit_rejected || 0), 0)},
-                                                    FR-{filteredDailyPerformance.reduce((sum, day) => sum + (day.visit_rescheduled || 0), 0)})
+                                                    (C-{dailyTotals.visit_completed},
+                                                    W-{dailyTotals.visit_wip},
+                                                    R-{dailyTotals.visit_rejected},
+                                                    FR-{dailyTotals.visit_rescheduled})
                                                 </span>
                                             </div>
                                         </td>
@@ -1798,7 +1965,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 className="px-1.5 py-0.5 text-[11px] font-bold rounded-full"
                                                 style={{ backgroundColor: `${themeColor}25`, color: themeColor }}
                                             >
-                                                {filteredDailyPerformance.reduce((sum, day) => sum + getQuotationSentForDay(day.date), 0)}
+                                                {dailyTotals.quotation_sent}
                                             </span>
                                         </td>
                                     </tr>
@@ -2482,66 +2649,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
-                                                {allFollowupsData
-                                                    .filter(fu => {
-                                                        // Quotation activity filter — only latest row per (instance_id + campaign_name) with "quotation"
-                                                        if (quotationFilterActive) {
-                                                            if (!quotationFollowupIds.has(fu.id)) return false;
-                                                        }
-
-                                                        // Quotation Sent filter — only rows where quotation_sent is true (Yes)
-                                                        if (quotationSentFilterActive) {
-                                                            if (!fu.quotation_sent) return false;
-                                                        }
-
-                                                        // CSP Quotation Required filter
-                                                        if (cspQuotationFilterActive) {
-                                                            if (!cspQuotationFollowupIds.has(fu.id)) return false;
-                                                        }
-
-                                                        // CSP Quotation Sent filter
-                                                        if (cspQuotationSentFilterActive) {
-                                                            if (!(fu.quotation_sent && isCspFollowup(fu))) return false;
-                                                        }
-
-                                                        // Status filter
-                                                        if (statusFilter !== 'all') {
-                                                            if ((fu.status || '').toLowerCase() !== statusFilter) return false;
-                                                        }
-
-                                                        // Search filter (debounced)
-                                                        if (debouncedSearch.trim()) {
-                                                            const t = debouncedSearch.toLowerCase();
-                                                            const matchesSearch = (
-                                                                (fu.customer_name || '').toLowerCase().includes(t) ||
-                                                                (fu.campaign_name || '').toLowerCase().includes(t) ||
-                                                                (fu.followup_remark || '').toLowerCase().includes(t) ||
-                                                                (fu.customer_instance_id || '').toString().toLowerCase().includes(t) ||
-                                                                (fu.phone_number || '').toString().toLowerCase().includes(t) ||
-                                                                (fu.email || '').toLowerCase().includes(t)
-                                                            );
-                                                            if (!matchesSearch) return false;
-                                                        }
-
-                                                        // Created At date-range filter
-                                                        if (createdFromDate || createdToDate) {
-                                                            if (!fu.created_at) return false;
-                                                            const created = new Date(fu.created_at);
-                                                            created.setHours(0, 0, 0, 0);
-                                                            if (createdFromDate) {
-                                                                const from = new Date(createdFromDate);
-                                                                from.setHours(0, 0, 0, 0);
-                                                                if (created < from) return false;
-                                                            }
-                                                            if (createdToDate) {
-                                                                const to = new Date(createdToDate);
-                                                                to.setHours(23, 59, 59, 999);
-                                                                if (created > to) return false;
-                                                            }
-                                                        }
-
-                                                        return true;
-                                                    })
+                                                {visibleFollowups
                                                     .map((fu, idx) => (
                                                         <tr
                                                             key={fu.id}
@@ -2780,6 +2888,210 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     className="px-4 py-1 rounded-md text-xs font-medium text-white disabled:opacity-50"
                                     style={{ background: themeColor }}>
                                     {addSrLoading ? 'Adding…' : 'Add'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>,
+                    document.body
+                )}
+
+                {showNonCampaignModal && ReactDOM.createPortal(
+                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3">
+                        <div className="bg-white rounded-xl shadow-xl max-w-7xl w-full max-h-[92vh] overflow-hidden flex flex-col">
+                            <div
+                                className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2"
+                                style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
+                            >
+                                <div>
+                                    <h3 className="text-base font-semibold text-white">
+                                        Non-Campaign Customers by {userData?.name || 'User'}
+                                    </h3>
+                                    <p className="text-[11px] text-white/80 mt-0.5">
+                                        Showing {filteredNonCampaignCustomers.length} of {nonCampaignData.total_customers} customer(s)
+                                    </p>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {/* Service / Product filter */}
+                                    <div className="flex items-center gap-1">
+                                        <label className="text-[11px] text-white whitespace-nowrap">Service:</label>
+                                        <div className="relative">
+                                            <select
+                                                value={nonCampaignServiceFilter}
+                                                onChange={(e) => setNonCampaignServiceFilter(e.target.value)}
+                                                className="border border-gray-300 rounded-md pl-2 pr-6 py-1 text-[11px] bg-white text-black appearance-none cursor-pointer focus:outline-none"
+                                            >
+                                                <option value="all">All</option>
+                                                {nonCampaignServiceOptions.map(s => (
+                                                    <option key={s} value={s}>{s}</option>
+                                                ))}
+                                            </select>
+                                            <svg className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-black pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                            </svg>
+                                        </div>
+                                    </div>
+
+                                    {/* Status filter */}
+                                    <div className="flex items-center gap-1">
+                                        <label className="text-[11px] text-white whitespace-nowrap">Status:</label>
+                                        <div className="relative">
+                                            <select
+                                                value={nonCampaignStatusFilter}
+                                                onChange={(e) => setNonCampaignStatusFilter(e.target.value)}
+                                                className="border border-gray-300 rounded-md pl-2 pr-6 py-1 text-[11px] bg-white text-black appearance-none cursor-pointer focus:outline-none"
+                                            >
+                                                <option value="all">All</option>
+                                                <option value="completed">Completed</option>
+                                                <option value="wip">WIP</option>
+                                                <option value="rejected">Rejected</option>
+                                                <option value="rescheduled">FR (Rescheduled)</option>
+                                            </select>
+                                            <svg className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-black pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                            </svg>
+                                        </div>
+                                    </div>
+
+                                    {/* Clear filters */}
+                                    {(nonCampaignSearchTerm || nonCampaignStatusFilter !== 'all' || nonCampaignServiceFilter !== 'all') && (
+                                        <button
+                                            onClick={() => {
+                                                setNonCampaignSearchTerm('');
+                                                setNonCampaignStatusFilter('all');
+                                                setNonCampaignServiceFilter('all');
+                                            }}
+                                            className="px-2 py-1 text-[11px] text-white border border-white/40 rounded-md bg-white/10 hover:bg-white/20 flex items-center gap-1"
+                                            title="Clear filters"
+                                        >
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                            Clear
+                                        </button>
+                                    )}
+
+                                    {/* Search */}
+                                    <input
+                                        type="text"
+                                        placeholder="Search customer, instance, service..."
+                                        value={nonCampaignSearchTerm}
+                                        onChange={(e) => setNonCampaignSearchTerm(e.target.value)}
+                                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 bg-white focus:outline-none"
+                                    />
+
+                                    {/* Export — permission-gated */}
+                                    {canExport && (
+                                        <button
+                                            onClick={exportNonCampaignToExcel}
+                                            className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-1.5 text-xs whitespace-nowrap"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                            </svg>
+                                            Export
+                                        </button>
+                                    )}
+
+                                    <button
+                                        onClick={() => setShowNonCampaignModal(false)}
+                                        className="w-7 h-7 sm:w-8 sm:h-8 bg-white rounded-lg flex items-center justify-center transition-all duration-200 group flex-shrink-0"
+                                    >
+                                        <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black group-hover:rotate-90 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex-1 overflow-auto p-3 max-h-[70vh]">
+                                {loadingNonCampaign ? (
+                                    <div className="flex items-center justify-center py-10">
+                                        <div className="w-8 h-8 border-2 border-t-2 border-t-[#2f3192] border-gray-200 rounded-full animate-spin"></div>
+                                        <span className="ml-2 text-xs text-gray-600">Loading customers...</span>
+                                    </div>
+                                ) : filteredNonCampaignCustomers.length === 0 ? (
+                                    <div className="text-center py-10 text-xs text-gray-500">
+                                        {nonCampaignData.customers.length === 0
+                                            ? 'No non-campaign customers found.'
+                                            : 'No customers match the current filters.'}
+                                    </div>
+                                ) : (
+                                    <div className="overflow-x-auto overflow-y-auto max-h-[60vh]">
+                                        <table className="min-w-[1600px] w-full border-collapse text-[11px]">
+                                            <thead className="bg-gray-100 sticky top-0 z-10">
+                                                <tr>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">S.No</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Instance ID</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Customer Name</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Phone</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Email</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Branch</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Service / Product</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Follow-up By</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Flag</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Status</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Last Follow-up</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Next Follow-up</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Remark</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Quote Sent</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Quote No.</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Quote Value</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {filteredNonCampaignCustomers.map((c, idx) => (
+                                                    <tr key={c.instance_id || idx} className="hover:bg-gray-50 transition-colors">
+                                                        <td className="px-2 py-1 border border-gray-200 text-center">{idx + 1}</td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-center">{c.instance_id || '-'}</td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-left">{c.customer_name || '-'}</td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-center">{c.phone_number || '-'}</td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-left">{c.email || '-'}</td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-center">{c.branch_id || '-'}</td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-left">{c.service || '-'}</td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-center capitalize">{c.followup_by || '-'}</td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-center">
+                                                            {c.latest_flag && c.latest_flag !== 'N/A' ? (
+                                                                <span className="px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold">{c.latest_flag}</span>
+                                                            ) : '-'}
+                                                        </td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-center capitalize">
+                                                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${c.last_status === 'completed' ? 'bg-green-100 text-green-700' :
+                                                                c.last_status === 'wip' ? 'bg-yellow-100 text-yellow-700' :
+                                                                    c.last_status === 'rejected' ? 'bg-red-100 text-red-700' :
+                                                                        c.last_status === 'rescheduled' ? 'bg-purple-100 text-purple-700' :
+                                                                            'bg-gray-100 text-gray-700'
+                                                                }`}>
+                                                                {c.last_status === 'rescheduled' ? 'FR' : (c.last_status || '-')}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-center whitespace-nowrap">
+                                                            {c.last_followup_date ? new Date(c.last_followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
+                                                        </td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-center whitespace-nowrap">
+                                                            {c.next_followup_date ? new Date(c.next_followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
+                                                        </td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-left max-w-[250px] truncate" title={c.latest_remark || ''}>{c.latest_remark || '-'}</td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-center">
+                                                            {c.quotation_sent ? <span className="text-green-600 font-semibold">Yes</span> : <span className="text-gray-500">No</span>}
+                                                        </td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-center">{c.quotation_no || '-'}</td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-right">
+                                                            {c.quotation_value ? `₹${parseFloat(c.quotation_value).toLocaleString('en-IN')}` : '-'}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="px-4 py-2 border-t border-gray-200 bg-gray-50 flex justify-end">
+                                <button
+                                    onClick={() => setShowNonCampaignModal(false)}
+                                    className="px-3 py-1.5 border border-gray-300 rounded-lg text-xs font-medium hover:bg-white text-black"
+                                >
+                                    Close
                                 </button>
                             </div>
                         </div>

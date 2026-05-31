@@ -5,6 +5,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, date
 from app.models.OE_model import OfficeExpense
 from app.models.OE_temp_model import OfficeExpenseTemp
+from app.controllers.OE_voucher_controller import OEVoucherController
 
 class OfficeExpenseController:
     
@@ -183,6 +184,13 @@ class OfficeExpenseTempController:
     def create_temp(db: Session, data: Dict[str, Any]) -> OfficeExpenseTemp:
         if isinstance(data.get('paid_date'), str):
             data['paid_date'] = datetime.fromisoformat(data['paid_date'])
+
+        # Auto-assign per-branch, per-FY voucher number at draft creation
+        ref_date = data['paid_date'].date() if hasattr(data['paid_date'], 'date') else data['paid_date']
+        data['voucher_no'] = str(
+            OfficeExpenseTempController.get_next_voucher_no(db, data['branch_code'], ref_date)
+        )
+
         temp = OfficeExpenseTemp(**data)
         db.add(temp)
         db.flush()
@@ -225,34 +233,97 @@ class OfficeExpenseTempController:
         return True
 
     @staticmethod
-    def submit_to_main(db: Session, temp_ids: List[int], branch_code: str) -> int:
-        """Move temp rows to main office_expenses table."""
+    def _financial_year_bounds(d: date):
+        """Return (fy_start, fy_end) for the Indian FY containing date d (Apr 1 – Mar 31)."""
+        if d.month >= 4:
+            fy_start = date(d.year, 4, 1)
+            fy_end = date(d.year + 1, 3, 31)
+        else:
+            fy_start = date(d.year - 1, 4, 1)
+            fy_end = date(d.year, 3, 31)
+        return fy_start, fy_end
+
+    @staticmethod
+    def get_next_voucher_no(db: Session, branch_code: str, ref_date: date) -> int:
+        """
+        Next voucher count for a branch within the financial year of ref_date.
+        Counts BOTH main-table rows and existing temp/draft rows (non-deleted)
+        in the same FY for this branch, so drafts get sequential numbers too.
+        """
+        fy_start, fy_end = OfficeExpenseTempController._financial_year_bounds(ref_date)
+
+        main_max = db.query(func.max(OfficeExpense.voucher_no)).filter(
+            OfficeExpense.branch_code == branch_code,
+            OfficeExpense.is_deleted == False,
+            cast(OfficeExpense.paid_date, Date) >= fy_start,
+            cast(OfficeExpense.paid_date, Date) <= fy_end,
+        ).scalar()
+
+        temp_max = db.query(func.max(OfficeExpenseTemp.voucher_no)).filter(
+            OfficeExpenseTemp.branch_code == branch_code,
+            OfficeExpenseTemp.is_deleted == False,
+            cast(OfficeExpenseTemp.paid_date, Date) >= fy_start,
+            cast(OfficeExpenseTemp.paid_date, Date) <= fy_end,
+        ).scalar()
+
+        def _to_int(v):
+            try:
+                return int(v) if v is not None else 0
+            except (ValueError, TypeError):
+                return 0
+
+        return max(_to_int(main_max), _to_int(temp_max)) + 1
+
+    @staticmethod
+    def submit_to_main(db: Session, temp_ids: List[int], branch_code: str):
+        """Move temp rows to main office_expenses table.
+        Each row keeps its per-record accounting voucher (voucher_no), and the
+        whole batch shares ONE HO-submission voucher (submit_voucher_no),
+        counted separately per branch and reset each financial year.
+        Returns (count, submit_voucher_no)."""
         temps = db.query(OfficeExpenseTemp).filter(
             OfficeExpenseTemp.id.in_(temp_ids),
             OfficeExpenseTemp.branch_code == branch_code,
             OfficeExpenseTemp.is_deleted == False
         ).all()
+
+        if not temps:
+            return 0, None
+
+        # One shared submission voucher for the whole batch (FY from earliest paid_date).
+        ref_dates = [
+            (t.paid_date.date() if hasattr(t.paid_date, 'date') else t.paid_date)
+            for t in temps
+        ]
+        batch_ref_date = min(ref_dates)
+        submit_voucher = OEVoucherController.generate_voucher(db, branch_code, batch_ref_date)
+
         count = 0
         for t in temps:
+            ref_date = t.paid_date.date() if hasattr(t.paid_date, 'date') else t.paid_date
+            next_no = OfficeExpenseTempController.get_next_voucher_no(db, branch_code, ref_date)
             main = OfficeExpense(
                 paid_date=t.paid_date,
                 expenses_head=t.expenses_head,
                 sub_head=t.sub_head,
                 expenses_description=t.expenses_description,
                 description=t.description,
+                internal_branch_name=t.internal_branch_name,
                 paid_to=t.paid_to,
                 invoice_no=t.invoice_no,
                 amount=t.amount,
                 remark=t.remark,
                 paid_by=t.paid_by,
-                voucher_no=t.voucher_no,
+                voucher_no=str(next_no),
+                submit_voucher_no=submit_voucher,
                 branch_code=t.branch_code,
                 created_by=t.created_by,
                 created_by_name=t.created_by_name,
                 verification_status='Pending',
             )
             db.add(main)
+            db.flush()  # ensures the next iteration's get_next_voucher_no sees this row
             t.is_deleted = True
             count += 1
         db.flush()
-        return count    
+        return count, submit_voucher

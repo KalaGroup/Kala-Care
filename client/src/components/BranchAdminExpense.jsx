@@ -4,6 +4,9 @@ import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import { useInView } from 'react-intersection-observer';
 import Swal from 'sweetalert2';
+import BranchTADAHistory from './BranchTADAHistory';
+import BranchOEHistory from './BranchOEhistory';
+import BranchLVBHistory from './BranchLVBHistory';
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
 
@@ -1111,95 +1114,116 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
                       })}
                     </div>
                   </>
-                ) : (
-                  /* ─── SR MODE: SR autocomplete first, then auto-filled (read-only) fields ─── */
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-2.5 gap-y-2">
-                    {/* Service Request No. — always first & editable */}
-                    <div key="sr" className={!pickedSr ? 'col-span-2 md:col-span-3 lg:col-span-4 flex items-end gap-3' : ''}>
-                      <div className={!pickedSr ? 'w-64 shrink-0' : ''}>
-                        <label className="block text-[9px] font-bold text-gray-500 uppercase tracking-wide mb-0.5 leading-tight">
-                          Service Request No. <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          ref={srInputRef}
-                          type="text"
-                          value={form['Service Request No.'] || ''}
-                          onChange={e => handleSrNumberChange(e.target.value)}
-                          onFocus={e => {
-                            e.target.style.borderColor = themeColor;
-                            if (srSuggestions.length > 0) setShowSrDropdown(true);
-                          }}
-                          onBlur={e => {
-                            e.target.style.borderColor = '#e2e8f0';
-                            setTimeout(() => setShowSrDropdown(false), 200);
-                          }}
-                          className="w-full px-2 py-1 text-[11px] border border-gray-200 rounded-md focus:outline-none text-black"
-                          placeholder="Type SR No. to search…"
-                          autoComplete="off"
-                        />
-                        {showSrDropdown && srSuggestions.length > 0 && srInputRef.current && (() => {
-                          const rect = srInputRef.current.getBoundingClientRect();
-                          const width = Math.max(rect.width, 320);
-                          const left = Math.min(rect.left, window.innerWidth - width - 8);
-                          const top = Math.min(rect.bottom + 4, window.innerHeight - 280);
-                          return (
-                            <div
-                              className="bg-white border border-gray-300 rounded-lg shadow-2xl overflow-y-auto"
-                              style={{
-                                position: 'fixed',
-                                top: `${top}px`,
-                                left: `${left}px`,
-                                width: `${width}px`,
-                                maxHeight: '260px',
-                                zIndex: 99999,
+
+
+                ) : (() => {
+                  /* ─── SR MODE: SR autocomplete first, top fields 4/row, then a 6-field last row ─── */
+                  const LAST_ROW_KEYS = [
+                    'Service Engineer Name', 'Service Engineer UID', 'Employee ID',
+                    'SR Status', 'SR Closed Date', 'KMs Travelled(1 Way)',
+                  ];
+                  const remaining = visibleFields.filter(f => f.key !== 'Service Request No.');
+                  const topFields = pickedSr ? remaining.filter(f => !LAST_ROW_KEYS.includes(f.key)) : [];
+                  const lastRowFields = pickedSr
+                    ? LAST_ROW_KEYS.map(k => remaining.find(f => f.key === k)).filter(Boolean)
+                    : [];
+
+                  return (
+                    <>
+                      {/* Top: SR No. + all other auto-filled fields, 5 per row */}
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-2.5 gap-y-2">
+                        {/* Service Request No. — always first & editable */}
+                        <div key="sr" className={!pickedSr ? 'col-span-2 md:col-span-3 lg:col-span-5 flex items-end gap-3' : ''}>
+                          <div className={!pickedSr ? 'w-64 shrink-0' : ''}>
+                            <label className="block text-[9px] font-bold text-gray-500 uppercase tracking-wide mb-0.5 leading-tight">
+                              Service Request No. <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                              ref={srInputRef}
+                              type="text"
+                              value={form['Service Request No.'] || ''}
+                              onChange={e => handleSrNumberChange(e.target.value)}
+                              onFocus={e => {
+                                e.target.style.borderColor = themeColor;
+                                if (srSuggestions.length > 0) setShowSrDropdown(true);
                               }}
-                              onMouseDown={e => e.preventDefault()}
-                            >
-                              <div className="px-2 py-1 border-b bg-blue-50 text-[9px] font-bold text-blue-700 uppercase tracking-wide sticky top-0">
-                                {srSuggestions.length} match{srSuggestions.length > 1 ? 'es' : ''} — click to auto-fill
-                              </div>
-                              {srSuggestions.map((r, i) => (
-                                <button
-                                  key={i}
-                                  type="button"
-                                  onClick={() => handlePickSrRecord(r)}
-                                  className="w-full px-2 py-1.5 text-left hover:bg-blue-50 border-b last:border-b-0 transition-colors"
+                              onBlur={e => {
+                                e.target.style.borderColor = '#e2e8f0';
+                                setTimeout(() => setShowSrDropdown(false), 200);
+                              }}
+                              className="w-full px-2 py-1 text-[11px] border border-gray-200 rounded-md focus:outline-none text-black"
+                              placeholder="Type SR No. to search…"
+                              autoComplete="off"
+                            />
+                            {showSrDropdown && srSuggestions.length > 0 && srInputRef.current && (() => {
+                              const rect = srInputRef.current.getBoundingClientRect();
+                              const width = Math.max(rect.width, 320);
+                              const left = Math.min(rect.left, window.innerWidth - width - 8);
+                              const top = Math.min(rect.bottom + 4, window.innerHeight - 280);
+                              return (
+                                <div
+                                  className="bg-white border border-gray-300 rounded-lg shadow-2xl overflow-y-auto"
+                                  style={{
+                                    position: 'fixed',
+                                    top: `${top}px`,
+                                    left: `${left}px`,
+                                    width: `${width}px`,
+                                    maxHeight: '260px',
+                                    zIndex: 99999,
+                                  }}
+                                  onMouseDown={e => e.preventDefault()}
                                 >
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="text-[11px] font-bold text-gray-800 truncate" title={r.service_engineer_name || ''}>
-                                      {r.service_engineer_name || '-'}
-                                    </span>
-                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 shrink-0 font-mono">
-                                      UID: {r.service_engineer_uid || '-'}
-                                    </span>
+                                  <div className="px-2 py-1 border-b bg-blue-50 text-[9px] font-bold text-blue-700 uppercase tracking-wide sticky top-0">
+                                    {srSuggestions.length} match{srSuggestions.length > 1 ? 'es' : ''} — click to auto-fill
                                   </div>
-                                  <div className="flex items-center gap-1.5 mt-0.5">
-                                    <span className="text-[10px] font-mono text-blue-700 font-semibold shrink-0">SR: {r.service_request_no}</span>
-                                    <span className="text-[9px] text-gray-300">·</span>
-                                    <span className="text-[9px] font-mono text-gray-600 shrink-0">Appt: {r.appointment_number || '-'}</span>
-                                    <span className="text-[9px] text-gray-300">·</span>
-                                    <span className="text-[9px] text-gray-500 truncate">{r.account || r.installation_site_address || '-'}</span>
-                                  </div>
-                                </button>
-                              ))}
-                            </div>
-                          );
-                        })()}
+                                  {srSuggestions.map((r, i) => (
+                                    <button
+                                      key={i}
+                                      type="button"
+                                      onClick={() => handlePickSrRecord(r)}
+                                      className="w-full px-2 py-1.5 text-left hover:bg-blue-50 border-b last:border-b-0 transition-colors"
+                                    >
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="text-[11px] font-bold text-gray-800 truncate" title={r.service_engineer_name || ''}>
+                                          {r.service_engineer_name || '-'}
+                                        </span>
+                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 shrink-0 font-mono">
+                                          UID: {r.service_engineer_uid || '-'}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5 mt-0.5">
+                                        <span className="text-[10px] font-mono text-blue-700 font-semibold shrink-0">SR: {r.service_request_no}</span>
+                                        <span className="text-[9px] text-gray-300">·</span>
+                                        <span className="text-[9px] font-mono text-gray-600 shrink-0">Appt: {r.appointment_number || '-'}</span>
+                                        <span className="text-[9px] text-gray-300">·</span>
+                                        <span className="text-[9px] text-gray-500 truncate">{r.account || r.installation_site_address || '-'}</span>
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                          {!pickedSr && (
+                            <p className="text-[11px] text-gray-400 italic pb-1">
+                              Type a Service Request No. and pick a match to auto-fill. Then enter Service Engineer Name, UID and KMs Travelled.
+                            </p>
+                          )}
+                        </div>
+
+                        {/* All fields except the 6 reserved for the last row */}
+                        {topFields.map((f, fi) => renderManualField(f, fi, EDITABLE_AFTER_FILL.has(f.key)))}
                       </div>
-                      {!pickedSr && (
-                        <p className="text-[11px] text-gray-400 italic pb-1">
-                          Type a Service Request No. and pick a match to auto-fill. Then enter Service Engineer Name, UID and KMs Travelled.
-                        </p>
+
+                      {/* Last row: exactly 6 fields */}
+                      {lastRowFields.length > 0 && (
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-x-2.5 gap-y-2 mt-2">
+                          {lastRowFields.map((f, fi) => renderManualField(f, fi, EDITABLE_AFTER_FILL.has(f.key)))}
+                        </div>
                       )}
-                    </div>
-
-                    {/* Remaining fields — only after an SR is picked; read-only except SE Name / UID / KMs Travelled */}
-                    {pickedSr && visibleFields
-                      .filter(f => f.key !== 'Service Request No.')
-                      .map((f, fi) => renderManualField(f, fi, EDITABLE_AFTER_FILL.has(f.key)))}
-                  </div>
-                )}
-
+                    </>
+                  );
+                })()}
               </div>
 
               <div className="border-t px-4 py-2.5 flex justify-between items-center bg-gray-50" style={{ flexShrink: 0 }}>
@@ -1423,7 +1447,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
               {/* ===== SERVICE ENGINEER SUB-TAB ===== */}
               {billWiseSubTab === 'se' && (
                 <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-3 gap-y-2.5">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-2 gap-y-2">
                     {/* Service Engineer Name */}
                     <div>
                       <label className={labelCls}>Service Engineer Name <span className="text-red-500">*</span></label>
@@ -1512,13 +1536,16 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
                       })()}
                     </div>
                     {/* Work Description / Purpose */}
-                    <div className="md:col-span-2 lg:col-span-4">
+                    <div>
                       <label className={labelCls}>Work Description / Purpose <span className="text-red-500">*</span></label>
                       <textarea rows={2} value={bwSeHeader.work_description}
                         onChange={e => setBwSeHeader(p => ({ ...p, work_description: e.target.value }))}
                         placeholder="Describe the work / purpose" className={`${inputCls} resize-none`} />
                     </div>
-                    {/* Auto-filled SR fields (read-only) */}
+                  </div>
+
+                  {/* Auto-filled SR fields (read-only) — 4 per row */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-2 gap-y-2 mt-2">
                     {[
                       ['Appointment Number', 'appointment_number'],
                       ['Account', 'account'],
@@ -1628,7 +1655,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
               {/* ===== BRANCH MANAGER SUB-TAB ===== */}
               {billWiseSubTab === 'bm' && (
                 <>
-                  <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-x-3 gap-y-2.5">
+                  <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-x-3 gap-y-2.5">
                     <div>
                       <label className={labelCls}>Customer Name <span className="text-red-500">*</span></label>
                       <input type="text" value={bwBmHeader.customer_name}
@@ -1837,21 +1864,9 @@ const BranchAdminExpense = () => {
   const [showBranchRateModal, setShowBranchRateModal] = useState(false);
   const [showActionMenu, setShowActionMenu] = useState(false);
 
-  // LVB history — periods tab state
-  const [lvbHistoryTab, setLvbHistoryTab] = useState('all');           // 'all' | 'periods'
-  const [lvbHistoryGrouped, setLvbHistoryGrouped] = useState({ rule_type: '', period_days: 0, groups: [] });
-  const [loadingLvbHistoryGrouped, setLoadingLvbHistoryGrouped] = useState(false);
-  const [lvbSelectedPeriod, setLvbSelectedPeriod] = useState(null);
-
   /* ── Manual Entry Modal ── */
   const [showManualEntryModal, setShowManualEntryModal] = useState(false);
   const [submittingManual, setSubmittingManual] = useState(false);
-
-  // OE History — periods tab state
-  const [oeHistoryTab, setOeHistoryTab] = useState('all');           // 'all' | 'periods'
-  const [oeHistoryGrouped, setOeHistoryGrouped] = useState({ rule_type: '', period_days: 0, groups: [] });
-  const [loadingOEHistoryGrouped, setLoadingOEHistoryGrouped] = useState(false);
-  const [oeSelectedPeriod, setOeSelectedPeriod] = useState(null);
 
   // ── OE Temp/Draft state ──────────────────────────────────────────────────────
   const [oeTempDrafts, setOeTempDrafts] = useState([]);
@@ -1903,6 +1918,7 @@ const BranchAdminExpense = () => {
     sub_head: '',
     expenses_description: '',
     description: '',
+    internal_branch_name: '',
     paid_to: '',
     invoice_no: '',
     amount: '',
@@ -1930,47 +1946,48 @@ const BranchAdminExpense = () => {
   const [submitRule, setSubmitRule] = useState(null); // { rule_type, allowed_values }
 
   const [showLvbHistoryModal, setShowLvbHistoryModal] = useState(false);
-  const [lvbHistoryRecords, setLvbHistoryRecords] = useState([]);
-  const [loadingLvbHistory, setLoadingLvbHistory] = useState(false);
-  const [lvbHistorySearch, setLvbHistorySearch] = useState('');
-  const [lvbHistoryDateFrom, setLvbHistoryDateFrom] = useState('');
-  const [lvbHistoryDateTo, setLvbHistoryDateTo] = useState('');
-  const [lvbHistoryInvoiceDateFrom, setLvbHistoryInvoiceDateFrom] = useState('');
-  const [lvbHistoryInvoiceDateTo, setLvbHistoryInvoiceDateTo] = useState('');
 
   const [showOEHistoryModal, setShowOEHistoryModal] = useState(false);
   // ── Branch Imprest view (read-only) ─────────────────────────
   const [showBranchImprestModal, setShowBranchImprestModal] = useState(false);
   const [branchImprestData, setBranchImprestData] = useState({ entries: [], total: 0, count: 0 });
   const [loadingBranchImprest, setLoadingBranchImprest] = useState(false);
-  const [oeHistoryRecords, setOeHistoryRecords] = useState([]);
-  const [loadingOEHistory, setLoadingOEHistory] = useState(false);
-  const [oeHistorySearch, setOeHistorySearch] = useState('');
-  const [oeHistoryDateFrom, setOeHistoryDateFrom] = useState('');
-  const [oeHistoryDateTo, setOeHistoryDateTo] = useState('');
-  const [oeHistoryPaidDateFrom, setOeHistoryPaidDateFrom] = useState('');
-  const [oeHistoryPaidDateTo, setOeHistoryPaidDateTo] = useState('');
 
   const exportToExcel = (data, filename, headers) => {
-    const escape = (val) => {
+    // Build an array-of-objects keyed by the human-readable label so the
+    // sheet header row matches what the user sees on screen.
+    const norm = (val) => {
       if (val === null || val === undefined) return '';
-      return String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return val;
     };
-    const headerRow = headers.map(h => `<th style="background:#2f3192;color:#fff;font-weight:bold;padding:4px 8px;border:1px solid #ccc;">${escape(h.label)}</th>`).join('');
-    const bodyRows = data.map(row =>
-      `<tr>${headers.map(h => `<td style="padding:4px 8px;border:1px solid #ddd;">${escape(row[h.key])}</td>`).join('')}</tr>`
-    ).join('');
-    const html = `
-      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-      <head><meta charset="UTF-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Sheet1</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head>
-      <body><table>${`<tr>${headerRow}</tr>`}${bodyRows}</table></body></html>`;
-    const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(url);
+    const rows = (data || []).map(row => {
+      const obj = {};
+      headers.forEach(h => { obj[h.label] = norm(row[h.key]); });
+      return obj;
+    });
+
+    // Create a real .xlsx workbook via SheetJS (already imported as XLSX).
+    const ws = XLSX.utils.json_to_sheet(rows, {
+      header: headers.map(h => h.label),
+    });
+
+    // Auto-size columns to roughly the widest cell in each.
+    ws['!cols'] = headers.map(h => {
+      let maxLen = h.label.length;
+      rows.forEach(r => {
+        const v = r[h.label];
+        const len = v === null || v === undefined ? 0 : String(v).length;
+        if (len > maxLen) maxLen = len;
+      });
+      return { wch: Math.min(Math.max(maxLen + 2, 10), 50) };
+    });
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+
+    // Ensure the filename ends in .xlsx (matches the real OOXML output).
+    const finalName = /\.xlsx$/i.test(filename) ? filename : `${filename}.xlsx`;
+    XLSX.writeFile(wb, finalName);
   };
 
   /* ── Tab ── */
@@ -3147,6 +3164,36 @@ const BranchAdminExpense = () => {
       }
     });
 
+    // Cancelled-only totals (2-way KM + amount), computed exactly like the draft cells
+    const cancelledRows = selectedRows.filter(
+      r => String(r.task_status || '').trim() === 'Cancelled'
+    );
+    let cancelledTwoWayKm = 0;
+    let cancelledTotalAmount = 0;
+    cancelledRows.forEach(r => {
+      cancelledTwoWayKm += parseFloat(r.two_way_km) || 0;
+
+      // Effective KM priority: typed → pending → saved branch_verified_km → two_way_km
+      let km = null;
+      const typed = localValues[`${r.id}_branch_verified_km`];
+      const pending = pendingKM[r.id];
+      if (typed !== undefined && String(typed).trim() !== '') {
+        km = parseFloat(typed);
+      } else if (pending !== undefined && String(pending).trim() !== '') {
+        km = parseFloat(pending);
+      } else if (r.branch_verified_km && String(r.branch_verified_km).trim() !== '') {
+        km = parseFloat(r.branch_verified_km);
+      } else if (r.two_way_km && String(r.two_way_km).trim() !== '') {
+        km = parseFloat(r.two_way_km);
+      }
+      if (km !== null && !isNaN(km)) {
+        const da = calculateDAmount(r, km, allRecords) || 0;
+        const freight = parseFloat(r.freight_charges || 0) || 0;
+        const total = calculateTotalAmountDynamic(r, km, da, allRecords, freight);
+        if (total !== null && total !== undefined) cancelledTotalAmount += total;
+      }
+    });
+
     // Build status message for confirmation
     let statusMessage = '';
     if (Object.keys(taskStatusCounts).length > 0) {
@@ -3154,7 +3201,18 @@ const BranchAdminExpense = () => {
       for (const [status, count] of Object.entries(taskStatusCounts)) {
         statusMessage += `<li><strong>${status}:</strong> ${count}</li>`;
       }
-      statusMessage += '</ul></div>';
+      statusMessage += '</ul>';
+
+      // Show Cancelled totals ONLY when at least one Cancelled record is selected
+      if (cancelledRows.length > 0) {
+        statusMessage += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #e5e7eb;">
+        <strong>Cancelled Records (${cancelledRows.length}):</strong>
+        <div style="margin-top:4px;">Total 2 Way KM: <strong>${cancelledTwoWayKm.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>
+        <div>Amount: <strong style="color:#2f3192;">₹${cancelledTotalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>
+      </div>`;
+      }
+
+      statusMessage += '</div>';
     }
 
     const result = await Swal.fire({
@@ -4130,11 +4188,12 @@ const BranchAdminExpense = () => {
           <td>${fmtDate(r.paid_date)}</td>
           <td class="al">${escape(r.sub_head || '-')}</td>
           <td class="al">${escape(r.expenses_head || '-')}</td>
-          <td class="al">${escape(r.expenses_description || '-')}</td>
-          <td class="al">${escape(r.paid_to || '-')}</td>
+          <td class="al">${escape(r.internal_branch_name || '-')}</td>
           <td>${escape(r.invoice_no || '-')}</td>
           <td style="text-align: right;">₹${amt.toFixed(2)}</td>
-          <td class="al">${escape(r.remark || '-')}</td>
+          <td class="al">${escape(r.paid_to || '-')}</td>
+          <td>${escape(r.submit_voucher_no || '-')}</td>
+          <td class="al">${escape(r.expenses_description || '-')}</td>
         </tr>
       `;
     }).join('');
@@ -4169,9 +4228,9 @@ const BranchAdminExpense = () => {
     table.data { width: 100%; border-collapse: collapse; table-layout: fixed; }
     table.data th, table.data td {
       border: 1px solid #000;
-      padding: 3px 4px;
+      padding: 2px 3px;
       text-align: center;
-      font-size: 9px;
+      font-size: 8px;
       word-wrap: break-word;
       overflow-wrap: break-word;
       vertical-align: middle;
@@ -4197,13 +4256,17 @@ const BranchAdminExpense = () => {
   <table class="info-table">
     <tr>
       <td class="title-cell" colspan="2">Office Expenses</td>
+      <td class="label">Branch Code :</td>
+      <td>${escape(userBranch)}</td>
       <td class="label">Branch Employee :</td>
       <td>${escape(period.submittedBy || '-')}</td>
     </tr>
     <tr>
-      <td class="label">Period:</td>
+      <td class="label">Voucher No. :</td>
+      <td>${escape(Array.from(new Set(period.records.map(r => r.submit_voucher_no).filter(Boolean))).join(', ') || '-')}</td>
+      <td class="label">Period :</td>
       <td>${fmtDate(period.periodStart)} — ${fmtDate(period.periodEnd)}</td>
-      <td class="label">Imprest Holding Amount:</td>
+      <td class="label">Imprest Holding Amount :</td>
       <td>₹${imprestTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
     </tr>
   </table>
@@ -4211,15 +4274,16 @@ const BranchAdminExpense = () => {
   <table class="data">
     <thead>
       <tr>
-        <th style="width: 45px;">SL no.</th>
-        <th style="width: 80px;">Paid Date</th>
-        <th style="width: 110px;">Exps. Sub Head</th>
-        <th style="width: 95px;">Expense Head (GL Code)</th>
+        <th style="width: 40px;">SL no.</th>
+        <th style="width: 75px;">Paid Date</th>
+        <th style="width: 100px;">Expenses Sub Head</th>
+        <th style="width: 95px;">Expenses Head (GL Code)</th>
+        <th style="width: 100px;">Internal Branch Name</th>
+        <th style="width: 130px;">Invoice No. / Stock transfer No. / SR no. / DC no. / Ref.no</th>
+        <th style="width: 85px;">Amount</th>
+        <th style="width: 100px;">Paid TO</th>
+        <th style="width: 95px;">Voucher NO.</th>
         <th>Expenses Description</th>
-        <th style="width: 110px;">Paid TO</th>
-        <th style="width: 110px;">Invoice No. / Stock transfer No. / SR no. / DC no.</th>
-        <th style="width: 90px;">Amount</th>
-        <th>Remark</th>
       </tr>
     </thead>
     <tbody>
@@ -4227,9 +4291,9 @@ const BranchAdminExpense = () => {
     </tbody>
     <tfoot>
       <tr>
-        <td colspan="7" style="text-align: right;">Grand Total (${period.records.length} record${period.records.length === 1 ? '' : 's'}):</td>
+        <td colspan="6" style="text-align: right;">Grand Total (${period.records.length} record${period.records.length === 1 ? '' : 's'}):</td>
         <td style="text-align: right;">₹${grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-        <td></td>
+        <td colspan="3"></td>
       </tr>
     </tfoot>
   </table>
@@ -4244,6 +4308,272 @@ const BranchAdminExpense = () => {
     printWindow.document.open();
     printWindow.document.write(html);
     printWindow.document.close();
+  };
+
+  /* ─────────────────────────────────────────────────────────────────────────────
+     PRINT — Single Office Expense Voucher
+   ───────────────────────────────────────────────────────────────────────────── */
+  const printOfficeExpenseVoucher = (r) => {
+    if (!r) { toast.error('No record to print'); return; }
+
+    const escape = (val) => {
+      if (val === null || val === undefined) return '';
+      return String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    };
+    const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
+    const amt = parseFloat(r.amount || 0) || 0;
+
+    // Amount in words (Indian numbering)
+    const numberToWords = (num) => {
+      if (num === 0) return 'Zero';
+      const a = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+        'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+      const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+      const twoDigits = (n) => n < 20 ? a[n] : `${b[Math.floor(n / 10)]}${n % 10 ? ' ' + a[n % 10] : ''}`;
+      const threeDigits = (n) => `${n >= 100 ? a[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' : '') : ''}${n % 100 ? twoDigits(n % 100) : ''}`;
+      let result = '';
+      const crore = Math.floor(num / 10000000); num %= 10000000;
+      const lakh = Math.floor(num / 100000); num %= 100000;
+      const thousand = Math.floor(num / 1000); num %= 1000;
+      const hundred = num;
+      if (crore) result += threeDigits(crore) + ' Crore ';
+      if (lakh) result += twoDigits(lakh) + ' Lakh ';
+      if (thousand) result += twoDigits(thousand) + ' Thousand ';
+      if (hundred) result += threeDigits(hundred);
+      return result.trim();
+    };
+
+    const rupees = Math.floor(amt);
+    const paise = Math.round((amt - rupees) * 100);
+    let words = numberToWords(rupees) + ' Rupees';
+    if (paise > 0) words += ` and ${numberToWords(paise)} Paise`;
+    words += ' Only';
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Voucher — ${escape(r.submit_voucher_no || '')}</title>
+  <style>
+    @page { size: A4 portrait; margin: 12mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 13px; margin: 0; padding: 10px; color: #000; }
+    .voucher-box { border: 1.5px solid #000; padding: 18px 24px; }
+    .v-title { text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 22px; }
+    table.v-head { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
+    table.v-head td { padding: 3px 6px; font-size: 13px; vertical-align: top; }
+    .lbl { font-weight: bold; }
+    table.v-body { width: 100%; border-collapse: collapse; }
+    table.v-body td { padding: 5px 6px; font-size: 13px; vertical-align: top; }
+    .amt-col { border-left: 1px solid #000; text-align: right; width: 160px; }
+    .amt-head { border-left: 1px solid #000; font-weight: bold; width: 160px; }
+    .total-row td { border-top: 1px solid #000; font-weight: bold; padding-top: 6px; }
+    .words-row td { padding-top: 14px; }
+    .sign-row { margin-top: 60px; display: flex; justify-content: space-between; }
+    .sign-row span { font-size: 13px; }
+    .print-btn { position: fixed; top: 10px; right: 10px; padding: 8px 16px; background: #2f3192; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; z-index: 1000; }
+    .print-btn:hover { background: #1e1f6b; }
+    @media print { .print-btn { display: none; } }
+  </style>
+</head>
+<body>
+  <button class="print-btn" onclick="window.print()">🖨 Print</button>
+  <div class="voucher-box">
+    <div class="v-title">Voucher</div>
+
+    <table class="v-head">
+      <tr>
+        <td style="width: 60%;"><span class="lbl">Branch Name:</span> ${escape(getBranchLabel(userBranch))} (${escape(userBranch)})</td>
+        <td><span class="lbl">Voucher No.</span> ${escape(r.submit_voucher_no || '-')}</td>
+      </tr>
+      <tr>
+        <td></td>
+        <td><span class="lbl">Date:</span> ${fmtDate(r.paid_date)}</td>
+      </tr>
+    </table>
+
+    <table class="v-body">
+      <tr>
+        <td><span class="lbl">Expenses GL Code:</span> ${escape(r.expenses_head || '-')}</td>
+        <td class="amt-head">Amount</td>
+      </tr>
+      <tr>
+        <td><span class="lbl">Expenses Sub Head:</span> ${escape(r.sub_head || '-')}</td>
+        <td class="amt-col">${amt.toFixed(2)}</td>
+      </tr>
+      <tr>
+        <td><span class="lbl">Internal Branch Name:</span> ${escape(r.internal_branch_name || '-')}</td>
+        <td class="amt-col"></td>
+      </tr>
+      <tr>
+        <td><span class="lbl">Paid To:</span> ${escape(r.paid_to || '-')}</td>
+        <td class="amt-col"></td>
+      </tr>
+      <tr>
+        <td><span class="lbl">Ref. no.:</span> ${escape(r.invoice_no || '-')}</td>
+        <td class="amt-col"></td>
+      </tr>
+      <tr>
+        <td><span class="lbl">Description:</span> ${escape(r.expenses_description || '-')}</td>
+        <td class="amt-col"></td>
+      </tr>
+      <tr class="total-row">
+        <td></td>
+        <td class="amt-col" style="border-left: 1px solid #000;">${amt.toFixed(2)}</td>
+      </tr>
+      <tr class="words-row">
+        <td colspan="2"><span class="lbl">Amount in Words:</span> ${escape(words)}</td>
+      </tr>
+    </table>
+
+    <div class="sign-row">
+      <span>Prepared By</span>
+      <span>Checked By</span>
+      <span>Receiver's Signature</span>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    const w = window.open('', '_blank', 'width=900,height=1100');
+    if (!w) { toast.error('Please allow pop-ups for this site to print'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+  };
+
+  /* ─────────────────────────────────────────────────────────────────────────────
+     PRINT — Local Vendor Bills Report (period drill-in)
+   ───────────────────────────────────────────────────────────────────────────── */
+  const printLvbReport = (period) => {
+    if (!period || !period.records || period.records.length === 0) {
+      toast.error('No records to print');
+      return;
+    }
+
+    const escape = (val) => {
+      if (val === null || val === undefined) return '';
+      return String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    };
+    const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
+
+    let grandTotal = 0;
+    const rowsHtml = period.records.map((r, idx) => {
+      const amt = parseFloat(r.payment_amount || 0) || 0;
+      grandTotal += amt;
+      return `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${fmtDate(r.invoice_date)}</td>
+          <td class="al">${escape(r.vendor_name || '-')}</td>
+          <td>${r.is_registered ? 'GST' : 'URD'}</td>
+          <td>${escape(r.invoice_number || '-')}</td>
+          <td style="text-align:right;">₹${amt.toFixed(2)}</td>
+          <td class="al">${escape(r.shop_name || '-')}</td>
+          <td class="al">${escape(r.customer_name || '-')}</td>
+          <td>${escape(r.customer_invoice_no || '-')}</td>
+          <td>${escape(r.customer_sr_no || '-')}</td>
+          <td style="text-align:right;">₹${(parseFloat(r.customer_invoice_amount || 0) || 0).toFixed(2)}</td>
+          <td style="text-align:right;">₹${(parseFloat(r.line_work_amount || 0) || 0).toFixed(2)}</td>
+          <td class="al">${escape(r.description || '-')}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const voucherLabel = Array.from(new Set(period.records.map(r => r.submit_voucher_no).filter(Boolean))).join(', ') || '-';
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Local Vendor Bills — ${escape(getBranchLabel(userBranch))}</title>
+  <style>
+    @page { size: A4 landscape; margin: 8mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 10px; margin: 0; padding: 8px; color: #000; }
+    .company-header { text-align: center; font-size: 16px; font-weight: bold; margin-bottom: 8px; padding: 6px; border: 1.5px solid #000; background: #f5f5f5; }
+    .info-table { width: 100%; margin-bottom: 8px; border-collapse: collapse; }
+    .info-table td { padding: 4px 8px; font-size: 11px; border: 1px solid #666; }
+    .info-table .label { font-weight: bold; background: #ececec; }
+    .info-table .title-cell { font-weight: bold; background: #d4d4d4; text-align: center; font-size: 13px; }
+    table.data { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    table.data th, table.data td { border: 1px solid #000; padding: 3px 4px; text-align: center; font-size: 9px; word-wrap: break-word; overflow-wrap: break-word; vertical-align: middle; }
+    table.data td.al { text-align: left; }
+    table.data th { background: #c5c5c5; font-weight: bold; font-size: 9.5px; }
+    table.data tfoot td { font-weight: bold; background: #e8e8e8; }
+    .grp-vendor { background: #dbe4f0; }
+    .grp-customer { background: #e8e0f0; }
+    .print-btn { position: fixed; top: 10px; right: 10px; padding: 8px 16px; background: #2f3192; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; z-index: 1000; }
+    .print-btn:hover { background: #1e1f6b; }
+    @media print { .print-btn { display: none; } }
+  </style>
+</head>
+<body>
+  <button class="print-btn" onclick="window.print()">🖨 Print</button>
+
+  <div class="company-header">KALA Care Global LLP, ${escape(getBranchLabel(userBranch))}</div>
+
+  <table class="info-table">
+    <tr>
+      <td class="title-cell" colspan="2">Local Vendor Bills</td>
+      <td class="label">Branch Code :</td>
+      <td>${escape(userBranch)}</td>
+      <td class="label">Submitted By :</td>
+      <td>${escape(period.submittedBy || '-')}</td>
+    </tr>
+    <tr>
+      <td class="label">Voucher No. :</td>
+      <td>${escape(voucherLabel)}</td>
+      <td class="label">Period :</td>
+      <td>${fmtDate(period.periodStart)} — ${fmtDate(period.periodEnd)}</td>
+      <td class="label">Total Amount :</td>
+      <td>₹${grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+    </tr>
+  </table>
+
+  <table class="data">
+    <colgroup>
+      <col style="width:3%;" /><col style="width:7%;" /><col style="width:11%;" /><col style="width:5%;" />
+      <col style="width:8%;" /><col style="width:8%;" /><col style="width:9%;" />
+      <col style="width:9%;" /><col style="width:9%;" /><col style="width:6%;" />
+      <col style="width:8%;" /><col style="width:7%;" /><col style="width:10%;" />
+    </colgroup>
+    <thead>
+      <tr>
+        <th rowspan="2">SL no.</th>
+        <th class="grp-vendor" colspan="6">Vendor Details</th>
+        <th class="grp-customer" colspan="6">Customer Invoice Details</th>
+      </tr>
+      <tr>
+        <th class="grp-vendor">Invoice Date</th>
+        <th class="grp-vendor">Vendor Name</th>
+        <th class="grp-vendor">Type</th>
+        <th class="grp-vendor">Invoice No.</th>
+        <th class="grp-vendor">Payment Amount</th>
+        <th class="grp-vendor">URD Vendor</th>
+        <th class="grp-customer">Customer Name</th>
+        <th class="grp-customer">Customer Invoice Number</th>
+        <th class="grp-customer">SR no.</th>
+        <th class="grp-customer">Customer Invoice Amount</th>
+        <th class="grp-customer">Line Work Amount</th>
+        <th class="grp-customer">Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="5" style="text-align:right;">Grand Total (${period.records.length} record${period.records.length === 1 ? '' : 's'}):</td>
+        <td style="text-align:right;">₹${grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        <td colspan="7"></td>
+      </tr>
+    </tfoot>
+  </table>
+</body>
+</html>`;
+
+    const w = window.open('', '_blank', 'width=1400,height=900');
+    if (!w) { toast.error('Please allow pop-ups for this site to print'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
   };
 
   const filteredRecords = useMemo(() => {
@@ -4886,60 +5216,24 @@ const BranchAdminExpense = () => {
     return null;
   }, [kmRates, userBranch]);
 
-  /* ─── Office Expense period grouping (branch submit rule driven) ─────────── */
+  /* ─── Office Expense grouping (by submitted voucher; period = min→max date) ─── */
   const oePeriodGroups = useMemo(() => {
     if (!officeExpenses || officeExpenses.length === 0) return [];
 
-    // 'weekdays' => weekly (Mon→Sun) periods
-    // 'month_dates' (default) => 15-day periods (1st→15th, 16th→end-of-month)
-    const ruleType = submitRule?.rule_type || 'month_dates';
-
-    const getPeriod = (dateStr) => {
-      if (!dateStr) return null;
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return null;
-
-      if (ruleType === 'weekdays') {
-        const day = d.getDay(); // 0=Sun..6=Sat
-        const diffToMon = (day + 6) % 7;
-        const start = new Date(d);
-        start.setDate(d.getDate() - diffToMon);
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(start);
-        end.setDate(start.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
-        return { key: start.toISOString().slice(0, 10), start, end };
-      }
-
-      // 15-day periods
-      const y = d.getFullYear();
-      const m = d.getMonth();
-      const day = d.getDate();
-      if (day <= 15) {
-        return {
-          key: `${y}-${String(m + 1).padStart(2, '0')}-H1`,
-          start: new Date(y, m, 1),
-          end: new Date(y, m, 15, 23, 59, 59, 999),
-        };
-      }
-      return {
-        key: `${y}-${String(m + 1).padStart(2, '0')}-H2`,
-        start: new Date(y, m, 16),
-        end: new Date(y, m + 1, 0, 23, 59, 59, 999),
-      };
-    };
-
     const groups = new Map();
     officeExpenses.forEach(exp => {
-      const period = getPeriod(exp.paid_date);
-      if (!period) return;
+      const d = exp.paid_date ? new Date(exp.paid_date) : null;
+      if (!d || isNaN(d.getTime())) return;
+
       const submitter = exp.created_by_name || exp.paid_by || 'Unknown';
-      const groupKey = `${period.key}__${submitter}`;
+      const voucher = exp.submit_voucher_no || 'No Voucher';
+      const groupKey = `${voucher}__${submitter}`;
+
       if (!groups.has(groupKey)) {
         groups.set(groupKey, {
           key: groupKey,
-          periodStart: period.start,
-          periodEnd: period.end,
+          periodStart: null,
+          periodEnd: null,
           submittedBy: submitter,
           records: [],
           totalAmount: 0,
@@ -4948,6 +5242,8 @@ const BranchAdminExpense = () => {
       }
       const g = groups.get(groupKey);
       g.records.push(exp);
+      if (!g.periodStart || d < g.periodStart) g.periodStart = d;
+      if (!g.periodEnd || d > g.periodEnd) g.periodEnd = d;
       const amt = parseFloat(exp.amount || 0);
       g.totalAmount += amt;
       if (exp.verification_status === 'Verified') g.verifiedAmount += amt;
@@ -4955,7 +5251,7 @@ const BranchAdminExpense = () => {
 
     return Array.from(groups.values())
       .sort((a, b) => b.periodStart.getTime() - a.periodStart.getTime());
-  }, [officeExpenses, submitRule]);
+  }, [officeExpenses]);
 
   /* ─── Sales grouping (by engineer name, date range min→max) ───────────────── */
   const salesPeriodGroups = useMemo(() => {
@@ -5165,7 +5461,7 @@ const BranchAdminExpense = () => {
         if (!hit) return false;
       }
       return true;
-    });
+    }).sort((a, b) => new Date(a.paid_date || 0) - new Date(b.paid_date || 0));
   }, [selectedOEPeriod, oeDetailSearch, oeDetailHead, oeDetailVerifiedOnly]);
 
   const filteredDetailTotals = useMemo(() => {
@@ -5183,58 +5479,24 @@ const BranchAdminExpense = () => {
     setOeDetailVerifiedOnly(false);
   }, [selectedOEPeriod?.key]);
 
-  /* ─── LVB period grouping (mirrors OE logic) ─────────────────────────────── */
+  /* ─── LVB grouping (by submitted voucher; period = min→max date) ─── */
   const lvbPeriodGroups = useMemo(() => {
     if (!lvbBills || lvbBills.length === 0) return [];
 
-    const ruleType = submitRule?.rule_type || 'month_dates';
-
-    const getPeriod = (dateStr) => {
-      if (!dateStr) return null;
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return null;
-
-      if (ruleType === 'weekdays') {
-        const day = d.getDay();
-        const diffToMon = (day + 6) % 7;
-        const start = new Date(d);
-        start.setDate(d.getDate() - diffToMon);
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(start);
-        end.setDate(start.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
-        return { key: start.toISOString().slice(0, 10), start, end };
-      }
-
-      // 15-day periods
-      const y = d.getFullYear();
-      const m = d.getMonth();
-      const day = d.getDate();
-      if (day <= 15) {
-        return {
-          key: `${y}-${String(m + 1).padStart(2, '0')}-H1`,
-          start: new Date(y, m, 1),
-          end: new Date(y, m, 15, 23, 59, 59, 999),
-        };
-      }
-      return {
-        key: `${y}-${String(m + 1).padStart(2, '0')}-H2`,
-        start: new Date(y, m, 16),
-        end: new Date(y, m + 1, 0, 23, 59, 59, 999),
-      };
-    };
-
     const groups = new Map();
     lvbBills.forEach(bill => {
-      const period = getPeriod(bill.invoice_date);
-      if (!period) return;
+      const d = bill.invoice_date ? new Date(bill.invoice_date) : null;
+      if (!d || isNaN(d.getTime())) return;
+
       const submitter = bill.created_by_name || 'Unknown';
-      const groupKey = `${period.key}__${submitter}`;
+      const voucher = bill.submit_voucher_no || 'No Voucher';
+      const groupKey = `${voucher}__${submitter}`;
+
       if (!groups.has(groupKey)) {
         groups.set(groupKey, {
           key: groupKey,
-          periodStart: period.start,
-          periodEnd: period.end,
+          periodStart: null,
+          periodEnd: null,
           submittedBy: submitter,
           records: [],
           totalAmount: 0,
@@ -5243,6 +5505,8 @@ const BranchAdminExpense = () => {
       }
       const g = groups.get(groupKey);
       g.records.push(bill);
+      if (!g.periodStart || d < g.periodStart) g.periodStart = d;
+      if (!g.periodEnd || d > g.periodEnd) g.periodEnd = d;
       const amt = parseFloat(bill.payment_amount || 0);
       g.totalAmount += amt;
       if (bill.verification_status === 'Verified') g.verifiedAmount += amt;
@@ -5250,7 +5514,7 @@ const BranchAdminExpense = () => {
 
     return Array.from(groups.values())
       .sort((a, b) => b.periodStart.getTime() - a.periodStart.getTime());
-  }, [lvbBills, submitRule]);
+  }, [lvbBills]);
 
   const filteredLvbPeriodGroups = useMemo(() => {
     return lvbPeriodGroups.filter(g => {
@@ -5287,7 +5551,7 @@ const BranchAdminExpense = () => {
         if (!hit) return false;
       }
       return true;
-    });
+    }).sort((a, b) => new Date(a.invoice_date || 0) - new Date(b.invoice_date || 0));
   }, [selectedLvbPeriod, lvbDetailSearch, lvbDetailVendor, lvbDetailVerifiedOnly]);
 
   const filteredLvbDetailTotals = useMemo(() => {
@@ -5478,134 +5742,6 @@ const BranchAdminExpense = () => {
         days_limit: 30,
       });
     } finally { setUploading(false); }
-  };
-
-  const loadBranchHistory = async () => {
-    setLoadingHistory(true);
-    setLoadingHistoryGrouped(true);
-    setLoadingSalesHistory(true);
-    setLoadingSalesHistoryGrouped(true);
-    setLoadingKmWiseHistory(true);
-    setLoadingKmWiseHistoryGrouped(true);
-    setLoadingBillWiseHistory(true);
-    setLoadingBillWiseHistoryGrouped(true);
-    setShowHistoryModal(true);
-    setHistoryMainTab('service_engineer');
-    setHistoryTab('periods');
-    setSalesHistoryTab('periods');
-    setKmWiseHistoryTab('periods');
-    setBillWiseHistoryTab('periods');
-    setSelectedPeriod(null);
-    setSalesSelectedHistoryPeriod(null);
-    setKmWiseSelectedHistoryPeriod(null);
-    setBillWiseSelectedHistoryPeriod(null);
-    try {
-      const [
-        allRes, groupedRes,
-        salesAllRes, salesGroupedRes,
-        kmAllRes, kmGroupedRes,
-        billAllRes, billGroupedRes,
-      ] = await Promise.all([
-        axios.get(`${API_BASE_URL}/tada-ho/branch-history`, { params: { branch_code: userBranch } }),
-        axios.get(`${API_BASE_URL}/tada-ho/branch-history-grouped`, { params: { branch_code: userBranch } }),
-        axios.get(`${API_BASE_URL}/tada-salesbm/history`, { params: { branch_code: userBranch } }).catch(() => ({ data: [] })),
-        Promise.resolve({ data: { rule_type: '', period_days: 0, groups: [] } }),
-        axios.get(`${API_BASE_URL}/tada-km-wise/history`, { params: { branch_code: userBranch } }).catch(() => ({ data: [] })),
-        axios.get(`${API_BASE_URL}/tada-km-wise/history/grouped`, { params: { branch_code: userBranch } }).catch(() => ({ data: { rule_type: '', period_days: 0, groups: [] } })),
-        axios.get(`${API_BASE_URL}/tada-bill-wise/history`, { params: { branch_code: userBranch } }).catch(() => ({ data: [] })),
-        axios.get(`${API_BASE_URL}/tada-bill-wise/history/grouped`, { params: { branch_code: userBranch } }).catch(() => ({ data: { rule_type: '', period_days: 0, groups: [] } })),
-      ]);
-      setHistoryRecords(allRes.data);
-      setHistoryGrouped(groupedRes.data || { rule_type: '', period_days: 0, groups: [] });
-      setSalesHistoryRecords(salesAllRes.data || []);
-      setSalesHistoryGrouped(salesGroupedRes.data || { rule_type: '', period_days: 0, groups: [] });
-      setKmWiseHistoryRecords(kmAllRes.data || []);
-      setKmWiseHistoryGrouped(kmGroupedRes.data || { rule_type: '', period_days: 0, groups: [] });
-      setBillWiseHistoryRecords(billAllRes.data || []);
-      setBillWiseHistoryGrouped(billGroupedRes.data || { rule_type: '', period_days: 0, groups: [] });
-    } catch (error) {
-      console.error('Error loading history:', error);
-      toast.error('Failed to load history');
-    } finally {
-      setLoadingHistory(false);
-      setLoadingHistoryGrouped(false);
-      setLoadingSalesHistory(false);
-      setLoadingSalesHistoryGrouped(false);
-      setLoadingKmWiseHistory(false);
-      setLoadingKmWiseHistoryGrouped(false);
-      setLoadingBillWiseHistory(false);
-      setLoadingBillWiseHistoryGrouped(false);
-    }
-  };
-
-  const closeHistoryModalBranch = () => {
-    setShowHistoryModal(false);
-    setHistoryRecords([]);
-    setSalesHistoryRecords([]);
-    setKmWiseHistoryRecords([]);
-    setBillWiseHistoryRecords([]);
-    setHistorySearch('');
-    setSalesHistorySearch('');
-    setKmWiseHistorySearch('');
-    setBillWiseHistorySearch('');
-    setHistoryDateFrom('');
-    setHistoryDateTo('');
-    setHistoryReachDateFrom('');
-    setHistoryReachDateTo('');
-    setHistoryEngineer('');
-    setHistoryMainTab('service_engineer');
-    setHistoryTab('periods');
-    setSalesHistoryTab('periods');
-    setKmWiseHistoryTab('periods');
-    setBillWiseHistoryTab('periods');
-    setSelectedPeriod(null);
-    setSalesSelectedHistoryPeriod(null);
-    setKmWiseSelectedHistoryPeriod(null);
-    setBillWiseSelectedHistoryPeriod(null);
-    setHistoryGrouped({ rule_type: '', period_days: 0, groups: [] });
-    setSalesHistoryGrouped({ rule_type: '', period_days: 0, groups: [] });
-    setKmWiseHistoryGrouped({ rule_type: '', period_days: 0, groups: [] });
-    setBillWiseHistoryGrouped({ rule_type: '', period_days: 0, groups: [] });
-    setHistoryAllTaskStatusFilter(new Set());
-    setHistoryPeriodTaskStatusFilter(new Set());
-  };
-
-  const loadOEHistory = async () => {
-    setLoadingOEHistory(true);
-    setLoadingOEHistoryGrouped(true);
-    setShowOEHistoryModal(true);
-    setOeHistoryTab('periods');
-    setOeSelectedPeriod(null);
-    try {
-      const params = new URLSearchParams({ limit: 500 });
-      params.append('branch_code', userBranch);
-      const [listRes, groupedRes] = await Promise.all([
-        axios.get(`${API_BASE_URL}/office-expenses/history/list?${params}`),
-        axios.get(`${API_BASE_URL}/office-expenses/history/grouped`, {
-          params: { branch_code: userBranch }
-        }),
-      ]);
-      setOeHistoryRecords(listRes.data);
-      setOeHistoryGrouped(groupedRes.data || { rule_type: '', period_days: 0, groups: [] });
-    } catch {
-      toast.error('Failed to load office expense history');
-    } finally {
-      setLoadingOEHistory(false);
-      setLoadingOEHistoryGrouped(false);
-    }
-  };
-
-  const closeOEHistoryModal = () => {
-    setShowOEHistoryModal(false);
-    setOeHistoryRecords([]);
-    setOeHistorySearch('');
-    setOeHistoryDateFrom('');
-    setOeHistoryDateTo('');
-    setOeHistoryPaidDateFrom('');
-    setOeHistoryPaidDateTo('');
-    setOeHistoryTab('periods');
-    setOeSelectedPeriod(null);
-    setOeHistoryGrouped({ rule_type: '', period_days: 0, groups: [] });
   };
 
   const openBranchImprestModal = async () => {
@@ -6488,9 +6624,10 @@ const BranchAdminExpense = () => {
     // ✅ NO upload-window check here. Drafts can be added any day.
     // All fields are compulsory EXCEPT remark
     if (!officeExpenseForm.paid_date || !officeExpenseForm.expenses_head ||
-      !officeExpenseForm.sub_head || !officeExpenseForm.paid_to ||
+      !officeExpenseForm.sub_head || !officeExpenseForm.internal_branch_name ||
+      !officeExpenseForm.paid_to ||
       !officeExpenseForm.invoice_no || !officeExpenseForm.amount ||
-      !officeExpenseForm.voucher_no || !officeExpenseForm.paid_by ||
+      !officeExpenseForm.paid_by ||
       !officeExpenseForm.expenses_description) {
       toast.error('Please fill all required fields (only Remark is optional)');
       return;
@@ -6512,7 +6649,7 @@ const BranchAdminExpense = () => {
       setOfficeExpenseForm({
         paid_date: new Date().toISOString().split('T')[0],
         expenses_head: '', sub_head: '', expenses_description: '',
-        description: '', paid_to: '', invoice_no: '', amount: '',
+        description: '', internal_branch_name: '', paid_to: '', invoice_no: '', amount: '',
         remark: '', paid_by: user?.name || '', voucher_no: ''
       });
       fetchOeTempDrafts();
@@ -6780,7 +6917,7 @@ const BranchAdminExpense = () => {
   const handleLvbSubmit = async (e) => {
     e.preventDefault();
     // All fields are compulsory EXCEPT remark
-    // Shop Name only required for URD purchases
+    // URD Vendor Name only required for URD purchases
     const isURD = lvbForm.vendor_name === 'URD Purchase' || (!lvbForm.is_registered && lvbForm.vendor_name);
     if (!lvbForm.vendor_name || !lvbForm.invoice_date || !lvbForm.invoice_number ||
       !lvbForm.payment_amount || !lvbForm.customer_name || !lvbForm.customer_invoice_no ||
@@ -6841,31 +6978,6 @@ const BranchAdminExpense = () => {
     }
   };
 
-  const loadLvbHistory = async () => {
-    setLoadingLvbHistory(true);
-    setLoadingLvbHistoryGrouped(true);
-    setShowLvbHistoryModal(true);
-    setLvbHistoryTab('periods');
-    setLvbSelectedPeriod(null);
-    try {
-      const [listRes, groupedRes] = await Promise.all([
-        axios.get(`${API_BASE_URL}/lvb/bills/history`, {
-          params: { branch_code: userBranch, limit: 500 }
-        }),
-        axios.get(`${API_BASE_URL}/lvb/bills/history/grouped`, {
-          params: { branch_code: userBranch }
-        }),
-      ]);
-      setLvbHistoryRecords(listRes.data);
-      setLvbHistoryGrouped(groupedRes.data || { rule_type: '', period_days: 0, groups: [] });
-    } catch {
-      toast.error('Failed to load vendor bill history');
-    } finally {
-      setLoadingLvbHistory(false);
-      setLoadingLvbHistoryGrouped(false);
-    }
-  };
-
   const fetchOeTempDrafts = async () => {
     setLoadingOeTemp(true);
     try {
@@ -6909,6 +7021,7 @@ const BranchAdminExpense = () => {
       expenses_head: draft.expenses_head || '',
       sub_head: draft.sub_head || '',
       expenses_description: draft.expenses_description || '',
+      internal_branch_name: draft.internal_branch_name || '',
       paid_to: draft.paid_to || '',
       invoice_no: draft.invoice_no || '',
       amount: draft.amount || '',
@@ -6959,7 +7072,11 @@ const BranchAdminExpense = () => {
         temp_ids: ids,
         branch_code: userBranch,
       });
-      toast.success(`${data.moved_count} record(s) submitted`);
+      toast.success(
+        data.submit_voucher_no
+          ? `${data.moved_count} record(s) submitted · Voucher: ${data.submit_voucher_no}`
+          : `${data.moved_count} record(s) submitted`
+      );
       fetchOeTempDrafts();
       fetchOfficeExpenses(true);  // refresh main table
     } catch {
@@ -7065,8 +7182,11 @@ const BranchAdminExpense = () => {
         temp_ids: ids,
         branch_code: userBranch,
       });
-      toast.success(`${data.moved_count} bill(s) submitted`);
-      fetchLvbTempDrafts();
+      toast.success(
+        data.submit_voucher_no
+          ? `${data.moved_count} record(s) submitted · Voucher: ${data.submit_voucher_no}`
+          : `${data.moved_count} record(s) submitted`
+      ); fetchLvbTempDrafts();
       fetchLvbBills(true);
     } catch {
       toast.error('Failed to submit');
@@ -7523,11 +7643,28 @@ const BranchAdminExpense = () => {
                         >
                           {/* History */}
                           <button
-                            onClick={() => { setShowActionMenu(false); loadBranchHistory(); }}
-                            className="w-full px-2.5 py-1.5 text-left text-[11px] font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"                          >
-                            <span className="w-5 h-5 rounded flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}>
-                              <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            onClick={() => {
+                              setShowActionMenu(false);
+                              setShowHistoryModal(true);
+                            }}
+                            className="w-full px-2.5 py-1.5 text-left text-[11px] font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
+                          >
+                            <span
+                              className="w-5 h-5 rounded flex items-center justify-center"
+                              style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
+                            >
+                              <svg
+                                className="h-3 w-3 text-white"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
                               </svg>
                             </span>
                             History
@@ -7852,26 +7989,103 @@ const BranchAdminExpense = () => {
                         ))}
                       </div>
                       {verifiedInnerTab === 'sales_bm' && (
-                        <button
-                          onClick={handleSubmitSalesBmToHo}
-                          disabled={submittingSalesBmToHo || Object.values(salesBmDraftSelected).filter(Boolean).length === 0 || (!isAdmin && !isUploadAllowed())}
-                          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-bold rounded-md shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
-                          style={{ background: 'linear-gradient(135deg, #dc2626, #b91c1c)' }}
-                          title={!isAdmin && !isUploadAllowed() ? getUploadRestrictionMessage() : 'Submit selected to HO'}
-                        >
-                          {submittingSalesBmToHo ? 'Submitting…' : `Submit to HO (${Object.values(salesBmDraftSelected).filter(Boolean).length})`}
-                        </button>
+                        <div className="ml-auto flex items-center gap-2">
+                          {canExport && salesBmDrafts.length > 0 && (
+                            <button
+                              onClick={() => exportToExcel(
+                                salesBmDrafts,
+                                `sales_bm_verified_${userBranch}.xlsx`,
+                                [
+                                  { key: 'date', label: 'Date' },
+                                  { key: 'sr_invoice_engine_no', label: 'SR/Invoice/Engine' },
+                                  { key: 'customer_name', label: 'Customer Name' },
+                                  { key: 'location', label: 'Location' },
+                                  { key: 'one_way_km', label: '1 Way KM' },
+                                  { key: 'two_way_km', label: '2 Way KM' },
+                                  { key: 'amount', label: 'Amount' },
+                                  { key: 'da', label: 'DA' },
+                                  { key: 'total_amount', label: 'Total Amount' },
+                                  { key: 'work_description', label: 'Work Description' },
+                                  { key: 'labour_sale_expected', label: 'Labour Sale Expected' },
+                                  { key: 'part_sale_expected', label: 'Part Sale Expected' },
+                                  { key: 'remark', label: 'Remark' },
+                                  { key: 'engineer_name', label: 'Engineer Name' },
+                                  { key: 'engineer_uid', label: 'Engineer UID' },
+                                  { key: 'employee_id', label: 'Employee ID' },
+                                ]
+                              )}
+                              className="inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-semibold rounded-md shadow-sm"
+                              style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
+                            >
+                              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
+                              </svg>
+                              Export
+                            </button>
+                          )}
+                          <button
+                            onClick={handleSubmitSalesBmToHo}
+                            disabled={submittingSalesBmToHo || Object.values(salesBmDraftSelected).filter(Boolean).length === 0 || (!isAdmin && !isUploadAllowed())}
+                            className="inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-bold rounded-md shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                            style={{ background: 'linear-gradient(135deg, #dc2626, #b91c1c)' }}
+                            title={!isAdmin && !isUploadAllowed() ? getUploadRestrictionMessage() : 'Submit selected to HO'}
+                          >
+                            {submittingSalesBmToHo ? 'Submitting…' : `Submit to HO (${Object.values(salesBmDraftSelected).filter(Boolean).length})`}
+                          </button>
+                        </div>
                       )}
                       {verifiedInnerTab === 'bill_wise' && (
-                        <button
-                          onClick={handleSubmitBillWiseToHo}
-                          disabled={submittingBillWiseToHo || Object.values(billWiseDraftSelected).filter(Boolean).length === 0 || (!isAdmin && !isUploadAllowed())}
-                          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-bold rounded-md shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
-                          style={{ background: 'linear-gradient(135deg, #dc2626, #b91c1c)' }}
-                          title={!isAdmin && !isUploadAllowed() ? getUploadRestrictionMessage() : 'Submit selected to HO'}
-                        >
-                          {submittingBillWiseToHo ? 'Submitting…' : `Submit to HO (${Object.values(billWiseDraftSelected).filter(Boolean).length})`}
-                        </button>
+                        <div className="ml-auto flex items-center gap-2">
+                          {canExport && billWiseDrafts.length > 0 && (
+                            <button
+                              onClick={() => exportToExcel(
+                                billWiseDrafts,
+                                `bill_wise_verified_${userBranch}.xlsx`,
+                                [
+                                  { key: 'entry_type', label: 'Type' },
+                                  { key: 'date', label: 'Date' },
+                                  { key: 'engineer_name', label: 'Engineer Name' },
+                                  { key: 'created_by', label: 'Employee / Created By' },
+                                  { key: 'customer_name', label: 'Customer Name' },
+                                  { key: 'sr_invoice_engine_no', label: 'SR/Invoice/Engine' },
+                                  { key: 'service_request_no', label: 'SR No.' },
+                                  { key: 'appointment_number', label: 'Appointment No.' },
+                                  { key: 'account', label: 'Account' },
+                                  { key: 'installation_site_address', label: 'Location / Site Address' },
+                                  { key: 'sr_type', label: 'SR Type' },
+                                  { key: 'task_status', label: 'Task Status' },
+                                  { key: 'kms_travelled', label: 'KMs Travelled' },
+                                  { key: 'task_start_date', label: 'Task Start Date' },
+                                  { key: 'task_end_date', label: 'Task End Date' },
+                                  { key: 'expenses_head', label: 'Expense Head' },
+                                  { key: 'amount', label: 'Amount' },
+                                  { key: 'bill_submitted', label: 'Bill Submitted' },
+                                  { key: 'work_description', label: 'Work Description' },
+                                  { key: 'remark', label: 'Remark' },
+                                  { key: 'work_status', label: 'Work Status' },
+                                  { key: 'employee_id', label: 'Employee ID' },
+                                  { key: 'service_engineer_uid', label: 'Service Engineer UID' },
+                                ]
+                              )}
+                              className="inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-semibold rounded-md shadow-sm"
+                              style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
+                            >
+                              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
+                              </svg>
+                              Export
+                            </button>
+                          )}
+                          <button
+                            onClick={handleSubmitBillWiseToHo}
+                            disabled={submittingBillWiseToHo || Object.values(billWiseDraftSelected).filter(Boolean).length === 0 || (!isAdmin && !isUploadAllowed())}
+                            className="inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-bold rounded-md shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                            style={{ background: 'linear-gradient(135deg, #dc2626, #b91c1c)' }}
+                            title={!isAdmin && !isUploadAllowed() ? getUploadRestrictionMessage() : 'Submit selected to HO'}
+                          >
+                            {submittingBillWiseToHo ? 'Submitting…' : `Submit to HO (${Object.values(billWiseDraftSelected).filter(Boolean).length})`}
+                          </button>
+                        </div>
                       )}
                     </div>
                   )}
@@ -8080,7 +8294,7 @@ const BranchAdminExpense = () => {
                                     )}
                                     <th className="px-2 py-0 text-[10px] font-bold text-gray-700 border-r border-gray-300 uppercase tracking-wide text-center" style={{ width: '60px', backgroundColor: '#f0f1ff', height: '26px' }}>Sr. No.</th>
                                     <th className="px-1 py-0 text-[10px] font-bold text-gray-700 border-r border-gray-300 uppercase tracking-tight text-center leading-[1.1] align-middle" style={{ width: '260px', backgroundColor: '#f0f1ff', whiteSpace: 'normal', wordBreak: 'break-word', height: '26px' }}>Period (SR Reach at Site Date)</th>
-                                    <th className="px-2 py-0 text-[10px] font-bold text-gray-700 border-r border-gray-300 uppercase tracking-wide text-center" style={{ width: '220px', backgroundColor: '#f0f1ff', height: '26px' }}>Employee Name</th>
+                                    <th className="px-2 py-0 text-[10px] font-bold text-gray-700 border-r border-gray-300 uppercase tracking-wide text-center" style={{ width: '220px', backgroundColor: '#f0f1ff', height: '26px' }}>Engineer Name</th>
                                     <th className="px-2 py-0 text-[10px] font-bold text-gray-700 border-r border-gray-300 uppercase tracking-wide text-center" style={{ width: '100px', backgroundColor: '#f0f1ff', height: '26px' }}>Number of Activity</th>
                                     <th className="px-2 py-0 text-[10px] font-bold text-gray-700 border-r border-gray-300 uppercase tracking-wide text-center" style={{ width: '160px', backgroundColor: '#f0f1ff', height: '26px' }}>Total Amount</th>
                                     {isSubmittedView && (
@@ -8393,6 +8607,45 @@ const BranchAdminExpense = () => {
                             </svg>
                             Back
                           </button>
+                          {canExport && (
+                            <button
+                              onClick={() => exportToExcel(
+                                salesSelectedPeriod.records
+                                  .filter(r => !salesHoKmFilter || (r.ho_corrected_km !== null && r.ho_corrected_km !== undefined && String(r.ho_corrected_km).trim() !== ''))
+                                  .filter(r => !salesVerifiedOnly || r.verification_status === 'Verified'),
+                                `sales_${salesSelectedPeriod.engineerName}_${userBranch}.xlsx`,
+                                [
+                                  { key: 'date', label: 'Date' },
+                                  { key: 'sr_invoice_engine_no', label: 'SR/Invoice/Engine' },
+                                  { key: 'customer_name', label: 'Customer Name' },
+                                  { key: 'location', label: 'Location' },
+                                  { key: 'one_way_km', label: '1 Way KM' },
+                                  { key: 'two_way_km', label: '2 Way KM' },
+                                  { key: 'amount', label: 'Amount' },
+                                  { key: 'da', label: 'DA' },
+                                  { key: 'total_amount', label: 'Total Amount' },
+                                  { key: 'work_description', label: 'Work Description' },
+                                  { key: 'labour_sale_expected', label: 'Labour Sale Expected' },
+                                  { key: 'part_sale_expected', label: 'Part Sale Expected' },
+                                  { key: 'remark', label: 'Remark' },
+                                  { key: 'engineer_name', label: 'Engineer Name' },
+                                  { key: 'engineer_uid', label: 'Engineer UID' },
+                                  { key: 'employee_id', label: 'Employee ID' },
+                                  { key: 'ho_corrected_km', label: 'HO Corrected KM' },
+                                  { key: 'ho_remark', label: 'HO Remark' },
+                                  { key: 'verification_status', label: 'Status' },
+                                  { key: 'created_by', label: 'Created By' },
+                                ]
+                              )}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md shadow-sm"
+                              style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
+                            >
+                              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
+                              </svg>
+                              Export
+                            </button>
+                          )}
                           {salesVerifiedOnly && (
                             <button
                               onClick={() => setSalesVerifiedOnly(false)}
@@ -8697,6 +8950,41 @@ const BranchAdminExpense = () => {
                             </svg>
                             Back
                           </button>
+                          {canExport && (
+                            <button
+                              onClick={() => exportToExcel(
+                                kmWiseSelectedPeriod.records
+                                  .filter(r => !kmWiseHoKmFilter || (r.ho_corrected_km !== null && r.ho_corrected_km !== undefined && String(r.ho_corrected_km).trim() !== ''))
+                                  .filter(r => !kmWiseVerifiedOnly || r.verification_status === 'Verified'),
+                                `km_wise_${userBranch}.xlsx`,
+                                [
+                                  { key: 'date', label: 'Date' },
+                                  { key: 'engineer_name', label: 'Engineer Name' },
+                                  { key: 'customer_name', label: 'Customer Name' },
+                                  { key: 'sr_invoice_engine_no', label: 'SR / Invoice / Engine No.' },
+                                  { key: 'work_description', label: 'Work Description' },
+                                  { key: 'km', label: 'KM' },
+                                  { key: 'rate', label: 'Rate' },
+                                  { key: 'da', label: 'DA' },
+                                  { key: 'amount', label: 'Amount' },
+                                  { key: 'work_status', label: 'Work Status' },
+                                  { key: 'asset_count', label: 'Asset Count' },
+                                  { key: 'kva_hp', label: 'KVA / HP' },
+                                  { key: 'ho_corrected_km', label: 'HO Corrected KM' },
+                                  { key: 'ho_remark', label: 'HO Remark' },
+                                  { key: 'verification_status', label: 'Status' },
+                                  { key: 'created_by', label: 'Created By' },
+                                ]
+                              )}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md shadow-sm"
+                              style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
+                            >
+                              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
+                              </svg>
+                              Export
+                            </button>
+                          )}
                           {kmWiseVerifiedOnly && (
                             <button
                               onClick={() => setKmWiseVerifiedOnly(false)}
@@ -9013,6 +9301,57 @@ const BranchAdminExpense = () => {
                             </svg>
                             Back
                           </button>
+                          {canExport && (() => {
+                            const isBM = (billWiseSelectedPeriod.records[0]?.entry_type) === 'BM';
+                            const rows = billWiseSelectedPeriod.records.filter(r => !billWiseVerifiedOnly || r.verification_status === 'Verified');
+                            const bmCols = [
+                              { key: 'date', label: 'Date' },
+                              { key: 'customer_name', label: 'Customer Name' },
+                              { key: 'sr_invoice_engine_no', label: 'SR No. / Inv / Engine' },
+                              { key: 'installation_site_address', label: 'Location' },
+                              { key: 'expenses_head', label: 'Expense Head' },
+                              { key: 'amount', label: 'Amount' },
+                              { key: 'bill_submitted', label: 'Bill Submitted' },
+                              { key: 'work_description', label: 'Work Description' },
+                              { key: 'remark', label: 'Remark' },
+                              { key: 'work_status', label: 'Work Status' },
+                              { key: 'created_by', label: 'Employee Name' },
+                              { key: 'verification_status', label: 'Status' },
+                            ];
+                            const seCols = [
+                              { key: 'date', label: 'Date' },
+                              { key: 'service_request_no', label: 'SR No.' },
+                              { key: 'account', label: 'Account' },
+                              { key: 'installation_site_address', label: 'Installation Site Address' },
+                              { key: 'sr_type', label: 'SR Type' },
+                              { key: 'expenses_head', label: 'Expense Head' },
+                              { key: 'amount', label: 'Amount' },
+                              { key: 'work_description', label: 'Work Description' },
+                              { key: 'kms_travelled', label: 'KMs Travelled' },
+                              { key: 'task_status', label: 'Task Status' },
+                              { key: 'appointment_number', label: 'Appointment No.' },
+                              { key: 'task_start_date', label: 'Task Start Date' },
+                              { key: 'task_end_date', label: 'Task End Date' },
+                              { key: 'engineer_name', label: 'Engineer' },
+                              { key: 'employee_id', label: 'Emp ID' },
+                              { key: 'service_engineer_uid', label: 'UID' },
+                              { key: 'bill_submitted', label: 'Bill Submitted' },
+                              { key: 'verification_status', label: 'Status' },
+                              { key: 'created_by', label: 'Created By' },
+                            ];
+                            return (
+                              <button
+                                onClick={() => exportToExcel(rows, `bill_wise_${billWiseSelectedPeriod.engineerName}_${userBranch}.xlsx`, isBM ? bmCols : seCols)}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md shadow-sm"
+                                style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
+                              >
+                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
+                                </svg>
+                                Export
+                              </button>
+                            );
+                          })()}
                           {billWiseVerifiedOnly && (
                             <button
                               onClick={() => setBillWiseVerifiedOnly(false)}
@@ -9638,1625 +9977,15 @@ const BranchAdminExpense = () => {
           );
         })()}
 
-        {/* History Modal */}
+        {/* History Modal — delegated to BranchTADAHistory */}
         {showHistoryModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-2 bg-black/50 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-[98vw] max-h-[92vh] overflow-hidden flex flex-col">
-
-              <div className="px-4 py-2 flex justify-between items-center shrink-0 gap-3 flex-wrap" style={{ background: themeColor }}>
-                <div className="flex items-center gap-2">
-                  <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <h2 className="text-sm font-semibold text-white whitespace-nowrap">
-                    History — {getBranchLabel(userBranch)}
-                  </h2>
-                  {!loadingHistory && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/20 text-white">
-                      {historyMainTab === 'sales'
-                        ? (salesHistoryTab === 'all' ? `${salesHistoryRecords.length} records` : `${salesHistoryGrouped.groups?.length || 0} periods`)
-                        : historyMainTab === 'km_wise'
-                          ? (kmWiseHistoryTab === 'all' ? `${kmWiseHistoryRecords.length} records` : `${kmWiseHistoryGrouped.groups?.length || 0} periods`)
-                          : historyMainTab === 'bill_wise'
-                            ? (billWiseHistoryTab === 'all' ? `${billWiseHistoryRecords.length} records` : `${billWiseHistoryGrouped.groups?.length || 0} periods`)
-                            : (historyTab === 'all' ? `${historyRecords.length} records` : `${historyGrouped.groups?.length || 0} periods`)}
-                    </span>
-                  )}
-                </div>
-
-                {/* 4 main tabs */}
-                {!loadingHistory && (
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <button
-                      onClick={() => { setHistoryMainTab('service_engineer'); setSalesSelectedHistoryPeriod(null); setKmWiseSelectedHistoryPeriod(null); setBillWiseSelectedHistoryPeriod(null); }}
-                      className="px-3 py-1 text-[11px] font-bold rounded-md transition-all"
-                      style={{
-                        backgroundColor: historyMainTab === 'service_engineer' ? '#fff' : 'rgba(255,255,255,0.15)',
-                        color: historyMainTab === 'service_engineer' ? themeColor : '#fff',
-                      }}
-                    >
-                      Service Engineer ({historyRecords.length})
-                    </button>
-                    <button
-                      onClick={() => { setHistoryMainTab('sales'); setSelectedPeriod(null); setKmWiseSelectedHistoryPeriod(null); setBillWiseSelectedHistoryPeriod(null); }}
-                      className="px-3 py-1 text-[11px] font-bold rounded-md transition-all"
-                      style={{
-                        backgroundColor: historyMainTab === 'sales' ? '#fff' : 'rgba(255,255,255,0.15)',
-                        color: historyMainTab === 'sales' ? themeColor : '#fff',
-                      }}
-                    >
-                      Sales & BM TADA ({salesHistoryRecords.length})
-                    </button>
-
-                    <button
-                      onClick={() => { setHistoryMainTab('bill_wise'); setSelectedPeriod(null); setSalesSelectedHistoryPeriod(null); setKmWiseSelectedHistoryPeriod(null); }}
-                      className="px-3 py-1 text-[11px] font-bold rounded-md transition-all"
-                      style={{
-                        backgroundColor: historyMainTab === 'bill_wise' ? '#fff' : 'rgba(255,255,255,0.15)',
-                        color: historyMainTab === 'bill_wise' ? themeColor : '#fff',
-                      }}
-                    >
-                      Bill Wise ({billWiseHistoryRecords.length})
-                    </button>
-                  </div>
-                )}
-
-                <button
-                  onClick={closeHistoryModalBranch}
-                  className="w-7 h-7 bg-white rounded-lg flex items-center justify-center transition-all"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              {/* ════════════ SERVICE ENGINEER SECTION ════════════ */}
-              {historyMainTab === 'service_engineer' && (
-                <>
-
-                  {/* Tab Bar */}
-                  {!loadingHistory && (
-                    <div className="shrink-0 px-4 py-2 border-b bg-gray-100 flex items-center gap-2 flex-wrap">
-                      <button
-                        onClick={() => { setHistoryTab('all'); setSelectedPeriod(null); }}
-                        className="px-3 py-1 text-[11px] font-semibold rounded-md transition-all border"
-                        style={{
-                          backgroundColor: historyTab === 'all' ? themeColor : '#fff',
-                          color: historyTab === 'all' ? 'white' : '#374151',
-                          borderColor: historyTab === 'all' ? themeColor : '#e5e7eb',
-                        }}
-                      >
-                        All Records ({historyRecords.length})
-                      </button>
-                      <button
-                        onClick={() => { setHistoryTab('periods'); setSelectedPeriod(null); }}
-                        className="px-3 py-1 text-[11px] font-semibold rounded-md transition-all border"
-                        style={{
-                          backgroundColor: historyTab === 'periods' ? '#059669' : '#fff',
-                          color: historyTab === 'periods' ? 'white' : '#374151',
-                          borderColor: historyTab === 'periods' ? '#059669' : '#e5e7eb',
-                        }}
-                      >
-                        By Submission Period ({historyGrouped.groups?.length || 0})
-                      </button>
-
-                      {/* Rule info — only when NOT in period detail */}
-                      {historyTab === 'periods' && !selectedPeriod && historyGrouped.rule_type && (
-                        <span className="text-[10px] text-gray-600 ml-2 px-2 py-1 bg-white rounded border border-gray-200">
-                          Rule: <strong>{historyGrouped.rule_type === 'weekdays' ? 'Weekly' : 'Monthly'}</strong>
-                          {' • '}Period size: <strong>{historyGrouped.period_days} days</strong>
-                        </span>
-                      )}
-
-                      {/* Export button — Periods summary view */}
-                      {historyTab === 'periods' && !selectedPeriod && canExport && historyGrouped.groups?.length > 0 && (
-                        <button
-                          onClick={() => {
-                            exportToExcel(
-                              historyGrouped.groups.map(g => ({
-                                period_start: g.period_start_display,
-                                period_end: g.period_end_display,
-                                uploaded_by: g.uploaded_by,
-                                record_count: g.record_count,
-                                total_amount: g.total_amount,
-                                paid_date: g.paid_date ? new Date(g.paid_date).toLocaleDateString('en-IN') : 'Not paid',
-                              })),
-                              `tada_history_periods_${userBranch}.xlsx`,
-                              [
-                                { key: 'period_start', label: 'Period Start' },
-                                { key: 'period_end', label: 'Period End' },
-                                { key: 'uploaded_by', label: 'Submitted By' },
-                                { key: 'record_count', label: 'Number of Activity' },
-                                { key: 'total_amount', label: 'Total Amount' },
-                                { key: 'paid_date', label: 'HO Paid Date' },
-                              ]
-                            );
-                          }}
-                          className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg ml-auto"
-                          style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
-                        >
-                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
-                          </svg>
-                          Export Periods
-                        </button>
-                      )}
-
-                      {/* Export button — inside drilled-in period */}
-                      {historyTab === 'periods' && selectedPeriod && canExport && (
-                        <button
-                          onClick={() => {
-                            const idSet = new Set(selectedPeriod.record_ids || []);
-                            const periodRecords = historyRecords.filter(r => idSet.has(r.id));
-                            exportToExcel(
-                              periodRecords,
-                              `tada_history_period_${selectedPeriod.period_start_display}_${userBranch}.xlsx`,
-                              [
-                                { key: 'appointment_number', label: 'Appointment No.' },
-                                { key: 'service_engineer_name', label: 'Engineer Name' },
-                                { key: 'service_engineer_uid', label: 'Engineer UID' },
-                                { key: 'sd_branch_name', label: 'Branch' },
-                                { key: 'installation_site_address', label: 'Installation Address' },
-                                { key: 'account', label: 'Account' },
-                                { key: 'service_request_no', label: 'SR No.' },
-                                { key: 'sr_type', label: 'SR Type' },
-                                { key: 'sr_sub_type', label: 'SR Sub Type' },
-                                { key: 'sr_due_date', label: 'SR Due Date' },
-                                { key: 'task_status', label: 'Task Status' },
-                                { key: 'sr_reach_at_site_datetime', label: 'SR Reach at Site' },
-                                { key: 'kms_travelled', label: 'KMs Travelled' },
-                                { key: 'two_way_km', label: 'Two Way KM' },
-                                { key: 'branch_verified_km', label: 'Branch Verified KM' },
-                                { key: 'ho_corrected_km', label: 'HO Corrected KM' },
-                                { key: 'km_rate_applied', label: 'KM Rate' },
-                                { key: 'da_amount', label: 'DA Amount' },
-                                { key: 'freight_charges', label: 'Freight Charges' },
-                                { key: 'total_amount', label: 'Total Amount' },
-                                { key: 'verification_status', label: 'Verification Status' },
-                                { key: 'submitted_by_name', label: 'Submitted By' },
-                                { key: 'moved_at', label: 'Submitted At' },
-                                { key: 'paid_date', label: 'Paid Date' },
-                              ]
-                            );
-                          }}
-                          className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg"
-                          style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
-                        >
-                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
-                          </svg>
-                          Export Period
-                        </button>
-                      )}
-
-                      {/* Period info inline (merged from old blue bar) + Back button */}
-                      {historyTab === 'periods' && selectedPeriod && (
-                        <>
-                          <div className="flex items-center gap-2 ml-2 px-2.5 py-1 bg-blue-50 rounded-lg border border-blue-200 flex-wrap">
-                            <span className="text-[11px] text-gray-600">Period:</span>
-                            <span className="text-[11px] font-bold text-gray-800">
-                              {selectedPeriod.period_start_display} → {selectedPeriod.period_end_display}
-                            </span>
-                            <span className="text-gray-300">|</span>
-                            <span className="text-[11px] text-gray-600">Submitted By:</span>
-                            <span className="text-[11px] font-bold text-purple-700">{selectedPeriod.uploaded_by}</span>
-                            <span className="text-gray-300">|</span>
-                            <span className="text-[11px] text-gray-600">Records:</span>
-                            <span className="text-[11px] font-bold text-gray-800">{selectedPeriod.record_count}</span>
-                            <span className="text-gray-300">|</span>
-                            <span className="text-[11px] text-gray-600">Total:</span>
-                            <span className="text-[11px] font-bold text-blue-700">
-                              ₹{parseFloat(selectedPeriod.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </span>
-                            {selectedPeriod.paid_date && (
-                              <>
-                                <span className="text-gray-300">|</span>
-                                <span className="text-[11px] text-gray-600">Paid:</span>
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-100 text-green-800 text-[10px] font-bold">
-                                  <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                  </svg>
-                                  {new Date(selectedPeriod.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                </span>
-                              </>
-                            )}
-                          </div>
-                          <button
-                            onClick={() => setSelectedPeriod(null)}
-                            className="ml-auto inline-flex items-center gap-1 px-2 py-1 text-[10px] text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-50"
-                          >
-                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                            </svg>
-                            Back to Periods
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Search & Filter Bar — only on All Records tab */}
-                  {historyTab === 'all' && !loadingHistory && historyRecords.length > 0 && (
-                    <div className="shrink-0 px-4 py-2 border-b bg-gray-50 flex flex-wrap items-center gap-2">
-                      <div className="relative flex-1 min-w-[200px]">
-                        <svg className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
-                        <input
-                          type="text"
-                          value={historySearch}
-                          onChange={e => setHistorySearch(e.target.value)}
-                          placeholder="Search by engineer, SR no, appointment no, account..."
-                          className="w-full pl-7 pr-3 py-1.5 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        />
-                        {historySearch && (
-                          <button onClick={() => setHistorySearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Engineer Filter */}
-                      <select
-                        value={historyEngineer}
-                        onChange={e => setHistoryEngineer(e.target.value)}
-                        className="px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
-                      >
-                        <option value="">All Engineers</option>
-                        {Array.from(
-                          new Map(
-                            historyRecords
-                              .filter(r => r.service_engineer_uid)
-                              .map(r => [r.service_engineer_uid, r.service_engineer_name || r.service_engineer_uid])
-                          ).entries()
-                        )
-                          .sort((a, b) => String(a[1]).localeCompare(String(b[1])))
-                          .map(([uid, name]) => (
-                            <option key={uid} value={uid}>{name}</option>
-                          ))}
-                      </select>
-
-                      {/* Submitted Date Filter */}
-                      <div className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-lg bg-white">
-                        <span className="text-[10px] font-bold text-gray-500 uppercase whitespace-nowrap">Submitted:</span>
-                        <input
-                          type="date"
-                          value={historyDateFrom}
-                          onChange={e => setHistoryDateFrom(e.target.value)}
-                          className="px-1.5 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          title="Submitted From"
-                        />
-                        <span className="text-[10px] text-gray-400">to</span>
-                        <input
-                          type="date"
-                          value={historyDateTo}
-                          onChange={e => setHistoryDateTo(e.target.value)}
-                          className="px-1.5 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          title="Submitted To"
-                        />
-                      </div>
-
-                      {/* SR Reach at Site Date Filter */}
-                      <div className="flex items-center gap-1 px-2 py-1 border border-blue-200 rounded-lg bg-blue-50">
-                        <span className="text-[10px] font-bold text-blue-600 uppercase whitespace-nowrap">SR Reach:</span>
-                        <input
-                          type="date"
-                          value={historyReachDateFrom}
-                          onChange={e => setHistoryReachDateFrom(e.target.value)}
-                          className="px-1.5 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          title="SR Reach at Site From"
-                        />
-                        <span className="text-[10px] text-gray-400">to</span>
-                        <input
-                          type="date"
-                          value={historyReachDateTo}
-                          onChange={e => setHistoryReachDateTo(e.target.value)}
-                          className="px-1.5 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          title="SR Reach at Site To"
-                        />
-                      </div>
-
-                      {(historySearch || historyDateFrom || historyDateTo || historyReachDateFrom || historyReachDateTo || historyEngineer) && (
-                        <button
-                          onClick={() => {
-                            setHistorySearch('');
-                            setHistoryDateFrom('');
-                            setHistoryDateTo('');
-                            setHistoryReachDateFrom('');
-                            setHistoryReachDateTo('');
-                            setHistoryEngineer('');
-                          }}
-                          className="px-2 py-1.5 text-xs text-red-600 border border-red-300 rounded-lg hover:bg-red-50 transition-colors whitespace-nowrap"
-                        >
-                          Clear Filters
-                        </button>
-                      )}
-                      {/* End Of Search & Filter Bar */}
-                      {canExport && (
-                        <button
-                          onClick={() => {
-                            const toExport = window.__historyFiltered || historyRecords;
-                            exportToExcel(
-                              toExport,
-                              `history_${userBranch}.xlsx`,
-                              [
-                                { key: 'appointment_number', label: 'Appointment No.' },
-                                { key: 'service_engineer_name', label: 'Engineer Name' },
-                                { key: 'service_engineer_uid', label: 'Engineer UID' },
-                                { key: 'sd_branch_name', label: 'Branch' },
-                                { key: 'installation_site_address', label: 'Installation Address' },
-                                { key: 'account', label: 'Account' },
-                                { key: 'service_request_no', label: 'SR No.' },
-                                { key: 'sr_type', label: 'SR Type' },
-                                { key: 'sr_sub_type', label: 'SR Sub Type' },
-                                { key: 'sr_due_date', label: 'SR Due Date' },
-                                { key: 'task_start_date', label: 'Task Start Date' },
-                                { key: 'task_end_date', label: 'Task End Date' },
-                                { key: 'task_status', label: 'Task Status' },
-                                { key: 'kms_travelled', label: 'KMs Travelled' },
-                                { key: 'sr_closed_date', label: 'SR Closed Date' },
-                                { key: 'sr_status', label: 'SR Status' },
-                                { key: 'two_way_km', label: 'Two Way KM' },
-                                { key: 'branch_verified_km', label: 'Branch Verified KM' },
-                                { key: 'km_verification_remark', label: 'Branch Verification Remark' },
-                                { key: 'ho_corrected_km', label: 'HO Corrected KM' },
-                                { key: 'km_rate_applied', label: 'KM Rate' },
-                                { key: 'da_amount', label: 'DA Amount' },
-                                { key: 'freight_charges', label: 'Freight Charges' },
-                                { key: 'total_amount', label: 'Total Amount' },
-                                { key: 'ho_remark', label: 'HO Remark' },
-                                { key: 'verification_status', label: 'Verification Status' },
-                                { key: 'submitted_by_name', label: 'Submitted By' },
-                                { key: 'moved_at', label: 'Submitted At' },
-                                { key: 'sr_reach_at_site_datetime', label: 'SR Reach at Site' },
-                                { key: 'paid_date', label: 'Paid Date (HO)' },
-                              ]
-                            );
-                          }}
-                          className="inline-flex items-center gap-1 px-2 py-1.5 text-white text-[10px] font-medium rounded-lg transition-all hover:opacity-90 whitespace-nowrap"
-                          style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
-                        >
-                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
-                          </svg>
-                          Export
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Body */}
-                  <div className="flex-1 overflow-auto" style={{ scrollbarWidth: 'thin' }}>
-                    {loadingHistory ? (
-                      <div className="text-center py-20">
-                        <svg className="animate-spin h-8 w-8 mx-auto mb-3" style={{ color: themeColor }} viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                        <p className="text-sm text-gray-500">Loading history records...</p>
-                      </div>
-                    ) : historyRecords.length === 0 ? (
-                      <div className="text-center py-20">
-                        <svg className="h-14 w-14 mx-auto text-gray-200 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <p className="text-sm text-gray-500 font-medium">No history records found for this branch</p>
-                      </div>
-                    ) : historyTab === 'periods' ? (
-                      /* ─────────── BY SUBMISSION PERIOD TAB ─────────── */
-                      !selectedPeriod ? (
-                        historyGrouped.groups?.length === 0 ? (
-                          <div className="text-center py-20">
-                            <p className="text-sm text-gray-500 font-medium">No grouped periods available</p>
-                            <p className="text-[11px] text-gray-400 mt-1">No history records have a valid SR Reach at Site date.</p>
-                          </div>
-                        ) : (
-                          <table className="border-collapse w-full">
-                            <thead className="sticky top-0 z-10">
-                              <tr style={{ backgroundColor: '#f0f1ff' }}>
-                                {[
-                                  { label: 'Sr. No.', width: 60 },
-                                  { label: 'Period (SR Reach at Site)', width: 320 },
-                                  { label: 'Submitted By', width: 180 },
-                                  { label: 'Voucher No.', width: 150 },
-                                  { label: 'Number of Activity', width: 110 },
-                                  { label: 'Total Amount', width: 160 },
-                                  { label: 'Paid Date (HO)', width: 180 },
-                                ].map((col, i) => (
-                                  <th key={i}
-                                    className="px-3 py-2 text-[11px] font-bold text-gray-700 border-r border-b-2 border-gray-200 last:border-r-0 uppercase tracking-wide whitespace-nowrap text-center"
-                                    style={{ width: `${col.width}px`, backgroundColor: '#f0f1ff' }}>
-                                    {col.label}
-                                  </th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                              {historyGrouped.groups.map((g, idx) => (
-                                <tr
-                                  key={idx}
-                                  onClick={() => setSelectedPeriod(g)}
-                                  className="hover:bg-blue-50 cursor-pointer transition-colors"
-                                  style={{ height: '38px' }}
-                                >
-                                  <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-medium">{idx + 1}</td>
-                                  <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center">
-                                    <span
-                                      className="inline-flex items-center gap-1.5 underline cursor-pointer transition-all hover:font-bold"
-                                      style={{ color: themeColor, textUnderlineOffset: '2px' }}
-                                      title="Click to view this period's records"
-                                    >
-                                      <span>{g.period_start_display}</span>
-                                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                                      </svg>
-                                      <span>{g.period_end_display}</span>
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center">
-                                    <span className="px-2 py-0.5 rounded-full font-medium">
-                                      {g.uploaded_by}
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-mono">{g.voucher_no || '-'}</td>
-                                  <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-bold">{g.record_count}</td>
-                                  <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-bold text-blue-700">
-                                    ₹{parseFloat(g.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                  </td>
-                                  <td className="px-3 py-1 text-[12px] text-center">
-                                    {g.paid_date ? (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 font-semibold border border-green-100">
-                                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                        </svg>
-                                        {new Date(g.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                      </span>
-                                    ) : g.paid_count > 0 ? (
-                                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-700 border border-yellow-100 font-semibold">
-                                        Mixed ({g.paid_count}/{g.record_count})
-                                      </span>
-                                    ) : (
-                                      <span className="text-[10px] text-gray-400 italic">Not paid yet</span>
-                                    )}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                            <tfoot className="sticky bottom-0">
-                              <tr style={{ backgroundColor: '#f0f1ff' }}>
-                                <td colSpan={4} className="px-3 py-1.5 text-[12px] font-bold text-gray-600 text-right border-t-2 border-gray-200">Grand Total</td>
-                                <td className="px-3 py-1.5 text-[12px] font-bold text-center border-t-2 border-gray-200">
-                                  {historyGrouped.groups.reduce((s, g) => s + (g.record_count || 0), 0)}
-                                </td>
-                                <td className="px-3 py-1.5 text-[12px] font-bold text-center border-t-2 border-gray-200" style={{ color: themeColor }}>
-                                  ₹{historyGrouped.groups.reduce((s, g) => s + parseFloat(g.total_amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </td>
-                                <td className="border-t-2 border-gray-200" />
-                              </tr>
-                            </tfoot>
-                          </table>
-                        )
-                      ) : (() => {
-                        const idSet = new Set(selectedPeriod.record_ids || []);
-                        let periodRecords = historyRecords.filter(r => idSet.has(r.id));
-                        if (historyPeriodTaskStatusFilter.size > 0) {
-                          periodRecords = periodRecords.filter(r =>
-                            historyPeriodTaskStatusFilter.has(String(r.task_status || '').trim())
-                          );
-                        }
-                        return (
-                          <table className="border-collapse w-full" style={{ minWidth: '3495px', tableLayout: 'fixed' }}>
-                            <thead className="sticky top-0 z-10">
-                              <tr style={{ backgroundColor: '#f0f1ff' }}>
-                                {[
-                                  { label: 'Sr. No.', width: 50 },
-                                  { label: 'Installation Address', width: 160 },
-                                  { label: 'Account', width: 130 },
-                                  { label: 'SR No.', width: 100 },
-                                  { label: 'SR Sub Type', width: 75 },
-                                  { label: 'SR Trip Start Date & Time', width: 105 },
-                                  { label: 'SR Reach at Site Date & Time', width: 110 },
-                                  { label: 'KMs Travelled', width: 75 },
-                                  { label: 'Two Way KM', width: 75 },
-                                  { label: 'Branch Verified KM', width: 95 },
-                                  { label: 'Branch Verification Remark', width: 130 },
-                                  { label: 'HO Corrected KM', width: 95 },
-                                  { label: 'DA Amount', width: 75 },
-                                  { label: 'Freight Charges', width: 80 },
-                                  { label: 'Total Amount', width: 85 },
-                                  { label: 'HO Remark', width: 130 },
-                                  { label: 'Appointment No.', width: 95 },
-                                  { label: 'SR Type', width: 70 },
-                                  { label: 'SR Due Date', width: 80 },
-                                  { label: 'Task Start Date', width: 95 },
-                                  { label: 'Task End Date', width: 95 },
-                                  { label: 'Task Status', width: 75 },
-                                  { label: 'Task Assigned Date & Time', width: 105 },
-                                  { label: 'SR Trip Start Lat Long', width: 120 },
-                                  { label: 'SR Reach at Site Lat Long', width: 125 },
-                                  { label: 'SR Closed Date', width: 85 },
-                                  { label: 'SR Status', width: 75 },
-                                  { label: 'KM Rate', width: 70 },
-                                  { label: 'Engineer Name', width: 110 },
-                                  { label: 'Engineer UID', width: 90 },
-                                  { label: 'Employee ID', width: 90 },
-                                  { label: 'Branch', width: 100 },
-                                  { label: 'Verification Status', width: 90 },
-                                  { label: 'Submitted By', width: 105 },
-                                  { label: 'Submitted At', width: 115 },
-                                  { label: 'Paid Date (HO)', width: 105 },
-                                ].map((col, i) => {
-                                  if (col.label === 'Task Status') {
-                                    const isActive = historyPeriodTaskStatusFilter.size > 0;
-                                    // Source = unfiltered period records so all statuses stay selectable
-                                    const sourceRecords = historyRecords.filter(r => idSet.has(r.id));
-                                    return (
-                                      <th key={i}
-                                        title={col.label}
-                                        className="px-1 py-0.5 text-[10px] font-bold text-gray-700 border-r border-b border-gray-300 uppercase tracking-tight text-center align-middle"
-                                        style={{
-                                          width: `${col.width}px`,
-                                          minWidth: `${col.width}px`,
-                                          maxWidth: `${col.width}px`,
-                                          backgroundColor: '#f0f1ff',
-                                          whiteSpace: 'normal',
-                                          wordBreak: 'break-word',
-                                          overflowWrap: 'break-word',
-                                          overflow: 'visible',
-                                          height: '34px',
-                                          lineHeight: '1.15',
-                                        }}>
-                                        <div className="flex items-center justify-center gap-1">
-                                          <span>{col.label}</span>
-                                          <button
-                                            onClick={(e) => openTaskStatusFilter(e, sourceRecords, historyPeriodTaskStatusFilter, setHistoryPeriodTaskStatusFilter)}
-                                            className={`p-0.5 rounded transition-colors ${isActive ? 'bg-blue-600 text-white' : 'hover:bg-blue-100 text-gray-500'}`}
-                                            title={isActive ? `Filtering: ${historyPeriodTaskStatusFilter.size} value(s)` : 'Filter Task Status'}
-                                          >
-                                            <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24">
-                                              <path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L15 12.414V19a1 1 0 01-.553.894l-4 2A1 1 0 019 21v-8.586L3.293 6.707A1 1 0 013 6V4z" />
-                                            </svg>
-                                          </button>
-                                        </div>
-                                      </th>
-                                    );
-                                  }
-                                  return (
-                                    <th key={i}
-                                      title={col.label}
-                                      className="px-1 py-0.5 text-[10px] font-bold text-gray-700 border-r border-b border-gray-300 uppercase tracking-tight text-center align-middle"
-                                      style={{
-                                        width: `${col.width}px`,
-                                        minWidth: `${col.width}px`,
-                                        maxWidth: `${col.width}px`,
-                                        backgroundColor: '#f0f1ff',
-                                        whiteSpace: 'normal',
-                                        wordBreak: 'break-word',
-                                        overflowWrap: 'break-word',
-                                        overflow: 'hidden',
-                                        height: '34px',
-                                        lineHeight: '1.15',
-                                      }}>
-                                      {col.label}
-                                    </th>
-                                  );
-                                })}
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                              {periodRecords.map((record, idx) => {
-                                const cell = (val, fallback = '-') => {
-                                  const v = val !== null && val !== undefined && String(val).trim() !== '' ? String(val) : fallback;
-                                  return <div className="truncate" title={v}>{v}</div>;
-                                };
-                                const movedAtFmt = record.moved_at ? record.moved_at.substring(0, 16).replace('T', ' ') : '-';
-                                return (
-                                  <tr key={record.id} className="hover:bg-blue-50/30 transition-colors" style={{ height: '28px' }}>
-                                    {/* 1. Sr. No. */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{idx + 1}</td>
-                                    {/* 2. Installation Address */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.installation_site_address)}</td>
-                                    {/* 3. Account */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.account)}</td>
-                                    {/* 4. SR No. */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.service_request_no)}</td>
-                                    {/* 5. SR Sub Type */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_sub_type)}</td>
-                                    {/* 6. SR Trip Start Date & Time */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_trip_start_datetime)}</td>
-                                    {/* 7. SR Reach at Site Date & Time */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_reach_at_site_datetime)}</td>
-                                    {/* 8. KMs Travelled */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center font-semibold">{cell(record.kms_travelled)}</td>
-                                    {/* 9. Two Way KM */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.two_way_km)}</td>
-                                    {/* 10. Branch Verified KM */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.branch_verified_km)}</td>
-                                    {/* 11. Branch Verification Remark */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.km_verification_remark)}</td>
-                                    {/* 12. HO Corrected KM */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.ho_corrected_km)}</td>
-                                    {/* 13. DA Amount */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center font-semibold text-green-700">
-                                      <div className="truncate" title={record.da_amount && parseFloat(record.da_amount) !== 0 ? `₹${record.da_amount}` : '-'}>
-                                        {record.da_amount && parseFloat(record.da_amount) !== 0 ? `₹${record.da_amount}` : '-'}
-                                      </div>
-                                    </td>
-                                    {/* Freight Charges */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center font-semibold text-orange-700">
-                                      <div className="truncate" title={record.freight_charges && parseFloat(record.freight_charges) !== 0 ? `₹${record.freight_charges}` : '-'}>
-                                        {record.freight_charges && parseFloat(record.freight_charges) !== 0 ? `₹${record.freight_charges}` : '-'}
-                                      </div>
-                                    </td>
-                                    {/* 14. Total Amount */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center font-bold text-blue-700">
-                                      <div className="truncate" title={record.total_amount && parseFloat(record.total_amount) !== 0 ? `₹${record.total_amount}` : '-'}>
-                                        {record.total_amount && parseFloat(record.total_amount) !== 0 ? `₹${record.total_amount}` : '-'}
-                                      </div>
-                                    </td>
-                                    {/* 15. HO Remark */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.ho_remark)}</td>
-                                    {/* 16. Appointment No. */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.appointment_number)}</td>
-                                    {/* 17. SR Type */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_type)}</td>
-                                    {/* 18. SR Due Date */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_due_date)}</td>
-                                    {/* 19. Task Start Date */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.task_start_date)}</td>
-                                    {/* 20. Task End Date */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.task_end_date)}</td>
-                                    {/* 21. Task Status */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.task_status)}</td>
-                                    {/* 22. Task Assigned Date & Time */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.task_assigned_datetime)}</td>
-                                    {/* 23. SR Trip Start Lat Long */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_trip_start_lat_long)}</td>
-                                    {/* 24. SR Reach at Site Lat Long */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_reach_at_site_lat_long)}</td>
-                                    {/* 25. SR Closed Date */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_closed_date)}</td>
-                                    {/* 26. SR Status */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-center" title={record.sr_status || '-'}>
-                                      <span className={`px-1.5 py-0.5 rounded-full text-[9px] whitespace-nowrap ${record.sr_status === 'Closed' ? 'bg-green-100 text-green-800' : record.sr_status === 'In Progress' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>
-                                        {record.sr_status || '-'}
-                                      </span>
-                                    </td>
-                                    {/* 27. KM Rate */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.km_rate_applied)}</td>
-                                    {/* 28. Engineer Name */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.service_engineer_name)}</td>
-                                    {/* 29. Engineer UID */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.service_engineer_uid)}</td>
-                                    {/* 29b. Employee ID */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.employee_id)}</td>
-                                    {/* 30. Branch */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sd_branch_name || record.sd_branch_code)}</td>
-                                    {/* 31. Verification Status */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-center" title={record.verification_status || '-'}>
-                                      <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-green-100 text-green-800 whitespace-nowrap">
-                                        {record.verification_status || '-'}
-                                      </span>
-                                    </td>
-                                    {/* 32. Submitted By */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.submitted_by_name)}</td>
-                                    {/* 33. Submitted At */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(movedAtFmt)}</td>
-                                    {/* 34. Paid Date (HO) */}
-                                    <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">
-                                      {record.paid_date ? (
-                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] bg-green-100 text-green-800 font-semibold whitespace-nowrap">
-                                          <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                          </svg>
-                                          {new Date(record.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })}
-                                        </span>
-                                      ) : (
-                                        <span className="text-[10px] text-gray-400 italic">Not paid</span>
-                                      )}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        );
-                      })()
-                    ) : (() => {
-                      const filtered = historyRecords.filter(record => {
-                        const searchLower = historySearch.toLowerCase();
-                        const matchesSearch = !historySearch || [
-                          record.service_engineer_name, record.service_engineer_uid,
-                          record.appointment_number, record.service_request_no,
-                          record.account, record.sr_type, record.sr_sub_type,
-                          record.installation_site_address, record.submitted_by_name,
-                        ].some(val => val && val.toLowerCase().includes(searchLower));
-
-                        // Submitted Date filter (moved_at)
-                        const movedDate = record.moved_at ? record.moved_at.substring(0, 10) : '';
-                        const matchesFrom = !historyDateFrom || movedDate >= historyDateFrom;
-                        const matchesTo = !historyDateTo || movedDate <= historyDateTo;
-
-                        // SR Reach at Site Date filter (safe — never throws on bad dates)
-                        let reachDate = '';
-                        if (record.sr_reach_at_site_datetime) {
-                          const _d = new Date(record.sr_reach_at_site_datetime);
-                          if (!isNaN(_d.getTime())) {
-                            reachDate = _d.toISOString().substring(0, 10);
-                          }
-                        }
-                        const matchesReachFrom = !historyReachDateFrom || (reachDate && reachDate >= historyReachDateFrom);
-                        const matchesReachTo = !historyReachDateTo || (reachDate && reachDate <= historyReachDateTo);
-
-                        const matchesEngineer = !historyEngineer || record.service_engineer_uid === historyEngineer;
-
-                        const matchesTaskStatus = historyAllTaskStatusFilter.size === 0 ||
-                          historyAllTaskStatusFilter.has(String(record.task_status || '').trim());
-                        return matchesSearch && matchesFrom && matchesTo && matchesReachFrom && matchesReachTo && matchesEngineer && matchesTaskStatus;
-                      });
-                      window.__historyFiltered = filtered;
-                      return filtered.length === 0 ? (
-                        <div className="text-center py-20">
-                          <svg className="h-14 w-14 mx-auto text-gray-200 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                          </svg>
-                          <p className="text-sm text-gray-500 font-medium">No records match your search/filter</p>
-                          <button onClick={() => { setHistorySearch(''); setHistoryDateFrom(''); setHistoryDateTo(''); setHistoryReachDateFrom(''); setHistoryReachDateTo(''); setHistoryEngineer(''); }} className="mt-2 text-xs text-blue-600 hover:underline">Clear filters</button>
-                        </div>
-                      ) : (
-                        <table className="border-collapse w-full" style={{ minWidth: '3495px', tableLayout: 'fixed' }}>
-                          <thead className="sticky top-0 z-10">
-                            <tr style={{ backgroundColor: '#f0f1ff' }}>
-                              {[
-                                { label: 'Sr. No.', width: 50 },
-                                { label: 'Installation Address', width: 160 },
-                                { label: 'Account', width: 130 },
-                                { label: 'SR No.', width: 100 },
-                                { label: 'SR Sub Type', width: 75 },
-                                { label: 'SR Trip Start Date & Time', width: 105 },
-                                { label: 'SR Reach at Site Date & Time', width: 110 },
-                                { label: 'KMs Travelled', width: 75 },
-                                { label: 'Two Way KM', width: 75 },
-                                { label: 'Branch Verified KM', width: 95 },
-                                { label: 'Branch Verification Remark', width: 130 },
-                                { label: 'HO Corrected KM', width: 95 },
-                                { label: 'DA Amount', width: 75 },
-                                { label: 'Freight Charges', width: 80 },
-                                { label: 'Total Amount', width: 85 },
-                                { label: 'HO Remark', width: 130 },
-                                { label: 'Appointment No.', width: 95 },
-                                { label: 'SR Type', width: 70 },
-                                { label: 'SR Due Date', width: 80 },
-                                { label: 'Task Start Date', width: 95 },
-                                { label: 'Task End Date', width: 95 },
-                                { label: 'Task Status', width: 75 },
-                                { label: 'Task Assigned Date & Time', width: 105 },
-                                { label: 'SR Trip Start Lat Long', width: 120 },
-                                { label: 'SR Reach at Site Lat Long', width: 125 },
-                                { label: 'SR Closed Date', width: 85 },
-                                { label: 'SR Status', width: 75 },
-                                { label: 'KM Rate', width: 70 },
-                                { label: 'Engineer Name', width: 110 },
-                                { label: 'Engineer UID', width: 90 },
-                                { label: 'Employee ID', width: 90 },
-                                { label: 'Branch', width: 100 },
-                                { label: 'Verification Status', width: 90 },
-                                { label: 'Submitted By', width: 105 },
-                                { label: 'Submitted At', width: 115 },
-                                { label: 'Paid Date (HO)', width: 105 },
-                              ].map((col, i) => {
-                                if (col.label === 'Task Status') {
-                                  // Decide which filter state to use based on whether we're in the period drill-down or all records view
-                                  const inPeriodDrill = historyTab === 'periods' && !!selectedPeriod;
-                                  const filterSet = inPeriodDrill ? historyPeriodTaskStatusFilter : historyAllTaskStatusFilter;
-                                  const setFilter = inPeriodDrill ? setHistoryPeriodTaskStatusFilter : setHistoryAllTaskStatusFilter;
-                                  const isActive = filterSet.size > 0;
-                                  return (
-                                    <th key={i}
-                                      title={col.label}
-                                      className="px-1 py-0.5 text-[10px] font-bold text-gray-700 border-r border-b border-gray-300 uppercase tracking-tight text-center align-middle"
-                                      style={{
-                                        width: `${col.width}px`,
-                                        minWidth: `${col.width}px`,
-                                        maxWidth: `${col.width}px`,
-                                        backgroundColor: '#f0f1ff',
-                                        whiteSpace: 'normal',
-                                        wordBreak: 'break-word',
-                                        overflowWrap: 'break-word',
-                                        overflow: 'visible',
-                                        height: '34px',
-                                        lineHeight: '1.15',
-                                      }}>
-                                      <div className="flex items-center justify-center gap-1">
-                                        <span>{col.label}</span>
-                                        <button
-                                          onClick={(e) => openTaskStatusFilter(e, historyRecords, filterSet, setFilter)}
-                                          className={`p-0.5 rounded transition-colors ${isActive ? 'bg-blue-600 text-white' : 'hover:bg-blue-100 text-gray-500'}`}
-                                          title={isActive ? `Filtering: ${filterSet.size} value(s)` : 'Filter Task Status'}
-                                        >
-                                          <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24">
-                                            <path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L15 12.414V19a1 1 0 01-.553.894l-4 2A1 1 0 019 21v-8.586L3.293 6.707A1 1 0 013 6V4z" />
-                                          </svg>
-                                        </button>
-                                      </div>
-                                    </th>
-                                  );
-                                }
-                                return (
-                                  <th key={i}
-                                    title={col.label}
-                                    className="px-1 py-0.5 text-[10px] font-bold text-gray-700 border-r border-b border-gray-300 uppercase tracking-tight text-center align-middle"
-                                    style={{
-                                      width: `${col.width}px`,
-                                      minWidth: `${col.width}px`,
-                                      maxWidth: `${col.width}px`,
-                                      backgroundColor: '#f0f1ff',
-                                      whiteSpace: 'normal',
-                                      wordBreak: 'break-word',
-                                      overflowWrap: 'break-word',
-                                      overflow: 'hidden',
-                                      height: '34px',
-                                      lineHeight: '1.15',
-                                    }}>
-                                    {col.label}
-                                  </th>
-                                );
-                              })}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {filtered.map((record, idx) => {
-                              const cell = (val, fallback = '-') => {
-                                const v = val !== null && val !== undefined && String(val).trim() !== '' ? String(val) : fallback;
-                                return <div className="truncate" title={v}>{v}</div>;
-                              };
-                              const movedAtFmt = record.moved_at ? record.moved_at.substring(0, 16).replace('T', ' ') : '-';
-                              return (
-                                <tr key={record.id} className="hover:bg-blue-50/30 transition-colors" style={{ height: '28px' }}>
-                                  {/* 1. Sr. No. */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{idx + 1}</td>
-                                  {/* 2. Installation Address */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.installation_site_address)}</td>
-                                  {/* 3. Account */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.account)}</td>
-                                  {/* 4. SR No. */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.service_request_no)}</td>
-                                  {/* 5. SR Sub Type */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_sub_type)}</td>
-                                  {/* 6. SR Trip Start Date & Time */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_trip_start_datetime)}</td>
-                                  {/* 7. SR Reach at Site Date & Time */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_reach_at_site_datetime)}</td>
-                                  {/* 8. KMs Travelled */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center font-semibold">{cell(record.kms_travelled)}</td>
-                                  {/* 9. Two Way KM */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.two_way_km)}</td>
-                                  {/* 10. Branch Verified KM */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.branch_verified_km)}</td>
-                                  {/* 11. Branch Verification Remark */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.km_verification_remark)}</td>
-                                  {/* 12. HO Corrected KM */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.ho_corrected_km)}</td>
-                                  {/* 13. DA Amount */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center font-semibold text-green-700">
-                                    <div className="truncate" title={record.da_amount && parseFloat(record.da_amount) !== 0 ? `₹${record.da_amount}` : '-'}>
-                                      {record.da_amount && parseFloat(record.da_amount) !== 0 ? `₹${record.da_amount}` : '-'}
-                                    </div>
-                                  </td>
-                                  {/* Freight Charges */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center font-semibold text-orange-700">
-                                    <div className="truncate" title={record.freight_charges && parseFloat(record.freight_charges) !== 0 ? `₹${record.freight_charges}` : '-'}>
-                                      {record.freight_charges && parseFloat(record.freight_charges) !== 0 ? `₹${record.freight_charges}` : '-'}
-                                    </div>
-                                  </td>
-                                  {/* 14. Total Amount */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center font-bold text-blue-700">
-                                    <div className="truncate" title={record.total_amount && parseFloat(record.total_amount) !== 0 ? `₹${record.total_amount}` : '-'}>
-                                      {record.total_amount && parseFloat(record.total_amount) !== 0 ? `₹${record.total_amount}` : '-'}
-                                    </div>
-                                  </td>
-                                  {/* 15. HO Remark */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.ho_remark)}</td>
-                                  {/* 16. Appointment No. */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.appointment_number)}</td>
-                                  {/* 17. SR Type */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_type)}</td>
-                                  {/* 18. SR Due Date */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_due_date)}</td>
-                                  {/* 19. Task Start Date */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.task_start_date)}</td>
-                                  {/* 20. Task End Date */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.task_end_date)}</td>
-                                  {/* 21. Task Status */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.task_status)}</td>
-                                  {/* 22. Task Assigned Date & Time */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.task_assigned_datetime)}</td>
-                                  {/* 23. SR Trip Start Lat Long */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_trip_start_lat_long)}</td>
-                                  {/* 24. SR Reach at Site Lat Long */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_reach_at_site_lat_long)}</td>
-                                  {/* 25. SR Closed Date */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sr_closed_date)}</td>
-                                  {/* 26. SR Status */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-center" title={record.sr_status || '-'}>
-                                    <span className={`px-1.5 py-0.5 rounded-full text-[9px] whitespace-nowrap ${record.sr_status === 'Closed' ? 'bg-green-100 text-green-800' : record.sr_status === 'In Progress' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>
-                                      {record.sr_status || '-'}
-                                    </span>
-                                  </td>
-                                  {/* 27. KM Rate */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.km_rate_applied)}</td>
-                                  {/* 28. Engineer Name */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.service_engineer_name)}</td>
-                                  {/* 29. Engineer UID */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.service_engineer_uid)}</td>
-                                  {/* 29b. Employee ID */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.employee_id)}</td>
-                                  {/* 30. Branch */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.sd_branch_name || record.sd_branch_code)}</td>
-                                  {/* 31. Verification Status */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-center" title={record.verification_status || '-'}>
-                                    <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-green-100 text-green-800 whitespace-nowrap">
-                                      {record.verification_status || '-'}
-                                    </span>
-                                  </td>
-                                  {/* 32. Submitted By */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(record.submitted_by_name)}</td>
-                                  {/* 33. Submitted At */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">{cell(movedAtFmt)}</td>
-                                  {/* 34. Paid Date (HO) */}
-                                  <td className="px-2 py-0 border-r border-gray-100 text-[11px] text-center">
-                                    {record.paid_date ? (
-                                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] bg-green-100 text-green-800 font-semibold whitespace-nowrap">
-                                        <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                        </svg>
-                                        {new Date(record.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })}
-                                      </span>
-                                    ) : (
-                                      <span className="text-[10px] text-gray-400 italic">Not paid</span>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      );
-                    })()}
-                  </div>
-
-                  {!loadingHistory && (() => {
-                    if (historyTab === 'periods') {
-                      if (selectedPeriod) {
-                        const idSet = new Set(selectedPeriod.record_ids || []);
-                        const periodRecords = historyRecords.filter(r => idSet.has(r.id));
-                        const total = periodRecords.reduce((s, r) => s + parseFloat(r.total_amount || 0), 0);
-                        return (
-                          <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-between items-center">
-                            <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
-                              <span>Period: <strong className="text-gray-800">{selectedPeriod.period_start_display} → {selectedPeriod.period_end_display}</strong></span>
-                              <span>|</span>
-                              <span>Records: <strong className="text-gray-800">{periodRecords.length}</strong></span>
-                              <span>|</span>
-                              <span>Amount: <strong className="text-blue-700">₹{total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
-                              {selectedPeriod.paid_date && (
-                                <>
-                                  <span>|</span>
-                                  <span>Paid: <strong className="text-green-700">{new Date(selectedPeriod.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</strong></span>
-                                </>
-                              )}
-                            </div>
-                            <div className="flex gap-2">
-                              <button onClick={() => setSelectedPeriod(null)} className="px-4 py-1.5 border rounded-lg text-xs font-medium text-blue-700 border-blue-300 hover:bg-blue-50">← Back</button>
-                              <button onClick={closeHistoryModalBranch} className="px-4 py-1.5 border rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100">Close</button>
-                            </div>
-                          </div>
-                        );
-                      }
-                      const totalRecs = historyGrouped.groups?.reduce((s, g) => s + (g.record_count || 0), 0) || 0;
-                      const totalAmt = historyGrouped.groups?.reduce((s, g) => s + parseFloat(g.total_amount || 0), 0) || 0;
-                      const paidPeriods = historyGrouped.groups?.filter(g => g.paid_date).length || 0;
-                      return (
-                        <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-between items-center">
-                          <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
-                            <span>Total Periods: <strong className="text-gray-800">{historyGrouped.groups?.length || 0}</strong></span>
-                            <span>|</span>
-                            <span>Total Records: <strong className="text-gray-800">{totalRecs}</strong></span>
-                            <span>|</span>
-                            <span>Total Amount: <strong className="text-blue-700">₹{totalAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
-                            <span>|</span>
-                            <span>Paid Periods: <strong className="text-green-700">{paidPeriods} / {historyGrouped.groups?.length || 0}</strong></span>
-                          </div>
-                          <button onClick={closeHistoryModalBranch} className="px-4 py-1.5 border rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100">Close</button>
-                        </div>
-                      );
-                    }
-                    // All Records footer (unchanged)
-                    const filtered = historyRecords.filter(record => {
-                      const searchLower = historySearch.toLowerCase();
-                      const matchesSearch = !historySearch || [
-                        record.service_engineer_name, record.service_engineer_uid,
-                        record.appointment_number, record.service_request_no,
-                        record.account, record.sr_type, record.sr_sub_type,
-                        record.installation_site_address, record.submitted_by_name,
-                      ].some(val => val && val.toLowerCase().includes(searchLower));
-                      const movedDate = record.moved_at ? record.moved_at.substring(0, 10) : '';
-                      const matchesFrom = !historyDateFrom || movedDate >= historyDateFrom;
-                      const matchesTo = !historyDateTo || movedDate <= historyDateTo;
-                      let reachDate = '';
-                      if (record.sr_reach_at_site_datetime) {
-                        const _d = new Date(record.sr_reach_at_site_datetime);
-                        if (!isNaN(_d.getTime())) {
-                          reachDate = _d.toISOString().substring(0, 10);
-                        }
-                      }
-                      const matchesReachFrom = !historyReachDateFrom || (reachDate && reachDate >= historyReachDateFrom);
-                      const matchesReachTo = !historyReachDateTo || (reachDate && reachDate <= historyReachDateTo);
-                      const matchesEngineer = !historyEngineer || record.service_engineer_uid === historyEngineer;
-                      const matchesTaskStatus = historyAllTaskStatusFilter.size === 0 ||
-                        historyAllTaskStatusFilter.has(String(record.task_status || '').trim());
-                      return matchesSearch && matchesFrom && matchesTo && matchesReachFrom && matchesReachTo && matchesEngineer && matchesTaskStatus;
-                    });
-                    const filteredCount = filtered.length;
-                    const filteredTotal = filtered.reduce((sum, r) => sum + parseFloat(r.total_amount || 0), 0);
-                    const isFiltered = historySearch || historyDateFrom || historyDateTo || historyReachDateFrom || historyReachDateTo || historyEngineer;
-
-                    return (
-                      <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-between items-center">
-                        <div className="flex items-center gap-3 text-xs text-gray-500">
-                          <span>
-                            {isFiltered ? (<>Showing <strong>{filteredCount}</strong> of <strong>{historyRecords.length}</strong> records</>) : (<>Total Records: <strong>{filteredCount}</strong></>)}
-                          </span>
-                          <span>|</span>
-                          <span>{isFiltered ? 'Filtered' : 'Total'} Amount: <strong className="text-blue-700">₹{filteredTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
-                          {isFiltered && (<><span>|</span><span>All Amount: <strong className="text-gray-700">₹{historyRecords.reduce((sum, r) => sum + parseFloat(r.total_amount || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span></>)}
-                        </div>
-                        <button
-                          onClick={closeHistoryModalBranch}
-                          className="px-4 py-1.5 border rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100 transition-colors"
-                        >
-                          Close
-                        </button>
-                      </div>
-                    );
-                  })()}
-                </>
-              )}
-              {/* ════════════ END SERVICE ENGINEER SECTION ════════════ */}
-
-              {/* ════════════ SALES SECTION ════════════ */}
-              {historyMainTab === 'sales' && (
-                <>
-                  {!loadingSalesHistory && (
-                    <div className="shrink-0 px-4 py-2 border-b bg-gray-100 flex items-center gap-2 flex-wrap">
-                      <button
-                        onClick={() => { setSalesHistoryTab('all'); setSalesSelectedPeriod(null); }}
-                        className="px-3 py-1 text-[11px] font-semibold rounded-md transition-all border"
-                        style={{
-                          backgroundColor: salesHistoryTab === 'all' ? themeColor : '#fff',
-                          color: salesHistoryTab === 'all' ? 'white' : '#374151',
-                          borderColor: salesHistoryTab === 'all' ? themeColor : '#e5e7eb',
-                        }}
-                      >
-                        All Records ({salesHistoryRecords.length})
-                      </button>
-                      <button
-                        onClick={() => { setSalesHistoryTab('periods'); setSalesSelectedPeriod(null); }}
-                        className="px-3 py-1 text-[11px] font-semibold rounded-md transition-all border"
-                        style={{
-                          backgroundColor: salesHistoryTab === 'periods' ? '#059669' : '#fff',
-                          color: salesHistoryTab === 'periods' ? 'white' : '#374151',
-                          borderColor: salesHistoryTab === 'periods' ? '#059669' : '#e5e7eb',
-                        }}
-                      >
-                        By Submission Period ({salesHistoryGrouped.groups?.length || 0})
-                      </button>
-                      {salesHistoryTab === 'periods' && salesSelectedHistoryPeriod && (
-                        <button
-                          onClick={() => setSalesSelectedHistoryPeriod(null)}
-                          className="ml-auto inline-flex items-center gap-1 px-2 py-1 text-[10px] text-purple-700 border border-purple-300 rounded-lg hover:bg-purple-50"
-                        >
-                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                          </svg>
-                          Back
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="flex-1 overflow-auto" style={{ scrollbarWidth: 'thin' }}>
-                    {loadingSalesHistory ? (
-                      <div className="text-center py-20">
-                        <svg className="animate-spin h-8 w-8 mx-auto mb-3" style={{ color: '#7c3aed' }} viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                        <p className="text-sm text-gray-500">Loading sales history...</p>
-                      </div>
-                    ) : salesHistoryRecords.length === 0 ? (
-                      <div className="text-center py-20">
-                        <p className="text-sm text-gray-500 font-medium">No sales history records found</p>
-                      </div>
-                    ) : salesHistoryTab === 'all' ? (
-                      <table className="border-collapse w-full" style={{ minWidth: '1760px' }}>
-                        <thead className="sticky top-0 z-10">
-                          <tr style={{ backgroundColor: '#f3e8ff' }}>
-                            {[
-                              { l: 'Sr.No.', w: 50 }, { l: 'Date', w: 100 }, { l: 'SR No.', w: 110 },
-                              { l: 'Engineer', w: 150 }, { l: 'Customer', w: 180 }, { l: 'Location', w: 140 },
-                              { l: 'Description', w: 200 }, { l: 'KM 2-Way', w: 85 }, { l: 'HO KM', w: 100 },
-                              { l: 'Rate', w: 80 }, { l: 'DA', w: 90 }, { l: 'Total', w: 100 },
-                              { l: 'Submitted By', w: 140 }, { l: 'Submitted At', w: 140 }, { l: 'Paid Date', w: 130 },
-                            ].map((c, i) => (
-                              <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 uppercase text-center"
-                                style={{ width: `${c.w}px`, minWidth: `${c.w}px`, backgroundColor: '#f3e8ff' }}>{c.l}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {salesHistoryRecords.map((r, idx) => (
-                            <tr key={r.id} className="hover:bg-purple-50/30" style={{ height: '34px' }}>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{idx + 1}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.date || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.sr_number || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate font-semibold text-purple-700" title={r.engineer_name}>{r.engineer_name || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.customer_name}>{r.customer_name || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.location}>{r.location || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.description_of_work}>{r.description_of_work || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.km_two_way || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.ho_corrected_km || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center font-semibold">{r.rate ? `₹${r.rate}` : '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center font-semibold text-green-700">{r.da && parseFloat(r.da) !== 0 ? `₹${r.da}` : '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center font-bold text-blue-700">{r.total_amount && parseFloat(r.total_amount) !== 0 ? `₹${r.total_amount}` : '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.submitted_by_name || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center whitespace-nowrap">{r.moved_at ? r.moved_at.substring(0, 16).replace('T', ' ') : '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                {r.paid_date ? new Date(r.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : <span className="text-gray-400 italic">Not paid</span>}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : !salesSelectedHistoryPeriod ? (
-                      salesHistoryGrouped.groups?.length === 0 ? (
-                        <div className="text-center py-20"><p className="text-sm text-gray-500">No grouped periods available</p></div>
-                      ) : (
-                        <table className="border-collapse w-full">
-                          <thead className="sticky top-0 z-10">
-                            <tr style={{ backgroundColor: '#f3e8ff' }}>
-                              {['Sr. No.', 'Period', 'Engineer', 'Submitted By', 'Records', 'Total Amount', 'Paid Date'].map((l, i) => (
-                                <th key={i} className="px-3 py-2 text-[11px] font-bold text-gray-700 border-r border-b-2 border-gray-200 uppercase text-center" style={{ backgroundColor: '#f3e8ff' }}>{l}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {salesHistoryGrouped.groups.map((g, idx) => (
-                              <tr key={idx} className="hover:bg-purple-50" style={{ height: '38px' }}>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-medium">{idx + 1}</td>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center">
-                                  <button onClick={() => setSalesSelectedHistoryPeriod(g)} className="underline hover:font-bold" style={{ color: themeColor }}>
-                                    {g.period_start_display} → {g.period_end_display}
-                                  </button>
-                                </td>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-semibold text-purple-700">{g.engineer_name || '-'}</td>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center">{g.uploaded_by || g.created_by_names || '-'}</td>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-bold">{g.record_count}</td>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-bold text-blue-700">₹{parseFloat(g.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                                <td className="px-3 py-1 text-[12px] text-center">
-                                  {g.paid_date ? new Date(g.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : <span className="text-gray-400 italic">Not paid</span>}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )
-                    ) : (() => {
-                      const idSet = new Set(salesSelectedHistoryPeriod.record_ids || []);
-                      const periodRecords = salesHistoryRecords.filter(r => idSet.has(r.id));
-                      return (
-                        <table className="border-collapse w-full" style={{ minWidth: '1760px' }}>
-                          <thead className="sticky top-0 z-10">
-                            <tr style={{ backgroundColor: '#f3e8ff' }}>
-                              {[
-                                { l: 'Sr.No.', w: 50 }, { l: 'Date', w: 100 }, { l: 'SR No.', w: 110 },
-                                { l: 'Engineer', w: 150 }, { l: 'Customer', w: 180 }, { l: 'Location', w: 140 },
-                                { l: 'Description', w: 200 }, { l: 'KM 2-Way', w: 85 }, { l: 'HO KM', w: 100 },
-                                { l: 'Rate', w: 80 }, { l: 'DA', w: 90 }, { l: 'Total', w: 100 },
-                                { l: 'Submitted By', w: 140 }, { l: 'Submitted At', w: 140 }, { l: 'Paid Date', w: 130 },
-                              ].map((c, i) => (
-                                <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 uppercase text-center"
-                                  style={{ width: `${c.w}px`, minWidth: `${c.w}px`, backgroundColor: '#f3e8ff' }}>{c.l}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {periodRecords.map((r, idx) => (
-                              <tr key={r.id} className="hover:bg-purple-50/30" style={{ height: '34px' }}>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{idx + 1}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.date || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.sr_number || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate font-semibold text-purple-700" title={r.engineer_name}>{r.engineer_name || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.customer_name}>{r.customer_name || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.location}>{r.location || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.description_of_work}>{r.description_of_work || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.km_two_way || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.ho_corrected_km || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center font-semibold">{r.rate ? `₹${r.rate}` : '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center font-semibold text-green-700">{r.da && parseFloat(r.da) !== 0 ? `₹${r.da}` : '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center font-bold text-blue-700">{r.total_amount && parseFloat(r.total_amount) !== 0 ? `₹${r.total_amount}` : '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.submitted_by_name || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center whitespace-nowrap">{r.moved_at ? r.moved_at.substring(0, 16).replace('T', ' ') : '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                  {r.paid_date ? new Date(r.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : <span className="text-gray-400 italic">Not paid</span>}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      );
-                    })()}
-                  </div>
-
-                  <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-between items-center">
-                    <span className="text-xs text-gray-500">Total: <strong>{salesHistoryRecords.length}</strong> records · <strong className="text-purple-700">₹{salesHistoryRecords.reduce((s, r) => s + parseFloat(r.total_amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></span>
-                    <button onClick={closeHistoryModalBranch} className="px-4 py-1.5 border rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100">Close</button>
-                  </div>
-                </>
-              )}
-              {/* ════════════ END SALES SECTION ════════════ */}
-
-              {/* ════════════ KM WISE SECTION ════════════ */}
-              {historyMainTab === 'km_wise' && (
-                <>
-                  {!loadingKmWiseHistory && (
-                    <div className="shrink-0 px-4 py-2 border-b bg-gray-100 flex items-center gap-2 flex-wrap">
-                      <button
-                        onClick={() => { setKmWiseHistoryTab('all'); setKmWiseSelectedHistoryPeriod(null); }}
-                        className="px-3 py-1 text-[11px] font-semibold rounded-md border"
-                        style={{
-                          backgroundColor: kmWiseHistoryTab === 'all' ? themeColor : '#fff',
-                          color: kmWiseHistoryTab === 'all' ? 'white' : '#374151',
-                          borderColor: kmWiseHistoryTab === 'all' ? themeColor : '#e5e7eb',
-                        }}
-                      >
-                        All Records ({kmWiseHistoryRecords.length})
-                      </button>
-                      <button
-                        onClick={() => { setKmWiseHistoryTab('periods'); setKmWiseSelectedHistoryPeriod(null); }}
-                        className="px-3 py-1 text-[11px] font-semibold rounded-md border"
-                        style={{
-                          backgroundColor: kmWiseHistoryTab === 'periods' ? '#059669' : '#fff',
-                          color: kmWiseHistoryTab === 'periods' ? 'white' : '#374151',
-                          borderColor: kmWiseHistoryTab === 'periods' ? '#059669' : '#e5e7eb',
-                        }}
-                      >
-                        By Submission Period ({kmWiseHistoryGrouped.groups?.length || 0})
-                      </button>
-                      {kmWiseHistoryTab === 'periods' && kmWiseSelectedHistoryPeriod && (
-                        <button onClick={() => setKmWiseSelectedHistoryPeriod(null)} className="ml-auto inline-flex items-center gap-1 px-2 py-1 text-[10px] text-cyan-700 border border-cyan-300 rounded-lg hover:bg-cyan-50">
-                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-                          Back
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="flex-1 overflow-auto" style={{ scrollbarWidth: 'thin' }}>
-                    {loadingKmWiseHistory ? (
-                      <div className="text-center py-20">
-                        <svg className="animate-spin h-8 w-8 mx-auto mb-3" style={{ color: '#0891b2' }} viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                        <p className="text-sm text-gray-500">Loading KM Wise history...</p>
-                      </div>
-                    ) : kmWiseHistoryRecords.length === 0 ? (
-                      <div className="text-center py-20"><p className="text-sm text-gray-500 font-medium">No KM Wise history records found</p></div>
-                    ) : kmWiseHistoryTab === 'all' ? (
-                      <table className="border-collapse w-full" style={{ minWidth: '1800px' }}>
-                        <thead className="sticky top-0 z-10">
-                          <tr style={{ backgroundColor: '#cffafe' }}>
-                            {[
-                              { l: 'Sr.No.', w: 50 }, { l: 'Date', w: 100 }, { l: 'Engineer', w: 150 },
-                              { l: 'Customer', w: 180 }, { l: 'SR/Inv/Engine', w: 150 }, { l: 'Work Desc.', w: 200 },
-                              { l: 'KM', w: 70 }, { l: 'HO KM', w: 100 }, { l: 'Work Status', w: 100 },
-                              { l: 'Rate', w: 70 }, { l: 'DA', w: 80 }, { l: 'Amount', w: 100 },
-                              { l: 'Submitted By', w: 140 }, { l: 'Submitted At', w: 140 }, { l: 'Paid Date', w: 130 },
-                            ].map((c, i) => (
-                              <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 uppercase text-center"
-                                style={{ width: `${c.w}px`, minWidth: `${c.w}px`, backgroundColor: '#cffafe' }}>{c.l}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {kmWiseHistoryRecords.map((r, idx) => (
-                            <tr key={r.id} className="hover:bg-cyan-50/30" style={{ height: '34px' }}>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{idx + 1}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.date || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate font-semibold text-purple-700" title={r.engineer_name}>{r.engineer_name || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.customer_name}>{r.customer_name || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.sr_invoice_engine_no}>{r.sr_invoice_engine_no || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.work_description}>{r.work_description || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.km || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.ho_corrected_km || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.work_status || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center font-semibold">{r.rate ? `₹${r.rate}` : '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center font-semibold text-green-700">{r.da && parseFloat(r.da) !== 0 ? `₹${r.da}` : '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center font-bold text-blue-700">{r.amount && parseFloat(r.amount) !== 0 ? `₹${r.amount}` : '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.submitted_by_name || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center whitespace-nowrap">{r.moved_at ? r.moved_at.substring(0, 16).replace('T', ' ') : '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                {r.paid_date ? new Date(r.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : <span className="text-gray-400 italic">Not paid</span>}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : !kmWiseSelectedHistoryPeriod ? (
-                      kmWiseHistoryGrouped.groups?.length === 0 ? (
-                        <div className="text-center py-20"><p className="text-sm text-gray-500">No grouped periods available</p></div>
-                      ) : (
-                        <table className="border-collapse w-full">
-                          <thead className="sticky top-0 z-10">
-                            <tr style={{ backgroundColor: '#cffafe' }}>
-                              {['Sr. No.', 'Period', 'Engineer', 'Submitted By', 'Records', 'Total Amount', 'Paid Date'].map((l, i) => (
-                                <th key={i} className="px-3 py-2 text-[11px] font-bold text-gray-700 border-r border-b-2 border-gray-200 uppercase text-center" style={{ backgroundColor: '#cffafe' }}>{l}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {kmWiseHistoryGrouped.groups.map((g, idx) => (
-                              <tr key={idx} className="hover:bg-cyan-50" style={{ height: '38px' }}>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-medium">{idx + 1}</td>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center">
-                                  <button onClick={() => setKmWiseSelectedHistoryPeriod(g)} className="underline hover:font-bold" style={{ color: themeColor }}>
-                                    {g.period_start_display} → {g.period_end_display}
-                                  </button>
-                                </td>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-semibold text-purple-700">{g.engineer_name || '-'}</td>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center">{g.uploaded_by || g.created_by_names || '-'}</td>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-bold">{g.record_count}</td>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-bold text-blue-700">₹{parseFloat(g.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                                <td className="px-3 py-1 text-[12px] text-center">
-                                  {g.paid_date ? new Date(g.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : <span className="text-gray-400 italic">Not paid</span>}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )
-                    ) : (() => {
-                      const idSet = new Set(kmWiseSelectedHistoryPeriod.record_ids || []);
-                      const periodRecords = kmWiseHistoryRecords.filter(r => idSet.has(r.id));
-                      return (
-                        <table className="border-collapse w-full" style={{ minWidth: '1800px' }}>
-                          <thead className="sticky top-0 z-10">
-                            <tr style={{ backgroundColor: '#cffafe' }}>
-                              {[
-                                { l: 'Sr.No.', w: 50 }, { l: 'Date', w: 100 }, { l: 'Engineer', w: 150 },
-                                { l: 'Customer', w: 180 }, { l: 'SR/Inv/Engine', w: 150 }, { l: 'Work Desc.', w: 200 },
-                                { l: 'KM', w: 70 }, { l: 'HO KM', w: 100 }, { l: 'Work Status', w: 100 },
-                                { l: 'Rate', w: 70 }, { l: 'DA', w: 80 }, { l: 'Amount', w: 100 },
-                                { l: 'Submitted By', w: 140 }, { l: 'Submitted At', w: 140 }, { l: 'Paid Date', w: 130 },
-                              ].map((c, i) => (
-                                <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 uppercase text-center"
-                                  style={{ width: `${c.w}px`, minWidth: `${c.w}px`, backgroundColor: '#cffafe' }}>{c.l}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {periodRecords.map((r, idx) => (
-                              <tr key={r.id} className="hover:bg-cyan-50/30" style={{ height: '34px' }}>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{idx + 1}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.date || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate font-semibold text-purple-700" title={r.engineer_name}>{r.engineer_name || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.customer_name}>{r.customer_name || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.sr_invoice_engine_no}>{r.sr_invoice_engine_no || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.work_description}>{r.work_description || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.km || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.ho_corrected_km || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.work_status || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center font-semibold">{r.rate ? `₹${r.rate}` : '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center font-semibold text-green-700">{r.da && parseFloat(r.da) !== 0 ? `₹${r.da}` : '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center font-bold text-blue-700">{r.amount && parseFloat(r.amount) !== 0 ? `₹${r.amount}` : '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.submitted_by_name || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center whitespace-nowrap">{r.moved_at ? r.moved_at.substring(0, 16).replace('T', ' ') : '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                  {r.paid_date ? new Date(r.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : <span className="text-gray-400 italic">Not paid</span>}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      );
-                    })()}
-                  </div>
-
-                  <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-between items-center">
-                    <span className="text-xs text-gray-500">Total: <strong>{kmWiseHistoryRecords.length}</strong> records · <strong className="text-cyan-700">₹{kmWiseHistoryRecords.reduce((s, r) => s + parseFloat(r.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></span>
-                    <button onClick={closeHistoryModalBranch} className="px-4 py-1.5 border rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100">Close</button>
-                  </div>
-                </>
-              )}
-              {/* ════════════ END KM WISE SECTION ════════════ */}
-
-              {/* ════════════ BILL WISE SECTION ════════════ */}
-              {historyMainTab === 'bill_wise' && (
-                <>
-                  {!loadingBillWiseHistory && (
-                    <div className="shrink-0 px-4 py-2 border-b bg-gray-100 flex items-center gap-2 flex-wrap">
-                      <button
-                        onClick={() => { setBillWiseHistoryTab('all'); setBillWiseSelectedHistoryPeriod(null); }}
-                        className="px-3 py-1 text-[11px] font-semibold rounded-md border"
-                        style={{
-                          backgroundColor: billWiseHistoryTab === 'all' ? themeColor : '#fff',
-                          color: billWiseHistoryTab === 'all' ? 'white' : '#374151',
-                          borderColor: billWiseHistoryTab === 'all' ? themeColor : '#e5e7eb',
-                        }}
-                      >
-                        All Records ({billWiseHistoryRecords.length})
-                      </button>
-                      <button
-                        onClick={() => { setBillWiseHistoryTab('periods'); setBillWiseSelectedHistoryPeriod(null); }}
-                        className="px-3 py-1 text-[11px] font-semibold rounded-md border"
-                        style={{
-                          backgroundColor: billWiseHistoryTab === 'periods' ? '#059669' : '#fff',
-                          color: billWiseHistoryTab === 'periods' ? 'white' : '#374151',
-                          borderColor: billWiseHistoryTab === 'periods' ? '#059669' : '#e5e7eb',
-                        }}
-                      >
-                        By Submission Period ({billWiseHistoryGrouped.groups?.length || 0})
-                      </button>
-                      {billWiseHistoryTab === 'periods' && billWiseSelectedHistoryPeriod && (
-                        <button onClick={() => setBillWiseSelectedHistoryPeriod(null)} className="ml-auto inline-flex items-center gap-1 px-2 py-1 text-[10px] text-orange-700 border border-orange-300 rounded-lg hover:bg-orange-50">
-                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-                          Back
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="flex-1 overflow-auto" style={{ scrollbarWidth: 'thin' }}>
-                    {loadingBillWiseHistory ? (
-                      <div className="text-center py-20">
-                        <svg className="animate-spin h-8 w-8 mx-auto mb-3" style={{ color: '#ea580c' }} viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                        <p className="text-sm text-gray-500">Loading Bill Wise history...</p>
-                      </div>
-                    ) : billWiseHistoryRecords.length === 0 ? (
-                      <div className="text-center py-20"><p className="text-sm text-gray-500 font-medium">No Bill Wise history records found</p></div>
-                    ) : billWiseHistoryTab === 'all' ? (
-                      <table className="border-collapse w-full" style={{ minWidth: '1760px' }}>
-                        <thead className="sticky top-0 z-10">
-                          <tr style={{ backgroundColor: '#ffedd5' }}>
-                            {[
-                              { l: 'Sr.No.', w: 50 }, { l: 'Type', w: 60 }, { l: 'Date', w: 100 }, { l: 'Engineer / Customer', w: 170 },
-                              { l: 'SR No. / Inv / Engine', w: 160 }, { l: 'Expense Head', w: 150 },
-                              { l: 'Bill Subm.', w: 90 }, { l: 'Work Desc.', w: 200 }, { l: 'Remark', w: 160 }, { l: 'Work Status', w: 110 }, { l: 'Amount', w: 110 },
-                              { l: 'Submitted By', w: 140 }, { l: 'Submitted At', w: 140 }, { l: 'Paid Date', w: 130 },
-                            ].map((c, i) => (
-                              <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 uppercase text-center"
-                                style={{ width: `${c.w}px`, minWidth: `${c.w}px`, backgroundColor: '#ffedd5' }}>{c.l}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {billWiseHistoryRecords.map((r, idx) => (
-                            <tr key={r.id} className="hover:bg-orange-50/30" style={{ height: '34px' }}>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{idx + 1}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-center">
-                                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold ${r.entry_type === 'BM' ? 'bg-indigo-100 text-indigo-700' : 'bg-cyan-100 text-cyan-700'}`}>{r.entry_type || 'SE'}</span>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.date || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate font-semibold text-purple-700" title={r.engineer_name || r.customer_name}>{r.engineer_name || r.customer_name || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.service_request_no || r.sr_invoice_engine_no}>{r.service_request_no || r.sr_invoice_engine_no || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.expenses_head}>{r.expenses_head || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.bill_submitted || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.work_description}>{r.work_description || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.remark}>{r.remark || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.work_status || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center font-bold text-blue-700">{r.amount && parseFloat(r.amount) !== 0 ? `₹${parseFloat(r.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.submitted_by_name || '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center whitespace-nowrap">{r.moved_at ? r.moved_at.substring(0, 16).replace('T', ' ') : '-'}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                {r.paid_date ? new Date(r.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : <span className="text-gray-400 italic">Not paid</span>}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : !billWiseSelectedHistoryPeriod ? (
-                      billWiseHistoryGrouped.groups?.length === 0 ? (
-                        <div className="text-center py-20"><p className="text-sm text-gray-500">No grouped periods available</p></div>
-                      ) : (
-                        <table className="border-collapse w-full">
-                          <thead className="sticky top-0 z-10">
-                            <tr style={{ backgroundColor: '#ffedd5' }}>
-                              {['Sr. No.', 'Period', 'Engineer', 'Submitted By', 'Records', 'Total Amount', 'Paid Date'].map((l, i) => (
-                                <th key={i} className="px-3 py-2 text-[11px] font-bold text-gray-700 border-r border-b-2 border-gray-200 uppercase text-center" style={{ backgroundColor: '#ffedd5' }}>{l}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {billWiseHistoryGrouped.groups.map((g, idx) => (
-                              <tr key={idx} className="hover:bg-orange-50" style={{ height: '38px' }}>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-medium">{idx + 1}</td>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center">
-                                  <button onClick={() => setBillWiseSelectedHistoryPeriod(g)} className="underline hover:font-bold" style={{ color: themeColor }}>
-                                    {g.period_start_display} → {g.period_end_display}
-                                  </button>
-                                </td>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-semibold text-purple-700">{g.engineer_name || '-'}</td>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center">{g.uploaded_by || g.created_by_names || '-'}</td>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-bold">{g.record_count}</td>
-                                <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-bold text-blue-700">₹{parseFloat(g.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                                <td className="px-3 py-1 text-[12px] text-center">
-                                  {g.paid_date ? new Date(g.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : <span className="text-gray-400 italic">Not paid</span>}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )
-                    ) : (() => {
-                      const idSet = new Set(billWiseSelectedHistoryPeriod.record_ids || []);
-                      const periodRecords = billWiseHistoryRecords.filter(r => idSet.has(r.id));
-                      return (
-                        <table className="border-collapse w-full" style={{ minWidth: '1760px' }}>
-                          <thead className="sticky top-0 z-10">
-                            <tr style={{ backgroundColor: '#ffedd5' }}>
-                              {[
-                                { l: 'Sr.No.', w: 50 }, { l: 'Date', w: 100 }, { l: 'Engineer', w: 150 },
-                                { l: 'Customer', w: 180 }, { l: 'SR/Inv/Engine', w: 150 }, { l: 'Expense Head', w: 150 },
-                                { l: 'Work Desc.', w: 220 }, { l: 'Remark', w: 160 }, { l: 'Work Status', w: 110 }, { l: 'Amount', w: 110 },
-                                { l: 'Submitted By', w: 140 }, { l: 'Submitted At', w: 140 }, { l: 'Paid Date', w: 130 },
-                              ].map((c, i) => (
-                                <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 uppercase text-center"
-                                  style={{ width: `${c.w}px`, minWidth: `${c.w}px`, backgroundColor: '#ffedd5' }}>{c.l}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {periodRecords.map((r, idx) => (
-                              <tr key={r.id} className="hover:bg-orange-50/30" style={{ height: '34px' }}>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{idx + 1}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.date || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate font-semibold text-purple-700" title={r.engineer_name}>{r.engineer_name || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.customer_name}>{r.customer_name || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.sr_invoice_engine_no}>{r.sr_invoice_engine_no || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.expenses_head}>{r.expenses_head || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.work_description}>{r.work_description || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] truncate" title={r.remark}>{r.remark || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.work_status || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center font-bold text-blue-700">{r.amount && parseFloat(r.amount) !== 0 ? `₹${parseFloat(r.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{r.submitted_by_name || '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center whitespace-nowrap">{r.moved_at ? r.moved_at.substring(0, 16).replace('T', ' ') : '-'}</td>
-                                <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                  {r.paid_date ? new Date(r.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : <span className="text-gray-400 italic">Not paid</span>}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      );
-                    })()}
-                  </div>
-
-                  <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-between items-center">
-                    <span className="text-xs text-gray-500">Total: <strong>{billWiseHistoryRecords.length}</strong> records · <strong className="text-orange-700">₹{billWiseHistoryRecords.reduce((s, r) => s + parseFloat(r.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></span>
-                    <button onClick={closeHistoryModalBranch} className="px-4 py-1.5 border rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100">Close</button>
-                  </div>
-                </>
-              )}
-              {/* ════════════ END BILL WISE SECTION ════════════ */}
-            </div>
-          </div>
+          <BranchTADAHistory
+            branchCode={userBranch}
+            branchName={getBranchLabel(userBranch)}
+            themeColor={themeColor}
+            canExport={canExport}
+            onClose={() => setShowHistoryModal(false)}
+          />
         )}
 
         {activeTab === 'office' && (
@@ -11270,6 +9999,18 @@ const BranchAdminExpense = () => {
                   </svg>
                   <h2 className="text-xs font-bold text-white tracking-wide">Add Office Expense</h2>
                 </div>
+                <button
+                  onClick={openBranchImprestModal}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-white text-[10px] font-semibold rounded-lg shadow-sm hover:shadow-md transition-all"
+                  style={{ color: themeColor }}
+                  title="View Imprest Amount for this branch"
+                >
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Imprest
+                </button>
               </div>
 
               <form onSubmit={handleSubmitOfficeExpense} className="p-4">
@@ -11325,6 +10066,21 @@ const BranchAdminExpense = () => {
                   </div>
 
                   <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Internal Branch Name *</label>
+                    <input
+                      type="text"
+                      name="internal_branch_name"
+                      value={officeExpenseForm.internal_branch_name}
+                      onChange={handleOfficeExpenseInputChange}
+                      className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none text-black"
+                      onFocus={e => e.target.style.borderColor = themeColor}
+                      onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                      placeholder="Enter internal branch name"
+                      required
+                    />
+                  </div>
+
+                  <div>
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Paid To *</label>
                     <input
                       type="text"
@@ -11340,7 +10096,7 @@ const BranchAdminExpense = () => {
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Invoice / SR No. *</label>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Invoice / SR No. / Ref. No. *</label>
                     <input
                       type="text"
                       name="invoice_no"
@@ -11371,17 +10127,15 @@ const BranchAdminExpense = () => {
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Voucher No. *</label>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Voucher No. (Auto)</label>
                     <input
                       type="text"
                       name="voucher_no"
                       value={officeExpenseForm.voucher_no}
-                      onChange={handleOfficeExpenseInputChange}
-                      className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none text-black"
-                      onFocus={e => e.target.style.borderColor = themeColor}
-                      onBlur={e => e.target.style.borderColor = '#e2e8f0'}
-                      placeholder="Enter voucher number"
-                      required
+                      readOnly
+                      className="w-full px-2.5 py-1.5 text-xs border border-gray-100 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed font-mono"
+                      placeholder="Auto-assigned on submit"
+                      title="Auto-generated per branch per financial year. Cannot be edited."
                     />
                   </div>
 
@@ -11410,7 +10164,7 @@ const BranchAdminExpense = () => {
                     />
                   </div>
 
-                  <div className="col-span-2 md:col-span-3">
+                  <div className="col-span-1 md:col-span-2">
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Expenses Description *</label>
                     <textarea
                       name="expenses_description"
@@ -11432,7 +10186,7 @@ const BranchAdminExpense = () => {
                     onClick={() => setOfficeExpenseForm({
                       paid_date: new Date().toISOString().split('T')[0],
                       expenses_head: '', sub_head: '', expenses_description: '',
-                      description: '', paid_to: '', invoice_no: '', amount: '',
+                      description: '', internal_branch_name: '', paid_to: '', invoice_no: '', amount: '',
                       remark: '', paid_by: user?.name || '', voucher_no: ''
                     })}
                     className="px-4 py-1.5 border border-gray-300 text-xs font-semibold text-gray-600 rounded-lg hover:bg-gray-50 transition-colors"
@@ -11511,8 +10265,9 @@ const BranchAdminExpense = () => {
                           { key: 'paid_date', label: 'Date' },
                           { key: 'sub_head', label: 'Exps. Sub Head' },
                           { key: 'expenses_head', label: 'Expense Head (GL Code)' },
+                          { key: 'internal_branch_name', label: 'Internal Branch Name' },
                           { key: 'paid_to', label: 'Paid To' },
-                          { key: 'invoice_no', label: 'Invoice / SR No.' },
+                          { key: 'invoice_no', label: 'Invoice / SR No. / Ref. No.' },
                           { key: 'amount', label: 'Amount (₹)' },
                           { key: 'voucher_no', label: 'Voucher No.' },
                           { key: 'paid_by', label: 'Paid By' },
@@ -11565,21 +10320,19 @@ const BranchAdminExpense = () => {
                         >
                           <input
                             type="checkbox"
+                            disabled
+                            className="cursor-not-allowed opacity-50"
                             checked={oeTempDrafts.length > 0 && oeTempDrafts.every(d => oeTempSelected[d.id])}
-                            onChange={e => {
-                              const next = {};
-                              if (e.target.checked) oeTempDrafts.forEach(d => { next[d.id] = true; });
-                              setOeTempSelected(next);
-                            }}
+                            title="Select rows individually"
                           />
                         </th>
-                        {['Sr.No.', 'Date', 'Exps. Sub Head', 'Expense Head (GL Code)', 'Paid To', 'Invoice / SR No.', 'Amount (₹)', 'Voucher No.', 'Paid By', 'Remark', 'Description', 'Actions'].map((c, i) => (
+                        {['Sr.No.', 'Date', 'Exps. Sub Head', 'Expense Head (GL Code)', 'Internal Branch Name', 'Invoice / SR No. / Ref. No.', 'Amount (₹)', 'Paid To', 'Voucher No.', 'Description', 'Remark', 'Paid By', 'Actions'].map((c, i) => (
                           <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-b-2 border-r border-gray-200 last:border-r-0 uppercase tracking-wide whitespace-nowrap text-center">{c}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {oeTempDrafts.map((d, idx) => {
+                      {[...oeTempDrafts].sort((a, b) => new Date(a.paid_date || 0) - new Date(b.paid_date || 0)).map((d, idx) => {
                         const isEditing = oeTempEditingId === d.id;
                         return (
                           <tr key={d.id} className="hover:bg-blue-50/30" style={{ height: '34px' }}>
@@ -11613,29 +10366,41 @@ const BranchAdminExpense = () => {
                                 ? <input value={oeTempEditForm.expenses_head} onChange={e => setOeTempEditForm(p => ({ ...p, expenses_head: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
                                 : (d.expenses_head || '-')}
                             </td>
+                            {/* Internal Branch Name */}
                             <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
                               {isEditing
-                                ? <input value={oeTempEditForm.paid_to} onChange={e => setOeTempEditForm(p => ({ ...p, paid_to: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
-                                : (d.paid_to || '-')}
+                                ? <input value={oeTempEditForm.internal_branch_name} onChange={e => setOeTempEditForm(p => ({ ...p, internal_branch_name: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
+                                : (d.internal_branch_name || '-')}
                             </td>
+                            {/* Invoice / SR No. / Ref. No. */}
                             <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
                               {isEditing
                                 ? <input value={oeTempEditForm.invoice_no} onChange={e => setOeTempEditForm(p => ({ ...p, invoice_no: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
                                 : (d.invoice_no || '-')}
                             </td>
+                            {/* Amount */}
                             <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] font-bold text-center whitespace-nowrap">
                               {isEditing
                                 ? <input type="number" value={oeTempEditForm.amount} onChange={e => setOeTempEditForm(p => ({ ...p, amount: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
                                 : `₹${parseFloat(d.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
                             </td>
+                            {/* Paid To */}
+                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
+                              {isEditing
+                                ? <input value={oeTempEditForm.paid_to} onChange={e => setOeTempEditForm(p => ({ ...p, paid_to: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
+                                : (d.paid_to || '-')}
+                            </td>
+                            {/* Voucher No. */}
                             <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
                               {isEditing
                                 ? <input value={oeTempEditForm.voucher_no || ''} onChange={e => setOeTempEditForm(p => ({ ...p, voucher_no: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
                                 : (d.voucher_no || '-')}
-                            </td>                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
+                            </td>
+                            {/* Description */}
+                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
                               {isEditing
-                                ? <input value={oeTempEditForm.paid_by || ''} onChange={e => setOeTempEditForm(p => ({ ...p, paid_by: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
-                                : (d.paid_by || '-')}
+                                ? <input value={oeTempEditForm.expenses_description || ''} onChange={e => setOeTempEditForm(p => ({ ...p, expenses_description: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
+                                : <div className="truncate max-w-[180px]" title={d.expenses_description || d.description || ''}>{d.expenses_description || d.description || '-'}</div>}
                             </td>
                             {/* Remark */}
                             <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
@@ -11643,11 +10408,11 @@ const BranchAdminExpense = () => {
                                 ? <input value={oeTempEditForm.remark} onChange={e => setOeTempEditForm(p => ({ ...p, remark: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
                                 : (d.remark || '-')}
                             </td>
-                            {/* Description (NEW) */}
+                            {/* Paid By */}
                             <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
                               {isEditing
-                                ? <input value={oeTempEditForm.expenses_description || ''} onChange={e => setOeTempEditForm(p => ({ ...p, expenses_description: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
-                                : <div className="truncate max-w-[180px]" title={d.expenses_description || d.description || ''}>{d.expenses_description || d.description || '-'}</div>}
+                                ? <input value={oeTempEditForm.paid_by || ''} onChange={e => setOeTempEditForm(p => ({ ...p, paid_by: e.target.value }))} className="px-1 py-0.5 text-[10px] border rounded w-full" />
+                                : (d.paid_by || '-')}
                             </td>
                             <td className="px-2 py-0.5 text-center">
                               <div className="flex gap-1 justify-center">
@@ -11681,79 +10446,6 @@ const BranchAdminExpense = () => {
               )}
             </div>
 
-            {/* Filters — Period Summary (matches outer table columns) */}
-            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-              <div className="px-4 py-2 border-b flex items-center justify-between" style={{ backgroundColor: themeLight }}>
-                <h3 className="text-[10px] font-bold text-gray-600 uppercase tracking-wide">Filters — Period Summary</h3>
-                <span className="text-[9px] text-gray-500 italic">Applies to the period table below</span>
-              </div>
-              <div className="p-3">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Submitted By</label>
-                    <div className="relative">
-                      <svg className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                      </svg>
-                      <input
-                        type="text"
-                        placeholder="Search submitter name..."
-                        value={oeSubmitterSearch}
-                        onChange={(e) => setOeSubmitterSearch(e.target.value)}
-                        className="w-full pl-6 pr-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none text-black"
-                        onFocus={e => e.target.style.borderColor = themeColor}
-                        onBlur={e => e.target.style.borderColor = '#e2e8f0'}
-                      />
-                      {oeSubmitterSearch && (
-                        <button onClick={() => setOeSubmitterSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Period From</label>
-                    <input
-                      type="date"
-                      value={oePeriodFromDate}
-                      onChange={(e) => setOePeriodFromDate(e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none text-black"
-                      onFocus={e => e.target.style.borderColor = themeColor}
-                      onBlur={e => e.target.style.borderColor = '#e2e8f0'}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Period To</label>
-                    <input
-                      type="date"
-                      value={oePeriodToDate}
-                      onChange={(e) => setOePeriodToDate(e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none text-black"
-                      onFocus={e => e.target.style.borderColor = themeColor}
-                      onBlur={e => e.target.style.borderColor = '#e2e8f0'}
-                    />
-                  </div>
-                </div>
-
-                {(oeSubmitterSearch || oePeriodFromDate || oePeriodToDate) && (
-                  <div className="mt-2 flex justify-between items-center">
-                    <span className="text-[10px] text-gray-500">
-                      Showing <strong>{filteredPeriodGroups.length}</strong> of <strong>{oePeriodGroups.length}</strong> period{oePeriodGroups.length === 1 ? '' : 's'}
-                    </span>
-                    <button
-                      onClick={() => { setOeSubmitterSearch(''); setOePeriodFromDate(''); setOePeriodToDate(''); }}
-                      className="text-[10px] font-semibold text-red-500 hover:text-red-700 flex items-center gap-1"
-                    >
-                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                      Clear Filters
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
             {/* Table — Period summary by default, drill-in to detail when a row is clicked */}
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="px-4 py-2.5 border-b flex justify-between items-center" style={{ backgroundColor: themeLight }}>
@@ -11765,7 +10457,7 @@ const BranchAdminExpense = () => {
                   {!loadingOfficeExpenses && !selectedOEPeriod && oePeriodGroups.length > 0 && (
                     <>
                       <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold text-white" style={{ backgroundColor: themeColor }}>
-                        {filteredPeriodGroups.length}{filteredPeriodGroups.length !== oePeriodGroups.length ? ` / ${oePeriodGroups.length}` : ''} period{oePeriodGroups.length === 1 ? '' : 's'}
+                        {oePeriodGroups.length} period{oePeriodGroups.length === 1 ? '' : 's'}
                       </span>
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-semibold whitespace-nowrap">
                         Grand Total: ₹{filteredPeriodGroups.reduce((s, g) => s + g.totalAmount, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -11787,6 +10479,14 @@ const BranchAdminExpense = () => {
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 font-semibold whitespace-nowrap">
                         Submitted By: {selectedOEPeriod.submittedBy}
                       </span>
+                      {(() => {
+                        const vouchers = Array.from(new Set(selectedOEPeriod.records.map(r => r.submit_voucher_no).filter(Boolean)));
+                        return vouchers.length > 0 ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap font-mono" style={{ backgroundColor: themeLight, color: themeColor }}>
+                            Voucher{vouchers.length > 1 ? 's' : ''}: {vouchers.join(', ')}
+                          </span>
+                        ) : null;
+                      })()}
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 font-semibold whitespace-nowrap">
                         Records: {selectedOEPeriod.records.length}
                       </span>
@@ -11834,8 +10534,9 @@ const BranchAdminExpense = () => {
                           { key: 'paid_date', label: 'Date' },
                           { key: 'sub_head', label: 'Exps. Sub Head' },
                           { key: 'expenses_head', label: 'Expense Head (GL Code)' },
+                          { key: 'internal_branch_name', label: 'Internal Branch Name' },
                           { key: 'paid_to', label: 'Paid To' },
-                          { key: 'invoice_no', label: 'Invoice / SR No.' },
+                          { key: 'invoice_no', label: 'Invoice / SR No. / Ref. No.' },
                           { key: 'amount', label: 'Amount (₹)' },
                           { key: 'voucher_no', label: 'Voucher No.' },
                           { key: 'paid_by', label: 'Paid By' },
@@ -11854,7 +10555,7 @@ const BranchAdminExpense = () => {
                     </button>
                   )}
                   <button
-                    onClick={loadOEHistory}
+                    onClick={() => setShowOEHistoryModal(true)}
                     className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg shadow-sm hover:shadow-md transition-all"
                     style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                   >
@@ -11862,18 +10563,6 @@ const BranchAdminExpense = () => {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                     History
-                  </button>
-                  <button
-                    onClick={openBranchImprestModal}
-                    className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg shadow-sm hover:shadow-md transition-all"
-                    style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeDark})` }}
-                    title="View Imprest Amount for this branch"
-                  >
-                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    Imprest
                   </button>
                 </div>
               </div>
@@ -11973,13 +10662,14 @@ const BranchAdminExpense = () => {
                             { label: 'Date', w: '90px' },
                             { label: 'Exps. Sub Head', w: '130px' },
                             { label: 'Expense Head (GL Code)', w: '110px' },
-                            { label: 'Paid To', w: '130px' },
-                            { label: 'Invoice / SR No.', w: '110px' },
+                            { label: 'Internal Branch Name', w: '130px' },
+                            { label: 'Invoice / SR No. / Ref. No.', w: '110px' },
                             { label: 'Amount (₹)', w: '100px' },
+                            { label: 'Paid To', w: '130px' },
                             { label: 'Voucher No.', w: '100px' },
-                            { label: 'Paid By', w: '110px' },
-                            { label: 'Remark', w: '130px' },
                             { label: 'Description', w: '180px' },
+                            { label: 'Remark', w: '130px' },
+                            { label: 'Paid By', w: '110px' },
                             { label: 'Status', w: '90px' },
                           ].map((col, i) => (
                             <th key={i}
@@ -12005,21 +10695,34 @@ const BranchAdminExpense = () => {
                           </tr>
                         ) : filteredDetailRecords.map((expense, idx) => (
                           <tr key={expense.id} className="hover:bg-blue-50/40 transition-colors" style={{ height: '34px' }}>
-                            <td className="px-2 py-1 text-[11px] text-black text-center font-medium border-r border-gray-100">{idx + 1}</td>
-                            <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100 whitespace-nowrap">
+                            <td className="px-2 py-1 text-[11px] text-black text-center font-medium border-r border-gray-100">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <span>{idx + 1}</span>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); printOfficeExpenseVoucher(expense); }}
+                                  className="text-purple-600 hover:text-purple-800"
+                                  title="Print voucher for this record"
+                                >
+                                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </td>                            <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100 whitespace-nowrap">
                               {expense.paid_date ? new Date(expense.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
                             </td>
                             <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.sub_head || ''}>{expense.sub_head || '-'}</div></td>
                             <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.expenses_head || ''}>{expense.expenses_head || '-'}</div></td>
-                            <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.paid_to || ''}>{expense.paid_to || '-'}</div></td>
+                            <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.internal_branch_name || ''}>{expense.internal_branch_name || '-'}</div></td>
                             <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.invoice_no || ''}>{expense.invoice_no || '-'}</div></td>
                             <td className="px-2 py-1 text-[11px] font-bold text-black text-center border-r border-gray-100 whitespace-nowrap">
                               ₹{parseFloat(expense.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                             </td>
+                            <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.paid_to || ''}>{expense.paid_to || '-'}</div></td>
                             <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.voucher_no || ''}>{expense.voucher_no || '-'}</div></td>
-                            <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.paid_by || ''}>{expense.paid_by || '-'}</div></td>
-                            <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.remark || ''}>{expense.remark || '-'}</div></td>
                             <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.expenses_description || expense.description || ''}>{expense.expenses_description || expense.description || '-'}</div></td>
+                            <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.remark || ''}>{expense.remark || '-'}</div></td>
+                            <td className="px-2 py-1 text-[11px] text-black text-center border-r border-gray-100"><div className="truncate" title={expense.paid_by || ''}>{expense.paid_by || '-'}</div></td>
                             <td className="px-2 py-1 text-center">
                               <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${expense.verification_status === 'Verified' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
                                 {expense.verification_status || 'Pending'}
@@ -12036,7 +10739,7 @@ const BranchAdminExpense = () => {
                           <td className="px-2 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200 whitespace-nowrap" style={{ color: themeColor }}>
                             ₹{filteredDetailTotals.total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                           </td>
-                          <td colSpan={5} className="border-t-2 border-gray-200" />
+                          <td colSpan={6} className="border-t-2 border-gray-200" />
                         </tr>
                       </tfoot>
                     </table>
@@ -12045,13 +10748,14 @@ const BranchAdminExpense = () => {
               ) : (
                 /* ─── SUMMARY VIEW: one row per period (filtered) ─── */
                 <div className="overflow-x-auto" style={{ maxHeight: '480px', scrollbarWidth: 'thin', scrollbarColor: '#a5b4fc #f1f5f9' }}>
-                  <table className="w-full border-collapse" style={{ minWidth: '900px' }}>
+                  <table className="w-full border-collapse" style={{ minWidth: '1040px' }}>
                     <thead className="sticky top-0 z-10">
                       <tr style={{ backgroundColor: '#f0f1ff' }}>
                         {[
                           { label: 'Sr. No.', w: '60px' },
                           { label: 'Period (Start → End)', w: '280px' },
                           { label: 'Submitted By', w: '200px' },
+                          { label: 'Voucher No.', w: '140px' },
                           { label: 'Records', w: '90px' },
                           { label: 'Total Amount', w: '160px' },
                           { label: 'Verified Amount', w: '160px' },
@@ -12065,27 +10769,21 @@ const BranchAdminExpense = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {filteredPeriodGroups.length === 0 ? (
+                      {oePeriodGroups.length === 0 ? (
                         <tr>
                           <td colSpan={6} className="text-center py-10 text-xs text-gray-400">
-                            No periods match your filters.{' '}
-                            <button
-                              onClick={() => { setOeSubmitterSearch(''); setOePeriodFromDate(''); setOePeriodToDate(''); }}
-                              className="text-blue-600 hover:underline font-semibold"
-                            >
-                              Clear filters
-                            </button>
+                            No periods yet.
                           </td>
                         </tr>
-                      ) : filteredPeriodGroups.map((g, idx) => {
+                      ) : oePeriodGroups.map((g, idx) => {
                         const fmt = d => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+                        const vouchers = Array.from(new Set(g.records.map(r => r.submit_voucher_no).filter(Boolean)));
+                        const voucherLabel = vouchers.length ? vouchers.join(', ') : '-';
                         return (
                           <tr
                             key={g.key}
-                            onClick={() => setSelectedOEPeriod(g)}
-                            className="hover:bg-blue-50 cursor-pointer transition-colors"
+                            className="hover:bg-blue-50 transition-colors"
                             style={{ height: '40px' }}
-                            title="Click to view this period's records"
                           >
                             <td className="px-3 py-1 text-[12px] text-center font-medium border-r border-gray-100">{idx + 1}</td>
                             <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100">
@@ -12099,6 +10797,16 @@ const BranchAdminExpense = () => {
                             </td>
                             <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100 font-medium text-purple-700">
                               {g.submittedBy}
+                            </td>
+                            <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100">
+                              <span
+                                onClick={(e) => { e.stopPropagation(); setSelectedOEPeriod(g); }}
+                                className="underline cursor-pointer hover:font-bold font-mono"
+                                style={{ color: themeColor, textUnderlineOffset: '2px' }}
+                                title="Click to view this period's records"
+                              >
+                                {voucherLabel}
+                              </span>
                             </td>
                             <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100 font-bold">
                               {g.records.length}
@@ -12115,7 +10823,7 @@ const BranchAdminExpense = () => {
                     </tbody>
                     <tfoot className="sticky bottom-0">
                       <tr style={{ backgroundColor: '#f0f1ff' }}>
-                        <td colSpan={3} className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border-t-2 border-gray-200">
+                        <td colSpan={4} className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border-t-2 border-gray-200">
                           Grand Total ({filteredPeriodGroups.length} period{filteredPeriodGroups.length === 1 ? '' : 's'})
                         </td>
                         <td className="px-3 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200">
@@ -12285,7 +10993,7 @@ const BranchAdminExpense = () => {
                         )}
                         {vendorCheckStatus === 'urd' && (
                           <p className="text-[10px] mt-0.5 text-gray-500 font-semibold truncate">
-                            ✎ URD Purchase — enter shop name below
+                            ✎ URD Purchase — enter URD Vendor Name below
                           </p>
                         )}
                       </div>
@@ -12434,10 +11142,10 @@ const BranchAdminExpense = () => {
                     />
                   </div>
 
-                  {/* Shop Name — only for URD */}
+                  {/* URD Vendor Name — only for URD */}
                   {(vendorCheckStatus === 'urd' || lvbForm.vendor_name === 'URD Purchase') && (
                     <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Shop Name *</label>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">URD Vendor Name *</label>
                       <input
                         type="text"
                         value={lvbForm.shop_name}
@@ -12572,7 +11280,7 @@ const BranchAdminExpense = () => {
                           { key: 'customer_sr_no', label: 'SR No.' },
                           { key: 'customer_invoice_amount', label: 'Cust. Invoice Amt' },
                           { key: 'line_work_amount', label: 'Line Work Amt' },
-                          { key: 'shop_name', label: 'Shop Name' },
+                          { key: 'shop_name', label: 'URD Vendor Name' },
                           { key: 'description', label: 'Description' },
                           { key: 'remark', label: 'Remark' },
                         ]
@@ -12622,21 +11330,19 @@ const BranchAdminExpense = () => {
                         >
                           <input
                             type="checkbox"
+                            disabled
+                            className="cursor-not-allowed opacity-50"
                             checked={lvbTempDrafts.length > 0 && lvbTempDrafts.every(d => lvbTempSelected[d.id])}
-                            onChange={e => {
-                              const next = {};
-                              if (e.target.checked) lvbTempDrafts.forEach(d => { next[d.id] = true; });
-                              setLvbTempSelected(next);
-                            }}
+                            title="Select rows individually"
                           />
                         </th>
-                        {['Sr.No.', 'Invoice Date', 'Vendor Name', 'Type', 'GST No.', 'Invoice No.', 'Amount (₹)', 'Customer Name', 'Cust. Invoice No.', 'SR No.', 'Cust. Invoice Amt (₹)', 'Line Work Amt (₹)', 'Shop Name', 'Description', 'Remark', 'Actions'].map((c, i) => (
+                        {['Sr.No.', 'Invoice Date', 'Vendor Name', 'Type', 'GST No.', 'Invoice No.', 'Amount (₹)', 'Customer Name', 'Cust. Invoice No.', 'SR No.', 'Cust. Invoice Amt (₹)', 'Line Work Amt (₹)', 'URD Vendor Name', 'Description', 'Remark', 'Actions'].map((c, i) => (
                           <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-b-2 border-r border-gray-200 last:border-r-0 uppercase tracking-wide whitespace-nowrap text-center">{c}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {lvbTempDrafts.map((d, idx) => {
+                      {[...lvbTempDrafts].sort((a, b) => new Date(a.invoice_date || 0) - new Date(b.invoice_date || 0)).map((d, idx) => {
                         const isEditing = lvbTempEditingId === d.id;
                         return (
                           <tr key={d.id} className="hover:bg-blue-50/30" style={{ height: '34px' }}>
@@ -12755,79 +11461,6 @@ const BranchAdminExpense = () => {
               )}
             </div>
 
-            {/* ── FILTERS — Period Summary (matches outer table columns) ──────── */}
-            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-              <div className="px-4 py-2 border-b flex items-center justify-between" style={{ backgroundColor: themeLight }}>
-                <h3 className="text-[10px] font-bold text-gray-600 uppercase tracking-wide">Filters — Period Summary</h3>
-                <span className="text-[9px] text-gray-500 italic">Applies to the period table below</span>
-              </div>
-              <div className="p-3">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Submitted By</label>
-                    <div className="relative">
-                      <svg className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                      </svg>
-                      <input
-                        type="text"
-                        placeholder="Search submitter name..."
-                        value={lvbSubmitterSearch}
-                        onChange={(e) => setLvbSubmitterSearch(e.target.value)}
-                        className="w-full pl-6 pr-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none text-black"
-                        onFocus={e => e.target.style.borderColor = themeColor}
-                        onBlur={e => e.target.style.borderColor = '#e2e8f0'}
-                      />
-                      {lvbSubmitterSearch && (
-                        <button onClick={() => setLvbSubmitterSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Period From</label>
-                    <input
-                      type="date"
-                      value={lvbPeriodFromDate}
-                      onChange={(e) => setLvbPeriodFromDate(e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none text-black"
-                      onFocus={e => e.target.style.borderColor = themeColor}
-                      onBlur={e => e.target.style.borderColor = '#e2e8f0'}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Period To</label>
-                    <input
-                      type="date"
-                      value={lvbPeriodToDate}
-                      onChange={(e) => setLvbPeriodToDate(e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none text-black"
-                      onFocus={e => e.target.style.borderColor = themeColor}
-                      onBlur={e => e.target.style.borderColor = '#e2e8f0'}
-                    />
-                  </div>
-                </div>
-
-                {(lvbSubmitterSearch || lvbPeriodFromDate || lvbPeriodToDate) && (
-                  <div className="mt-2 flex justify-between items-center">
-                    <span className="text-[10px] text-gray-500">
-                      Showing <strong>{filteredLvbPeriodGroups.length}</strong> of <strong>{lvbPeriodGroups.length}</strong> period{lvbPeriodGroups.length === 1 ? '' : 's'}
-                    </span>
-                    <button
-                      onClick={() => { setLvbSubmitterSearch(''); setLvbPeriodFromDate(''); setLvbPeriodToDate(''); }}
-                      className="text-[10px] font-semibold text-red-500 hover:text-red-700 flex items-center gap-1"
-                    >
-                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                      Clear Filters
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
             {/* ── BILL RECORDS — Period summary by default, drill-in to detail ── */}
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="px-4 py-2.5 border-b flex justify-between items-center" style={{ backgroundColor: themeLight }}>
@@ -12839,8 +11472,17 @@ const BranchAdminExpense = () => {
                   {!loadingLvbBills && !selectedLvbPeriod && lvbPeriodGroups.length > 0 && (
                     <>
                       <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold text-white" style={{ backgroundColor: themeColor }}>
-                        {filteredLvbPeriodGroups.length}{filteredLvbPeriodGroups.length !== lvbPeriodGroups.length ? ` / ${lvbPeriodGroups.length}` : ''} period{lvbPeriodGroups.length === 1 ? '' : 's'}
+                        {lvbPeriodGroups.length} period{lvbPeriodGroups.length === 1 ? '' : 's'}
                       </span>
+                      {(() => {
+                        const vouchers = Array.from(new Set(filteredLvbPeriodGroups.flatMap(g => g.records.map(r => r.submit_voucher_no).filter(Boolean))));
+                        if (vouchers.length === 0) return null;
+                        return (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap" style={{ backgroundColor: themeLight, color: themeColor }}>
+                            Voucher{vouchers.length > 1 ? 's' : ''}: {vouchers.join(', ')}
+                          </span>
+                        );
+                      })()}
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-semibold whitespace-nowrap">
                         Grand Total: ₹{filteredLvbPeriodGroups.reduce((s, g) => s + g.totalAmount, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
@@ -12861,6 +11503,14 @@ const BranchAdminExpense = () => {
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 font-semibold whitespace-nowrap">
                         Submitted By: {selectedLvbPeriod.submittedBy}
                       </span>
+                      {(() => {
+                        const vouchers = Array.from(new Set(selectedLvbPeriod.records.map(r => r.submit_voucher_no).filter(Boolean)));
+                        return vouchers.length > 0 ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap font-mono" style={{ backgroundColor: themeLight, color: themeColor }}>
+                            Voucher{vouchers.length > 1 ? 's' : ''}: {vouchers.join(', ')}
+                          </span>
+                        ) : null;
+                      })()}
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 font-semibold whitespace-nowrap">
                         Records: {selectedLvbPeriod.records.length}
                       </span>
@@ -12883,7 +11533,20 @@ const BranchAdminExpense = () => {
                       <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                       </svg>
-                      Back to Periods
+                      Back
+                    </button>
+                  )}
+                  {selectedLvbPeriod && (
+                    <button
+                      onClick={() => printLvbReport(selectedLvbPeriod)}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg shadow-sm hover:shadow-md transition-all"
+                      style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)' }}
+                      title="Print this period's Local Vendor Bills report"
+                    >
+                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                      </svg>
+                      Print
                     </button>
                   )}
                   {canExport && lvbBills.length > 0 && (
@@ -12902,7 +11565,7 @@ const BranchAdminExpense = () => {
                           { key: 'customer_sr_no', label: 'SR No.' },
                           { key: 'customer_invoice_amount', label: 'Customer Invoice Amount (₹)' },
                           { key: 'line_work_amount', label: 'Line Work Amount (₹)' },
-                          { key: 'shop_name', label: 'Shop Name' },
+                          { key: 'shop_name', label: 'URD Vendor Name' },
                           { key: 'description', label: 'Description' },
                           { key: 'remark', label: 'Remark' },
                           { key: 'created_by_name', label: 'Added By' },
@@ -12919,7 +11582,7 @@ const BranchAdminExpense = () => {
                     </button>
                   )}
                   <button
-                    onClick={loadLvbHistory}
+                    onClick={() => setShowLvbHistoryModal(true)}
                     className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg shadow-sm hover:shadow-md transition-all"
                     style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                   >
@@ -13034,7 +11697,7 @@ const BranchAdminExpense = () => {
                             { label: 'SR No.', w: '100px' },
                             { label: 'Cust. Invoice Amt (₹)', w: '130px' },
                             { label: 'Line Work Amt (₹)', w: '120px' },
-                            { label: 'Shop Name', w: '120px' },
+                            { label: 'URD Vendor Name', w: '120px' },
                             { label: 'Description', w: '160px' },
                             { label: 'Remark', w: '120px' },
                             { label: 'Status', w: '90px' },
@@ -13114,13 +11777,14 @@ const BranchAdminExpense = () => {
               ) : (
                 /* ─── SUMMARY VIEW: one row per period (filtered) ─── */
                 <div className="overflow-x-auto" style={{ maxHeight: '480px', scrollbarWidth: 'thin', scrollbarColor: '#a5b4fc #f1f5f9' }}>
-                  <table className="w-full border-collapse" style={{ minWidth: '900px' }}>
+                  <table className="w-full border-collapse" style={{ minWidth: '1040px' }}>
                     <thead className="sticky top-0 z-10">
                       <tr style={{ backgroundColor: '#f0f1ff' }}>
                         {[
                           { label: 'Sr. No.', w: '60px' },
                           { label: 'Period (Start → End)', w: '280px' },
                           { label: 'Submitted By', w: '200px' },
+                          { label: 'Voucher No.', w: '140px' },
                           { label: 'Records', w: '90px' },
                           { label: 'Total Amount', w: '160px' },
                           { label: 'Verified Amount', w: '160px' },
@@ -13134,27 +11798,21 @@ const BranchAdminExpense = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {filteredLvbPeriodGroups.length === 0 ? (
+                      {lvbPeriodGroups.length === 0 ? (
                         <tr>
                           <td colSpan={6} className="text-center py-10 text-xs text-gray-400">
-                            No periods match your filters.{' '}
-                            <button
-                              onClick={() => { setLvbSubmitterSearch(''); setLvbPeriodFromDate(''); setLvbPeriodToDate(''); }}
-                              className="text-blue-600 hover:underline font-semibold"
-                            >
-                              Clear filters
-                            </button>
+                            No periods yet.
                           </td>
                         </tr>
-                      ) : filteredLvbPeriodGroups.map((g, idx) => {
+                      ) : lvbPeriodGroups.map((g, idx) => {
                         const fmt = d => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+                        const vouchers = Array.from(new Set(g.records.map(r => r.submit_voucher_no).filter(Boolean)));
+                        const voucherLabel = vouchers.length ? vouchers.join(', ') : '-';
                         return (
                           <tr
                             key={g.key}
-                            onClick={() => setSelectedLvbPeriod(g)}
-                            className="hover:bg-blue-50 cursor-pointer transition-colors"
+                            className="hover:bg-blue-50 transition-colors"
                             style={{ height: '40px' }}
-                            title="Click to view this period's records"
                           >
                             <td className="px-3 py-1 text-[12px] text-center font-medium border-r border-gray-100">{idx + 1}</td>
                             <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100">
@@ -13168,6 +11826,16 @@ const BranchAdminExpense = () => {
                             </td>
                             <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100 font-medium text-purple-700">
                               {g.submittedBy}
+                            </td>
+                            <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100">
+                              <span
+                                onClick={(e) => { e.stopPropagation(); setSelectedLvbPeriod(g); }}
+                                className="underline cursor-pointer hover:font-bold font-mono"
+                                style={{ color: themeColor, textUnderlineOffset: '2px' }}
+                                title="Click to view this period's records"
+                              >
+                                {voucherLabel}
+                              </span>
                             </td>
                             <td className="px-3 py-1 text-[12px] text-center border-r border-gray-100 font-bold">
                               {g.records.length}
@@ -13184,7 +11852,7 @@ const BranchAdminExpense = () => {
                     </tbody>
                     <tfoot className="sticky bottom-0">
                       <tr style={{ backgroundColor: '#f0f1ff' }}>
-                        <td colSpan={3} className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border-t-2 border-gray-200">
+                        <td colSpan={4} className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border-t-2 border-gray-200">
                           Grand Total ({filteredLvbPeriodGroups.length} period{filteredLvbPeriodGroups.length === 1 ? '' : 's'})
                         </td>
                         <td className="px-3 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200">
@@ -13356,1482 +12024,25 @@ const BranchAdminExpense = () => {
           </div>
         )}
 
+        {/* Office Expense History — delegated to BranchOEHistory */}
         {showOEHistoryModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-2 bg-black/50 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-[98vw] max-h-[92vh] overflow-hidden flex flex-col">
-
-              {/* Header */}
-              <div className="px-4 py-3 flex justify-between items-center shrink-0" style={{ background: themeColor }}>
-                <div className="flex items-center gap-2">
-                  <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <h2 className="text-sm font-semibold text-white">Office Expense History — {getBranchLabel(userBranch)}</h2>
-                  {!loadingOEHistory && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/20 text-white">
-                      {oeHistoryTab === 'all' ? `${oeHistoryRecords.length} records` : `${oeHistoryGrouped.groups?.length || 0} periods`}
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={() => {
-                    setShowOEHistoryModal(false);
-                    setOeHistoryRecords([]);
-                    setOeHistorySearch('');
-                    setOeHistoryDateFrom('');
-                    setOeHistoryDateTo('');
-                    setOeHistoryPaidDateFrom('');
-                    setOeHistoryPaidDateTo('');
-                    setOeHistoryTab('all');
-                    setOeSelectedPeriod(null);
-                    setOeHistoryGrouped({ rule_type: '', period_days: 0, groups: [] });
-                  }}
-                  className="w-7 h-7 bg-white rounded-lg flex items-center justify-center hover:bg-gray-100 transition-colors"
-                >
-                  <svg className="h-4 w-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              {/* Tab Bar */}
-              {!loadingOEHistory && (
-                <div className="shrink-0 px-4 py-2 border-b bg-gray-100 flex items-center gap-2 flex-wrap">
-                  <button
-                    onClick={() => { setOeHistoryTab('all'); setOeSelectedPeriod(null); }}
-                    className="px-3 py-1 text-[11px] font-semibold rounded-md transition-all border"
-                    style={{
-                      backgroundColor: oeHistoryTab === 'all' ? themeColor : '#fff',
-                      color: oeHistoryTab === 'all' ? 'white' : '#374151',
-                      borderColor: oeHistoryTab === 'all' ? themeColor : '#e5e7eb',
-                    }}
-                  >
-                    All Records ({oeHistoryRecords.length})
-                  </button>
-                  <button
-                    onClick={() => { setOeHistoryTab('periods'); setOeSelectedPeriod(null); }}
-                    className="px-3 py-1 text-[11px] font-semibold rounded-md transition-all border"
-                    style={{
-                      backgroundColor: oeHistoryTab === 'periods' ? '#059669' : '#fff',
-                      color: oeHistoryTab === 'periods' ? 'white' : '#374151',
-                      borderColor: oeHistoryTab === 'periods' ? '#059669' : '#e5e7eb',
-                    }}
-                  >
-                    By Submission Period ({oeHistoryGrouped.groups?.length || 0})
-                  </button>
-
-                  {/* Rule info — only when NOT in period detail */}
-                  {oeHistoryTab === 'periods' && !oeSelectedPeriod && oeHistoryGrouped.rule_type && (
-                    <span className="text-[10px] text-gray-600 ml-2 px-2 py-1 bg-white rounded border border-gray-200">
-                      Rule: <strong>{oeHistoryGrouped.rule_type === 'weekdays' ? 'Weekly' : 'Monthly'}</strong>
-                      {' • '}Period size: <strong>{oeHistoryGrouped.period_days} days</strong>
-                    </span>
-                  )}
-
-                  {/* Export Periods Summary */}
-                  {oeHistoryTab === 'periods' && !oeSelectedPeriod && canExport && oeHistoryGrouped.groups?.length > 0 && (
-                    <button
-                      onClick={() => {
-                        exportToExcel(
-                          oeHistoryGrouped.groups.map(g => ({
-                            period_start: g.period_start_display,
-                            period_end: g.period_end_display,
-                            uploaded_by: g.uploaded_by,
-                            record_count: g.record_count,
-                            total_amount: g.total_amount,
-                            paid_date: g.paid_date ? new Date(g.paid_date).toLocaleDateString('en-IN') : 'Not paid',
-                          })),
-                          `oe_history_periods_${userBranch}.xlsx`,
-                          [
-                            { key: 'period_start', label: 'Period Start' },
-                            { key: 'period_end', label: 'Period End' },
-                            { key: 'uploaded_by', label: 'Submitted By' },
-                            { key: 'record_count', label: 'Number of Activity' },
-                            { key: 'total_amount', label: 'Total Amount' },
-                            { key: 'paid_date', label: 'HO Paid Date' },
-                          ]
-                        );
-                      }}
-                      className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg ml-auto"
-                      style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
-                    >
-                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
-                      </svg>
-                      Export Periods
-                    </button>
-                  )}
-
-                  {/* Period info inline + Back button */}
-                  {oeHistoryTab === 'periods' && oeSelectedPeriod && (
-                    <>
-                      <div className="flex items-center gap-2 ml-2 px-2.5 py-1 bg-blue-50 rounded-lg border border-blue-200 flex-wrap">
-                        <span className="text-[11px] text-gray-600">Period:</span>
-                        <span className="text-[11px] font-bold text-gray-800">
-                          {oeSelectedPeriod.period_start_display} → {oeSelectedPeriod.period_end_display}
-                        </span>
-                        <span className="text-gray-300">|</span>
-                        <span className="text-[11px] text-gray-600">Submitted By:</span>
-                        <span className="text-[11px] font-bold text-purple-700">{oeSelectedPeriod.uploaded_by}</span>
-                        <span className="text-gray-300">|</span>
-                        <span className="text-[11px] text-gray-600">Records:</span>
-                        <span className="text-[11px] font-bold text-gray-800">{oeSelectedPeriod.record_count}</span>
-                        <span className="text-gray-300">|</span>
-                        <span className="text-[11px] text-gray-600">Total:</span>
-                        <span className="text-[11px] font-bold text-blue-700">
-                          ₹{parseFloat(oeSelectedPeriod.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                        {oeSelectedPeriod.paid_date && (
-                          <>
-                            <span className="text-gray-300">|</span>
-                            <span className="text-[11px] text-gray-600">HO Paid:</span>
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-100 text-green-800 text-[10px] font-bold">
-                              <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                              </svg>
-                              {new Date(oeSelectedPeriod.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                      {canExport && (
-                        <button
-                          onClick={() => {
-                            const idSet = new Set(oeSelectedPeriod.record_ids || []);
-                            const periodRecords = oeHistoryRecords.filter(r => idSet.has(r.id));
-                            exportToExcel(
-                              periodRecords,
-                              `oe_history_period_${oeSelectedPeriod.period_start_display}_${userBranch}.xlsx`,
-                              [
-                                { key: 'paid_date', label: 'Date' },
-                                { key: 'sub_head', label: 'Exps. Sub Head' },
-                                { key: 'expenses_head', label: 'Expense Head (GL Code)' },
-                                { key: 'paid_to', label: 'Paid To' },
-                                { key: 'invoice_no', label: 'Invoice No.' },
-                                { key: 'amount', label: 'Amount (₹)' },
-                                { key: 'voucher_no', label: 'Voucher No.' },
-                                { key: 'paid_by', label: 'Paid By' },
-                                { key: 'remark', label: 'Remark' },
-                                { key: 'expenses_description', label: 'Description' },
-                                { key: 'verified_by_name', label: 'Verified By' },
-                                { key: 'submitted_by_name', label: 'Submitted By' },
-                                { key: 'moved_at', label: 'Submitted At' },
-                                { key: 'ho_paid_date', label: 'HO Paid Date' },
-                              ]
-                            );
-                          }}
-                          className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg ml-auto"
-                          style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
-                        >
-                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
-                          </svg>
-                          Export Period
-                        </button>
-                      )}
-                      <button
-                        onClick={() => setOeSelectedPeriod(null)}
-                        className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-50 ${canExport ? '' : 'ml-auto'}`}
-                      >
-                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                        </svg>
-                        Back to Periods
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* Filter Bar — only on All Records tab */}
-              {!loadingOEHistory && oeHistoryRecords.length > 0 && oeHistoryTab === 'all' && (
-                <div className="shrink-0 px-4 py-2 border-b bg-gray-50 flex flex-wrap items-center gap-2">
-                  <div className="relative flex-1 min-w-[200px]">
-                    <svg className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
-                    <input
-                      type="text"
-                      value={oeHistorySearch}
-                      onChange={e => setOeHistorySearch(e.target.value)}
-                      placeholder="Search by expense head, paid to, submitted by..."
-                      className="w-full pl-7 pr-3 py-1.5 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                    {oeHistorySearch && (
-                      <button onClick={() => setOeHistorySearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1 px-2 py-1 border border-blue-200 rounded-lg bg-blue-50">
-                    <span className="text-[10px] font-bold text-blue-600 uppercase whitespace-nowrap">Paid Date:</span>
-                    <input type="date" value={oeHistoryPaidDateFrom} onChange={e => setOeHistoryPaidDateFrom(e.target.value)}
-                      className="px-1.5 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                    <span className="text-[10px] text-gray-400">to</span>
-                    <input type="date" value={oeHistoryPaidDateTo} onChange={e => setOeHistoryPaidDateTo(e.target.value)}
-                      className="px-1.5 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                  </div>
-
-                  <div className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-lg bg-white">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase whitespace-nowrap">Submitted:</span>
-                    <input type="date" value={oeHistoryDateFrom} onChange={e => setOeHistoryDateFrom(e.target.value)}
-                      className="px-1.5 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                    <span className="text-[10px] text-gray-400">to</span>
-                    <input type="date" value={oeHistoryDateTo} onChange={e => setOeHistoryDateTo(e.target.value)}
-                      className="px-1.5 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                  </div>
-
-                  {(oeHistorySearch || oeHistoryDateFrom || oeHistoryDateTo || oeHistoryPaidDateFrom || oeHistoryPaidDateTo) && (
-                    <button
-                      onClick={() => {
-                        setOeHistorySearch('');
-                        setOeHistoryDateFrom('');
-                        setOeHistoryDateTo('');
-                        setOeHistoryPaidDateFrom('');
-                        setOeHistoryPaidDateTo('');
-                      }}
-                      className="px-2 py-1.5 text-xs text-red-600 border border-red-300 rounded-lg hover:bg-red-50 whitespace-nowrap"
-                    >
-                      Clear Filters
-                    </button>
-                  )}
-
-                  {canExport && (
-                    <button
-                      onClick={() => {
-                        const toExport = window.__oeHistoryFilteredBranch || oeHistoryRecords;
-                        exportToExcel(toExport, `office_expense_history_${userBranch}.xlsx`, [
-                          { key: 'paid_date', label: 'Date' },
-                          { key: 'sub_head', label: 'Exps. Sub Head' },
-                          { key: 'expenses_head', label: 'Expense Head (GL Code)' },
-                          { key: 'paid_to', label: 'Paid To' },
-                          { key: 'invoice_no', label: 'Invoice No.' },
-                          { key: 'amount', label: 'Amount (₹)' },
-                          { key: 'voucher_no', label: 'Voucher No.' },
-                          { key: 'paid_by', label: 'Paid By' },
-                          { key: 'remark', label: 'Remark' },
-                          { key: 'expenses_description', label: 'Description' },
-                          { key: 'verified_by_name', label: 'Verified By' },
-                          { key: 'submitted_by_name', label: 'Submitted By' },
-                          { key: 'moved_at', label: 'Submitted At' },
-                          { key: 'ho_paid_date', label: 'HO Paid Date' },
-                        ]);
-                      }}
-                      className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg hover:shadow-md transition-all"
-                      style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
-                    >
-                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
-                      </svg>
-                      Export
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Body */}
-              <div className="flex-1 overflow-auto" style={{ scrollbarWidth: 'thin' }}>
-                {loadingOEHistory ? (
-                  <div className="text-center py-20">
-                    <svg className="animate-spin h-7 w-7 mx-auto mb-3" style={{ color: themeColor }} viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    <p className="text-xs text-gray-500">Loading history...</p>
-                  </div>
-                ) : oeHistoryRecords.length === 0 ? (
-                  <div className="text-center py-20">
-                    <p className="text-xs text-gray-500 font-medium">No history records found for this branch</p>
-                  </div>
-                ) : oeHistoryTab === 'all' ? (() => {
-                  /* ─────────── ALL RECORDS TAB ─────────── */
-                  const filtered = oeHistoryRecords.filter(rec => {
-                    const q = oeHistorySearch.toLowerCase();
-                    const matchesSearch = !oeHistorySearch || [
-                      rec.expenses_head, rec.sub_head, rec.paid_to,
-                      rec.submitted_by_name, rec.verified_by_name,
-                      rec.paid_by, rec.expenses_description, rec.remark, rec.invoice_no,
-                    ].some(v => v && v.toLowerCase().includes(q));
-
-                    const movedDate = rec.moved_at ? rec.moved_at.substring(0, 10) : '';
-                    const matchesFrom = !oeHistoryDateFrom || movedDate >= oeHistoryDateFrom;
-                    const matchesTo = !oeHistoryDateTo || movedDate <= oeHistoryDateTo;
-
-                    const paidDate = rec.paid_date ? String(rec.paid_date).substring(0, 10) : '';
-                    const matchesPaidFrom = !oeHistoryPaidDateFrom || (paidDate && paidDate >= oeHistoryPaidDateFrom);
-                    const matchesPaidTo = !oeHistoryPaidDateTo || (paidDate && paidDate <= oeHistoryPaidDateTo);
-
-                    return matchesSearch && matchesFrom && matchesTo && matchesPaidFrom && matchesPaidTo;
-                  });
-                  window.__oeHistoryFilteredBranch = filtered;
-
-                  return filtered.length === 0 ? (
-                    <div className="text-center py-20">
-                      <p className="text-xs text-gray-500 font-medium">No records match your filters</p>
-                      <button
-                        onClick={() => {
-                          setOeHistorySearch('');
-                          setOeHistoryDateFrom('');
-                          setOeHistoryDateTo('');
-                          setOeHistoryPaidDateFrom('');
-                          setOeHistoryPaidDateTo('');
-                        }}
-                        className="mt-2 text-xs text-blue-600 hover:underline"
-                      >
-                        Clear filters
-                      </button>
-                    </div>
-                  ) : (
-                    <table className="border-collapse w-full" style={{ minWidth: '1400px' }}>
-                      <thead className="sticky top-0 z-10">
-                        <tr style={{ backgroundColor: '#f0f1ff' }}>
-                          {['Sr.No.', 'Date', 'Exps. Sub Head', 'Expense Head (GL Code)', 'Paid To', 'Invoice No.', 'Amount (₹)', 'Voucher No.', 'Paid By', 'Remark', 'Description', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date'].map((col, i) => (
-                            <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 last:border-r-0 uppercase tracking-wide whitespace-nowrap text-center" style={{ backgroundColor: '#f0f1ff' }}>
-                              {col}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {filtered.map((rec, idx) => (
-                          <tr key={rec.id || idx} className="hover:bg-blue-50/30" style={{ height: '34px' }}>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">{idx + 1}</td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center whitespace-nowrap">
-                              {rec.paid_date ? new Date(rec.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                              <div className="truncate max-w-[150px]" title={rec.sub_head || ''}>{rec.sub_head || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                              <div className="truncate max-w-[150px]" title={rec.expenses_head || ''}>{rec.expenses_head || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                              <div className="truncate max-w-[150px]" title={rec.paid_to || ''}>{rec.paid_to || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                              <div className="truncate max-w-[120px]" title={rec.invoice_no || ''}>{rec.invoice_no || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] font-bold text-black text-center whitespace-nowrap">
-                              ₹{parseFloat(rec.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                              <div className="truncate max-w-[120px]" title={rec.voucher_no || ''}>{rec.voucher_no || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                              <div className="truncate max-w-[120px]" title={rec.paid_by || ''}>{rec.paid_by || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                              <div className="truncate max-w-[150px]" title={rec.remark || ''}>{rec.remark || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                              <div className="truncate max-w-[200px]" title={rec.expenses_description || rec.description || ''}>{rec.expenses_description || rec.description || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                              <div className="truncate max-w-[120px]" title={rec.verified_by_name || ''}>{rec.verified_by_name || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                              <div className="truncate max-w-[120px]" title={rec.submitted_by_name || ''}>{rec.submitted_by_name || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center whitespace-nowrap">
-                              {rec.moved_at ? new Date(rec.moved_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
-                            </td>
-                            <td className="px-2 py-0.5 text-center">
-                              {rec.ho_paid_date ? (
-                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] bg-green-100 text-green-800 font-semibold whitespace-nowrap">
-                                  <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                  </svg>
-                                  {new Date(rec.ho_paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })}
-                                </span>
-                              ) : (
-                                <span className="text-[10px] text-gray-400 italic">Not paid</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                      <tfoot className="sticky bottom-0">
-                        <tr style={{ backgroundColor: '#f0f1ff' }}>
-                          <td colSpan="6" className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border-t-2 border-gray-200">
-                            Grand Total
-                          </td>
-                          <td className="px-2 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200 whitespace-nowrap" style={{ color: themeColor }}>
-                            ₹{filtered.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td colSpan="8" className="border-t-2 border-gray-200"></td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  );
-                })() : (
-                  /* ─────────── BY SUBMISSION PERIOD TAB ─────────── */
-                  !oeSelectedPeriod ? (
-                    oeHistoryGrouped.groups?.length === 0 ? (
-                      <div className="text-center py-20">
-                        <p className="text-sm text-gray-500 font-medium">No grouped periods available</p>
-                        <p className="text-[11px] text-gray-400 mt-1">No history records have a valid paid date.</p>
-                      </div>
-                    ) : (
-                      <table className="border-collapse w-full">
-                        <thead className="sticky top-0 z-10">
-                          <tr style={{ backgroundColor: '#f0f1ff' }}>
-                            {[
-                              { label: 'Sr. No.', width: 60 },
-                              { label: 'Period (Paid Date)', width: 320 },
-                              { label: 'Submitted By', width: 200 },
-                              { label: 'Number of Activity', width: 110 },
-                              { label: 'Total Amount', width: 160 },
-                              { label: 'HO Paid Date', width: 180 },
-                            ].map((col, i) => (
-                              <th key={i}
-                                className="px-3 py-2 text-[11px] font-bold text-gray-700 border-r border-b-2 border-gray-200 last:border-r-0 uppercase tracking-wide whitespace-nowrap text-center"
-                                style={{ width: `${col.width}px`, backgroundColor: '#f0f1ff' }}>
-                                {col.label}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {oeHistoryGrouped.groups.map((g, idx) => (
-                            <tr
-                              key={idx}
-                              onClick={() => setOeSelectedPeriod(g)}
-                              className="hover:bg-blue-50 cursor-pointer transition-colors"
-                              style={{ height: '38px' }}
-                            >
-                              <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-medium">{idx + 1}</td>
-                              <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center">
-                                <span
-                                  className="inline-flex items-center gap-1.5 underline cursor-pointer transition-all hover:font-bold"
-                                  style={{ color: themeColor, textUnderlineOffset: '2px' }}
-                                  title="Click to view this period's records"
-                                >
-                                  <span>{g.period_start_display}</span>
-                                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                                  </svg>
-                                  <span>{g.period_end_display}</span>
-                                </span>
-                              </td>
-                              <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-medium text-purple-700">
-                                {g.uploaded_by}
-                              </td>
-                              <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-bold">{g.record_count}</td>
-                              <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-bold text-blue-700">
-                                ₹{parseFloat(g.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </td>
-                              <td className="px-3 py-1 text-[12px] text-center">
-                                {g.paid_date ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 font-semibold border border-green-100">
-                                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                    </svg>
-                                    {new Date(g.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                  </span>
-                                ) : g.paid_count > 0 ? (
-                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-700 border border-yellow-100 font-semibold">
-                                    Mixed ({g.paid_count}/{g.record_count})
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] text-gray-400 italic">Not paid yet</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot className="sticky bottom-0">
-                          <tr style={{ backgroundColor: '#f0f1ff' }}>
-                            <td colSpan={3} className="px-3 py-1.5 text-[12px] font-bold text-gray-600 text-right border-t-2 border-gray-200">Grand Total</td>
-                            <td className="px-3 py-1.5 text-[12px] font-bold text-center border-t-2 border-gray-200">
-                              {oeHistoryGrouped.groups.reduce((s, g) => s + (g.record_count || 0), 0)}
-                            </td>
-                            <td className="px-3 py-1.5 text-[12px] font-bold text-center border-t-2 border-gray-200" style={{ color: themeColor }}>
-                              ₹{oeHistoryGrouped.groups.reduce((s, g) => s + parseFloat(g.total_amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-                            <td className="border-t-2 border-gray-200" />
-                          </tr>
-                        </tfoot>
-                      </table>
-                    )
-                  ) : (() => {
-                    /* DRILL-DOWN — records inside selected period */
-                    const idSet = new Set(oeSelectedPeriod.record_ids || []);
-                    const periodRecords = oeHistoryRecords.filter(r => idSet.has(r.id));
-                    return (
-                      <table className="border-collapse w-full" style={{ minWidth: '1400px' }}>
-                        <thead className="sticky top-0 z-10">
-                          <tr style={{ backgroundColor: '#f0f1ff' }}>
-                            {['Sr.No.', 'Date', 'Exps. Sub Head', 'Expense Head (GL Code)', 'Paid To', 'Invoice No.', 'Amount (₹)', 'Voucher No.', 'Paid By', 'Remark', 'Description', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date'].map((col, i) => (
-                              <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 last:border-r-0 uppercase tracking-wide whitespace-nowrap text-center" style={{ backgroundColor: '#f0f1ff' }}>
-                                {col}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {periodRecords.map((rec, idx) => (
-                            <tr key={rec.id || idx} className="hover:bg-blue-50/30" style={{ height: '34px' }}>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">{idx + 1}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center whitespace-nowrap">
-                                {rec.paid_date ? new Date(rec.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                                <div className="truncate max-w-[150px]" title={rec.expenses_head || ''}>{rec.expenses_head || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                                <div className="truncate max-w-[150px]" title={rec.sub_head || ''}>{rec.sub_head || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                                <div className="truncate max-w-[150px]" title={rec.paid_to || ''}>{rec.paid_to || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                                <div className="truncate max-w-[120px]" title={rec.invoice_no || ''}>{rec.invoice_no || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] font-bold text-black text-center whitespace-nowrap">
-                                ₹{parseFloat(rec.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                                <div className="truncate max-w-[120px]" title={rec.voucher_no || ''}>{rec.voucher_no || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                                <div className="truncate max-w-[120px]" title={rec.paid_by || ''}>{rec.paid_by || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                                <div className="truncate max-w-[150px]" title={rec.remark || ''}>{rec.remark || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                                <div className="truncate max-w-[200px]" title={rec.expenses_description || rec.description || ''}>{rec.expenses_description || rec.description || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                                <div className="truncate max-w-[120px]" title={rec.verified_by_name || ''}>{rec.verified_by_name || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center">
-                                <div className="truncate max-w-[120px]" title={rec.submitted_by_name || ''}>{rec.submitted_by_name || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-black text-center whitespace-nowrap">
-                                {rec.moved_at ? new Date(rec.moved_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
-                              </td>
-                              <td className="px-2 py-0.5 text-center">
-                                {rec.ho_paid_date ? (
-                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] bg-green-100 text-green-800 font-semibold whitespace-nowrap">
-                                    <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                    </svg>
-                                    {new Date(rec.ho_paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })}
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] text-gray-400 italic">Not paid</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot className="sticky bottom-0">
-                          <tr style={{ backgroundColor: '#f0f1ff' }}>
-                            <td colSpan="6" className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border-t-2 border-gray-200">
-                              Period Total
-                            </td>
-                            <td className="px-2 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200 whitespace-nowrap" style={{ color: themeColor }}>
-                              ₹{periodRecords.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td colSpan="8" className="border-t-2 border-gray-200"></td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    );
-                  })()
-                )}
-              </div>
-
-              {/* Footer — tab-aware */}
-              {!loadingOEHistory && (() => {
-                if (oeHistoryTab === 'periods') {
-                  if (oeSelectedPeriod) {
-                    const idSet = new Set(oeSelectedPeriod.record_ids || []);
-                    const periodRecords = oeHistoryRecords.filter(r => idSet.has(r.id));
-                    const total = periodRecords.reduce((s, r) => s + parseFloat(r.amount || 0), 0);
-                    return (
-                      <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-between items-center">
-                        <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
-                          <span>Period: <strong className="text-gray-800">{oeSelectedPeriod.period_start_display} → {oeSelectedPeriod.period_end_display}</strong></span>
-                          <span>|</span>
-                          <span>Records: <strong className="text-gray-800">{periodRecords.length}</strong></span>
-                          <span>|</span>
-                          <span>Amount: <strong className="text-blue-700">₹{total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
-                        </div>
-                        <div className="flex gap-2">
-                          <button onClick={() => setOeSelectedPeriod(null)} className="px-4 py-1.5 border rounded-lg text-xs font-medium text-blue-700 border-blue-300 hover:bg-blue-50">← Back</button>
-                          <button
-                            onClick={() => {
-                              setShowOEHistoryModal(false);
-                              setOeHistoryRecords([]);
-                              setOeHistorySearch('');
-                              setOeHistoryDateFrom('');
-                              setOeHistoryDateTo('');
-                              setOeHistoryPaidDateFrom('');
-                              setOeHistoryPaidDateTo('');
-                              setOeHistoryTab('all');
-                              setOeSelectedPeriod(null);
-                              setOeHistoryGrouped({ rule_type: '', period_days: 0, groups: [] });
-                            }}
-                            className="px-4 py-1.5 border rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100"
-                          >
-                            Close
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  }
-                  const totalRecs = oeHistoryGrouped.groups?.reduce((s, g) => s + (g.record_count || 0), 0) || 0;
-                  const totalAmt = oeHistoryGrouped.groups?.reduce((s, g) => s + parseFloat(g.total_amount || 0), 0) || 0;
-                  return (
-                    <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-between items-center">
-                      <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
-                        <span>Total Periods: <strong className="text-gray-800">{oeHistoryGrouped.groups?.length || 0}</strong></span>
-                        <span>|</span>
-                        <span>Total Records: <strong className="text-gray-800">{totalRecs}</strong></span>
-                        <span>|</span>
-                        <span>Total Amount: <strong className="text-blue-700">₹{totalAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
-                      </div>
-                      <button
-                        onClick={() => {
-                          setShowOEHistoryModal(false);
-                          setOeHistoryRecords([]);
-                          setOeHistorySearch('');
-                          setOeHistoryDateFrom('');
-                          setOeHistoryDateTo('');
-                          setOeHistoryPaidDateFrom('');
-                          setOeHistoryPaidDateTo('');
-                          setOeHistoryTab('all');
-                          setOeSelectedPeriod(null);
-                          setOeHistoryGrouped({ rule_type: '', period_days: 0, groups: [] });
-                        }}
-                        className="px-4 py-1.5 border rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100"
-                      >
-                        Close
-                      </button>
-                    </div>
-                  );
-                }
-                // All Records footer
-                const filtered = window.__oeHistoryFilteredBranch || oeHistoryRecords;
-                const isFiltered = oeHistorySearch || oeHistoryDateFrom || oeHistoryDateTo || oeHistoryPaidDateFrom || oeHistoryPaidDateTo;
-                const filteredCount = filtered.length;
-                const filteredAmount = filtered.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-                const grandTotalAmount = oeHistoryRecords.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-                return (
-                  <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-between items-center">
-                    <span className="text-xs text-gray-500">
-                      <div className="flex items-center gap-3">
-                        <span>
-                          {isFiltered
-                            ? <>Showing <strong>{filteredCount}</strong> of <strong>{oeHistoryRecords.length}</strong> records</>
-                            : <>Total Records: <strong>{filteredCount}</strong></>}
-                        </span>
-                        <span>|</span>
-                        <span>
-                          {isFiltered ? 'Filtered' : 'Total'} Amount:{' '}
-                          <strong className="text-blue-700">
-                            ₹{filteredAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </strong>
-                        </span>
-                        {isFiltered && (
-                          <>
-                            <span>|</span>
-                            <span>
-                              All Amount:{' '}
-                              <strong className="text-gray-700">
-                                ₹{grandTotalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </strong>
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    </span>
-                    <button
-                      onClick={() => {
-                        setShowOEHistoryModal(false);
-                        setOeHistoryRecords([]);
-                        setOeHistorySearch('');
-                        setOeHistoryDateFrom('');
-                        setOeHistoryDateTo('');
-                        setOeHistoryPaidDateFrom('');
-                        setOeHistoryPaidDateTo('');
-                        setOeHistoryTab('all');
-                        setOeSelectedPeriod(null);
-                        setOeHistoryGrouped({ rule_type: '', period_days: 0, groups: [] });
-                      }}
-                      className="px-4 py-1.5 border rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100 transition-colors"
-                    >
-                      Close
-                    </button>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
+          <BranchOEHistory
+            branchCode={userBranch}
+            branchName={getBranchLabel(userBranch)}
+            themeColor={themeColor}
+            canExport={canExport}
+            onClose={() => setShowOEHistoryModal(false)}
+          />
         )}
 
         {showLvbHistoryModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-2 bg-black/50 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-[98vw] max-h-[92vh] overflow-hidden flex flex-col">
-
-              {/* Header */}
-              <div className="px-4 py-3 flex justify-between items-center shrink-0" style={{ background: themeColor }}>
-                <div className="flex items-center gap-2">
-                  <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <h2 className="text-sm font-semibold text-white">
-                    Local Vendor Bills History — {getBranchLabel(userBranch)}
-                  </h2>
-                  {!loadingLvbHistory && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/20 text-white">
-                      {lvbHistoryTab === 'all' ? `${lvbHistoryRecords.length} records` : `${lvbHistoryGrouped.groups?.length || 0} periods`}
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={() => {
-                    setShowLvbHistoryModal(false);
-                    setLvbHistoryRecords([]);
-                    setLvbHistorySearch('');
-                    setLvbHistoryDateFrom('');
-                    setLvbHistoryDateTo('');
-                    setLvbHistoryInvoiceDateFrom('');
-                    setLvbHistoryInvoiceDateTo('');
-                    setLvbHistoryTab('periods');
-                    setLvbSelectedPeriod(null);
-                    setLvbHistoryGrouped({ rule_type: '', period_days: 0, groups: [] });
-                  }}
-                  className="w-7 h-7 bg-white rounded-lg flex items-center justify-center hover:bg-gray-100 transition-colors"
-                >
-                  <svg className="h-4 w-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              {/* Tab Bar */}
-              {!loadingLvbHistory && (
-                <div className="shrink-0 px-4 py-2 border-b bg-gray-100 flex items-center gap-2 flex-wrap">
-                  <button
-                    onClick={() => { setLvbHistoryTab('all'); setLvbSelectedPeriod(null); }}
-                    className="px-3 py-1 text-[11px] font-semibold rounded-md transition-all border"
-                    style={{
-                      backgroundColor: lvbHistoryTab === 'all' ? themeColor : '#fff',
-                      color: lvbHistoryTab === 'all' ? 'white' : '#374151',
-                      borderColor: lvbHistoryTab === 'all' ? themeColor : '#e5e7eb',
-                    }}
-                  >
-                    All Records ({lvbHistoryRecords.length})
-                  </button>
-                  <button
-                    onClick={() => { setLvbHistoryTab('periods'); setLvbSelectedPeriod(null); }}
-                    className="px-3 py-1 text-[11px] font-semibold rounded-md transition-all border"
-                    style={{
-                      backgroundColor: lvbHistoryTab === 'periods' ? '#059669' : '#fff',
-                      color: lvbHistoryTab === 'periods' ? 'white' : '#374151',
-                      borderColor: lvbHistoryTab === 'periods' ? '#059669' : '#e5e7eb',
-                    }}
-                  >
-                    By Submission Period ({lvbHistoryGrouped.groups?.length || 0})
-                  </button>
-
-                  {/* Rule info — only when NOT in period detail */}
-                  {lvbHistoryTab === 'periods' && !lvbSelectedPeriod && lvbHistoryGrouped.rule_type && (
-                    <span className="text-[10px] text-gray-600 ml-2 px-2 py-1 bg-white rounded border border-gray-200">
-                      Rule: <strong>{lvbHistoryGrouped.rule_type === 'weekdays' ? 'Weekly' : 'Monthly'}</strong>
-                      {' • '}Period size: <strong>{lvbHistoryGrouped.period_days} days</strong>
-                    </span>
-                  )}
-
-                  {/* Export Periods Summary */}
-                  {lvbHistoryTab === 'periods' && !lvbSelectedPeriod && canExport && lvbHistoryGrouped.groups?.length > 0 && (
-                    <button
-                      onClick={() => {
-                        exportToExcel(
-                          lvbHistoryGrouped.groups.map(g => ({
-                            period_start: g.period_start_display,
-                            period_end: g.period_end_display,
-                            uploaded_by: g.uploaded_by,
-                            record_count: g.record_count,
-                            total_amount: g.total_amount,
-                            paid_date: g.paid_date ? new Date(g.paid_date).toLocaleDateString('en-IN') : 'Not paid',
-                          })),
-                          `lvb_history_periods_${userBranch}.xlsx`,
-                          [
-                            { key: 'period_start', label: 'Period Start' },
-                            { key: 'period_end', label: 'Period End' },
-                            { key: 'uploaded_by', label: 'Submitted By' },
-                            { key: 'record_count', label: 'Bill Count' },
-                            { key: 'total_amount', label: 'Total Amount' },
-                            { key: 'paid_date', label: 'HO Paid Date' },
-                          ]
-                        );
-                      }}
-                      className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg ml-auto"
-                      style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
-                    >
-                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
-                      </svg>
-                      Export Periods
-                    </button>
-                  )}
-
-                  {/* Period info inline + Back button when drilled in */}
-                  {lvbHistoryTab === 'periods' && lvbSelectedPeriod && (
-                    <>
-                      <div className="flex items-center gap-2 ml-2 px-2.5 py-1 bg-blue-50 rounded-lg border border-blue-200 flex-wrap">
-                        <span className="text-[11px] text-gray-600">Period:</span>
-                        <span className="text-[11px] font-bold text-gray-800">
-                          {lvbSelectedPeriod.period_start_display} → {lvbSelectedPeriod.period_end_display}
-                        </span>
-                        <span className="text-gray-300">|</span>
-                        <span className="text-[11px] text-gray-600">Submitted By:</span>
-                        <span className="text-[11px] font-bold text-purple-700">{lvbSelectedPeriod.uploaded_by}</span>
-                        <span className="text-gray-300">|</span>
-                        <span className="text-[11px] text-gray-600">Bills:</span>
-                        <span className="text-[11px] font-bold text-gray-800">{lvbSelectedPeriod.record_count}</span>
-                        <span className="text-gray-300">|</span>
-                        <span className="text-[11px] text-gray-600">Total:</span>
-                        <span className="text-[11px] font-bold text-blue-700">
-                          ₹{parseFloat(lvbSelectedPeriod.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                        {lvbSelectedPeriod.paid_date && (
-                          <>
-                            <span className="text-gray-300">|</span>
-                            <span className="text-[11px] text-gray-600">HO Paid:</span>
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-100 text-green-800 text-[10px] font-bold">
-                              <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                              </svg>
-                              {new Date(lvbSelectedPeriod.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                      {canExport && (
-                        <button
-                          onClick={() => {
-                            const idSet = new Set(lvbSelectedPeriod.record_ids || []);
-                            const periodRecords = lvbHistoryRecords.filter(r => idSet.has(r.id));
-                            exportToExcel(
-                              periodRecords,
-                              `lvb_history_period_${lvbSelectedPeriod.period_start_display}_${userBranch}.xlsx`,
-                              [
-                                { key: 'invoice_date', label: 'Invoice Date' },
-                                { key: 'vendor_name', label: 'Vendor Name' },
-                                { key: 'gst_no', label: 'GST No.' },
-                                { key: 'invoice_number', label: 'Invoice No.' },
-                                { key: 'payment_amount', label: 'Amount (₹)' },
-                                { key: 'customer_name', label: 'Customer Name' },
-                                { key: 'customer_invoice_no', label: 'Cust. Invoice No.' },
-                                { key: 'customer_sr_no', label: 'SR No.' },
-                                { key: 'customer_invoice_amount', label: 'Cust. Invoice Amt' },
-                                { key: 'line_work_amount', label: 'Line Work Amt' },
-                                { key: 'shop_name', label: 'Shop Name' },
-                                { key: 'description', label: 'Description' },
-                                { key: 'remark', label: 'Remark' },
-                                { key: 'verified_by_name', label: 'Verified By' },
-                                { key: 'submitted_by_name', label: 'Submitted By' },
-                                { key: 'moved_at', label: 'Submitted At' },
-                                { key: 'ho_paid_date', label: 'HO Paid Date' },
-                              ]
-                            );
-                          }}
-                          className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg ml-auto"
-                          style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
-                        >
-                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
-                          </svg>
-                          Export Period
-                        </button>
-                      )}
-                      <button
-                        onClick={() => setLvbSelectedPeriod(null)}
-                        className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-50 ${canExport ? '' : 'ml-auto'}`}
-                      >
-                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                        </svg>
-                        Back to Periods
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* Filter Bar — only on All Records tab */}
-              {!loadingLvbHistory && lvbHistoryRecords.length > 0 && lvbHistoryTab === 'all' && (
-                <div className="shrink-0 px-4 py-2 border-b bg-gray-50 flex flex-wrap items-center gap-2">
-                  <div className="relative flex-1 min-w-[200px]">
-                    <svg className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
-                    <input
-                      type="text"
-                      value={lvbHistorySearch}
-                      onChange={e => setLvbHistorySearch(e.target.value)}
-                      placeholder="Search by vendor, invoice no, customer, SR no..."
-                      className="w-full pl-7 pr-3 py-1.5 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                    {lvbHistorySearch && (
-                      <button onClick={() => setLvbHistorySearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1 px-2 py-1 border border-blue-200 rounded-lg bg-blue-50">
-                    <span className="text-[10px] font-bold text-blue-600 uppercase whitespace-nowrap">Invoice:</span>
-                    <input type="date" value={lvbHistoryInvoiceDateFrom} onChange={e => setLvbHistoryInvoiceDateFrom(e.target.value)}
-                      className="px-1.5 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                    <span className="text-[10px] text-gray-400">to</span>
-                    <input type="date" value={lvbHistoryInvoiceDateTo} onChange={e => setLvbHistoryInvoiceDateTo(e.target.value)}
-                      className="px-1.5 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                  </div>
-
-                  <div className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-lg bg-white">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase whitespace-nowrap">Submitted:</span>
-                    <input type="date" value={lvbHistoryDateFrom} onChange={e => setLvbHistoryDateFrom(e.target.value)}
-                      className="px-1.5 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                    <span className="text-[10px] text-gray-400">to</span>
-                    <input type="date" value={lvbHistoryDateTo} onChange={e => setLvbHistoryDateTo(e.target.value)}
-                      className="px-1.5 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                  </div>
-
-                  {(lvbHistorySearch || lvbHistoryDateFrom || lvbHistoryDateTo || lvbHistoryInvoiceDateFrom || lvbHistoryInvoiceDateTo) && (
-                    <button
-                      onClick={() => {
-                        setLvbHistorySearch('');
-                        setLvbHistoryDateFrom('');
-                        setLvbHistoryDateTo('');
-                        setLvbHistoryInvoiceDateFrom('');
-                        setLvbHistoryInvoiceDateTo('');
-                      }}
-                      className="px-2 py-1.5 text-xs text-red-600 border border-red-300 rounded-lg hover:bg-red-50 whitespace-nowrap"
-                    >
-                      Clear Filters
-                    </button>
-                  )}
-
-                  {canExport && (
-                    <button
-                      onClick={() => {
-                        const toExport = window.__lvbHistoryFilteredBranch || lvbHistoryRecords;
-                        exportToExcel(toExport, `lvb_history_${userBranch}.xlsx`, [
-                          { key: 'invoice_date', label: 'Invoice Date' },
-                          { key: 'vendor_name', label: 'Vendor Name' },
-                          { key: 'gst_no', label: 'GST No.' },
-                          { key: 'invoice_number', label: 'Invoice No.' },
-                          { key: 'payment_amount', label: 'Amount (₹)' },
-                          { key: 'customer_name', label: 'Customer Name' },
-                          { key: 'customer_invoice_no', label: 'Cust. Invoice No.' },
-                          { key: 'customer_sr_no', label: 'SR No.' },
-                          { key: 'customer_invoice_amount', label: 'Cust. Invoice Amt' },
-                          { key: 'line_work_amount', label: 'Line Work Amt' },
-                          { key: 'shop_name', label: 'Shop Name' },
-                          { key: 'description', label: 'Description' },
-                          { key: 'remark', label: 'Remark' },
-                          { key: 'verified_by_name', label: 'Verified By' },
-                          { key: 'submitted_by_name', label: 'Submitted By' },
-                          { key: 'moved_at', label: 'Submitted At' },
-                          { key: 'ho_paid_date', label: 'HO Paid Date' },
-                        ]);
-                      }}
-                      className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg hover:shadow-md transition-all"
-                      style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
-                    >
-                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
-                      </svg>
-                      Export
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Body */}
-              <div className="flex-1 overflow-auto" style={{ scrollbarWidth: 'thin' }}>
-                {loadingLvbHistory ? (
-                  <div className="text-center py-20">
-                    <svg className="animate-spin h-7 w-7 mx-auto mb-3" style={{ color: themeColor }} viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    <p className="text-xs text-gray-500">Loading history...</p>
-                  </div>
-                ) : lvbHistoryRecords.length === 0 ? (
-                  <div className="text-center py-20">
-                    <p className="text-xs text-gray-500 font-medium">No history records found for this branch</p>
-                  </div>
-                ) : lvbHistoryTab === 'all' ? (() => {
-                  /* ─────────── ALL RECORDS TAB ─────────── */
-                  const filtered = lvbHistoryRecords.filter(rec => {
-                    const q = lvbHistorySearch.toLowerCase();
-                    const matchesSearch = !lvbHistorySearch || [
-                      rec.vendor_name, rec.gst_no, rec.invoice_number, rec.customer_name,
-                      rec.customer_invoice_no, rec.customer_sr_no, rec.shop_name,
-                      rec.description, rec.remark, rec.submitted_by_name, rec.verified_by_name,
-                    ].some(v => v && v.toLowerCase().includes(q));
-
-                    const movedDate = rec.moved_at ? rec.moved_at.substring(0, 10) : '';
-                    const matchesFrom = !lvbHistoryDateFrom || movedDate >= lvbHistoryDateFrom;
-                    const matchesTo = !lvbHistoryDateTo || movedDate <= lvbHistoryDateTo;
-
-                    const invDate = rec.invoice_date ? String(rec.invoice_date).substring(0, 10) : '';
-                    const matchesInvFrom = !lvbHistoryInvoiceDateFrom || (invDate && invDate >= lvbHistoryInvoiceDateFrom);
-                    const matchesInvTo = !lvbHistoryInvoiceDateTo || (invDate && invDate <= lvbHistoryInvoiceDateTo);
-
-                    return matchesSearch && matchesFrom && matchesTo && matchesInvFrom && matchesInvTo;
-                  });
-                  window.__lvbHistoryFilteredBranch = filtered;
-
-                  return filtered.length === 0 ? (
-                    <div className="text-center py-20">
-                      <p className="text-xs text-gray-500 font-medium">No records match your filters</p>
-                      <button
-                        onClick={() => {
-                          setLvbHistorySearch('');
-                          setLvbHistoryDateFrom('');
-                          setLvbHistoryDateTo('');
-                          setLvbHistoryInvoiceDateFrom('');
-                          setLvbHistoryInvoiceDateTo('');
-                        }}
-                        className="mt-2 text-xs text-blue-600 hover:underline"
-                      >
-                        Clear filters
-                      </button>
-                    </div>
-                  ) : (
-                    <table className="border-collapse w-full" style={{ minWidth: '1700px' }}>
-                      <thead className="sticky top-0 z-10">
-                        <tr style={{ backgroundColor: '#f0f1ff' }}>
-                          {['Sr.No.', 'Invoice Date', 'Vendor Name', 'Type', 'GST No.', 'Invoice No.', 'Amount (₹)', 'Customer Name', 'Cust. Invoice No.', 'SR No.', 'Cust. Inv. Amt', 'Line Work Amt', 'Shop Name', 'Description', 'Remark', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date']
-                            .map((label, i) => (
-                              <th key={i}
-                                className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 uppercase tracking-wide whitespace-nowrap text-center"
-                                style={{ backgroundColor: '#f0f1ff' }}>
-                                {label}
-                              </th>
-                            ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {filtered.map((rec, idx) => (
-                          <tr key={rec.id || idx} className="hover:bg-blue-50/30" style={{ height: '34px' }}>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{idx + 1}</td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center whitespace-nowrap">
-                              {rec.invoice_date ? new Date(rec.invoice_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                              <div className="truncate max-w-[160px]" title={rec.vendor_name || ''}>{rec.vendor_name || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-center">
-                              <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold whitespace-nowrap ${rec.is_registered ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                                {rec.is_registered ? 'GST' : 'URD'}
-                              </span>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                              <div className="truncate max-w-[120px]" title={rec.gst_no || ''}>{rec.gst_no || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                              <div className="truncate max-w-[120px]" title={rec.invoice_number || ''}>{rec.invoice_number || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] font-bold text-center whitespace-nowrap">
-                              ₹{parseFloat(rec.payment_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                              <div className="truncate max-w-[140px]" title={rec.customer_name || ''}>{rec.customer_name || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                              <div className="truncate max-w-[120px]" title={rec.customer_invoice_no || ''}>{rec.customer_invoice_no || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                              <div className="truncate max-w-[100px]" title={rec.customer_sr_no || ''}>{rec.customer_sr_no || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center whitespace-nowrap">
-                              ₹{parseFloat(rec.customer_invoice_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center whitespace-nowrap">
-                              ₹{parseFloat(rec.line_work_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                              <div className="truncate max-w-[120px]" title={rec.shop_name || ''}>{rec.shop_name || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                              <div className="truncate max-w-[180px]" title={rec.description || ''}>{rec.description || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                              <div className="truncate max-w-[120px]" title={rec.remark || ''}>{rec.remark || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                              <div className="truncate max-w-[120px]" title={rec.verified_by_name || ''}>{rec.verified_by_name || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                              <div className="truncate max-w-[120px]" title={rec.submitted_by_name || ''}>{rec.submitted_by_name || '-'}</div>
-                            </td>
-                            <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center whitespace-nowrap">
-                              {rec.moved_at ? new Date(rec.moved_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
-                            </td>
-                            <td className="px-2 py-0.5 text-center">
-                              {rec.ho_paid_date ? (
-                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] bg-green-100 text-green-800 font-semibold whitespace-nowrap">
-                                  <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                  </svg>
-                                  {new Date(rec.ho_paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })}
-                                </span>
-                              ) : (
-                                <span className="text-[10px] text-gray-400 italic">Not paid</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                      <tfoot className="sticky bottom-0">
-                        <tr style={{ backgroundColor: '#f0f1ff' }}>
-                          <td colSpan="6" className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border-t-2 border-gray-200">
-                            Grand Total
-                          </td>
-                          <td className="px-2 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200 whitespace-nowrap" style={{ color: themeColor }}>
-                            ₹{filtered.reduce((s, r) => s + (parseFloat(r.payment_amount) || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td colSpan="12" className="border-t-2 border-gray-200"></td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  );
-                })() : (
-                  /* ─────────── BY SUBMISSION PERIOD TAB ─────────── */
-                  !lvbSelectedPeriod ? (
-                    lvbHistoryGrouped.groups?.length === 0 ? (
-                      <div className="text-center py-20">
-                        <p className="text-sm text-gray-500 font-medium">No grouped periods available</p>
-                        <p className="text-[11px] text-gray-400 mt-1">No history records have a valid invoice date.</p>
-                      </div>
-                    ) : (
-                      <table className="border-collapse w-full">
-                        <thead className="sticky top-0 z-10">
-                          <tr style={{ backgroundColor: '#f0f1ff' }}>
-                            {[
-                              { label: 'Sr. No.', width: 60 },
-                              { label: 'Period (Invoice Date)', width: 320 },
-                              { label: 'Submitted By', width: 200 },
-                              { label: 'Bill Count', width: 110 },
-                              { label: 'Total Amount', width: 160 },
-                              { label: 'HO Paid Date', width: 180 },
-                            ].map((col, i) => (
-                              <th key={i}
-                                className="px-3 py-2 text-[11px] font-bold text-gray-700 border-r border-b-2 border-gray-200 last:border-r-0 uppercase tracking-wide whitespace-nowrap text-center"
-                                style={{ width: `${col.width}px`, backgroundColor: '#f0f1ff' }}>
-                                {col.label}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {lvbHistoryGrouped.groups.map((g, idx) => (
-                            <tr
-                              key={idx}
-                              onClick={() => setLvbSelectedPeriod(g)}
-                              className="hover:bg-blue-50 cursor-pointer transition-colors"
-                              style={{ height: '38px' }}
-                            >
-                              <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-medium">{idx + 1}</td>
-                              <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center">
-                                <span
-                                  className="inline-flex items-center gap-1.5 underline cursor-pointer transition-all hover:font-bold"
-                                  style={{ color: themeColor, textUnderlineOffset: '2px' }}
-                                  title="Click to view this period's records"
-                                >
-                                  <span>{g.period_start_display}</span>
-                                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                                  </svg>
-                                  <span>{g.period_end_display}</span>
-                                </span>
-                              </td>
-                              <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-medium text-purple-700">
-                                {g.uploaded_by}
-                              </td>
-                              <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-bold">{g.record_count}</td>
-                              <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-bold text-blue-700">
-                                ₹{parseFloat(g.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </td>
-                              <td className="px-3 py-1 text-[12px] text-center">
-                                {g.paid_date ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 font-semibold border border-green-100">
-                                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                    </svg>
-                                    {new Date(g.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                  </span>
-                                ) : g.paid_count > 0 ? (
-                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-700 border border-yellow-100 font-semibold">
-                                    Mixed ({g.paid_count}/{g.record_count})
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] text-gray-400 italic">Not paid yet</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot className="sticky bottom-0">
-                          <tr style={{ backgroundColor: '#f0f1ff' }}>
-                            <td colSpan={3} className="px-3 py-1.5 text-[12px] font-bold text-gray-600 text-right border-t-2 border-gray-200">Grand Total</td>
-                            <td className="px-3 py-1.5 text-[12px] font-bold text-center border-t-2 border-gray-200">
-                              {lvbHistoryGrouped.groups.reduce((s, g) => s + (g.record_count || 0), 0)}
-                            </td>
-                            <td className="px-3 py-1.5 text-[12px] font-bold text-center border-t-2 border-gray-200" style={{ color: themeColor }}>
-                              ₹{lvbHistoryGrouped.groups.reduce((s, g) => s + parseFloat(g.total_amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-                            <td className="border-t-2 border-gray-200" />
-                          </tr>
-                        </tfoot>
-                      </table>
-                    )
-                  ) : (() => {
-                    /* DRILL-DOWN: records inside the selected period */
-                    const idSet = new Set(lvbSelectedPeriod.record_ids || []);
-                    const periodRecords = lvbHistoryRecords.filter(r => idSet.has(r.id));
-                    return (
-                      <table className="border-collapse w-full" style={{ minWidth: '1700px' }}>
-                        <thead className="sticky top-0 z-10">
-                          <tr style={{ backgroundColor: '#f0f1ff' }}>
-                            {['Sr.No.', 'Invoice Date', 'Vendor Name', 'Type', 'GST No.', 'Invoice No.', 'Amount (₹)', 'Customer Name', 'Cust. Invoice No.', 'SR No.', 'Cust. Inv. Amt', 'Line Work Amt', 'Shop Name', 'Description', 'Remark', 'Verified By', 'Submitted By', 'Submitted At', 'HO Paid Date']
-                              .map((label, i) => (
-                                <th key={i}
-                                  className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 uppercase tracking-wide whitespace-nowrap text-center"
-                                  style={{ backgroundColor: '#f0f1ff' }}>
-                                  {label}
-                                </th>
-                              ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {periodRecords.map((rec, idx) => (
-                            <tr key={rec.id || idx} className="hover:bg-blue-50/30" style={{ height: '34px' }}>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">{idx + 1}</td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center whitespace-nowrap">
-                                {rec.invoice_date ? new Date(rec.invoice_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                <div className="truncate max-w-[160px]" title={rec.vendor_name || ''}>{rec.vendor_name || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-center">
-                                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold whitespace-nowrap ${rec.is_registered ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                                  {rec.is_registered ? 'GST' : 'URD'}
-                                </span>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                <div className="truncate max-w-[120px]" title={rec.gst_no || ''}>{rec.gst_no || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                <div className="truncate max-w-[120px]" title={rec.invoice_number || ''}>{rec.invoice_number || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] font-bold text-center whitespace-nowrap">
-                                ₹{parseFloat(rec.payment_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                <div className="truncate max-w-[140px]" title={rec.customer_name || ''}>{rec.customer_name || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                <div className="truncate max-w-[120px]" title={rec.customer_invoice_no || ''}>{rec.customer_invoice_no || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                <div className="truncate max-w-[100px]" title={rec.customer_sr_no || ''}>{rec.customer_sr_no || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center whitespace-nowrap">
-                                ₹{parseFloat(rec.customer_invoice_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center whitespace-nowrap">
-                                ₹{parseFloat(rec.line_work_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                <div className="truncate max-w-[120px]" title={rec.shop_name || ''}>{rec.shop_name || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                <div className="truncate max-w-[180px]" title={rec.description || ''}>{rec.description || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                <div className="truncate max-w-[120px]" title={rec.remark || ''}>{rec.remark || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                <div className="truncate max-w-[120px]" title={rec.verified_by_name || ''}>{rec.verified_by_name || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center">
-                                <div className="truncate max-w-[120px]" title={rec.submitted_by_name || ''}>{rec.submitted_by_name || '-'}</div>
-                              </td>
-                              <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center whitespace-nowrap">
-                                {rec.moved_at ? new Date(rec.moved_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
-                              </td>
-                              <td className="px-2 py-0.5 text-center">
-                                {rec.ho_paid_date ? (
-                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] bg-green-100 text-green-800 font-semibold whitespace-nowrap">
-                                    <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                    </svg>
-                                    {new Date(rec.ho_paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })}
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] text-gray-400 italic">Not paid</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot className="sticky bottom-0">
-                          <tr style={{ backgroundColor: '#f0f1ff' }}>
-                            <td colSpan="6" className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border-t-2 border-gray-200">
-                              Period Total
-                            </td>
-                            <td className="px-2 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200 whitespace-nowrap" style={{ color: themeColor }}>
-                              ₹{periodRecords.reduce((s, r) => s + (parseFloat(r.payment_amount) || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td colSpan="12" className="border-t-2 border-gray-200"></td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    );
-                  })()
-                )}
-              </div>
-
-              {/* Footer — tab-aware */}
-              {!loadingLvbHistory && (() => {
-                if (lvbHistoryTab === 'periods') {
-                  if (lvbSelectedPeriod) {
-                    const idSet = new Set(lvbSelectedPeriod.record_ids || []);
-                    const periodRecords = lvbHistoryRecords.filter(r => idSet.has(r.id));
-                    const total = periodRecords.reduce((s, r) => s + parseFloat(r.payment_amount || 0), 0);
-                    return (
-                      <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-between items-center">
-                        <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
-                          <span>Period: <strong className="text-gray-800">{lvbSelectedPeriod.period_start_display} → {lvbSelectedPeriod.period_end_display}</strong></span>
-                          <span>|</span>
-                          <span>Bills: <strong className="text-gray-800">{periodRecords.length}</strong></span>
-                          <span>|</span>
-                          <span>Amount: <strong className="text-blue-700">₹{total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
-                        </div>
-                        <div className="flex gap-2">
-                          <button onClick={() => setLvbSelectedPeriod(null)} className="px-4 py-1.5 border rounded-lg text-xs font-medium text-blue-700 border-blue-300 hover:bg-blue-50">← Back</button>
-                          <button
-                            onClick={() => {
-                              setShowLvbHistoryModal(false);
-                              setLvbHistoryRecords([]);
-                              setLvbHistorySearch('');
-                              setLvbHistoryDateFrom('');
-                              setLvbHistoryDateTo('');
-                              setLvbHistoryInvoiceDateFrom('');
-                              setLvbHistoryInvoiceDateTo('');
-                              setLvbHistoryTab('all');
-                              setLvbSelectedPeriod(null);
-                              setLvbHistoryGrouped({ rule_type: '', period_days: 0, groups: [] });
-                            }}
-                            className="px-4 py-1.5 border rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100"
-                          >
-                            Close
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  }
-                  const totalRecs = lvbHistoryGrouped.groups?.reduce((s, g) => s + (g.record_count || 0), 0) || 0;
-                  const totalAmt = lvbHistoryGrouped.groups?.reduce((s, g) => s + parseFloat(g.total_amount || 0), 0) || 0;
-                  const paidPeriods = lvbHistoryGrouped.groups?.filter(g => g.paid_date).length || 0;
-                  return (
-                    <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-between items-center">
-                      <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
-                        <span>Total Periods: <strong className="text-gray-800">{lvbHistoryGrouped.groups?.length || 0}</strong></span>
-                        <span>|</span>
-                        <span>Total Bills: <strong className="text-gray-800">{totalRecs}</strong></span>
-                        <span>|</span>
-                        <span>Total Amount: <strong className="text-blue-700">₹{totalAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
-                        <span>|</span>
-                        <span>Paid Periods: <strong className="text-green-700">{paidPeriods} / {lvbHistoryGrouped.groups?.length || 0}</strong></span>
-                      </div>
-                      <button
-                        onClick={() => {
-                          setShowLvbHistoryModal(false);
-                          setLvbHistoryRecords([]);
-                          setLvbHistorySearch('');
-                          setLvbHistoryDateFrom('');
-                          setLvbHistoryDateTo('');
-                          setLvbHistoryInvoiceDateFrom('');
-                          setLvbHistoryInvoiceDateTo('');
-                          setLvbHistoryTab('all');
-                          setLvbSelectedPeriod(null);
-                          setLvbHistoryGrouped({ rule_type: '', period_days: 0, groups: [] });
-                        }}
-                        className="px-4 py-1.5 border rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100"
-                      >
-                        Close
-                      </button>
-                    </div>
-                  );
-                }
-                // All Records footer
-                const filtered = window.__lvbHistoryFilteredBranch || lvbHistoryRecords;
-                const isFiltered = lvbHistorySearch || lvbHistoryDateFrom || lvbHistoryDateTo || lvbHistoryInvoiceDateFrom || lvbHistoryInvoiceDateTo;
-                const filteredAmount = filtered.reduce((s, r) => s + (parseFloat(r.payment_amount) || 0), 0);
-                const grandTotal = lvbHistoryRecords.reduce((s, r) => s + (parseFloat(r.payment_amount) || 0), 0);
-                return (
-                  <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-between items-center">
-                    <div className="flex items-center gap-3 text-xs text-gray-500">
-                      <span>
-                        {isFiltered
-                          ? <>Showing <strong>{filtered.length}</strong> of <strong>{lvbHistoryRecords.length}</strong> records</>
-                          : <>Total Records: <strong>{filtered.length}</strong></>}
-                      </span>
-                      <span>|</span>
-                      <span>
-                        {isFiltered ? 'Filtered' : 'Total'} Amount:{' '}
-                        <strong className="text-blue-700">
-                          ₹{filteredAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </strong>
-                      </span>
-                      {isFiltered && (
-                        <>
-                          <span>|</span>
-                          <span>
-                            All Amount:{' '}
-                            <strong className="text-gray-700">₹{grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                          </span>
-                        </>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => {
-                        setShowLvbHistoryModal(false);
-                        setLvbHistoryRecords([]);
-                        setLvbHistorySearch('');
-                        setLvbHistoryDateFrom('');
-                        setLvbHistoryDateTo('');
-                        setLvbHistoryInvoiceDateFrom('');
-                        setLvbHistoryInvoiceDateTo('');
-                        setLvbHistoryTab('all');
-                        setLvbSelectedPeriod(null);
-                        setLvbHistoryGrouped({ rule_type: '', period_days: 0, groups: [] });
-                      }}
-                      className="px-4 py-1.5 border rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100 transition-colors"
-                    >
-                      Close
-                    </button>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
+          <BranchLVBHistory
+            branchCode={userBranch}
+            branchName={getBranchLabel(userBranch)}
+            themeColor={themeColor}
+            canExport={canExport}
+            onClose={() => setShowLvbHistoryModal(false)}
+          />
         )}
 
         <ImportModal />

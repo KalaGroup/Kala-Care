@@ -11,12 +11,14 @@ class OfficeExpense(Base):
     sub_head = Column(String(100), nullable=True)
     expenses_description = Column(Text, nullable=True)
     description = Column(Text, nullable=True)
+    internal_branch_name = Column(String(150), nullable=True)
     paid_to = Column(String(255), nullable=False)
     invoice_no = Column(String(100), nullable=True)
     amount = Column(Float, nullable=False)
     remark = Column(Text, nullable=True)
     paid_by = Column(String(100), nullable=False)
     voucher_no = Column(String(50), nullable=True)
+    submit_voucher_no = Column(String(50), nullable=True)   # HO-submission batch voucher
 
     verification_status = Column(String(20), default='Pending')
     verified_by_name = Column(String(100), nullable=True)
@@ -38,12 +40,14 @@ class OfficeExpense(Base):
             "sub_head": self.sub_head,
             "expenses_description": self.expenses_description,
             "description": self.description,
+            "internal_branch_name": self.internal_branch_name,
             "paid_to": self.paid_to,
             "invoice_no": self.invoice_no,
             "amount": self.amount,
             "remark": self.remark,
             "paid_by": self.paid_by,
             "voucher_no": self.voucher_no,
+            "submit_voucher_no": self.submit_voucher_no,
             "verification_status": self.verification_status or 'Pending',
             "verified_by_name": self.verified_by_name,
             "verified_by_id": self.verified_by_id,

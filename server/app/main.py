@@ -49,6 +49,7 @@ ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN")
 from app.models import customer_model, campaign_model, engagement_model
 from app.models import banner_model
 from app.models import user_model
+from app.models import login_activity_model
 from app.models.user_model import User, UserBranchAccess
 
 # ---------------- CREATE UPLOAD DIRECTORIES ---------------- #

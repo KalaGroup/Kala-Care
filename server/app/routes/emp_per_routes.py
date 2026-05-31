@@ -1158,3 +1158,68 @@ async def asset_lookup(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )        
+
+@router.post("/my-performance/non-campaign-customers")
+async def get_my_non_campaign_customers(
+    user_info: UserInfo,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all non-campaign customers for the logged-in user with latest follow-up details.
+    """
+    try:
+        user_id = user_info.user_id
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User ID not found"
+            )
+
+        result = await emp_per_controller.EmployeePerformanceController.get_my_non_campaign_customers(
+            db, user_id
+        )
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in my non-campaign-customers endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )        
+
+@router.get("/employee-time-report")
+async def employee_time_report(
+    target_date: Optional[str] = Query(None, description="IST date YYYY-MM-DD; defaults to today"),
+    branch_code: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    user_id: str = Query(...),
+    db: Session = Depends(get_db)
+):
+    """Login/logout + daily work-time report. Only specific privileged user IDs."""
+    try:
+        ALLOWED_TIME_REPORT_IDS = {'kala000001', '31240002'}
+        if user_id not in ALLOWED_TIME_REPORT_IDS:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to view the time report"
+            )
+
+        result = await emp_per_controller.EmployeePerformanceController.get_employee_time_report(
+            db, target_date, branch_code, search
+        )
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in employee-time-report endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )        

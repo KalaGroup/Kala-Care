@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from app.database import SessionLocal
 from app.controllers.LVB_controller import LocalVendorController, LocalVendorBillController
 from app.controllers.LVB_controller import LocalVendorBillTempController
-from app.models.LVB_model import LocalVendorBillHistory  
+from app.models.LVB_model import LocalVendorBill, LocalVendorBillHistory  
 
 router = APIRouter(prefix="/lvb", tags=["Local Vendor Bills"])
 
@@ -80,6 +80,7 @@ class BillResponse(BaseModel):
     created_by: str
     created_by_name: str
     created_at: Optional[str]
+    submit_voucher_no: Optional[str] = None
     # ✅ Add these:
     verification_status: str = 'Pending'
     verified_by_name: Optional[str] = None
@@ -232,6 +233,89 @@ def get_bills(
     finally:
         db.close()
 
+# ==================== VOUCHER-WISE VERIFICATION (MAIN) ====================
+
+@router.get("/bills/vouchers")
+def lvb_vouchers(branch_code: Optional[str] = Query(None)):
+    """Group non-deleted local vendor bills by submit_voucher_no for HO verification."""
+    db = get_db()
+    try:
+        q = db.query(LocalVendorBill).filter(LocalVendorBill.is_deleted == False)
+        if branch_code:
+            q = q.filter(LocalVendorBill.branch_code == branch_code)
+        records = q.all()
+
+        groups_map = {}
+        for r in records:
+            vno = r.submit_voucher_no or 'No Voucher'
+            key = (r.branch_code or '', vno)
+            if key not in groups_map:
+                groups_map[key] = {
+                    'submit_voucher_no': vno,
+                    'branch_code': r.branch_code or '',
+                    'record_count': 0,
+                    'verified_count': 0,
+                    'total_amount': 0.0,
+                    'verified_amount': 0.0,
+                    'record_ids': [],
+                    '_dates': [],
+                    '_submitters': set(),
+                }
+            g = groups_map[key]
+            amt = float(r.payment_amount or 0)
+            g['record_count'] += 1
+            g['total_amount'] += amt
+            g['record_ids'].append(r.id)
+            if r.created_by_name:
+                g['_submitters'].add(r.created_by_name)
+            if r.verification_status == 'Verified':
+                g['verified_count'] += 1
+                g['verified_amount'] += amt
+            if r.invoice_date:
+                d = r.invoice_date.date() if hasattr(r.invoice_date, 'date') else r.invoice_date
+                g['_dates'].append(d)
+
+        groups = []
+        for g in groups_map.values():
+            dates = g.pop('_dates')
+            submitters = g.pop('_submitters')
+            g['submitted_by'] = ', '.join(sorted(submitters)) if submitters else 'Unknown'
+            if dates:
+                ps, pe = min(dates), max(dates)
+                g['period_start'] = ps.isoformat()
+                g['period_end'] = pe.isoformat()
+                g['period_start_display'] = ps.strftime('%d %b %Y')
+                g['period_end_display'] = pe.strftime('%d %b %Y')
+            else:
+                g['period_start'] = g['period_end'] = None
+                g['period_start_display'] = g['period_end_display'] = '-'
+            groups.append(g)
+
+        groups.sort(key=lambda x: (x['period_start'] or '', x['submit_voucher_no']), reverse=True)
+        return {'groups': groups}
+    finally:
+        db.close()
+
+
+@router.get("/bills/voucher-records")
+def lvb_voucher_records(
+    submit_voucher_no: str = Query(...),
+    branch_code: Optional[str] = Query(None),
+):
+    """All non-deleted bills inside one submit voucher."""
+    db = get_db()
+    try:
+        q = db.query(LocalVendorBill).filter(LocalVendorBill.is_deleted == False)
+        if submit_voucher_no == 'No Voucher':
+            q = q.filter(LocalVendorBill.submit_voucher_no.is_(None))
+        else:
+            q = q.filter(LocalVendorBill.submit_voucher_no == submit_voucher_no)
+        if branch_code:
+            q = q.filter(LocalVendorBill.branch_code == branch_code)
+        records = q.order_by(LocalVendorBill.invoice_date.asc()).all()
+        return [r.to_dict() for r in records]
+    finally:
+        db.close()
 
 @router.delete("/bills/{bill_id}")
 def delete_bill(bill_id: int):
@@ -320,6 +404,97 @@ def get_bill_history(
     finally:
         db.close()     
 
+@router.get("/bills/history/vouchers")
+def lvb_history_vouchers(branch_code: Optional[str] = Query(None)):
+    """Group LVB history by submit_voucher_no."""
+    db = get_db()
+    try:
+        q = db.query(LocalVendorBillHistory)
+        if branch_code:
+            q = q.filter(LocalVendorBillHistory.branch_code == branch_code)
+        records = q.all()
+
+        groups_map = {}
+        for r in records:
+            vno = r.submit_voucher_no or 'No Voucher'
+            key = (r.branch_code or '', vno)
+            if key not in groups_map:
+                groups_map[key] = {
+                    'submit_voucher_no': vno,
+                    'branch_code': r.branch_code or '',
+                    'record_count': 0,
+                    'total_amount': 0.0,
+                    'record_ids': [],
+                    '_dates': [],
+                    '_submitters': set(),
+                    '_verifiers': set(),
+                    '_paid_set': set(),
+                    'paid_count': 0,
+                }
+            g = groups_map[key]
+            amt = float(r.payment_amount or 0)
+            g['record_count'] += 1
+            g['total_amount'] += amt
+            g['record_ids'].append(r.id)
+            if r.created_by_name:
+                g['_submitters'].add(r.created_by_name)
+            if r.verified_by_name:
+                g['_verifiers'].add(r.verified_by_name)
+            if r.invoice_date:
+                d = r.invoice_date.date() if hasattr(r.invoice_date, 'date') else r.invoice_date
+                g['_dates'].append(d)
+            if r.ho_paid_date:
+                g['_paid_set'].add(r.ho_paid_date.isoformat())
+                g['paid_count'] += 1
+
+        groups = []
+        for g in groups_map.values():
+            dates = g.pop('_dates')
+            submitters = g.pop('_submitters')
+            verifiers = g.pop('_verifiers')
+            paid_set = g.pop('_paid_set')
+            g['submitted_by'] = ', '.join(sorted(submitters)) if submitters else 'Unknown'
+            g['verified_by'] = ', '.join(sorted(verifiers)) if verifiers else '-'
+            g['paid_date'] = (list(paid_set)[0]
+                              if len(paid_set) == 1 and g['paid_count'] == g['record_count']
+                              else None)
+            if dates:
+                ps, pe = min(dates), max(dates)
+                g['period_start'] = ps.isoformat()
+                g['period_end'] = pe.isoformat()
+                g['period_start_display'] = ps.strftime('%d %b %Y')
+                g['period_end_display'] = pe.strftime('%d %b %Y')
+            else:
+                g['period_start'] = g['period_end'] = None
+                g['period_start_display'] = g['period_end_display'] = '-'
+            groups.append(g)
+
+        groups.sort(key=lambda x: (x['period_start'] or '', x['submit_voucher_no']), reverse=True)
+        return {'groups': groups}
+    finally:
+        db.close()
+
+
+@router.get("/bills/history/voucher-records")
+def lvb_history_voucher_records(
+    submit_voucher_no: str = Query(...),
+    branch_code: Optional[str] = Query(None),
+):
+    """All LVB history rows inside one submit voucher."""
+    db = get_db()
+    try:
+        q = db.query(LocalVendorBillHistory)
+        if submit_voucher_no == 'No Voucher':
+            q = q.filter(LocalVendorBillHistory.submit_voucher_no.is_(None))
+        else:
+            q = q.filter(LocalVendorBillHistory.submit_voucher_no == submit_voucher_no)
+        if branch_code:
+            q = q.filter(LocalVendorBillHistory.branch_code == branch_code)
+        records = q.order_by(LocalVendorBillHistory.invoice_date.asc()).all()
+        return [r.to_dict() for r in records]
+    finally:
+        db.close()        
+
 @router.post("/bills/temp", status_code=201)
 def create_temp_bill(payload: BillTempCreate):
     db = get_db()
@@ -378,9 +553,11 @@ def delete_temp_bill(temp_id: int):
 def submit_bill_temp_to_main(payload: SubmitBillTempRequest):
     db = get_db()
     try:
-        count = LocalVendorBillTempController.submit_to_main(db, payload.temp_ids, payload.branch_code)
+        count, submit_voucher_no = LocalVendorBillTempController.submit_to_main(
+            db, payload.temp_ids, payload.branch_code
+        )
         db.commit()
-        return {"moved_count": count}
+        return {"moved_count": count, "submit_voucher_no": submit_voucher_no}
     except Exception as e:
         db.rollback(); raise HTTPException(status_code=400, detail=str(e))
     finally:

@@ -16,6 +16,26 @@ from app.models.engagement_model import FollowUp, Activity, RR
 from app.schemas import engagement_schema
 from app.models.non_followup_model import NonFollowUp
 
+import time
+import threading
+
+# ---- Non-campaign list cache (kills the per-page full-dataset recomputation) ----
+_NC_CACHE = {
+    "signature": None,   # detects active-campaign changes
+    "built_at": 0.0,
+    "orders": {},        # {True: [customer_id...], False: [customer_id...]}
+    "rows": {},          # {customer_id: {...row dict...}}
+}
+_NC_CACHE_LOCK = threading.Lock()
+_NC_CACHE_TTL = 60.0     # seconds; explicit invalidation handles immediate correctness
+
+
+def invalidate_non_campaign_cache():
+    """Call after any non_followup write or campaign asset change."""
+    with _NC_CACHE_LOCK:
+        _NC_CACHE["signature"] = None
+        _NC_CACHE["built_at"] = 0.0
+
 # Load environment variables
 load_dotenv()
 
@@ -65,7 +85,8 @@ class EngagementController:
         """
         Update a single follow-up's flag based on its next_followup_date.
         Returns 1 if updated, 0 otherwise.
-        Only updates if this is the latest follow-up for the customer.
+        The caller already passes the latest follow-up for the customer, so the
+        old per-row "is this the latest?" query is removed (kills the N+1).
         """
         # Skip if no next_followup_date
         if not followup.next_followup_date:
@@ -73,16 +94,6 @@ class EngagementController:
         
         # Skip if completed or rejected
         if followup.status in ['completed']:
-            return 0
-        
-        # Check if this is the latest follow-up for this customer
-        latest_followup = self.db.query(FollowUp).filter(
-            FollowUp.customer_id == followup.customer_id,
-            FollowUp.status.notin_(['completed', 'rejected'])
-        ).order_by(desc(FollowUp.followup_date)).first()
-        
-        # Only update if this followup is the latest one
-        if latest_followup and latest_followup.id != followup.id:
             return 0
         
         old_flag = followup.followup_flag
@@ -145,7 +156,11 @@ class EngagementController:
                 )
             ).all()
             
+            seen_customers = set()  # on followup_date ties, keep one per customer (preserves prior behavior)
             for followup in latest_followups:
+                if followup.customer_id in seen_customers:
+                    continue
+                seen_customers.add(followup.customer_id)
                 updated_count += self._update_single_followup_flag(today, followup)
         
         if updated_count > 0:
@@ -315,16 +330,17 @@ class EngagementController:
                 campaign.asset_numbers = new_asset_numbers
                 self.db.commit()
                 
-                # Get the latest follow-up for this customer in this campaign
-                latest_followup = self.db.query(FollowUp).filter(
-                    FollowUp.customer_id == customer.id,
-                    FollowUp.campaign_id == campaign_id,
-                    FollowUp.status == 'completed'
-                ).order_by(desc(FollowUp.followup_date)).first()
-                
-                # Send thank you email to customer
-                if latest_followup:
-                    self._send_campaign_completion_email_to_customer(customer, campaign, latest_followup)
+                # Email functionality disabled - no longer sending completion email to customer
+                # # Get the latest follow-up for this customer in this campaign
+                # latest_followup = self.db.query(FollowUp).filter(
+                #     FollowUp.customer_id == customer.id,
+                #     FollowUp.campaign_id == campaign_id,
+                #     FollowUp.status == 'completed'
+                # ).order_by(desc(FollowUp.followup_date)).first()
+                #
+                # # Send thank you email to customer
+                # if latest_followup:
+                #     self._send_campaign_completion_email_to_customer(customer, campaign, latest_followup)
                 
                 return True
             else:
@@ -494,10 +510,16 @@ class EngagementController:
                 "total_count": 0
             }
         
-        # Get ALL customers
-        all_customers = self.db.query(Customer).filter(
-            Customer.instance_id.isnot(None)
-        ).all()
+        # Get ALL customers — project only the columns this method reads
+        # (avoids hydrating full ORM objects for 10K+ rows)
+        all_customers = self.db.query(
+            Customer.id,
+            Customer.instance_id,
+            Customer.customer_name,
+            Customer.phone_number,
+            Customer.email,
+            Customer.branch_id,
+        ).filter(Customer.instance_id.isnot(None)).all()
         
         # Filter to only customers who are in at least one active campaign
         relevant_customers = [
@@ -515,9 +537,17 @@ class EngagementController:
             for i in range(0, len(relevant_customer_ids), CHUNK):
                 chunk = relevant_customer_ids[i:i + CHUNK]
                 all_followups_for_customers.extend(
-                    self.db.query(FollowUp).filter(
-                        FollowUp.customer_id.in_(chunk)
-                    ).all()
+                    self.db.query(
+                        FollowUp.id,
+                        FollowUp.customer_id,
+                        FollowUp.campaign_id,
+                        FollowUp.status,
+                        FollowUp.followup_date,
+                        FollowUp.next_followup_date,
+                        FollowUp.followup_flag,
+                        FollowUp.followup_remark,
+                        FollowUp.user_name,
+                    ).filter(FollowUp.customer_id.in_(chunk)).all()
                 )
             # Sort across all chunks (per-chunk order isn't a global order)
             all_followups_for_customers.sort(
@@ -569,29 +599,42 @@ class EngagementController:
             for c in transfer_candidate_campaigns
         }
         
-        # Warranty + agreement maps (same as before)
+        # Warranty + agreement maps — scoped to ONLY the customers we return
+        # (was scanning the entire AssetDetailed / AMCAgreement tables every load).
+        # Include both raw and normalized id so the ".0" formatting difference
+        # _normalize_id handles does not cause a miss.
+        id_candidates = set()
+        for c in relevant_customers:
+            if c.instance_id:
+                id_candidates.add(str(c.instance_id))
+                id_candidates.add(self._normalize_id(c.instance_id))
+        id_list = [i for i in id_candidates if i]
+
         warranty_map = {}
-        asset_records = self.db.query(
-            AssetDetailed.instance_id,
-            AssetDetailed.warranty_expiry_date
-        ).filter(AssetDetailed.instance_id.isnot(None)).all()
-        for inst_id, warranty in asset_records:
-            normalized = self._normalize_id(inst_id)
-            if normalized and normalized not in warranty_map:
-                warranty_map[normalized] = warranty
-        
         agreement_map = {}
-        amc_records = self.db.query(
-            AMCAgreement.instance_id,
-            AMCAgreement.agreement_end_date,
-            AMCAgreement.agreement_start_date
-        ).filter(AMCAgreement.instance_id.isnot(None)).order_by(
-            desc(AMCAgreement.agreement_start_date)
-        ).all()
-        for inst_id, end_date, _ in amc_records:
-            normalized = self._normalize_id(inst_id)
-            if normalized and normalized not in agreement_map:
-                agreement_map[normalized] = end_date
+        CHUNK_WA = 1000  # SQL Server 2100-param IN() limit
+        for i in range(0, len(id_list), CHUNK_WA):
+            chunk = id_list[i:i + CHUNK_WA]
+            for inst_id, warranty in self.db.query(
+                AssetDetailed.instance_id,
+                AssetDetailed.warranty_expiry_date
+            ).filter(AssetDetailed.instance_id.in_(chunk)).all():
+                normalized = self._normalize_id(inst_id)
+                if normalized and normalized not in warranty_map:
+                    warranty_map[normalized] = warranty
+
+        for i in range(0, len(id_list), CHUNK_WA):
+            chunk = id_list[i:i + CHUNK_WA]
+            for inst_id, end_date, _ in self.db.query(
+                AMCAgreement.instance_id,
+                AMCAgreement.agreement_end_date,
+                AMCAgreement.agreement_start_date
+            ).filter(AMCAgreement.instance_id.in_(chunk)).order_by(
+                desc(AMCAgreement.agreement_start_date)
+            ).all():
+                normalized = self._normalize_id(inst_id)
+                if normalized and normalized not in agreement_map:
+                    agreement_map[normalized] = end_date
         
         # ========== Build result using in-memory lookups (NO MORE QUERIES PER CUSTOMER) ==========
         result = []
@@ -716,7 +759,7 @@ class EngagementController:
         """Get customer details with all follow-ups, service history and LMS data"""
         
         # First update flag for this customer's latest follow-up
-        self.update_latest_followup_flags(customer_id)
+        #self.update_latest_followup_flags(customer_id)
         
         customer = self.db.query(Customer).filter(Customer.id == customer_id).first()
         if not customer:
@@ -925,9 +968,8 @@ class EngagementController:
         # Convert campaigns to dictionaries - include color and scripts
         campaign_dicts = []
         for c in campaigns:
-            # Process scripts to ensure proper format
-            scripts = self._get_campaign_scripts(c)
-            
+            # Send script METADATA only (no base64). PDFs are fetched on demand
+            # via /campaigns/{id}/scripts/{index} when the user opens the panel.
             campaign_dicts.append({
                 "id": c.id,
                 "name": c.name,
@@ -936,7 +978,7 @@ class EngagementController:
                 "color": c.color or "#71C9CE",
                 "start_date": c.start_date,
                 "end_date": c.end_date,
-                "scripts": scripts
+                "scripts": self._scripts_meta(c)
             })
         
         # Prepare all campaigns list with membership status (reuse parsed asset_numbers)
@@ -956,7 +998,7 @@ class EngagementController:
                 "service": c.service,
                 "color": c.color or "#71C9CE",
                 "is_member": is_member,
-                "scripts": self._get_campaign_scripts(c)
+                "scripts": self._scripts_meta(c)  # metadata only; lazy-load content
             })
         
         # Related assets — all OTHER customer rows with the same name (one indexed query).
@@ -1206,6 +1248,7 @@ class EngagementController:
         self.db.add(db_followup)
         self.db.commit()
         self.db.refresh(db_followup)
+        invalidate_non_campaign_cache()
         
         # Track if customer was removed from campaign
         removed_from_campaign = False
@@ -1306,6 +1349,7 @@ class EngagementController:
         db_followup.updated_at = datetime.utcnow()
         self.db.commit()
         self.db.refresh(db_followup)
+        invalidate_non_campaign_cache()
         
         # Track if customer was removed from campaign
         removed_from_campaign = False
@@ -1622,277 +1666,321 @@ class EngagementController:
                 detail=f"Failed to delete reject reason: {str(e)}"
             )
     
-    def get_non_campaign_customers(self, page: int = 1, limit: int = 20, search: Optional[str] = None, from_date: Optional[str] = None, to_date: Optional[str] = None) -> Dict[str, Any]:
-        """Get customers who are not in any campaign with their engagement data"""
-        
-        is_search = bool(search and search.strip())
-        
-        # Skip the global flag recompute on search — it scans the whole DB and is the biggest hidden cost
-        if not is_search:
-            self.update_latest_followup_flags()
-        
-        # Parse dates if provided
-        start_date = None
-        end_date = None
-        if from_date:
-            try:
-                start_date = datetime.strptime(from_date, '%Y-%m-%d')
-            except:
-                start_date = datetime.fromisoformat(from_date.replace('Z', '+00:00'))
-        if to_date:
-            try:
-                end_date = datetime.strptime(to_date, '%Y-%m-%d')
-                end_date = end_date.replace(hour=23, minute=59, second=59)
-            except:
-                end_date = datetime.fromisoformat(to_date.replace('Z', '+00:00'))
-                end_date = end_date.replace(hour=23, minute=59, second=59)
-        
-        # Get all active campaigns
+    # ----- cheap fingerprint of active campaigns -----
+    def _non_campaign_signature(self):
+        rows = self.db.query(Campaign.id, Campaign.updated_at)\
+            .filter(Campaign.status == 'active').all()
+        return hash(tuple(sorted((r.id, str(r.updated_at)) for r in rows)))
+
+    # ----- one latest non_followup row per customer (reusable) -----
+    def _windowed_latest_for_ids(self, customer_ids, active_only):
+        out = {}
+        if not customer_ids:
+            return out
+        CHUNK = 1000  # SQL Server 2100-param IN() limit
+        for i in range(0, len(customer_ids), CHUNK):
+            chunk = customer_ids[i:i + CHUNK]
+            q = self.db.query(
+                NonFollowUp.customer_id.label('cid'),
+                NonFollowUp.status.label('status'),
+                NonFollowUp.next_followup_date.label('nfd'),
+                NonFollowUp.followup_date.label('fd'),
+                NonFollowUp.user_name.label('un'),
+                NonFollowUp.followup_remark.label('rem'),
+                NonFollowUp.followup_flag.label('flag'),
+                func.row_number().over(
+                    partition_by=NonFollowUp.customer_id,
+                    order_by=[desc(NonFollowUp.followup_date), desc(NonFollowUp.id)],
+                ).label('rn'),
+            ).filter(NonFollowUp.customer_id.in_(chunk))
+            if active_only:
+                q = q.filter(NonFollowUp.status.notin_(['rejected', 'completed']))
+            sub = q.subquery()
+            for r in self.db.query(sub).filter(sub.c.rn == 1).all():
+                out[r.cid] = r
+        return out
+
+    # ----- HEAVY work, done ONCE and cached -----
+    def _build_non_campaign_index(self):
         active_campaigns = self.db.query(Campaign).filter(Campaign.status == 'active').all()
-        
-        # Build set of all customer instance_ids that are in any campaign
         campaign_customer_ids = set()
         for campaign in active_campaigns:
-            asset_numbers = self._parse_asset_numbers(campaign.asset_numbers)
-            for asset in asset_numbers:
-                normalized_asset = self._normalize_id(asset)
-                if normalized_asset:
-                    campaign_customer_ids.add(normalized_asset)
-        
-        # Get all customers
-        customers_query = self.db.query(Customer).filter(
-            Customer.instance_id.isnot(None)
-        )
-        
-        # Server-side search — instance_id is unique+indexed so exact/prefix match is instant.
-        if is_search:
-            term = search.strip()
-            like = f"%{term}%"
-            customers_query = customers_query.filter(
-                or_(
-                    Customer.instance_id == term,            # exact → unique index, instant
-                    Customer.instance_id.like(f"{term}%"),   # prefix → still uses index
-                    Customer.phone_number.like(f"{term}%"),
-                    Customer.customer_name.like(like),
-                    Customer.email.like(like),
-                )
-            ).limit(1000)  # safety cap
-        
-        # Filter out customers that are in any campaign
-        all_customers = customers_query.all()
-        non_campaign_customers = []
-        
-        for customer in all_customers:
-            if customer.instance_id:
-                normalized_id = self._normalize_id(customer.instance_id)
-                if normalized_id not in campaign_customer_ids:
-                    non_campaign_customers.append(customer)
-        
-        # Apply date filters if provided (filter by last followup date)
-        if start_date or end_date:
-            filtered_customers = []
-            for customer in non_campaign_customers:
-                # Get latest followup for this customer
-                latest_followup = self.db.query(FollowUp).filter(
-                    FollowUp.customer_id == customer.id
-                ).order_by(desc(FollowUp.followup_date)).first()
-                
-                if latest_followup:
-                    followup_date = latest_followup.followup_date
-                    if start_date and followup_date < start_date:
-                        continue
-                    if end_date and followup_date > end_date:
-                        continue
-                    filtered_customers.append(customer)
-                elif not start_date and not end_date:
-                    # If no date filters, include customers without followups
-                    filtered_customers.append(customer)
-                # If date filters are set and no followup, exclude the customer
-            non_campaign_customers = filtered_customers
-        
-        # Calculate total count
-        total_count = len(non_campaign_customers)
-        
-        # Apply pagination (on search, return ALL matches in a single page)
-        if is_search:
-            start_idx = 0
-            end_idx = total_count
-            paginated_customers = non_campaign_customers
-        else:
-            start_idx = (page - 1) * limit
-            end_idx = start_idx + limit
-            paginated_customers = non_campaign_customers[start_idx:end_idx]
-        
-        # Build warranty + agreement maps only for paginated customers (efficient)
-        paginated_instance_ids = [
-            self._normalize_id(c.instance_id) 
-            for c in paginated_customers 
-            if c.instance_id
+            for asset in self._parse_asset_numbers(campaign.asset_numbers):
+                norm = self._normalize_id(asset)
+                if norm:
+                    campaign_customer_ids.add(norm)
+
+        cust_rows = self.db.query(
+            Customer.id, Customer.instance_id, Customer.branch_id,
+            Customer.customer_name, Customer.phone_number, Customer.email,
+        ).filter(Customer.instance_id.isnot(None)).all()
+
+        non_campaign = [
+            c for c in cust_rows
+            if c.instance_id and self._normalize_id(c.instance_id) not in campaign_customer_ids
         ]
-        
-        warranty_map = {}
-        agreement_map = {}
-        
-        if paginated_instance_ids:
-            # SQL Server has a 2100-parameter limit on IN() — chunk to be safe
-            CHUNK = 1000
-            paginated_instance_ids_unique = list(set(paginated_instance_ids))
-            
-            # Warranty lookup — only for the paginated instance_ids (not the full table)
-            for i in range(0, len(paginated_instance_ids_unique), CHUNK):
-                chunk = paginated_instance_ids_unique[i:i + CHUNK]
-                asset_rows = self.db.query(
-                    AssetDetailed.instance_id,
-                    AssetDetailed.warranty_expiry_date
-                ).filter(AssetDetailed.instance_id.in_(chunk)).all()
-                for inst_id, warranty in asset_rows:
-                    normalized = self._normalize_id(inst_id)
-                    if normalized and normalized not in warranty_map:
-                        warranty_map[normalized] = warranty
-            
-            # Latest agreement_end_date lookup — also filtered
-            for i in range(0, len(paginated_instance_ids_unique), CHUNK):
-                chunk = paginated_instance_ids_unique[i:i + CHUNK]
-                amc_rows = self.db.query(
-                    AMCAgreement.instance_id,
-                    AMCAgreement.agreement_end_date,
-                    AMCAgreement.agreement_start_date
-                ).filter(AMCAgreement.instance_id.in_(chunk)).order_by(
-                    desc(AMCAgreement.agreement_start_date)
-                ).all()
-                for inst_id, end_date, _ in amc_rows:
-                    normalized = self._normalize_id(inst_id)
-                    if normalized and normalized not in agreement_map:
-                        agreement_map[normalized] = end_date
-        
-        # ========== OPTIMIZATION: Batch-fetch followups for ALL paginated customers ==========
-        # (was: 4 separate per-customer queries × N customers = 4N queries per page)
-        paginated_customer_ids = [c.id for c in paginated_customers]
-        
-        all_followups: List[FollowUp] = []
-        all_non_followups: List[NonFollowUp] = []
-        if paginated_customer_ids:
-            all_followups = self.db.query(FollowUp).filter(
-                FollowUp.customer_id.in_(paginated_customer_ids)
-            ).order_by(desc(FollowUp.followup_date)).all()
-            
-            all_non_followups = self.db.query(NonFollowUp).filter(
-                NonFollowUp.customer_id.in_(paginated_customer_ids)
-            ).order_by(desc(NonFollowUp.followup_date)).all()
-        
-        # Group followups by customer_id (already sorted desc, so first = latest)
-        regular_by_customer: Dict[int, List[FollowUp]] = {}
-        for f in all_followups:
-            regular_by_customer.setdefault(f.customer_id, []).append(f)
-        
-        non_by_customer: Dict[int, List[NonFollowUp]] = {}
-        for nf in all_non_followups:
-            non_by_customer.setdefault(nf.customer_id, []).append(nf)
-        
-        # Process customers for response - now using in-memory lookups only
-        result = []
-        for idx, customer in enumerate(paginated_customers, start=start_idx + 1):
-            regular_list = regular_by_customer.get(customer.id, [])
-            non_list = non_by_customer.get(customer.id, [])
-            
-            # Latest followup of each type (first in desc-sorted list)
-            latest_followup_regular = regular_list[0] if regular_list else None
-            latest_followup_other = non_list[0] if non_list else None
-            
-            # Pick the more recent one for display
-            if latest_followup_regular and latest_followup_other:
-                latest_followup = (
-                    latest_followup_regular
-                    if latest_followup_regular.followup_date >= latest_followup_other.followup_date
-                    else latest_followup_other
-                )
-            elif latest_followup_other:
-                latest_followup = latest_followup_other
-            else:
-                latest_followup = latest_followup_regular
-            
-            # Latest ACTIVE followup of each type (excludes rejected/completed)
-            latest_active_regular = next(
-                (f for f in regular_list if f.status not in ('rejected', 'completed')),
-                None
-            )
-            latest_active_other = next(
-                (nf for nf in non_list if nf.status not in ('rejected', 'completed')),
-                None
-            )
-            
-            if latest_active_regular and latest_active_other:
-                latest_active_followup = (
-                    latest_active_regular
-                    if latest_active_regular.followup_date >= latest_active_other.followup_date
-                    else latest_active_other
-                )
-            elif latest_active_other:
-                latest_active_followup = latest_active_other
-            else:
-                latest_active_followup = latest_active_regular
-            
-            latest_status = latest_followup.status if latest_followup else None
-            
-            # Calculate next follow-up date
-            next_followup_date = None
-            if latest_active_followup and latest_active_followup.next_followup_date:
-                next_followup_date = latest_active_followup.next_followup_date
-            
-            # Get followup flags
-            followup_flags = self._get_followup_flags(customer, latest_active_followup)
-            
-            normalized_inst_id = self._normalize_id(customer.instance_id) if customer.instance_id else None
-            
-            result.append({
-                "sr_no": idx,
-                "customer_id": customer.id,
-                "instance_id": customer.instance_id,
-                "branch_id": customer.branch_id, 
-                "customer_name": customer.customer_name or "Unknown",
-                "mobile": customer.phone_number or "-",
-                "email": customer.email or "-",
-                "warranty_expiry_date": warranty_map.get(normalized_inst_id) if normalized_inst_id else None,
-                "agreement_end_date": agreement_map.get(normalized_inst_id) if normalized_inst_id else None,
-                "campaigns": [],  # Empty for non-campaign customers
-                "campaign_checkmarks": {},
-                "campaign_status": {},
-                "followup_flags": followup_flags,
-                "latest_status": latest_status,
-                "last_followup_date": latest_followup.followup_date if latest_followup else None,
-                "last_followup_user": latest_followup.user_name if latest_followup else None,
-                "next_followup_date": next_followup_date,
-                "last_followup_remark": latest_followup.followup_remark if latest_followup else None
-            })
-        
-        # Get all campaigns for follow-up creation
-        all_campaigns_list = []
+        all_ids = [c.id for c in non_campaign]
+
+        latest_map = self._windowed_latest_for_ids(all_ids, active_only=False)
+        active_map = self._windowed_latest_for_ids(all_ids, active_only=True)
+
+        rows_by_id = {}
+        enriched = []  # (cid, status, nfd, fd)
+        for c in non_campaign:
+            latest = latest_map.get(c.id)
+            active = active_map.get(c.id)
+            status = latest.status if latest else None
+            flag_src = type("F", (), {"followup_flag": active.flag if active else None})()
+            rows_by_id[c.id] = {
+                "customer_id": c.id,
+                "instance_id": c.instance_id,
+                "branch_id": c.branch_id,
+                "customer_name": c.customer_name or "Unknown",
+                "mobile": c.phone_number or "-",
+                "email": c.email or "-",
+                "followup_flags": self._get_followup_flags(c, flag_src),
+                "latest_status": status,
+                "last_followup_date": latest.fd if latest else None,
+                "last_followup_user": latest.un if latest else None,
+                "next_followup_date": active.nfd if active else None,
+                "last_followup_remark": latest.rem if latest else None,
+            }
+            enriched.append((c.id, status, active.nfd if active else None,
+                             latest.fd if latest else None))
+
+        def order_for(completed_first):
+            def tier(status):
+                if status == 'completed':
+                    return 0 if completed_first else 2
+                if status:
+                    return 1 if completed_first else 0
+                return 2 if completed_first else 1
+
+            def key(e):
+                _cid, status, nfd, _fd = e
+                return (tier(status), nfd is None, nfd or datetime.max)
+
+            return [e[0] for e in sorted(enriched, key=key)]
+
+        return rows_by_id, {True: order_for(True), False: order_for(False)}
+
+    # ----- scripts METADATA only (NO base64) -----
+    def _scripts_meta(self, campaign):
+        out = []
+        data = campaign.scripts
+        if not data:
+            return out
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except Exception:
+                data = []
+        if isinstance(data, list):
+            for i, script in enumerate(data):
+                if isinstance(script, dict):
+                    if 'content' in script:
+                        out.append({"type": "pdf",
+                                    "name": script.get('name', 'script.pdf'),
+                                    "index": i, "has_content": True})
+                    else:
+                        out.append({"type": "text", "content": script.get('content', '')})
+                else:
+                    out.append({"type": "text", "content": str(script)})
+        return out
+
+    # ----- lazy PDF fetch (one script's base64) -----
+    def get_campaign_script_pdf(self, campaign_id, script_index):
+        campaign = self.db.query(Campaign).filter(Campaign.id == campaign_id).first()
+        if not campaign:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        scripts = self._get_campaign_scripts(campaign)
+        if script_index < 0 or script_index >= len(scripts):
+            raise HTTPException(status_code=404, detail="Script not found")
+        return scripts[script_index]
+
+    # ----- SEARCH path: direct, indexed, capped -----
+    def _search_non_campaign_customers(self, term, page, limit, completed_first):
+        from app.models.campaign_model import CampaignService
+
+        active_campaigns = self.db.query(Campaign).filter(Campaign.status == 'active').all()
+        campaign_customer_ids = set()
         for campaign in active_campaigns:
-            all_campaigns_list.append({
-                "id": campaign.id,
-                "name": campaign.name,
-                "service": campaign.service,
-                "color": campaign.color or "#71C9CE",
-                "scripts": self._get_campaign_scripts(campaign)
+            for asset in self._parse_asset_numbers(campaign.asset_numbers):
+                norm = self._normalize_id(asset)
+                if norm:
+                    campaign_customer_ids.add(norm)
+
+        like = f"%{term}%"
+        cust = self.db.query(
+            Customer.id, Customer.instance_id, Customer.branch_id,
+            Customer.customer_name, Customer.phone_number, Customer.email,
+        ).filter(
+            Customer.instance_id.isnot(None),
+            or_(
+                Customer.instance_id == term,
+                Customer.instance_id.like(f"{term}%"),
+                Customer.phone_number.like(f"{term}%"),
+                Customer.customer_name.like(like),
+                Customer.email.like(like),
+            )
+        ).limit(1000).all()
+
+        non_campaign = [c for c in cust
+                        if c.instance_id and self._normalize_id(c.instance_id) not in campaign_customer_ids]
+        ids = [c.id for c in non_campaign]
+        latest_map = self._windowed_latest_for_ids(ids, active_only=False)
+        active_map = self._windowed_latest_for_ids(ids, active_only=True)
+
+        result = []
+        for idx, c in enumerate(non_campaign, start=1):
+            latest = latest_map.get(c.id)
+            active = active_map.get(c.id)
+            flag_src = type("F", (), {"followup_flag": active.flag if active else None})()
+            result.append({
+                "sr_no": idx, "customer_id": c.id, "instance_id": c.instance_id,
+                "branch_id": c.branch_id, "customer_name": c.customer_name or "Unknown",
+                "mobile": c.phone_number or "-", "email": c.email or "-",
+                "warranty_expiry_date": None, "agreement_end_date": None,
+                "campaigns": [], "campaign_checkmarks": {}, "campaign_status": {},
+                "followup_flags": self._get_followup_flags(c, flag_src),
+                "latest_status": latest.status if latest else None,
+                "last_followup_date": latest.fd if latest else None,
+                "last_followup_user": latest.un if latest else None,
+                "next_followup_date": active.nfd if active else None,
+                "last_followup_remark": latest.rem if latest else None,
             })
 
-        # After building all_campaigns_list, add:
-        from app.models.campaign_model import CampaignService
-        
+        all_campaigns_list = [{
+            "id": c.id, "name": c.name, "service": c.service,
+            "color": c.color or "#71C9CE", "scripts": self._scripts_meta(c),
+        } for c in active_campaigns]
         campaign_services = self.db.query(CampaignService).order_by(CampaignService.name).all()
-        campaign_services_list = [{"id": cs.id, "name": cs.name} for cs in campaign_services] 
-        
+
         return {
-            "from_date": from_date,
-            "to_date": to_date,
-            "page": page,
-            "limit": limit,
-            "total_count": total_count,
-            "has_more": end_idx < total_count,
-            "customers": result,
+            "from_date": None, "to_date": None, "page": 1, "limit": limit,
+            "total_count": len(result), "has_more": False, "customers": result,
             "all_campaigns": all_campaigns_list,
-            "campaign_services": campaign_services_list,
+            "campaign_services": [{"id": cs.id, "name": cs.name} for cs in campaign_services],
         }
+
+    # ----- PUBLIC: now cheap per page -----
+    def get_non_campaign_customers(self, page: int = 1, limit: int = 20, search: Optional[str] = None,
+                                   from_date: Optional[str] = None, to_date: Optional[str] = None,
+                                   completed_first: bool = False) -> Dict[str, Any]:
+        from app.models.campaign_model import CampaignService
+        try:
+            is_search = bool(search and search.strip())
+            if is_search:
+                return self._search_non_campaign_customers(search.strip(), page, limit, completed_first)
+
+            start_date = end_date = None
+            if from_date:
+                try:
+                    start_date = datetime.strptime(from_date, '%Y-%m-%d')
+                except Exception:
+                    start_date = datetime.fromisoformat(from_date.replace('Z', '+00:00'))
+            if to_date:
+                try:
+                    end_date = datetime.strptime(to_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+                except Exception:
+                    end_date = datetime.fromisoformat(to_date.replace('Z', '+00:00')).replace(hour=23, minute=59, second=59)
+
+            now = time.time()
+            signature = self._non_campaign_signature()
+            with _NC_CACHE_LOCK:
+                valid = (_NC_CACHE["signature"] == signature
+                         and (now - _NC_CACHE["built_at"]) < _NC_CACHE_TTL
+                         and _NC_CACHE["orders"])
+            if not valid:
+                rows_by_id, orders = self._build_non_campaign_index()
+                with _NC_CACHE_LOCK:
+                    _NC_CACHE["signature"] = signature
+                    _NC_CACHE["built_at"] = now
+                    _NC_CACHE["orders"] = orders
+                    _NC_CACHE["rows"] = rows_by_id
+            with _NC_CACHE_LOCK:
+                rows_by_id = _NC_CACHE["rows"]
+                order = list(_NC_CACHE["orders"][bool(completed_first)])
+
+            if start_date or end_date:
+                def in_range(cid):
+                    fd = rows_by_id[cid]["last_followup_date"]
+                    if not fd:
+                        return False
+                    if start_date and fd < start_date:
+                        return False
+                    if end_date and fd > end_date:
+                        return False
+                    return True
+                order = [cid for cid in order if in_range(cid)]
+
+            total_count = len(order)
+            start_idx = (page - 1) * limit
+            page_ids = order[start_idx:start_idx + limit]
+
+            page_inst = [rows_by_id[cid]["instance_id"] for cid in page_ids if rows_by_id[cid]["instance_id"]]
+            page_norm = list({self._normalize_id(i) for i in page_inst})
+            warranty_map, agreement_map = {}, {}
+            CHUNK = 1000
+            if page_norm:
+                for i in range(0, len(page_norm), CHUNK):
+                    chunk = page_norm[i:i + CHUNK]
+                    for inst_id, warranty in self.db.query(
+                        AssetDetailed.instance_id, AssetDetailed.warranty_expiry_date
+                    ).filter(AssetDetailed.instance_id.in_(chunk)).all():
+                        n = self._normalize_id(inst_id)
+                        if n and n not in warranty_map:
+                            warranty_map[n] = warranty
+                for i in range(0, len(page_norm), CHUNK):
+                    chunk = page_norm[i:i + CHUNK]
+                    for inst_id, end_d, _ in self.db.query(
+                        AMCAgreement.instance_id, AMCAgreement.agreement_end_date,
+                        AMCAgreement.agreement_start_date
+                    ).filter(AMCAgreement.instance_id.in_(chunk)).order_by(
+                        desc(AMCAgreement.agreement_start_date)
+                    ).all():
+                        n = self._normalize_id(inst_id)
+                        if n and n not in agreement_map:
+                            agreement_map[n] = end_d
+
+            result = []
+            for idx, cid in enumerate(page_ids, start=start_idx + 1):
+                base = rows_by_id[cid]
+                norm = self._normalize_id(base["instance_id"]) if base["instance_id"] else None
+                result.append({
+                    "sr_no": idx,
+                    "campaigns": [], "campaign_checkmarks": {}, "campaign_status": {},
+                    "warranty_expiry_date": warranty_map.get(norm) if norm else None,
+                    "agreement_end_date": agreement_map.get(norm) if norm else None,
+                    **base,
+                })
+
+            active_campaigns = self.db.query(Campaign).filter(Campaign.status == 'active').all()
+            all_campaigns_list = [{
+                "id": c.id, "name": c.name, "service": c.service,
+                "color": c.color or "#71C9CE", "scripts": self._scripts_meta(c),
+            } for c in active_campaigns]
+            campaign_services = self.db.query(CampaignService).order_by(CampaignService.name).all()
+
+            return {
+                "from_date": from_date, "to_date": to_date,
+                "page": page, "limit": limit, "total_count": total_count,
+                "has_more": (start_idx + len(page_ids)) < total_count,
+                "customers": result,
+                "all_campaigns": all_campaigns_list,
+                "campaign_services": [{"id": cs.id, "name": cs.name} for cs in campaign_services],
+            }
+
+        except Exception as e:
+            print(f"Error in get_non_campaign_customers: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "from_date": from_date, "to_date": to_date,
+                "page": page, "limit": limit, "total_count": 0,
+                "has_more": False, "customers": [],
+                "all_campaigns": [], "campaign_services": [],
+            }
     
     def get_customer_non_followups(self, customer_id: int) -> List[Dict[str, Any]]:
         """Get all non-follow-ups (other type) for a customer"""
@@ -2045,6 +2133,7 @@ class EngagementController:
         self.db.add(db_non_followup)
         self.db.commit()
         self.db.refresh(db_non_followup)
+        invalidate_non_campaign_cache()
         
         # Return response with campaign_name as "Other"
         return {
@@ -2095,7 +2184,8 @@ class EngagementController:
         db_non_followup.updated_at = datetime.utcnow()
         self.db.commit()
         self.db.refresh(db_non_followup)
-        
+        invalidate_non_campaign_cache()
+
         # Get campaign info for response
         campaign_name = None
         campaign_color = None
@@ -2140,6 +2230,8 @@ class EngagementController:
         
         self.db.delete(db_non_followup)
         self.db.commit()
+        invalidate_non_campaign_cache()
+
         return {"message": "Non-follow-up deleted successfully"}
 
 # ==================== CSP Status (branch-wise) ====================

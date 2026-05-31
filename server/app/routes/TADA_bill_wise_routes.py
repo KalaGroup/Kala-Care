@@ -117,6 +117,7 @@ def _serialize_bill_wise(r) -> dict:
         "task_end_date": g("task_end_date"),
         "customer_name": g("customer_name"),
         "sr_invoice_engine_no": g("sr_invoice_engine_no"),
+        "location": g("location"),
         "work_status": g("work_status"),
         "remark": g("remark"),
         "verification_status": g("verification_status", "Pending"),
@@ -150,6 +151,7 @@ def _serialize_history(r) -> dict:
         "task_end_date": r.task_end_date,
         "customer_name": r.customer_name,
         "sr_invoice_engine_no": r.sr_invoice_engine_no,
+        "location": getattr(r, "location", None),
         "work_status": r.work_status,
         "remark": r.remark,
         "verification_status": r.verification_status,
@@ -288,6 +290,40 @@ def branch_bill_wise_records(
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# VOUCHER-WISE (HO verification view)
+# ════════════════════════════════════════════════════════════════════════════
+
+@router.get("/branch-vouchers")
+def branch_bill_wise_vouchers(branch_code: str, db: Session = Depends(get_db)):
+    """Bill Wise records grouped by voucher_no for a branch (HO verification)."""
+    try:
+        return bill_controller.get_branch_bill_wise_vouchers(db, unquote(branch_code))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"branch_bill_wise_vouchers error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/voucher-records")
+def branch_bill_wise_voucher_records(
+    branch_code: str,
+    voucher_no: str,
+    db: Session = Depends(get_db),
+):
+    """Get all Bill Wise records under one voucher_no for a branch."""
+    try:
+        records = bill_controller.get_bill_wise_voucher_records(
+            db, unquote(branch_code), unquote(voucher_no)
+        )
+        return [_serialize_bill_wise(r) for r in records]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"branch_bill_wise_voucher_records error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ════════════════════════════════════════════════════════════════════════════
 # UPDATE — verification status only
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -385,6 +421,16 @@ def bill_wise_history_grouped(branch_code: str, db: Session = Depends(get_db)):
         logger.error(f"bill_wise_history_grouped error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/history/vouchers")
+def bill_wise_history_vouchers(branch_code: str, db: Session = Depends(get_db)):
+    """Bill Wise history grouped by voucher_no."""
+    try:
+        return bill_controller.get_bill_wise_history_vouchers(db, unquote(branch_code))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"bill_wise_history_vouchers error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/history/bulk-paid-date")
 def bulk_bill_wise_history_paid_date(payload: BulkPaidDateRequest, db: Session = Depends(get_db)):

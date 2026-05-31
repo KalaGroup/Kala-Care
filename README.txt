@@ -66,3 +66,37 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_non_followups_status'
 
 CREATE NONCLUSTERED INDEX idx_customers_customer_name
 ON customers (customer_name);
+
+
+
+CREATE INDEX ix_customers_branch_id ON customers (branch_id);
+CREATE INDEX ix_followups_user_id ON followups (user_id);
+CREATE INDEX ix_followups_campaign_status ON followups (campaign_id, status);
+CREATE INDEX ix_users_branch_blocked ON users (branch, is_blocked);
+
+
+
+
+
+
+CREATE INDEX ix_non_followups_customer_date
+    ON non_followups (customer_id, followup_date DESC, id DESC);
+
+CREATE INDEX ix_non_followups_status
+    ON non_followups (status);
+
+CREATE INDEX ix_nonfollowups_cust_date ON non_followups (customer_id, followup_date DESC, id DESC);
+CREATE INDEX ix_followups_cust_date    ON followups     (customer_id, followup_date DESC);
+CREATE INDEX ix_assetdetailed_instance ON asset_detailed (instance_id);
+CREATE INDEX ix_amc_instance_start     ON amc_agreements (instance_id, agreement_start_date DESC);
+CREATE INDEX ix_customers_name         ON customers (customer_name);    
+
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_followups_customer_date' AND object_id=OBJECT_ID('followups'))
+    CREATE INDEX IX_followups_customer_date ON followups (customer_id, followup_date);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_campaigns_status' AND object_id=OBJECT_ID('campaigns'))
+    CREATE INDEX IX_campaigns_status ON campaigns (status);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_customers_customer_name' AND object_id=OBJECT_ID('customers'))
+    CREATE INDEX IX_customers_customer_name ON customers (customer_name);

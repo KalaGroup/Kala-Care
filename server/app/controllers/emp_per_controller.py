@@ -105,55 +105,66 @@ class EmployeePerformanceController:
                 elif time_period == 'year':
                     date_condition = "AND created_at >= DATEADD(day, -365, GETUTCDATE())"
             
-            # SQL query including campaign name and status breakdown for each type (with rescheduled)
+            # SQL query now COMBINES followups + non_followups for the same user.
+            # date_condition uses an unqualified "created_at", so it applies correctly
+            # inside each UNION branch (one table per branch).
             sql_query = f"""
+                WITH combined_followups AS (
+                    SELECT f.created_at, f.followup_by, f.status, f.campaign_id
+                    FROM followups f
+                    WHERE f.user_id = :user_id
+                        AND f.created_at IS NOT NULL
+                        {date_condition}
+                    UNION ALL
+                    SELECT n.created_at, n.followup_by, n.status, n.campaign_id
+                    FROM non_followups n
+                    WHERE n.user_id = :user_id
+                        AND n.created_at IS NOT NULL
+                        {date_condition}
+                )
                 SELECT 
-                    CONVERT(DATE, f.created_at) as date,
-                    MIN(f.created_at) as first_followup_time,
-                    MAX(f.created_at) as last_followup_time,
+                    CONVERT(DATE, cf.created_at) as date,
+                    MIN(cf.created_at) as first_followup_time,
+                    MAX(cf.created_at) as last_followup_time,
                     COUNT(*) as total_followups,
-                    -- Get all campaign names for this day
+                    -- Campaign NAME (not id) resolved from campaign_id across BOTH tables for this day
                     STUFF((
                         SELECT DISTINCT ', ' + c2.name
                         FROM campaigns c2
                         WHERE c2.id IN (
-                            SELECT DISTINCT f2.campaign_id
-                            FROM followups f2
-                            WHERE f2.user_id = :user_id
-                                AND CONVERT(DATE, f2.created_at) = CONVERT(DATE, f.created_at)
-                                AND f2.campaign_id IS NOT NULL
+                            SELECT DISTINCT cf2.campaign_id
+                            FROM combined_followups cf2
+                            WHERE CONVERT(DATE, cf2.created_at) = CONVERT(DATE, cf.created_at)
+                                AND cf2.campaign_id IS NOT NULL
                         )
                         FOR XML PATH('')
                     ), 1, 2, '') as campaign_name,
-                    SUM(CASE WHEN f.followup_by = 'call' THEN 1 ELSE 0 END) as followup_by_call,
-                    SUM(CASE WHEN f.followup_by = 'call' AND f.status = 'completed' THEN 1 ELSE 0 END) as call_completed,
-                    SUM(CASE WHEN f.followup_by = 'call' AND f.status = 'wip' THEN 1 ELSE 0 END) as call_wip,
-                    SUM(CASE WHEN f.followup_by = 'call' AND f.status = 'rejected' THEN 1 ELSE 0 END) as call_rejected,
-                    SUM(CASE WHEN f.followup_by = 'call' AND f.status = 'rescheduled' THEN 1 ELSE 0 END) as call_rescheduled,
+                    SUM(CASE WHEN cf.followup_by = 'call' THEN 1 ELSE 0 END) as followup_by_call,
+                    SUM(CASE WHEN cf.followup_by = 'call' AND cf.status = 'completed' THEN 1 ELSE 0 END) as call_completed,
+                    SUM(CASE WHEN cf.followup_by = 'call' AND cf.status = 'wip' THEN 1 ELSE 0 END) as call_wip,
+                    SUM(CASE WHEN cf.followup_by = 'call' AND cf.status = 'rejected' THEN 1 ELSE 0 END) as call_rejected,
+                    SUM(CASE WHEN cf.followup_by = 'call' AND cf.status = 'rescheduled' THEN 1 ELSE 0 END) as call_rescheduled,
                     -- WhatsApp breakdown
-                    SUM(CASE WHEN f.followup_by = 'whatsapp' THEN 1 ELSE 0 END) as followup_by_whatsapp,
-                    SUM(CASE WHEN f.followup_by = 'whatsapp' AND f.status = 'completed' THEN 1 ELSE 0 END) as whatsapp_completed,
-                    SUM(CASE WHEN f.followup_by = 'whatsapp' AND f.status = 'wip' THEN 1 ELSE 0 END) as whatsapp_wip,
-                    SUM(CASE WHEN f.followup_by = 'whatsapp' AND f.status = 'rejected' THEN 1 ELSE 0 END) as whatsapp_rejected,
-                    SUM(CASE WHEN f.followup_by = 'whatsapp' AND f.status = 'rescheduled' THEN 1 ELSE 0 END) as whatsapp_rescheduled,
+                    SUM(CASE WHEN cf.followup_by = 'whatsapp' THEN 1 ELSE 0 END) as followup_by_whatsapp,
+                    SUM(CASE WHEN cf.followup_by = 'whatsapp' AND cf.status = 'completed' THEN 1 ELSE 0 END) as whatsapp_completed,
+                    SUM(CASE WHEN cf.followup_by = 'whatsapp' AND cf.status = 'wip' THEN 1 ELSE 0 END) as whatsapp_wip,
+                    SUM(CASE WHEN cf.followup_by = 'whatsapp' AND cf.status = 'rejected' THEN 1 ELSE 0 END) as whatsapp_rejected,
+                    SUM(CASE WHEN cf.followup_by = 'whatsapp' AND cf.status = 'rescheduled' THEN 1 ELSE 0 END) as whatsapp_rescheduled,
                     -- Email breakdown
-                    SUM(CASE WHEN f.followup_by = 'email' THEN 1 ELSE 0 END) as followup_by_email,
-                    SUM(CASE WHEN f.followup_by = 'email' AND f.status = 'completed' THEN 1 ELSE 0 END) as email_completed,
-                    SUM(CASE WHEN f.followup_by = 'email' AND f.status = 'wip' THEN 1 ELSE 0 END) as email_wip,
-                    SUM(CASE WHEN f.followup_by = 'email' AND f.status = 'rejected' THEN 1 ELSE 0 END) as email_rejected,
-                    SUM(CASE WHEN f.followup_by = 'email' AND f.status = 'rescheduled' THEN 1 ELSE 0 END) as email_rescheduled,
+                    SUM(CASE WHEN cf.followup_by = 'email' THEN 1 ELSE 0 END) as followup_by_email,
+                    SUM(CASE WHEN cf.followup_by = 'email' AND cf.status = 'completed' THEN 1 ELSE 0 END) as email_completed,
+                    SUM(CASE WHEN cf.followup_by = 'email' AND cf.status = 'wip' THEN 1 ELSE 0 END) as email_wip,
+                    SUM(CASE WHEN cf.followup_by = 'email' AND cf.status = 'rejected' THEN 1 ELSE 0 END) as email_rejected,
+                    SUM(CASE WHEN cf.followup_by = 'email' AND cf.status = 'rescheduled' THEN 1 ELSE 0 END) as email_rescheduled,
                     -- Visit breakdown
-                    SUM(CASE WHEN f.followup_by = 'visit' THEN 1 ELSE 0 END) as followup_by_visit,
-                    SUM(CASE WHEN f.followup_by = 'visit' AND f.status = 'completed' THEN 1 ELSE 0 END) as visit_completed,
-                    SUM(CASE WHEN f.followup_by = 'visit' AND f.status = 'wip' THEN 1 ELSE 0 END) as visit_wip,
-                    SUM(CASE WHEN f.followup_by = 'visit' AND f.status = 'rejected' THEN 1 ELSE 0 END) as visit_rejected,
-                    SUM(CASE WHEN f.followup_by = 'visit' AND f.status = 'rescheduled' THEN 1 ELSE 0 END) as visit_rescheduled
-                FROM followups f
-                WHERE f.user_id = :user_id
-                    AND f.created_at IS NOT NULL
-                    {date_condition}
-                GROUP BY CONVERT(DATE, f.created_at)
-                ORDER BY CONVERT(DATE, f.created_at) DESC
+                    SUM(CASE WHEN cf.followup_by = 'visit' THEN 1 ELSE 0 END) as followup_by_visit,
+                    SUM(CASE WHEN cf.followup_by = 'visit' AND cf.status = 'completed' THEN 1 ELSE 0 END) as visit_completed,
+                    SUM(CASE WHEN cf.followup_by = 'visit' AND cf.status = 'wip' THEN 1 ELSE 0 END) as visit_wip,
+                    SUM(CASE WHEN cf.followup_by = 'visit' AND cf.status = 'rejected' THEN 1 ELSE 0 END) as visit_rejected,
+                    SUM(CASE WHEN cf.followup_by = 'visit' AND cf.status = 'rescheduled' THEN 1 ELSE 0 END) as visit_rescheduled
+                FROM combined_followups cf
+                GROUP BY CONVERT(DATE, cf.created_at)
+                ORDER BY CONVERT(DATE, cf.created_at) DESC
             """
             
             result = db.execute(text(sql_query), params)
@@ -2128,30 +2139,26 @@ class EmployeePerformanceController:
     
             campaigns = db.query(Campaign).all()
     
+            branch_rows = db.query(Customer.instance_id).filter(
+                Customer.branch_id == branch_code
+            ).all()
+            branch_set = {r[0] for r in branch_rows if r[0]}
+    
             campaign_counts = []
             total_customers_set = set()
     
             for campaign in campaigns:
-                asset_numbers = campaign.asset_numbers or []
-    
-                if not asset_numbers:
+                asset_set = set(campaign.asset_numbers or [])
+                if not asset_set:
                     continue
-    
-                branch_customers = db.query(Customer).filter(
-                    Customer.instance_id.in_(asset_numbers),
-                    Customer.branch_id == branch_code
-                ).all()
-    
-                if not branch_customers:
+                matched = branch_set & asset_set   # same result as the IN() query
+                if not matched:
                     continue
-    
-                customer_instance_ids = [c.instance_id for c in branch_customers]
-                total_customers_set.update(customer_instance_ids)
-    
+                total_customers_set.update(matched)
                 campaign_counts.append({
                     "campaign_id": campaign.id,
                     "campaign_name": campaign.name,
-                    "remaining_customers": len(customer_instance_ids),
+                    "remaining_customers": len(matched),
                     "status": campaign.status
                 })
     
@@ -2174,54 +2181,19 @@ class EmployeePerformanceController:
             from app.models.customer_model import Customer
             from app.models.engagement_model import FollowUp
     
-            CHUNK_SIZE = 1000  # safely under SQL Server's 2100 param limit
-    
-            def chunked_customer_query(instance_ids, branch_id):
-                """Query customers in chunks to avoid SQL Server 2100 param limit"""
-                results = []
-                seen = set()
-                id_list = list(instance_ids)
-                for i in range(0, len(id_list), CHUNK_SIZE):
-                    chunk = id_list[i:i + CHUNK_SIZE]
-                    rows = db.query(Customer).filter(
-                        Customer.instance_id.in_(chunk),
-                        Customer.branch_id == branch_id
-                    ).all()
-                    for row in rows:
-                        if row.instance_id not in seen:
-                            seen.add(row.instance_id)
-                            results.append(row)
-                return results
-    
-            def chunked_followup_query(instance_ids):
-                """Query followups in chunks to avoid SQL Server 2100 param limit"""
-                attended = set()
-                id_list = list(instance_ids)
-                for i in range(0, len(id_list), CHUNK_SIZE):
-                    chunk = id_list[i:i + CHUNK_SIZE]
-                    rows = db.query(FollowUp.customer_instance_id).filter(
-                        FollowUp.customer_instance_id.in_(chunk)
-                    ).distinct().all()
-                    for row in rows:
-                        if row[0]:
-                            attended.add(row[0])
-                return attended
-    
-            # Step 1: Get all instance IDs from campaign asset_numbers
+            # Step 1: asset instance IDs across all campaigns (in-memory set)
             all_campaigns = db.query(Campaign).all()
             asset_instance_ids = set()
             for campaign in all_campaigns:
-                asset_numbers = campaign.asset_numbers or []
-                asset_instance_ids.update(asset_numbers)
+                asset_instance_ids.update(campaign.asset_numbers or [])
     
-            # Step 2: Get all instance IDs from followup table
-            all_followup_ids = db.query(FollowUp.customer_instance_id).distinct().all()
-            followup_instance_ids = set([fu[0] for fu in all_followup_ids if fu[0]])
+            # Step 2: ALL customers in this branch (one indexed query)
+            branch_rows = db.query(Customer.instance_id).filter(
+                Customer.branch_id == branch_code
+            ).all()
+            branch_instance_ids = {r[0] for r in branch_rows if r[0]}
     
-            # Step 3: Union both sets
-            all_unique_instance_ids = asset_instance_ids.union(followup_instance_ids)
-    
-            if not all_unique_instance_ids:
+            if not branch_instance_ids:
                 return {
                     'branch_code': branch_code,
                     'branch_name': get_branch_display_name(branch_code),
@@ -2230,27 +2202,25 @@ class EmployeePerformanceController:
                     'attended_percentage': 0
                 }
     
-            # Step 4: Query customers in chunks (FIXES the 2100 param limit error)
-            branch_customers = chunked_customer_query(all_unique_instance_ids, branch_code)
+            # Step 3: branch customers who have at least one follow-up
+            # ONE join query — DB does the matching, no chunked IN() round-trips
+            attended_rows = db.query(
+                func.distinct(FollowUp.customer_instance_id)
+            ).join(
+                Customer, Customer.instance_id == FollowUp.customer_instance_id
+            ).filter(
+                Customer.branch_id == branch_code
+            ).all()
+            attended_set = {r[0] for r in attended_rows if r[0]}
     
-            total_allocated = len(branch_customers)
+            # Step 4: allocated = branch customers in assets OR with a follow-up
+            # (every attended customer is allocated by definition)
+            allocated_ids = {
+                iid for iid in branch_instance_ids if iid in asset_instance_ids
+            } | attended_set
     
-            if total_allocated == 0:
-                return {
-                    'branch_code': branch_code,
-                    'branch_name': get_branch_display_name(branch_code),
-                    'total_allocated_customers': 0,
-                    'attended_customers': 0,
-                    'attended_percentage': 0
-                }
-    
-            # Step 5: Get branch customer instance IDs
-            branch_instance_ids = set([c.instance_id for c in branch_customers])
-    
-            # Step 6: Check which customers have follow-ups (attended) - also chunked
-            attended_instance_ids = chunked_followup_query(branch_instance_ids)
-    
-            attended_customers = len(attended_instance_ids)
+            total_allocated = len(allocated_ids)
+            attended_customers = len(attended_set)
             attended_percentage = round(
                 (attended_customers / total_allocated * 100), 2
             ) if total_allocated > 0 else 0
@@ -2625,4 +2595,183 @@ class EmployeePerformanceController:
             }
         except Exception as e:
             print(f"Error in get_asset_lookup: {str(e)}")
-            return {"found": False, "goem_oem": "", "segment": ""}              
+            return {"found": False, "goem_oem": "", "segment": ""}       
+
+    @staticmethod
+    async def get_my_non_campaign_customers(db: Session, user_id: str):
+        """
+        Get all non-campaign customers for a SPECIFIC user with their latest follow-up
+        details. Returns unique customers based on customer_instance_id (latest per customer).
+        """
+        try:
+            from app.models.non_followup_model import NonFollowUp
+            from app.models.customer_model import Customer
+
+            all_non_followups = db.query(NonFollowUp).filter(
+                NonFollowUp.user_id == user_id
+            ).all()
+
+            if not all_non_followups:
+                return {"total_customers": 0, "customers": []}
+
+            # Latest non-followup per customer_instance_id
+            latest_map = {}
+            for nfu in all_non_followups:
+                instance_id = nfu.customer_instance_id
+                if not instance_id:
+                    continue
+                record_date = nfu.followup_date if nfu.followup_date else nfu.created_at
+                if instance_id not in latest_map:
+                    latest_map[instance_id] = nfu
+                else:
+                    existing_date = (
+                        latest_map[instance_id].followup_date
+                        if latest_map[instance_id].followup_date
+                        else latest_map[instance_id].created_at
+                    )
+                    if record_date and existing_date and record_date > existing_date:
+                        latest_map[instance_id] = nfu
+
+            instance_ids = list(latest_map.keys())
+            customers_db = db.query(Customer).filter(
+                Customer.instance_id.in_(instance_ids)
+            ).all() if instance_ids else []
+            customer_map = {c.instance_id: c for c in customers_db}
+
+            customers_list = []
+            for instance_id, nfu in latest_map.items():
+                customer = customer_map.get(instance_id)
+                customers_list.append({
+                    "s_no": 0,
+                    "instance_id": instance_id,
+                    "customer_name": customer.customer_name if customer else "Not Found",
+                    "phone_number": customer.phone_number if customer else "N/A",
+                    "email": customer.email if customer else "N/A",
+                    "branch_id": customer.branch_id if customer else "N/A",
+                    "location": customer.location if customer else "N/A",
+                    "service": nfu.service or "N/A",
+                    "remark_type": nfu.remark_type or "other",
+                    "last_status": nfu.status,
+                    "last_followup_user_name": nfu.user_name or "N/A",
+                    "last_followup_user_id": nfu.user_id or "N/A",
+                    "last_followup_date": nfu.followup_date.isoformat() if nfu.followup_date else (
+                        nfu.created_at.isoformat() if nfu.created_at else None
+                    ),
+                    "next_followup_date": nfu.next_followup_date.isoformat() if nfu.next_followup_date else None,
+                    "latest_flag": nfu.followup_flag or "N/A",
+                    "latest_remark": nfu.followup_remark or "N/A",
+                    "followup_by": nfu.followup_by or "N/A",
+                    "quotation_sent": nfu.quotation_sent or False,
+                    "quotation_value": float(nfu.quotation_value) if nfu.quotation_value else 0,
+                    "quotation_no": nfu.quotation_no or None,
+                })
+
+            customers_list.sort(key=lambda x: x["last_followup_date"] or "", reverse=True)
+            for idx, c in enumerate(customers_list, 1):
+                c["s_no"] = idx
+
+            return {"total_customers": len(customers_list), "customers": customers_list}
+
+        except Exception as e:
+            print(f"Error in get_my_non_campaign_customers: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {"total_customers": 0, "customers": []}       
+            
+    @staticmethod
+    async def get_employee_time_report(db: Session, target_date: str = None,
+                                       branch_code: str = None, search: str = None):
+        """
+        Login / logout report (IST). Defaults to today's IST date.
+        Work time is computed on the fly from login/logout — nothing daily is stored.
+        """
+        try:
+            from app.models.login_activity_model import LoginSession, now_ist
+            from app.models.user_model import User
+
+            # Resolve the date (IST). Default = today in IST.
+            if target_date:
+                try:
+                    day = datetime.strptime(target_date, '%Y-%m-%d').date()
+                except Exception:
+                    day = now_ist().date()
+            else:
+                day = now_ist().date()
+
+            # Sessions on this IST date; push branch/name filters into SQL.
+            sess_q = db.query(LoginSession).filter(LoginSession.session_date == day)
+            if branch_code or search:
+                sess_q = sess_q.join(User, User.user_id == LoginSession.user_id)
+                if branch_code:
+                    sess_q = sess_q.filter(User.branch == branch_code)
+                if search:
+                    like = f"%{search.strip()}%"
+                    sess_q = sess_q.filter(
+                        or_(LoginSession.user_id.like(like), User.name.like(like))
+                    )
+            sessions = sess_q.order_by(LoginSession.login_time.desc()).all()
+
+            # Users for branch + name display
+            user_ids = list({s.user_id for s in sessions})
+            user_map = {}
+            if user_ids:
+                for u in db.query(User).filter(User.user_id.in_(user_ids)).all():
+                    user_map[u.user_id] = u
+
+            now = now_ist()
+            today = now.date()
+            MAX_OPEN_SESSION_SECS = 10 * 3600  # cap a forgotten open tab at 10h
+
+            def fmt_secs(secs):
+                if not secs or secs < 0:
+                    return "0h 0m"
+                h = secs // 3600
+                m = (secs % 3600) // 60
+                return f"{h}h {m}m"
+
+            def session_secs(s):
+                if s.logout_time:
+                    if s.duration_seconds is not None:
+                        return max(s.duration_seconds, 0)
+                    return max(int((s.logout_time - s.login_time).total_seconds()), 0)
+                if not s.login_time:
+                    return 0
+                # Open session
+                if day == today:
+                    raw = int((now - s.login_time).total_seconds())
+                else:
+                    end_of_day = datetime.combine(day, datetime.max.time())
+                    raw = int((end_of_day - s.login_time).total_seconds())
+                return max(min(raw, MAX_OPEN_SESSION_SECS), 0)
+
+            rows = []
+            for s in sessions:
+                u = user_map.get(s.user_id)
+                branch = u.branch if u else (s.branch or 'N/A')
+                user_name = (u.name if u else None) or s.user_name or 'N/A'
+
+                secs = session_secs(s)
+                if s.logout_time:
+                    status_label = s.logout_type or "unknown"
+                else:
+                    status_label = "active" if day == today else "no-logout"
+
+                rows.append({
+                    "user_id": s.user_id,
+                    "user_name": user_name,
+                    "branch": branch,
+                    "branch_display": get_branch_display_name(branch),
+                    "login_time": s.login_time.isoformat() if s.login_time else None,
+                    "logout_time": s.logout_time.isoformat() if s.logout_time else None,
+                    "session_seconds": secs,
+                    "work_time": fmt_secs(secs),
+                    "logout_type": status_label,
+                })
+
+            return {"date": day.strftime('%Y-%m-%d'), "total_sessions": len(rows), "rows": rows}
+
+        except Exception as e:
+            print(f"Error in get_employee_time_report: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {"date": target_date or "", "total_sessions": 0, "rows": []}                        

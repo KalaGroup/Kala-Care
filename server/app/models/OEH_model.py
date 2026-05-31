@@ -13,6 +13,7 @@ class OfficeExpenseHistory(Base):
     sub_head = Column(String(100), nullable=True)
     expenses_description = Column(Text, nullable=True)
     description = Column(Text, nullable=True)
+    internal_branch_name = Column(String(150), nullable=True)
     paid_to = Column(String(255), nullable=True)
     invoice_no = Column(String(100), nullable=True)
     amount = Column(Float, nullable=True)
@@ -36,6 +37,7 @@ class OfficeExpenseHistory(Base):
     submitted_by_id = Column(String(100), nullable=True)
     moved_at = Column(DateTime, server_default=func.now())
     ho_paid_date = Column(Date, nullable=True)
+    submit_voucher_no = Column(String(50), nullable=True)   # carried from main on submit-to-history
 
     def to_dict(self):
         return {
@@ -46,6 +48,7 @@ class OfficeExpenseHistory(Base):
             "sub_head": self.sub_head,
             "expenses_description": self.expenses_description,
             "description": self.description,
+            "internal_branch_name": self.internal_branch_name,
             "paid_to": self.paid_to,
             "invoice_no": self.invoice_no,
             "amount": self.amount,
@@ -63,4 +66,5 @@ class OfficeExpenseHistory(Base):
             "submitted_by_id": self.submitted_by_id,
             "moved_at": self.moved_at.isoformat() if self.moved_at else None,
             "ho_paid_date": self.ho_paid_date.isoformat() if self.ho_paid_date else None,
+            "submit_voucher_no": self.submit_voucher_no,
         }

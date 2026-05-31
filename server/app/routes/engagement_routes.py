@@ -250,6 +250,7 @@ async def get_non_campaign_customers(
     search: Optional[str] = Query(None, description="Search instance_id / name / mobile / email"),
     from_date: Optional[str] = Query(None, description="From date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, description="To date (YYYY-MM-DD)"),
+    completed_first: bool = Query(False, description="Put completed customers on top"),
     db: Session = Depends(get_db)
 ):
     """Get customers who are not in any campaign with their engagement data"""
@@ -260,7 +261,8 @@ async def get_non_campaign_customers(
         limit=limit,
         search=search,
         from_date=from_date,
-        to_date=to_date
+        to_date=to_date,
+        completed_first=completed_first
     )
     
     return result    
@@ -325,3 +327,13 @@ async def get_csp_status(
     """Get branch-wise CSP info rows with computed due dates"""
     controller = EngagementController(db)
     return controller.get_csp_status_for_branch(branch_id, role)    
+
+@router.get("/campaigns/{campaign_id}/scripts/{script_index}", response_model=dict)
+async def get_campaign_script_pdf(
+    campaign_id: int,
+    script_index: int,
+    db: Session = Depends(get_db)
+):
+    """Fetch a single campaign script's PDF content on demand (lazy load)."""
+    controller = EngagementController(db)
+    return controller.get_campaign_script_pdf(campaign_id, script_index)

@@ -55,8 +55,10 @@ const CustomerEng = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const autoOpenHandledRef = useRef(false);
+    const activeCustomerRequestRef = useRef(null);
     const [loading, setLoading] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
+    const [showOtherCampaigns, setShowOtherCampaigns] = useState(false);
 
     // Get user from localStorage
     const [currentUser, setCurrentUser] = useState(null);
@@ -1114,6 +1116,32 @@ const CustomerEng = () => {
         return assets;
     }, [customerDetails, serverRelatedAssets, isAdmin, userBranch]);
 
+    // Campaigns this customer is NOT enrolled in
+    const notEnrolledCampaigns = useMemo(() => {
+        const enrolledIds = new Set(customerCampaigns.map(c => c.id));
+        return (allCampaigns || []).filter(c => !enrolledIds.has(c.id));
+    }, [allCampaigns, customerCampaigns]);
+
+    // Enrolled + not-enrolled, used so a selected "other" campaign resolves correctly
+    const selectableCampaigns = useMemo(
+        () => [...customerCampaigns, ...notEnrolledCampaigns],
+        [customerCampaigns, notEnrolledCampaigns]
+    );
+
+    // Services available for "Other" (non-campaign) follow-ups — derived from all campaigns
+    const campaignServices = useMemo(() => {
+        const seen = new Set();
+        const list = [];
+        (allCampaigns || []).forEach(c => {
+            const name = (c.service || '').trim();
+            if (name && !seen.has(name.toLowerCase())) {
+                seen.add(name.toLowerCase());
+                list.push({ id: c.id, name });
+            }
+        });
+        return list;
+    }, [allCampaigns]);
+
     const fetchEngagementData = async () => {
         setLoading(true);
         const loadingToast = toast.loading('Loading engagement data...');
@@ -1264,6 +1292,7 @@ const CustomerEng = () => {
 
             // Kick off all parallel fetches BEFORE awaiting anything
             const detailsPromise = fetch(`${API_BASE_URL}/v1/engagement/customers/${customerId}`);
+            const nonFollowupsPromise = fetch(`${API_BASE_URL}/v1/engagement/customers/${customerId}/non-followups`);
 
             const completeDataPromise = instanceIdFromList
                 ? fetch(`${API_BASE_URL}/customers/instance/${instanceIdFromList}/complete-data`)
@@ -1279,10 +1308,25 @@ const CustomerEng = () => {
             setLoadingCompleteData(true);
             setLoadingEditInfo(true);
 
-            // Wait for primary details (controls main UI)
-            const response = await detailsPromise;
+            // Wait for primary details + non-followups (controls main UI)
+            const [response, nonFollowupsResponse] = await Promise.all([detailsPromise, nonFollowupsPromise]);
             if (!response.ok) throw new Error('Failed to fetch customer details');
             const data = await response.json();
+
+            let nonFollowups = [];
+            if (nonFollowupsResponse.ok) {
+                nonFollowups = await nonFollowupsResponse.json();
+            }
+
+            // User navigated back while this fetch was still running → abort,
+            // so we don't re-open the customer details view (prevents the jump).
+            if (activeCustomerRequestRef.current !== customerId) {
+                toast.dismiss(loadingToast);
+                setLoading(false);
+                setLoadingCompleteData(false);
+                setLoadingEditInfo(false);
+                return;
+            }
 
             const customerData = {
                 ...data.customer,
@@ -1293,7 +1337,7 @@ const CustomerEng = () => {
 
             setCustomerDetails(customerData);
 
-            const sortedFollowups = (data.followups || []).sort((a, b) =>
+            const sortedFollowups = [...(data.followups || []), ...nonFollowups].sort((a, b) =>
                 new Date(b.followup_date) - new Date(a.followup_date)
             );
             setCustomerFollowups(sortedFollowups);
@@ -1532,6 +1576,11 @@ const CustomerEng = () => {
     }, [isDragging, handleDragMove, handleDragEnd]);
 
     const handleViewCustomer = (customerId) => {
+        // Mark this customer as the one the user actively opened.
+        // fetchCustomerDetails no longer sets this, so a post-save refetch
+        // after Back was clicked will NOT re-open the details view.
+        activeCustomerRequestRef.current = customerId;
+
         // Save current scroll position before navigating
         if (tableContainerRef.current) {
             savedScrollPosition.current = tableContainerRef.current.scrollTop;
@@ -1565,6 +1614,7 @@ const CustomerEng = () => {
     };
 
     const handleBackToList = () => {
+        activeCustomerRequestRef.current = null;
         setIsInCustomerDetails(false);
         setShowCustomerDetails(false);
         setSelectedCustomer(null);
@@ -1936,6 +1986,43 @@ const CustomerEng = () => {
         });
     };
 
+    // Handle "Other" selection for non-campaign follow-ups (stored in non_followups)
+    const handleOtherSelection = () => {
+        const otherId = 'other';
+
+        if (selectedCampaignsForFollowup.includes(otherId)) {
+            setSelectedCampaignsForFollowup(prev => prev.filter(id => id !== otherId));
+            setCampaignFollowupData(prev => {
+                const newData = { ...prev };
+                delete newData[otherId];
+                return newData;
+            });
+            if (activeCampaignTab === otherId) {
+                setActiveCampaignTab(null);
+            }
+        } else {
+            setSelectedCampaignsForFollowup(prev => [...prev, otherId]);
+            setCampaignFollowupData(prev => ({
+                ...prev,
+                [otherId]: {
+                    status: 'rescheduled',
+                    quotation_sent: false,
+                    quotation_no: '',
+                    quotation_value: '',
+                    activity_id: '',
+                    rr_id: '',
+                    remark: '',
+                    service: '',
+                    followup_by: commonFollowupBy,
+                    followup_flag: commonFollowupFlag,
+                    next_followup_date: commonNextFollowupDate,
+                    is_other: true
+                }
+            }));
+            setActiveCampaignTab(otherId);
+        }
+    };
+
     // Update campaign-specific follow-up data
     const updateCampaignFollowupData = (campaignId, field, value) => {
         setCampaignFollowupData(prev => ({
@@ -1947,18 +2034,42 @@ const CustomerEng = () => {
         }));
     };
 
-    // Load PDFs for selected campaign
-    const loadCampaignPdfs = (campaignId) => {
-        const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
-        if (campaign) {
-            const pdfs = (campaign.scripts || []).filter(script => script.type === 'pdf');
-            setCampaignPdfs(pdfs);
-            setSelectedPdf(pdfs.length > 0 ? pdfs[0] : null);
-            setCurrentPdfIndex(0);
-            setPdfViewerCampaign(campaign);
-            setShowPdfViewer(true);
-            setIsPdfPanelMinimized(false);
-            setActiveCampaignTab(campaignId);
+    // Load PDFs for selected campaign — content is fetched lazily (backend sends metadata only)
+    const loadCampaignPdfs = async (campaignId) => {
+        const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
+        if (!campaign) return;
+
+        // Open the panel immediately using metadata
+        setPdfViewerCampaign(campaign);
+        setShowPdfViewer(true);
+        setIsPdfPanelMinimized(false);
+        setActiveCampaignTab(campaignId);
+        setCurrentPdfIndex(0);
+
+        const pdfMeta = (campaign.scripts || []).filter(script => script.type === 'pdf');
+        if (pdfMeta.length === 0) {
+            setCampaignPdfs([]);
+            setSelectedPdf(null);
+            return;
+        }
+
+        try {
+            const loaded = await Promise.all(pdfMeta.map(async (meta) => {
+                if (meta.content) return meta; // already hydrated
+                const res = await fetch(
+                    `${API_BASE_URL}/v1/engagement/campaigns/${campaignId}/scripts/${meta.index}`
+                );
+                if (res.ok) {
+                    const full = await res.json();
+                    return { ...meta, content: full.content, name: full.name || meta.name };
+                }
+                return meta;
+            }));
+            setCampaignPdfs(loaded);
+            setSelectedPdf(loaded[0] || null);
+        } catch (e) {
+            console.error('Failed to load campaign PDFs', e);
+            toast.error('Failed to load scripts');
         }
     };
 
@@ -2080,6 +2191,7 @@ const CustomerEng = () => {
 
         // Check for specific reject reasons before submitting
         for (const campaignId of selectedCampaignsForFollowup) {
+            if (campaignId === 'other') continue; // Skip for "other" type
             const campaignData = campaignFollowupData[campaignId];
 
             if (campaignData.status === 'rejected' && campaignData.rr_id) {
@@ -2089,6 +2201,7 @@ const CustomerEng = () => {
                 // Check if reject reason is 'wrong number' or 'call not connected'
                 if (
                     rejectReason.includes("wrong number") ||
+                    rejectReason.includes("Incorrect contact details") ||
                     rejectReason.includes("call not connected")
                 ) {
                     const result = await Swal.fire({
@@ -2152,6 +2265,7 @@ const CustomerEng = () => {
 
         // Validate all campaigns data
         for (const campaignId of selectedCampaignsForFollowup) {
+            const isOtherType = campaignId === 'other';
             const campaignData = campaignFollowupData[campaignId];
 
             if (!campaignData) {
@@ -2160,15 +2274,23 @@ const CustomerEng = () => {
             }
 
             if (!campaignData.activity_id) {
-                const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
-                toast.error(`Please select an activity for campaign: ${campaign?.name}`);
+                if (isOtherType) {
+                    toast.error(`Please select an activity for Other follow-up`);
+                } else {
+                    const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
+                    toast.error(`Please select an activity for campaign: ${campaign?.name}`);
+                }
                 return;
             }
 
             // Remark is mandatory for ALL statuses
             if (!campaignData.remark || campaignData.remark.trim() === '') {
-                const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
-                toast.error(`Please enter a remark for campaign: ${campaign?.name}`);
+                if (isOtherType) {
+                    toast.error(`Please enter a remark for Other follow-up`);
+                } else {
+                    const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
+                    toast.error(`Please enter a remark for campaign: ${campaign?.name}`);
+                }
                 return;
             }
 
@@ -2178,60 +2300,72 @@ const CustomerEng = () => {
                 const flag = campaignData.followup_flag || commonFollowupFlag;
 
                 if (!nextDate) {
-                    const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
-                    toast.error(`Please select Next Follow-up Date for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in campaign: ${campaign?.name}`);
+                    if (isOtherType) {
+                        toast.error(`Please select Next Follow-up Date for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in Other follow-up`);
+                    } else {
+                        const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
+                        toast.error(`Please select Next Follow-up Date for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in campaign: ${campaign?.name}`);
+                    }
                     return;
                 }
 
                 if (!flag) {
-                    const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
-                    toast.error(`Please select Follow-up Flag for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in campaign: ${campaign?.name}`);
+                    if (isOtherType) {
+                        toast.error(`Please select Follow-up Flag for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in Other follow-up`);
+                    } else {
+                        const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
+                        toast.error(`Please select Follow-up Flag for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in campaign: ${campaign?.name}`);
+                    }
                     return;
                 }
             }
 
             // NEW: Reject reason is mandatory when status is rejected
             if (campaignData.status === 'rejected' && !campaignData.rr_id) {
-                const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
-                toast.error(`Please select a reject reason for campaign: ${campaign?.name}`);
+                if (isOtherType) {
+                    toast.error(`Please select a reject reason for Other follow-up`);
+                } else {
+                    const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
+                    toast.error(`Please select a reject reason for campaign: ${campaign?.name}`);
+                }
                 return;
             }
 
-            // NEW VALIDATION: For completed OR wip status, require quotation number and value
-            if (campaignData.status === 'completed' || campaignData.status === 'wip') {
+            // NEW VALIDATION: For completed OR wip status, require quotation number and value (regular campaigns only, not "other")
+            if (!isOtherType && (campaignData.status === 'completed' || campaignData.status === 'wip')) {
                 if (!campaignData.quotation_sent) {
-                    const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
+                    const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
                     toast.error(`For "${campaignData.status === 'completed' ? 'Completed' : 'WIP'}" status in campaign "${campaign?.name}", please check "Quote Sent" checkbox first`);
                     return;
                 }
                 if (!campaignData.quotation_no || campaignData.quotation_no.trim() === '') {
-                    const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
+                    const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
                     toast.error(`For "${campaignData.status === 'completed' ? 'Completed' : 'WIP'}" status in campaign "${campaign?.name}", please enter Quotation Number`);
                     return;
                 }
                 if (!campaignData.quotation_value || campaignData.quotation_value <= 0) {
-                    const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
+                    const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
                     toast.error(`For "${campaignData.status === 'completed' ? 'Completed' : 'WIP'}" status in campaign "${campaign?.name}", please enter valid Quotation Value`);
                     return;
                 }
             }
 
-            if (campaignData.status !== 'rejected' && campaignData.status !== 'completed') {
+            // Skip date-window validation for "other" type
+            if (!isOtherType && campaignData.status !== 'rejected' && campaignData.status !== 'completed') {
                 const nextDate = campaignData.next_followup_date || commonNextFollowupDate;
                 const flag = campaignData.followup_flag || commonFollowupFlag;
                 if (nextDate && flag && !validateNextFollowupDate(nextDate, flag)) {
-                    const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
+                    const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
                     const days = followupFlags[flag];
                     toast.error(`Next follow-up date must be within ${days} days from today for ${flag} flag in campaign: ${campaign?.name}`);
                     return;
                 }
             }
-            // In the validation section of handleSubmitFollowup, add these checks:
 
-            // Check if trying to create WIP with quotation and if it's allowed (90-day rule)
-            if (campaignData.status === 'wip' && campaignData.quotation_sent) {
+            // Check if trying to create WIP with quotation and if it's allowed (90-day rule) — regular campaigns only
+            if (!isOtherType && campaignData.status === 'wip' && campaignData.quotation_sent) {
                 if (!canCreateWipQuotation(campaignId)) {
-                    const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
+                    const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
                     toast.error(`Cannot send quotation with WIP status for campaign "${campaign?.name}". Last WIP quotation was sent within the last 90 days. Please wait until 90 days have passed or use a different status.`);
                     return;
                 }
@@ -2240,8 +2374,12 @@ const CustomerEng = () => {
             // If status is 'rescheduled', quotation_sent must be false
             if (campaignData.status === 'rescheduled') {
                 if (campaignData.quotation_sent) {
-                    const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
-                    toast.error(`Cannot save: Status is "Follow-up Reschedule" but quotation is sent for campaign "${campaign?.name}". Please uncheck "Quote Sent" or change status.`);
+                    if (isOtherType) {
+                        toast.error(`Cannot save: Status is "Follow-up Reschedule" but quotation is sent for Other follow-up. Please uncheck "Quote Sent" or change status.`);
+                    } else {
+                        const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
+                        toast.error(`Cannot save: Status is "Follow-up Reschedule" but quotation is sent for campaign "${campaign?.name}". Please uncheck "Quote Sent" or change status.`);
+                    }
                     return;
                 }
                 // Clear quotation data if rescheduled
@@ -2257,61 +2395,117 @@ const CustomerEng = () => {
         try {
             for (const campaignId of selectedCampaignsForFollowup) {
                 const campaignData = campaignFollowupData[campaignId];
+                const isOtherType = campaignId === 'other';
 
-                let formData = {
-                    followup_date: editingFollowup ? editingFollowup.followup_date : new Date().toISOString(),
-                    campaign_id: parseInt(campaignId),
-                    followup_by: campaignData.followup_by || commonFollowupBy,
-                    followup_remark: campaignData.remark || '',
-                    status: campaignData.status,
-                    quotation_sent: campaignData.quotation_sent,
-                    quotation_no: campaignData.quotation_sent ? campaignData.quotation_no : null,
-                    quotation_value: campaignData.quotation_sent ? parseFloat(campaignData.quotation_value) : null,
-                    activity_id: parseInt(campaignData.activity_id),
-                    rr_id: campaignData.rr_id ? parseInt(campaignData.rr_id) : null,
-                    user_id: currentUser.user_id || currentUser.id,
-                    user_name: currentUser.name
-                };
+                if (isOtherType) {
+                    // "Other" type — stored in non_followups, NO campaign_id sent
+                    let formData = {
+                        followup_by: campaignData.followup_by || commonFollowupBy,
+                        status: campaignData.status,
+                        service: campaignData.service || null,
+                        quotation_sent: campaignData.quotation_sent || false,
+                        quotation_no: campaignData.quotation_sent ? campaignData.quotation_no : null,
+                        quotation_value: campaignData.quotation_sent ? parseFloat(campaignData.quotation_value) : null,
+                        activity_id: parseInt(campaignData.activity_id),
+                        rr_id: campaignData.rr_id ? parseInt(campaignData.rr_id) : null,
+                        user_id: currentUser.user_id || currentUser.id,
+                        user_name: currentUser.name,
+                        remark_type: "other",
+                        followup_remark: campaignData.remark || null
+                    };
 
-                if (campaignData.status === 'rejected' || campaignData.status === 'completed') {
-                    formData.followup_flag = null;
-                    formData.next_followup_date = null;
+                    if (editingFollowup && editingFollowup.remark_type === 'other') {
+                        formData.followup_date = editingFollowup.followup_date;
+                    } else {
+                        formData.followup_date = new Date().toISOString();
+                    }
+
+                    if (campaignData.status === 'rejected' || campaignData.status === 'completed') {
+                        formData.followup_flag = null;
+                        formData.next_followup_date = null;
+                    } else {
+                        formData.followup_flag = campaignData.followup_flag || commonFollowupFlag || null;
+                        formData.next_followup_date = (campaignData.next_followup_date || commonNextFollowupDate) ?
+                            new Date(campaignData.next_followup_date || commonNextFollowupDate).toISOString() : null;
+                    }
+
+                    let url, method;
+                    if (editingFollowup && editingFollowup.remark_type === 'other') {
+                        url = `${API_BASE_URL}/v1/engagement/non-followups/${editingFollowup.id}`;
+                        method = 'PUT';
+                    } else {
+                        url = `${API_BASE_URL}/v1/engagement/customers/${selectedCustomer}/non-followups`;
+                        method = 'POST';
+                    }
+
+                    const response = await fetch(url, {
+                        method: method,
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(formData),
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.detail || 'Failed to save other follow-up');
+                    }
                 } else {
-                    formData.followup_flag = campaignData.followup_flag || commonFollowupFlag || null;
-                    formData.next_followup_date = (campaignData.next_followup_date || commonNextFollowupDate) ?
-                        new Date(campaignData.next_followup_date || commonNextFollowupDate).toISOString() : null;
-                }
+                    // Regular campaign follow-up — INCLUDES campaign_id
+                    let formData = {
+                        followup_date: editingFollowup ? editingFollowup.followup_date : new Date().toISOString(),
+                        campaign_id: parseInt(campaignId),
+                        followup_by: campaignData.followup_by || commonFollowupBy,
+                        followup_remark: campaignData.remark || '',
+                        status: campaignData.status,
+                        quotation_sent: campaignData.quotation_sent,
+                        quotation_no: campaignData.quotation_sent ? campaignData.quotation_no : null,
+                        quotation_value: campaignData.quotation_sent ? parseFloat(campaignData.quotation_value) : null,
+                        activity_id: parseInt(campaignData.activity_id),
+                        rr_id: campaignData.rr_id ? parseInt(campaignData.rr_id) : null,
+                        user_id: currentUser.user_id || currentUser.id,
+                        user_name: currentUser.name
+                    };
 
-                let url, method;
-                if (editingFollowup) {
-                    url = `${API_BASE_URL}/v1/engagement/followups/${editingFollowup.id}`;
-                    method = 'PUT';
-                } else {
-                    url = `${API_BASE_URL}/v1/engagement/customers/${selectedCustomer}/followups`;
-                    method = 'POST';
-                }
+                    if (campaignData.status === 'rejected' || campaignData.status === 'completed') {
+                        formData.followup_flag = null;
+                        formData.next_followup_date = null;
+                    } else {
+                        formData.followup_flag = campaignData.followup_flag || commonFollowupFlag || null;
+                        formData.next_followup_date = (campaignData.next_followup_date || commonNextFollowupDate) ?
+                            new Date(campaignData.next_followup_date || commonNextFollowupDate).toISOString() : null;
+                    }
 
-                const response = await fetch(url, {
-                    method: method,
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(formData),
-                });
+                    let url, method;
+                    if (editingFollowup) {
+                        url = `${API_BASE_URL}/v1/engagement/followups/${editingFollowup.id}`;
+                        method = 'PUT';
+                    } else {
+                        url = `${API_BASE_URL}/v1/engagement/customers/${selectedCustomer}/followups`;
+                        method = 'POST';
+                    }
 
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.detail || `Failed to save follow-up for campaign ${campaignId}`);
-                }
+                    const response = await fetch(url, {
+                        method: method,
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(formData),
+                    });
 
-                if (!editingFollowup && campaignData.status === 'completed') {
-                    try {
-                        const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
-                        if (campaign) {
-                            await removeCustomerFromCampaign(campaign.id, selectedCustomer);
-                            toast.success(`Customer automatically removed from ${campaign.name} campaign due to completed status`);
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.detail || `Failed to save follow-up for campaign ${campaignId}`);
+                    }
+
+                    if (!editingFollowup && campaignData.status === 'completed') {
+                        try {
+                            // Only auto-remove if the customer was actually enrolled in this campaign
+                            const enrolledCampaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
+                            if (enrolledCampaign) {
+                                await removeCustomerFromCampaign(enrolledCampaign.id, selectedCustomer);
+                                toast.success(`Customer automatically removed from ${enrolledCampaign.name} campaign due to completed status`);
+                            }
+                        } catch (removeError) {
+                            toast.error(`Follow-up saved but failed to remove from campaign ${campaignId}`);
+                            console.error('Auto-remove error:', removeError);
                         }
-                    } catch (removeError) {
-                        toast.error(`Follow-up saved but failed to remove from campaign ${campaignId}`);
-                        console.error('Auto-remove error:', removeError);
                     }
                 }
             }
@@ -5620,27 +5814,95 @@ const CustomerEng = () => {
                     {/* Campaign Selection */}
                     <div className="mb-3">
                         <label className="block text-[11px] font-semibold text-black mb-1.5">Select Campaigns for Follow-up *</label>
-                        <div className="overflow-x-auto pb-1.5" style={{ scrollbarWidth: 'thin' }}>
-                            <div className="flex gap-1.5 min-w-max">
-                                {customerCampaigns.map(campaign => (
-                                    <button
-                                        key={campaign.id}
-                                        type="button"
-                                        onClick={() => handleCampaignSelection(campaign.id)}
-                                        className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${selectedCampaignsForFollowup.includes(campaign.id)
-                                            ? 'text-white'
-                                            : 'bg-gray-100 text-black hover:bg-gray-200'
-                                            }`}
-                                        style={selectedCampaignsForFollowup.includes(campaign.id) ? { backgroundColor: campaign.color || themeColor } : {}}
-                                    >
-                                        <span>{campaign.name}</span>
-                                        {selectedCampaignsForFollowup.includes(campaign.id) && (
-                                            <CheckCircleIcon className="h-3 w-3" />
-                                        )}
-                                    </button>
-                                ))}
+
+                        <div className="grid grid-cols-[7fr_3fr] gap-2">
+                            {/* Enrolled campaigns */}
+                            <div className="border border-gray-200 rounded-lg p-2 min-w-0">
+                                <p className="text-[10px] font-bold text-black uppercase mb-1.5">Enrolled Campaigns</p>
+                                <div className="flex gap-1.5 overflow-x-auto pb-1 custom-scrollbar" style={{ scrollbarWidth: 'thin' }}>
+                                    {customerCampaigns.map(campaign => (
+                                        <button
+                                            key={campaign.id}
+                                            type="button"
+                                            onClick={() => handleCampaignSelection(campaign.id)}
+                                            className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${selectedCampaignsForFollowup.includes(campaign.id)
+                                                ? 'text-white'
+                                                : 'bg-gray-100 text-black hover:bg-gray-200'
+                                                }`}
+                                            style={selectedCampaignsForFollowup.includes(campaign.id) ? { backgroundColor: campaign.color || themeColor } : {}}
+                                        >
+                                            <span>{campaign.name}</span>
+                                            {selectedCampaignsForFollowup.includes(campaign.id) && (
+                                                <CheckCircleIcon className="h-3 w-3" />
+                                            )}
+                                        </button>
+                                    ))}
+                                    {customerCampaigns.length === 0 && (
+                                        <span className="text-[11px] text-gray-400">Loading...</span>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Other (not enrolled) campaigns — collapsed behind a toggle */}
+                            <div className="border border-dashed border-gray-300 rounded-lg bg-gray-50 overflow-hidden min-w-0">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowOtherCampaigns(prev => !prev)}
+                                    className="w-full flex items-center justify-between px-2 py-1.5 hover:bg-gray-100 transition-colors"
+                                >
+                                    <span className="text-[10px] font-bold text-black uppercase flex items-center gap-1.5">
+                                        Other Campaigns (Not Enrolled)
+                                        <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold text-white" style={{ backgroundColor: themeColor }}>
+                                            {notEnrolledCampaigns.length}
+                                        </span>
+                                    </span>
+                                    <ChevronDownIcon
+                                        className={`h-3.5 w-3.5 text-gray-500 transition-transform duration-200 ${showOtherCampaigns ? 'rotate-180' : ''}`}
+                                    />
+                                </button>
+
+                                {showOtherCampaigns && (
+                                    <div className="px-2 pb-2 pt-1 border-t border-dashed border-gray-300">
+                                        <div className="flex gap-1.5 overflow-x-auto pb-1 custom-scrollbar" style={{ scrollbarWidth: 'thin' }}>
+                                            {notEnrolledCampaigns.map(campaign => (
+                                                <button
+                                                    key={campaign.id}
+                                                    type="button"
+                                                    onClick={() => handleCampaignSelection(campaign.id)}
+                                                    className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${selectedCampaignsForFollowup.includes(campaign.id)
+                                                        ? 'text-white'
+                                                        : 'bg-white border border-gray-300 text-black hover:bg-gray-100'
+                                                        }`}
+                                                    style={selectedCampaignsForFollowup.includes(campaign.id) ? { backgroundColor: campaign.color || themeColor } : {}}
+                                                >
+                                                    <span>{campaign.name}</span>
+                                                    {selectedCampaignsForFollowup.includes(campaign.id) && (
+                                                        <CheckCircleIcon className="h-3 w-3" />
+                                                    )}
+                                                </button>
+                                            ))}
+
+                                            {/* Other (non-campaign) follow-up — stored in non_followups */}
+                                            <button
+                                                type="button"
+                                                onClick={() => handleOtherSelection()}
+                                                className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${selectedCampaignsForFollowup.includes('other')
+                                                    ? 'text-white'
+                                                    : 'bg-white border border-gray-300 text-black hover:bg-gray-100'
+                                                    }`}
+                                                style={selectedCampaignsForFollowup.includes('other') ? { backgroundColor: '#9CA3AF' } : {}}
+                                            >
+                                                <span>Other</span>
+                                                {selectedCampaignsForFollowup.includes('other') && (
+                                                    <CheckCircleIcon className="h-3 w-3" />
+                                                )}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
+
                         {selectedCampaignsForFollowup.length === 0 && (
                             <p className="text-[11px] text-red-500 mt-1">Please select at least one campaign</p>
                         )}
@@ -5755,7 +6017,8 @@ const CustomerEng = () => {
                                 </thead>
                                 <tbody>
                                     {selectedCampaignsForFollowup.map((campaignId, index) => {
-                                        const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
+                                        const isOther = campaignId === 'other';
+                                        const campaign = !isOther ? selectableCampaigns.find(c => c.id === parseInt(campaignId)) : null;
                                         const campaignData = campaignFollowupData[campaignId] || {};
                                         const remarkText = campaignData.remark || '';
                                         const showQuoteColumns = campaignData.quotation_sent === true;
@@ -5768,7 +6031,11 @@ const CustomerEng = () => {
                                                     }`}
                                             >
                                                 <td className="px-2 py-1.5 border border-gray-300 text-left align-middle">
-                                                    {campaign ? (
+                                                    {isOther ? (
+                                                        <span className="font-semibold text-[11px]" style={{ color: "black" }}>
+                                                            Other
+                                                        </span>
+                                                    ) : campaign ? (
                                                         <div className="flex items-center gap-2">
                                                             <button
                                                                 type="button"
@@ -5787,7 +6054,21 @@ const CustomerEng = () => {
                                                     )}
                                                 </td>
                                                 <td className="px-2 py-1.5 border border-gray-300 text-center align-middle">
-                                                    {campaign ? (
+                                                    {isOther ? (
+                                                        <select
+                                                            value={campaignData.service || ''}
+                                                            onChange={(e) => updateCampaignFollowupData(campaignId, 'service', e.target.value)}
+                                                            className="w-full border border-gray-300 rounded-lg px-2 py-1 text-[11px] text-black"
+                                                            style={{ '--tw-ring-color': themeColor }}
+                                                        >
+                                                            <option value="">-- Optional --</option>
+                                                            {campaignServices.map((cs) => (
+                                                                <option key={cs.id} value={cs.name}>
+                                                                    {cs.name}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    ) : campaign ? (
                                                         <span className="text-[11px] text-black flex items-center justify-center gap-1">
                                                             {campaign.service || '-'}
                                                         </span>
@@ -5805,7 +6086,9 @@ const CustomerEng = () => {
                                                     >
                                                         <option value="">Select Activity</option>
                                                         {(() => {
-                                                            const serviceText = (campaign?.service || '').trim();
+                                                            const serviceText = isOther
+                                                                ? (campaignData.service || '').trim()
+                                                                : (campaign?.service || '').trim();
 
                                                             // Build whole-word regex (escapes regex special chars)
                                                             const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -5858,7 +6141,7 @@ const CustomerEng = () => {
 
                                                             // If quotation is sent, prevent changing status to "rescheduled"
                                                             if (campaignData.quotation_sent && newStatus === 'rescheduled') {
-                                                                const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
+                                                                const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
                                                                 toast.error(`Cannot change status to "Follow-up Reschedule" because quotation has already been sent for campaign "${campaign?.name}".`);
                                                                 return;
                                                             }
@@ -5918,7 +6201,7 @@ const CustomerEng = () => {
                                                                 // If trying to check WIP quotation, validate 90-day rule
                                                                 if (e.target.checked && campaignData.status === 'wip') {
                                                                     if (!canCreateWipQuotation(campaignId)) {
-                                                                        const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
+                                                                        const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
                                                                         toast.error(`Cannot send quotation with WIP status for campaign "${campaign?.name}". Last WIP quotation was sent within the last 90 days.`);
                                                                         return;
                                                                     }

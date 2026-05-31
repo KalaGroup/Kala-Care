@@ -43,6 +43,27 @@ def login(user_login: UserLogin, db: Session = Depends(get_db)):
                 }
             )
         
+        # ---- Record login time (IST) in login_sessions ----
+        from app.models.login_activity_model import LoginSession, now_ist
+        session_id = None
+        try:
+            login_ts = now_ist()
+            login_session = LoginSession(
+                user_id=user.user_id,
+                user_name=user.name,
+                branch=user.branch,
+                login_time=login_ts,
+                session_date=login_ts.date(),
+                logout_type=None,
+            )
+            db.add(login_session)
+            db.commit()
+            db.refresh(login_session)
+            session_id = login_session.id
+        except Exception as e:
+            db.rollback()
+            print(f"Login-time tracking failed: {str(e)}")
+
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
@@ -58,6 +79,7 @@ def login(user_login: UserLogin, db: Session = Depends(get_db)):
                     "is_blocked": user.is_blocked,
                     "can_export": user.can_export,
                     "can_access_expense": user.can_access_expense,
+                    "session_id": session_id,
                     "branches": [
                         {
                             "id": ba.id,
@@ -702,3 +724,59 @@ def toggle_expense_access(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error toggling expense access: {str(e)}"
         )    
+
+@router.post("/logout")
+def logout(payload: dict, db: Session = Depends(get_db)):
+    """Record logout time (IST) and session duration. No daily roll-up."""
+    from app.models.login_activity_model import LoginSession, now_ist
+    try:
+        session_id = payload.get("session_id")
+        logout_type = payload.get("logout_type", "manual")
+
+        if not session_id:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={"success": True, "message": "No session to close"}
+            )
+
+        sess = db.query(LoginSession).filter(LoginSession.id == session_id).first()
+        if not sess:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={"success": True, "message": "Session not found"}
+            )
+
+        # Already closed — don't overwrite
+        if sess.logout_time is not None:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={"success": True, "message": "Session already closed"}
+            )
+
+        logout_ts = now_ist()
+        duration = int((logout_ts - sess.login_time).total_seconds())
+        if duration < 0:
+            duration = 0
+
+        sess.logout_time = logout_ts
+        sess.duration_seconds = duration
+        sess.logout_type = logout_type
+        db.commit()
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "success": True,
+                "message": "Logout recorded",
+                "duration_seconds": duration,
+                "logout_type": logout_type,
+            }
+        )
+
+    except Exception as e:
+        db.rollback()
+        print(f"Logout tracking error: {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"success": False, "message": "Logout tracking failed"}
+        )        

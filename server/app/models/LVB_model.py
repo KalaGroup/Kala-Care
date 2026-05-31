@@ -62,6 +62,7 @@ class LocalVendorBill(Base):
     verified_by_name = Column(String(100), nullable=True)
     verified_by_id = Column(String(100), nullable=True)
     verified_at = Column(DateTime, nullable=True)
+    submit_voucher_no = Column(String(50), nullable=True)   # HO-submission batch voucher
 
     def to_dict(self):
         return {
@@ -90,6 +91,7 @@ class LocalVendorBill(Base):
             "verified_by_name": self.verified_by_name,
             "verified_by_id": self.verified_by_id,
             "verified_at": self.verified_at.isoformat() if self.verified_at else None,
+            "submit_voucher_no": self.submit_voucher_no,
         }
 
 
@@ -123,6 +125,7 @@ class LocalVendorBillHistory(Base):
     submitted_by_id = Column(String(100), nullable=True)
     moved_at = Column(DateTime, server_default=func.now())
     ho_paid_date = Column(Date, nullable=True)
+    submit_voucher_no = Column(String(50), nullable=True)   # carried from main on submit-to-history
 
     def to_dict(self):
         return {
@@ -153,5 +156,6 @@ class LocalVendorBillHistory(Base):
             "submitted_by_id": self.submitted_by_id,
             "moved_at": self.moved_at.isoformat() if self.moved_at else None,
             "ho_paid_date": self.ho_paid_date.isoformat() if self.ho_paid_date else None,
+            "submit_voucher_no": self.submit_voucher_no,
         }
     

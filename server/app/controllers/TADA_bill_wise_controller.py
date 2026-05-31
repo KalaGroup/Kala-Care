@@ -377,6 +377,98 @@ def get_branch_bill_wise_records(db: Session, branch_code: str,
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# VOUCHER-WISE SUMMARY (HO verification view — like Service Engineer / Sales & BM)
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_branch_bill_wise_vouchers(db: Session, branch_code: str) -> dict:
+    """
+    Bill Wise (main) records grouped by voucher_no.
+    Each voucher carries: who submitted it, activity count, verified count,
+    total + verified amount, and the date range of its bills.
+    """
+    records = db.query(TADABillWise).filter(TADABillWise.branch_code == branch_code).all()
+    if not records:
+        return {"groups": []}
+
+    vmap = {}
+    for r in records:
+        v = (str(r.voucher_no or "").strip()) or "No Voucher"
+        if v not in vmap:
+            vmap[v] = {
+                "voucher_no": v,
+                "_submitters": set(),
+                "_names": set(),
+                "record_count": 0,
+                "verified_count": 0,
+                "total_amount": 0.0,
+                "verified_amount": 0.0,
+                "record_ids": [],
+                "_min_date": None,
+                "_max_date": None,
+            }
+        g = vmap[v]
+        g["record_count"] += 1
+        g["record_ids"].append(r.id)
+
+        if r.created_by:
+            g["_submitters"].add(str(r.created_by).strip())
+
+        # SE rows label by engineer, BM rows by customer
+        label = (r.engineer_name if r.entry_type == "SE" else r.customer_name) or "Unknown"
+        g["_names"].add(label.strip())
+
+        try:
+            amt = float(r.amount or 0)
+        except (ValueError, TypeError):
+            amt = 0.0
+        g["total_amount"] += amt
+        if r.verification_status == "Verified":
+            g["verified_count"] += 1
+            g["verified_amount"] += amt
+
+        d = _parse_date(r.date)
+        if d:
+            if g["_min_date"] is None or d < g["_min_date"]:
+                g["_min_date"] = d
+            if g["_max_date"] is None or d > g["_max_date"]:
+                g["_max_date"] = d
+
+    groups = []
+    for g in vmap.values():
+        start = g.pop("_min_date")
+        end = g.pop("_max_date")
+        g["period_start_display"] = start.strftime("%d %b %Y") if start else "-"
+        g["period_end_display"] = end.strftime("%d %b %Y") if end else "-"
+        submitters = sorted(g.pop("_submitters"))
+        g["submitted_by"] = ", ".join(submitters) if submitters else "-"
+        g["activity_count"] = len(g.pop("_names"))
+        g["total_amount"] = round(g["total_amount"], 2)
+        g["verified_amount"] = round(g["verified_amount"], 2)
+        groups.append(g)
+
+    groups.sort(key=lambda x: str(x["voucher_no"]))
+    return {"groups": groups}
+
+
+def get_bill_wise_voucher_records(db: Session, branch_code: str, voucher_no: str):
+    """Return all Bill Wise (main) records for a branch + voucher_no."""
+    try:
+        q = db.query(TADABillWise).filter(TADABillWise.branch_code == branch_code)
+        if str(voucher_no).strip() == "No Voucher":
+            q = q.filter(
+                (TADABillWise.voucher_no.is_(None)) |
+                (func.trim(func.coalesce(TADABillWise.voucher_no, "")) == "")
+            )
+        else:
+            q = q.filter(
+                func.trim(func.coalesce(TADABillWise.voucher_no, "")) == str(voucher_no).strip()
+            )
+        return q.order_by(desc(TADABillWise.created_at)).all()
+    except Exception as e:
+        logger.error(f"get_bill_wise_voucher_records error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ════════════════════════════════════════════════════════════════════════════
 # UPDATE — verification status only
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -451,6 +543,7 @@ def submit_bill_wise_to_history(db: Session, record_ids: List[int],
                 work_status=rec.work_status,
                 remark=rec.remark,
                 verification_status=rec.verification_status,
+                voucher_no=rec.voucher_no,            # <-- carry the SAME voucher forward
                 branch_code=rec.branch_code,
                 created_by=rec.created_by,
                 created_at=rec.created_at,
@@ -581,6 +674,71 @@ def get_bill_wise_history_grouped(db: Session, branch_code: str) -> dict:
     groups.sort(key=lambda x: (x["engineer_name"] or ""))
     return {"rule_type": rule["rule_type"], "period_days": period_days, "groups": groups}
 
+def get_bill_wise_history_vouchers(db: Session, branch_code: str) -> dict:
+    """Group Bill Wise history by voucher_no for HO paid-date management."""
+    records = (
+        db.query(TADABillWiseHistory)
+        .filter(TADABillWiseHistory.branch_code == branch_code)
+        .order_by(desc(TADABillWiseHistory.moved_at))
+        .all()
+    )
+
+    vmap = {}
+    for r in records:
+        v = (str(r.voucher_no or "").strip()) or "No Voucher"
+        g = vmap.setdefault(v, {
+            "voucher_no": v, "record_ids": [], "total_amount": 0.0,
+            "_engineers": set(), "_submitters": set(), "_branch": set(),
+            "_min_date": None, "_max_date": None,
+            "_paid_dates": set(), "paid_count": 0,
+        })
+        g["record_ids"].append(r.id)
+        try:
+            g["total_amount"] += float(r.amount or 0)
+        except (ValueError, TypeError):
+            pass
+        label = (r.engineer_name if r.entry_type == "SE" else r.customer_name) or "Unknown"
+        g["_engineers"].add(label.strip())
+        if r.submitted_by_name:
+            g["_submitters"].add(str(r.submitted_by_name).strip())   # HO verifier
+        if r.created_by:
+            g["_branch"].add(str(r.created_by).strip())              # branch submitter
+        if r.paid_date:
+            g["paid_count"] += 1
+            g["_paid_dates"].add(str(r.paid_date))
+        d = _parse_date(r.date)
+        if d:
+            if g["_min_date"] is None or d < g["_min_date"]:
+                g["_min_date"] = d
+            if g["_max_date"] is None or d > g["_max_date"]:
+                g["_max_date"] = d
+
+    groups = []
+    for g in vmap.values():
+        start = g.pop("_min_date")
+        end = g.pop("_max_date")
+        paid_dates = g.pop("_paid_dates")
+        engineers = g.pop("_engineers")
+        submitters = g.pop("_submitters")
+        branch = g.pop("_branch")
+        groups.append({
+            **g,
+            "period_start": start.isoformat() if start else None,
+            "period_end": end.isoformat() if end else None,
+            "period_start_display": start.strftime("%d %b %Y") if start else "-",
+            "period_end_display": end.strftime("%d %b %Y") if end else "-",
+            "submitted_by": ", ".join(sorted(branch)) or "-",      # branch person
+            "verified_by": ", ".join(sorted(submitters)) or "-",   # HO person
+            "uploaded_by": ", ".join(sorted(branch)) or "-",       # back-compat
+            "engineer_count": len(engineers),
+            "record_count": len(g["record_ids"]),
+            "total_amount": round(g["total_amount"], 2),
+            "paid_date": (next(iter(paid_dates))
+                          if (len(paid_dates) == 1 and g["paid_count"] == len(g["record_ids"]))
+                          else None),
+        })
+    groups.sort(key=lambda x: str(x["voucher_no"]))
+    return {"rule_type": "voucher", "period_days": 0, "groups": groups}
 
 def bulk_update_bill_wise_history_paid_date(db: Session, record_ids: List[int], paid_date) -> dict:
     """Apply a paid_date to many Bill Wise history rows at once."""

@@ -15,6 +15,7 @@ class TADAUpdateData(BaseModel):
     ho_corrected_km: Optional[str] = None
     km_rate_applied: Optional[str] = None
     da_amount: Optional[str] = None
+    freight_charges: Optional[str] = None
     total_amount: Optional[str] = None
     branch_verified_km: Optional[str] = None
     km_verification_remark: Optional[str] = None
@@ -68,6 +69,7 @@ class TADARecordResponse(BaseModel):
     ho_corrected_km: Optional[str] = None
     km_rate_applied: Optional[str] = None
     da_amount: Optional[str] = None
+    freight_charges: Optional[str] = None
     total_amount: Optional[str] = None
     ho_remark: Optional[str] = None
     verification_status: Optional[str] = None
@@ -75,6 +77,8 @@ class TADARecordResponse(BaseModel):
     sd_branch_code: Optional[str] = None
     service_engineer_uid: Optional[str] = None
     service_engineer_name: Optional[str] = None
+    voucher_no: Optional[str] = None
+    uploaded_by: Optional[str] = None
     file_name: Optional[str] = None
 
 class BranchSummaryResponse(BaseModel):
@@ -149,6 +153,8 @@ def update_tada_record(
             record.km_rate_applied = update_data.km_rate_applied
         if update_data.da_amount is not None:
             record.da_amount = update_data.da_amount
+        if update_data.freight_charges is not None:
+            record.freight_charges = update_data.freight_charges
         if update_data.total_amount is not None:
             record.total_amount = update_data.total_amount
         if update_data.branch_verified_km is not None:
@@ -459,6 +465,7 @@ def get_branch_history(
             "ho_corrected_km": r.ho_corrected_km,
             "km_rate_applied": r.km_rate_applied,
             "da_amount": r.da_amount,
+            "freight_charges": r.freight_charges,
             "total_amount": r.total_amount,
             "ho_remark": r.ho_remark,
             "verification_status": r.verification_status,
@@ -596,6 +603,84 @@ def get_branch_history_grouped(
         'rule_type': rule_type, 'period_days': period_days,
         'total_groups': len(groups), 'groups': groups
     }
+
+@router.get("/branch-history-vouchers")
+def get_branch_history_vouchers(
+    branch_code: str = Query(..., description="Branch code"),
+    db: Session = Depends(get_db)
+):
+    """Group Service Engineer history into VOUCHERS for HO paid-date management."""
+    from app.models.TADA_history_model import TADAHistory
+    from dateutil import parser as date_parser
+    from datetime import datetime, timedelta
+
+    records = db.query(TADAHistory).filter(
+        TADAHistory.sd_branch_code == branch_code
+    ).all()
+
+    min_valid = datetime(2020, 1, 1)
+    max_valid = datetime.now() + timedelta(days=30)
+
+    vmap = {}
+    for r in records:
+        v = (str(r.voucher_no or '').strip()) or 'No Voucher'
+        g = vmap.setdefault(v, {
+            'voucher_no': v, 'record_ids': [], 'total_amount': 0.0,
+            '_engineers': set(), '_submitters': set(), '_branch': set(), '_dates': [],
+            '_paid_dates': set(), 'paid_count': 0,
+        })
+        g['record_ids'].append(r.id)
+        try:
+            g['total_amount'] += float(r.total_amount or 0)
+        except (ValueError, TypeError):
+            pass
+        eng = (r.service_engineer_uid or r.service_engineer_name or '').strip()
+        if eng:
+            g['_engineers'].add(eng)
+        if r.submitted_by_name:
+            g['_submitters'].add(str(r.submitted_by_name).strip())   # HO verifier
+        if r.uploaded_by:
+            g['_branch'].add(str(r.uploaded_by).strip())             # branch submitter
+        if r.paid_date and str(r.paid_date).strip():
+            g['paid_count'] += 1
+            g['_paid_dates'].add(str(r.paid_date).strip())
+        raw = r.sr_reach_at_site_datetime
+        if raw:
+            raw_str = str(raw).strip()
+            if raw_str and raw_str.lower() not in ('null', 'none', '-', 'nan', '0'):
+                try:
+                    d = date_parser.parse(raw_str, dayfirst=False, fuzzy=False)
+                    if min_valid <= d <= max_valid:
+                        g['_dates'].append(d)
+                except (ValueError, TypeError, OverflowError):
+                    pass
+
+    groups = []
+    for g in vmap.values():
+        dates = sorted(g.pop('_dates'))
+        paid_dates = g.pop('_paid_dates')
+        engineers = g.pop('_engineers')
+        submitters = g.pop('_submitters')
+        branch = g.pop('_branch')
+        groups.append({
+            **g,
+            'period_start': dates[0].strftime('%Y-%m-%d') if dates else None,
+            'period_end': dates[-1].strftime('%Y-%m-%d') if dates else None,
+            'period_start_display': dates[0].strftime('%d %b %Y') if dates else '-',
+            'period_end_display': dates[-1].strftime('%d %b %Y') if dates else '-',
+            'submitted_by': ', '.join(sorted(branch)) or '-',      # branch person
+            'verified_by': ', '.join(sorted(submitters)) or '-',   # HO person
+            'uploaded_by': ', '.join(sorted(branch)) or '-',       # back-compat
+            'engineer_count': len(engineers),
+            'record_count': len(g['record_ids']),
+            'total_amount': round(g['total_amount'], 2),
+            'paid_date': (next(iter(paid_dates))
+                          if (len(paid_dates) == 1 and g['paid_count'] == len(g['record_ids']))
+                          else None),
+        })
+    groups.sort(key=lambda x: str(x['voucher_no']))
+    return {'rule_type': 'voucher', 'period_days': 0, 'groups': groups}
+
 
 @router.put("/history/{record_id}/paid-date")
 def update_history_paid_date(

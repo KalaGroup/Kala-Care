@@ -26,6 +26,8 @@ class SalesBMHistory(Base):
     engineer_name = Column(String(200), nullable=False)
     engineer_uid = Column(String(100), nullable=True)
     employee_id = Column(String(100), nullable=True)
+    labour_sale_expected = Column(String, nullable=True)
+    part_sale_expected = Column(String, nullable=True)
 
     ho_corrected_km = Column(String(50), nullable=True)
     ho_remark = Column(Text, nullable=True)

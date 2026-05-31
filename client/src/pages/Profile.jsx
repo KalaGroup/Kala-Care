@@ -736,7 +736,7 @@ const Profile = () => {
     const canGrantExport = isMasterAdmin || isITAdmin;
     const canGrantExpense = isMasterAdmin || isITAdmin;
     const canViewCDBUpdate = isMasterAdmin || isITAdmin;
-    const RESTRICTED_USER_IDS = ['31240001', '31250001'];
+    const RESTRICTED_USER_IDS = ['31240001', '31250001', '31240012'];
     const isRestrictedUser = user && RESTRICTED_USER_IDS.includes(String(user.user_id));
 
     // Helper to highlight search term in text
@@ -950,8 +950,17 @@ const Profile = () => {
             cancelButtonColor: '#d33',
             confirmButtonText: 'Yes, logout',
             cancelButtonText: 'Cancel'
-        }).then((result) => {
+        }).then(async (result) => {
             if (result.isConfirmed) {
+                try {
+                    const stored = JSON.parse(sessionStorage.getItem('user') || '{}');
+                    if (stored.session_id) {
+                        await axios.post(`${API_BASE_URL}/users/logout`, {
+                            session_id: stored.session_id,
+                            logout_type: 'manual',
+                        });
+                    }
+                } catch (e) { console.error('Logout tracking failed:', e); }
                 sessionStorage.removeItem('user');
                 showToast('success', 'Logged out successfully');
                 setTimeout(() => {
@@ -2042,52 +2051,65 @@ const Profile = () => {
                                         <div>
                                             <label className="block text-xs text-black mb-1">New Branch Code <span className="text-red-500">*</span></label>
                                             <div className="relative">
-                                                <input
-                                                    type="text"
-                                                    placeholder="Enter branch code"
-                                                    value={editProfileData.branch}
-                                                    onChange={(e) => {
-                                                        const value = e.target.value;
-                                                        if (value === '') {
-                                                            Swal.fire({
-                                                                title: 'Warning!',
-                                                                text: 'Branch code cannot be empty',
-                                                                icon: 'warning',
-                                                                confirmButtonColor: '#2f3192',
-                                                                timer: 1500
-                                                            });
-                                                            return;
-                                                        }
-                                                        setEditProfileData({ ...editProfileData, branch: value });
-                                                    }}
-                                                    className="w-full pl-3 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent text-black"
-                                                />
+                                                <FaBuilding className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
+                                                {isMasterAdmin ? (
+                                                    <>
+                                                        <select
+                                                            value={editProfileData.branch}
+                                                            onChange={(e) => {
+                                                                const code = e.target.value;
+                                                                setEditProfileData({ ...editProfileData, branch: code, branch_name: BRANCH_OPTIONS[code] || '' });
+                                                            }}
+                                                            className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent appearance-none bg-white text-black"
+                                                        >
+                                                            <option value="">-- Select branch code --</option>
+                                                            {Object.keys(BRANCH_OPTIONS).map((code) => (
+                                                                <option key={code} value={code}>{code}</option>
+                                                            ))}
+                                                        </select>
+                                                        <FaChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-black text-xs pointer-events-none" />
+                                                    </>
+                                                ) : (
+                                                    <input
+                                                        type="text"
+                                                        value={editProfileData.branch || ''}
+                                                        disabled
+                                                        className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg bg-gray-50 text-black cursor-not-allowed"
+                                                    />
+                                                )}
                                             </div>
                                         </div>
 
                                         <div>
                                             <label className="block text-xs text-black mb-1">New Branch Name <span className="text-red-500">*</span></label>
                                             <div className="relative">
-                                                <input
-                                                    type="text"
-                                                    placeholder="Enter branch name"
-                                                    value={editProfileData.branch_name || ''}
-                                                    onChange={(e) => {
-                                                        const value = e.target.value;
-                                                        if (value === '') {
-                                                            Swal.fire({
-                                                                title: 'Warning!',
-                                                                text: 'Branch name cannot be empty',
-                                                                icon: 'warning',
-                                                                confirmButtonColor: '#2f3192',
-                                                                timer: 1500
-                                                            });
-                                                            return;
-                                                        }
-                                                        setEditProfileData({ ...editProfileData, branch_name: value });
-                                                    }}
-                                                    className="w-full pl-3 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent text-black"
-                                                />
+                                                <FaBuilding className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
+                                                {isMasterAdmin ? (
+                                                    <>
+                                                        <select
+                                                            value={editProfileData.branch_name || ''}
+                                                            onChange={(e) => {
+                                                                const name = e.target.value;
+                                                                const code = Object.keys(BRANCH_OPTIONS).find(c => BRANCH_OPTIONS[c] === name) || '';
+                                                                setEditProfileData({ ...editProfileData, branch_name: name, branch: code });
+                                                            }}
+                                                            className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent appearance-none bg-white text-black"
+                                                        >
+                                                            <option value="">-- Select branch name --</option>
+                                                            {Object.entries(BRANCH_OPTIONS).map(([code, name]) => (
+                                                                <option key={code} value={name}>{name}</option>
+                                                            ))}
+                                                        </select>
+                                                        <FaChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-black text-xs pointer-events-none" />
+                                                    </>
+                                                ) : (
+                                                    <input
+                                                        type="text"
+                                                        value={editProfileData.branch_name || ''}
+                                                        disabled
+                                                        className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg bg-gray-50 text-black cursor-not-allowed"
+                                                    />
+                                                )}
                                             </div>
                                         </div>
 
@@ -2519,14 +2541,21 @@ const Profile = () => {
                                 <label className="block text-xs text-black mb-1">Branch Code <span className="text-red-500">*</span></label>
                                 <div className="relative">
                                     <FaBuilding className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
-                                    <input
-                                        type="text"
+                                    <select
                                         required
-                                        placeholder="Enter branch code"
                                         value={formData.branch}
-                                        onChange={(e) => setFormData({ ...formData, branch: e.target.value })}
-                                        className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent text-black"
-                                    />
+                                        onChange={(e) => {
+                                            const code = e.target.value;
+                                            setFormData({ ...formData, branch: code, branch_name: BRANCH_OPTIONS[code] || '' });
+                                        }}
+                                        className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent appearance-none bg-white text-black"
+                                    >
+                                        <option value="">-- Select branch code --</option>
+                                        {Object.keys(BRANCH_OPTIONS).map((code) => (
+                                            <option key={code} value={code}>{code}</option>
+                                        ))}
+                                    </select>
+                                    <FaChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-black text-xs pointer-events-none" />
                                 </div>
                             </div>
 
@@ -2534,13 +2563,21 @@ const Profile = () => {
                                 <label className="block text-xs text-black mb-1">Branch Name</label>
                                 <div className="relative">
                                     <FaBuilding className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
-                                    <input
-                                        type="text"
-                                        placeholder="Enter branch name"
+                                    <select
                                         value={formData.branch_name}
-                                        onChange={(e) => setFormData({ ...formData, branch_name: e.target.value })}
-                                        className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent text-black"
-                                    />
+                                        onChange={(e) => {
+                                            const name = e.target.value;
+                                            const code = Object.keys(BRANCH_OPTIONS).find(c => BRANCH_OPTIONS[c] === name) || '';
+                                            setFormData({ ...formData, branch_name: name, branch: code });
+                                        }}
+                                        className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent appearance-none bg-white text-black"
+                                    >
+                                        <option value="">-- Select branch name --</option>
+                                        {Object.entries(BRANCH_OPTIONS).map(([code, name]) => (
+                                            <option key={code} value={name}>{name}</option>
+                                        ))}
+                                    </select>
+                                    <FaChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-black text-xs pointer-events-none" />
                                 </div>
                             </div>
 
@@ -2590,7 +2627,12 @@ const Profile = () => {
                                         className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent appearance-none bg-white text-black"
                                     >
                                         {getAvailableRoles().map(role => (
-                                            <option key={role.value} value={role.value}>
+                                            <option
+                                                key={role.value}
+                                                value={role.value}
+                                                disabled={role.value === 'it_admin'}
+                                                style={role.value === 'it_admin' ? { color: '#9ca3af' } : {}}
+                                            >
                                                 {role.label}
                                             </option>
                                         ))}
@@ -2673,14 +2715,32 @@ const Profile = () => {
                                         <label className="block text-xs text-black mb-1">Branch Code <span className="text-red-500">*</span></label>
                                         <div className="relative">
                                             <FaBuilding className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
-                                            <input
-                                                type="text"
-                                                required
-                                                value={editingUser.branch || ''}
-                                                onChange={(e) => setEditingUser({ ...editingUser, branch: e.target.value })}
-                                                className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent text-black"
-                                                placeholder="Enter branch code"
-                                            />
+                                            {isMasterAdmin ? (
+                                                <>
+                                                    <select
+                                                        required
+                                                        value={editingUser.branch || ''}
+                                                        onChange={(e) => {
+                                                            const code = e.target.value;
+                                                            setEditingUser({ ...editingUser, branch: code, branch_name: BRANCH_OPTIONS[code] || '' });
+                                                        }}
+                                                        className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent appearance-none bg-white text-black"
+                                                    >
+                                                        <option value="">-- Select branch code --</option>
+                                                        {Object.keys(BRANCH_OPTIONS).map((code) => (
+                                                            <option key={code} value={code}>{code}</option>
+                                                        ))}
+                                                    </select>
+                                                    <FaChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-black text-xs pointer-events-none" />
+                                                </>
+                                            ) : (
+                                                <input
+                                                    type="text"
+                                                    value={editingUser.branch || ''}
+                                                    disabled
+                                                    className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg bg-gray-50 text-black cursor-not-allowed"
+                                                />
+                                            )}
                                         </div>
                                     </div>
 
@@ -2688,13 +2748,32 @@ const Profile = () => {
                                         <label className="block text-xs text-black mb-1">Branch Name</label>
                                         <div className="relative">
                                             <FaBuilding className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
-                                            <input
-                                                type="text"
-                                                value={editingUser.branch_name || ''}
-                                                onChange={(e) => setEditingUser({ ...editingUser, branch_name: e.target.value })}
-                                                className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent text-black"
-                                                placeholder="Enter branch name"
-                                            />
+                                            {isMasterAdmin ? (
+                                                <>
+                                                    <select
+                                                        value={editingUser.branch_name || ''}
+                                                        onChange={(e) => {
+                                                            const name = e.target.value;
+                                                            const code = Object.keys(BRANCH_OPTIONS).find(c => BRANCH_OPTIONS[c] === name) || '';
+                                                            setEditingUser({ ...editingUser, branch_name: name, branch: code });
+                                                        }}
+                                                        className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent appearance-none bg-white text-black"
+                                                    >
+                                                        <option value="">-- Select branch name --</option>
+                                                        {Object.entries(BRANCH_OPTIONS).map(([code, name]) => (
+                                                            <option key={code} value={name}>{name}</option>
+                                                        ))}
+                                                    </select>
+                                                    <FaChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-black text-xs pointer-events-none" />
+                                                </>
+                                            ) : (
+                                                <input
+                                                    type="text"
+                                                    value={editingUser.branch_name || ''}
+                                                    disabled
+                                                    className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg bg-gray-50 text-black cursor-not-allowed"
+                                                />
+                                            )}
                                         </div>
                                     </div>
 
@@ -2761,76 +2840,79 @@ const Profile = () => {
                                         </div>
                                     </div>
 
-                                    {(isMasterAdmin || isITAdmin) && editingUser.role === 'branch_admin' && (
-                                        <div className="border-t pt-4 mt-2">
-                                            <h4 className="text-xs font-semibold text-black mb-2 flex items-center space-x-2">
-                                                <FaBuilding className="text-[#2f3192]" />
-                                                <span>Branch Access</span>
-                                            </h4>
+                                    {(
+                                        ((isMasterAdmin || isITAdmin) && editingUser.role === 'branch_admin') ||
+                                        (isMasterAdmin && editingUser.role === 'employee')
+                                    ) && (
+                                            <div className="border-t pt-4 mt-2">
+                                                <h4 className="text-xs font-semibold text-black mb-2 flex items-center space-x-2">
+                                                    <FaBuilding className="text-[#2f3192]" />
+                                                    <span>Branch Access</span>
+                                                </h4>
 
-                                            <div className="space-y-2 mb-3 max-h-40 overflow-y-auto">
-                                                {editingUserBranches.map(b => (
-                                                    <div key={b.id} className="flex items-center justify-between bg-gray-50 px-2 py-1.5 rounded-lg">
-                                                        <div className="text-xs text-black flex items-center gap-2">
-                                                            {b.is_primary && <span className="text-yellow-500">★</span>}
-                                                            <span className="font-medium">{b.branch_name}</span>
-                                                            <span className="text-gray-500">({b.branch})</span>
+                                                <div className="space-y-2 mb-3 max-h-40 overflow-y-auto">
+                                                    {editingUserBranches.map(b => (
+                                                        <div key={b.id} className="flex items-center justify-between bg-gray-50 px-2 py-1.5 rounded-lg">
+                                                            <div className="text-xs text-black flex items-center gap-2">
+                                                                {b.is_primary && <span className="text-yellow-500">★</span>}
+                                                                <span className="font-medium">{b.branch_name}</span>
+                                                                <span className="text-gray-500">({b.branch})</span>
+                                                            </div>
+                                                            <div className="flex gap-1">
+                                                                {!b.is_primary && (
+                                                                    <button type="button" onClick={() => handleSetPrimary(b.branch)}
+                                                                        className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded">
+                                                                        Set Primary
+                                                                    </button>
+                                                                )}
+                                                                {!b.is_primary && (
+                                                                    <button type="button" onClick={() => handleRemoveBranch(b.id)}
+                                                                        className="text-xs px-2 py-0.5 bg-red-100 text-red-700 hover:bg-red-200 rounded">
+                                                                        <FaTrash className="text-xs" />
+                                                                    </button>
+                                                                )}
+                                                            </div>
                                                         </div>
-                                                        <div className="flex gap-1">
-                                                            {!b.is_primary && (
-                                                                <button type="button" onClick={() => handleSetPrimary(b.branch)}
-                                                                    className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded">
-                                                                    Set Primary
-                                                                </button>
-                                                            )}
-                                                            {!b.is_primary && (
-                                                                <button type="button" onClick={() => handleRemoveBranch(b.id)}
-                                                                    className="text-xs px-2 py-0.5 bg-red-100 text-red-700 hover:bg-red-200 rounded">
-                                                                    <FaTrash className="text-xs" />
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                                {editingUserBranches.length === 0 && (
-                                                    <p className="text-xs text-gray-500">No branch access entries.</p>
-                                                )}
-                                            </div>
+                                                    ))}
+                                                    {editingUserBranches.length === 0 && (
+                                                        <p className="text-xs text-gray-500">No branch access entries.</p>
+                                                    )}
+                                                </div>
 
-                                            <div className="relative">
-                                                <FaBuilding className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
-                                                <select
-                                                    value={newBranchInput.branch}
-                                                    onChange={(e) => {
-                                                        const code = e.target.value;
-                                                        setNewBranchInput({
-                                                            branch: code,
-                                                            branch_name: BRANCH_OPTIONS[code] || ''
-                                                        });
-                                                    }}
-                                                    className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#2f3192] appearance-none bg-white text-black"
+                                                <div className="relative">
+                                                    <FaBuilding className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
+                                                    <select
+                                                        value={newBranchInput.branch}
+                                                        onChange={(e) => {
+                                                            const code = e.target.value;
+                                                            setNewBranchInput({
+                                                                branch: code,
+                                                                branch_name: BRANCH_OPTIONS[code] || ''
+                                                            });
+                                                        }}
+                                                        className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#2f3192] appearance-none bg-white text-black"
+                                                    >
+                                                        <option value="">-- Select a branch to add --</option>
+                                                        {Object.entries(BRANCH_OPTIONS)
+                                                            .filter(([code]) => !editingUserBranches.some(b => b.branch === code))
+                                                            .map(([code, name]) => (
+                                                                <option key={code} value={code}>
+                                                                    {name} ({code})
+                                                                </option>
+                                                            ))}
+                                                    </select>
+                                                    <FaChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-black text-xs pointer-events-none" />
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleAddBranch}
+                                                    disabled={!newBranchInput.branch}
+                                                    className={`mt-2 w-full bg-[#2f3192] hover:bg-[#3a5885] text-white text-xs py-1 rounded-lg flex items-center justify-center gap-1 ${!newBranchInput.branch ? 'opacity-50 cursor-not-allowed' : ''}`}
                                                 >
-                                                    <option value="">-- Select a branch to add --</option>
-                                                    {Object.entries(BRANCH_OPTIONS)
-                                                        .filter(([code]) => !editingUserBranches.some(b => b.branch === code))
-                                                        .map(([code, name]) => (
-                                                            <option key={code} value={code}>
-                                                                {name} ({code})
-                                                            </option>
-                                                        ))}
-                                                </select>
-                                                <FaChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-black text-xs pointer-events-none" />
+                                                    <FaPlus className="text-xs" /> Add Branch Access
+                                                </button>
                                             </div>
-                                            <button
-                                                type="button"
-                                                onClick={handleAddBranch}
-                                                disabled={!newBranchInput.branch}
-                                                className={`mt-2 w-full bg-[#2f3192] hover:bg-[#3a5885] text-white text-xs py-1 rounded-lg flex items-center justify-center gap-1 ${!newBranchInput.branch ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                            >
-                                                <FaPlus className="text-xs" /> Add Branch Access
-                                            </button>
-                                        </div>
-                                    )}
+                                        )}
 
                                     <div className="space-y-3 pt-2">
                                         <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">

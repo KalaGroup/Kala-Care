@@ -12,6 +12,7 @@ class OfficeExpenseTemp(Base):
     sub_head = Column(String(100), nullable=True)
     expenses_description = Column(Text, nullable=True)
     description = Column(Text, nullable=True)
+    internal_branch_name = Column(String(150), nullable=True)
     paid_to = Column(String(255), nullable=False)
     invoice_no = Column(String(100), nullable=True)
     amount = Column(Float, nullable=False)
@@ -33,6 +34,7 @@ class OfficeExpenseTemp(Base):
             "sub_head": self.sub_head,
             "expenses_description": self.expenses_description,
             "description": self.description,
+            "internal_branch_name": self.internal_branch_name,
             "paid_to": self.paid_to,
             "invoice_no": self.invoice_no,
             "amount": self.amount,

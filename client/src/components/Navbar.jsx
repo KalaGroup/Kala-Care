@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { PiHandshakeDuotone } from "react-icons/pi";
 import Swal from 'sweetalert2';
+import axios from 'axios';
 
 import {
   Bars3Icon,
@@ -226,11 +227,96 @@ function Navbar({ children }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [branchDropdownOpen]);
 
-  const handleLogout = () => {
-    sessionStorage.removeItem('user');
-    sessionStorage.removeItem('token');
-    navigate('/login');
+  // Send logout time to backend (manual or auto), then clear session
+  const recordLogoutAndClear = async (logoutType = 'manual') => {
+    try {
+      const stored = JSON.parse(sessionStorage.getItem('user') || '{}');
+      if (stored.session_id) {
+        // Use the SAME axios path style as the login call (/api/users/...)
+        // so the request actually reaches the backend.
+        await axios.post(`${import.meta.env.VITE_BACKEND_URL}/users/logout`, {
+          session_id: stored.session_id,
+          logout_type: logoutType,
+        });
+      }
+    } catch (e) {
+      console.error('Logout tracking failed:', e);
+      // never block logout on a tracking failure
+    } finally {
+      sessionStorage.removeItem('user');
+      sessionStorage.removeItem('token');
+      navigate('/login');
+    }
   };
+
+  const handleLogout = () => {
+    recordLogoutAndClear('manual');
+  };
+
+  // ---- Auto-logout after 10 minutes of inactivity ----
+  useEffect(() => {
+    if (!user) return;
+
+    const INACTIVITY_MS = 10 * 60 * 1000; // 10 minutes
+    const CHECK_INTERVAL_MS = 30 * 1000;   // check every 30s
+
+    // Activity handlers just stamp a timestamp — O(1), no timer churn.
+    let lastActivity = Date.now();
+    const markActivity = () => { lastActivity = Date.now(); };
+
+    // mousemove/scroll fire constantly, so throttle the timestamp write to once
+    // every 1s. A plain variable write is cheap, but this avoids even that on
+    // every single frame.
+    let throttled = false;
+    const onActivity = () => {
+      if (throttled) return;
+      throttled = true;
+      markActivity();
+      setTimeout(() => { throttled = false; }, 1000);
+    };
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
+    events.forEach(evt => window.addEventListener(evt, onActivity, { passive: true }));
+
+    // ONE interval does the deciding — not the event handlers.
+    const interval = setInterval(() => {
+      if (Date.now() - lastActivity >= INACTIVITY_MS) {
+        clearInterval(interval);
+        recordLogoutAndClear('auto');
+      }
+    }, CHECK_INTERVAL_MS);
+
+    return () => {
+      clearInterval(interval);
+      events.forEach(evt => window.removeEventListener(evt, onActivity));
+    };
+  }, [user]);
+
+  // Record logout when the tab/window is closing (browser kills the page, so a
+  // normal fetch won't finish — sendBeacon is allowed to complete during unload).
+  useEffect(() => {
+    if (!user) return;
+
+    const sendLogoutBeacon = () => {
+      const stored = JSON.parse(sessionStorage.getItem('user') || '{}');
+      if (stored.session_id && navigator.sendBeacon) {
+        const url = `${import.meta.env.VITE_BACKEND_URL}/users/logout`;
+        const blob = new Blob(
+          [JSON.stringify({ session_id: stored.session_id, logout_type: 'close' })],
+          { type: 'application/json' }
+        );
+        navigator.sendBeacon(url, blob);
+      }
+    };
+
+    // pagehide fires on tab close, navigation, and (on mobile) when the app is
+    // backgrounded — more reliable than beforeunload across browsers.
+    window.addEventListener('pagehide', sendLogoutBeacon);
+
+    return () => {
+      window.removeEventListener('pagehide', sendLogoutBeacon);
+    };
+  }, [user]);
 
   const handleBranchSwitch = (branchObj) => {
     if (branchObj.branch === user.branch) return;
@@ -290,7 +376,7 @@ function Navbar({ children }) {
       }
     ];
 
-    const hiddenUserIds = ['31240001', '31250001'];
+    const hiddenUserIds = ['31240001', '31250001', '31240012'];
     const restrictedPaths = ['/import', '/campaigns'];
     return allItems.filter(item => {
       if (hiddenUserIds.includes(String(user?.user_id)) && restrictedPaths.includes(item.path)) {
@@ -987,11 +1073,10 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
                               type="button"
                               disabled={isActive}
                               onClick={() => handleBranchSwitch(b)}
-                              className={`w-full text-left px-2 py-1 text-[10px] transition-colors flex items-center gap-1.5 ${
-                                isActive
+                              className={`w-full text-left px-2 py-1 text-[10px] transition-colors flex items-center gap-1.5 ${isActive
                                   ? 'bg-green-50 text-green-800 cursor-default font-semibold'
                                   : 'text-gray-700 hover:bg-gray-50 cursor-pointer'
-                              }`}
+                                }`}
                             >
                               {isActive && <span className="text-green-600">✓</span>}
                               {!isActive && b.is_primary && (

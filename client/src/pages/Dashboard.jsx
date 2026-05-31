@@ -27,6 +27,7 @@ import * as XLSX from 'xlsx';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import EmployeePerformanceModal from '../components/EmployeePerformanceModal';
+import EmployeeTime from '../components/EmployeeTime';
 
 // Register ChartJS components
 ChartJS.register(
@@ -114,6 +115,7 @@ const Dashboard = () => {
     const hasFetchedBranchPerformance = useRef(false);
     const hasFetchedAllBranches = useRef(false);
     const [showOtherFollowupModal, setShowOtherFollowupModal] = useState(false);
+    const [branchEmployeesLoading, setBranchEmployeesLoading] = useState(false);
 
     // Track which tabs have been loaded
     const [loadedTabs, setLoadedTabs] = useState({
@@ -171,6 +173,9 @@ const Dashboard = () => {
     const [showBranchCustomersModal, setShowBranchCustomersModal] = useState(false);
     const [summaryStats, setSummaryStats] = useState(null);
     const [canExport, setCanExport] = useState(false);
+    const [showEmployeeTimeModal, setShowEmployeeTimeModal] = useState(false);
+    const TIME_REPORT_ALLOWED_IDS = ['kala000001', '31240002'];
+    const canViewTimeReport = userData && TIME_REPORT_ALLOWED_IDS.includes(String(userData.user_id));
 
     // Additional stats state
     const [activityStats, setActivityStats] = useState([]);
@@ -448,6 +453,18 @@ const Dashboard = () => {
             abortControllerRef.current?.abort();
         };
     }, []);
+
+    // Cancel the previous tab's in-flight requests on every tab switch,
+    // so the newly-active tab loads fast without competing network calls.
+    const isFirstTabRender = useRef(true);
+    useEffect(() => {
+        if (isFirstTabRender.current) {
+            isFirstTabRender.current = false;
+            return; // skip on first render so the initial tab loads normally
+        }
+        abortControllerRef.current?.abort();               // stop old tab's calls
+        abortControllerRef.current = new AbortController(); // fresh controller for new tab
+    }, [activeTab]);
 
     // Replace this entire useEffect
     useEffect(() => {
@@ -923,7 +940,12 @@ const Dashboard = () => {
 
     const formatDateForAPI = (date) => {
         if (!date) return null;
-        return date.toISOString().split('T')[0];
+        // Use LOCAL (IST) date parts so the chosen day isn't shifted to the
+        // previous day by UTC conversion (toISOString shifts IST dates back).
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
     };
 
     const handleBranchEmployeeTableSort = (columnKey) => {
@@ -2259,11 +2281,11 @@ const Dashboard = () => {
         const execute = async () => {
             const signal = abortControllerRef.current?.signal;
             if (!branchCodes || branchCodes.length === 0) {
-                if (isMounted.current) { setBranchEmployees([]); setLoading(false); }
+                if (isMounted.current) { setBranchEmployees([]); setBranchEmployeesLoading(false); }
                 return;
             }
             try {
-                if (isMounted.current) { setLoading(true); setError(null); setBranchEmployees([]); }
+                if (isMounted.current) { setBranchEmployeesLoading(true); setError(null); setBranchEmployees([]); }
                 const fetchPromises = branchCodes.map(async (branchCode) => {
                     const payload = {
                         branch_code: branchCode,
@@ -2302,7 +2324,7 @@ const Dashboard = () => {
                     setError(error.response?.data?.detail || error.message);
                 }
             } finally {
-                if (isMounted.current) setLoading(false);
+                if (isMounted.current) setBranchEmployeesLoading(false);
             }
         };
 
@@ -4053,7 +4075,21 @@ const Dashboard = () => {
                 {/* Employee Progress Tab */}
                 {activeTab === 'branch-report' && (isMasterAdmin || isITAdmin || isBranchAdmin) && shouldLoadTab('branch-report') && (
                     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                        <h2 className="text-base font-bold text-black mb-3">Branch Employee Report</h2>
+                        <div className="flex items-center justify-between mb-3">
+                            <h2 className="text-base font-bold text-black">Branch Employee Report</h2>
+                            {canViewTimeReport && (
+                                <button
+                                    onClick={() => setShowEmployeeTimeModal(true)}
+                                    className="px-3 py-1.5 text-xs font-medium text-white rounded-lg hover:opacity-90 transition-opacity flex items-center gap-1.5 whitespace-nowrap"
+                                    style={{ backgroundColor: themeColor }}
+                                >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    Employee Login Time
+                                </button>
+                            )}
+                        </div>
 
                         {(isMasterAdmin || isITAdmin) ? (
                             <div className="mb-4">
@@ -4064,7 +4100,11 @@ const Dashboard = () => {
                                     <div className="flex gap-2">
                                         <button
                                             onClick={() => {
-                                                const allBranchCodes = branches.map(b => b);
+                                                const apiBranches = branches || [];
+                                                const allBranchCodes = [
+                                                    ...BRANCH_ORDER_LIST,
+                                                    ...apiBranches.filter(b => !BRANCH_ORDER_LIST.includes(b))
+                                                ];
                                                 const selectedStr = allBranchCodes.join(',');
                                                 setSelectedBranch(selectedStr);
                                                 fetchMultipleBranchEmployees(allBranchCodes);
@@ -4087,20 +4127,12 @@ const Dashboard = () => {
 
                                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mb-4 p-3 border border-gray-200 rounded bg-gray-50 max-h-48 overflow-y-auto">
                                     {(() => {
-                                        const branchOrder = [
-                                            'HO',
-                                            '420435_1', '420435_2', '420435_3', '420435_4', '420435_5',
-                                            '420435_6', '420435_7', '420435_8', '420435_9', '420435_10',
-                                            '420435_11', '420435_12', '420435_13', '420435_14'
-                                        ];
-                                        const sortedBranches = [...branches].sort((a, b) => {
-                                            const indexA = branchOrder.indexOf(a);
-                                            const indexB = branchOrder.indexOf(b);
-                                            if (indexA === -1 && indexB === -1) return 0;
-                                            if (indexA === -1) return 1;
-                                            if (indexB === -1) return -1;
-                                            return indexA - indexB;
-                                        });
+                                        const branchOrder = BRANCH_ORDER_LIST;
+                                        // Render from the static list so branch names appear
+                                        // instantly, then append any extra branches the API returned.
+                                        const apiBranches = branches || [];
+                                        const extras = apiBranches.filter(b => !branchOrder.includes(b));
+                                        const sortedBranches = [...branchOrder, ...extras];
                                         return sortedBranches.map((branch) => {
                                             const selectedBranches = selectedBranch ? selectedBranch.split(',') : [];
                                             const isChecked = selectedBranches.includes(branch);
@@ -4157,14 +4189,14 @@ const Dashboard = () => {
                             </div>
                         )}
 
-                        {loading && selectedBranch && (
+                        {branchEmployeesLoading && selectedBranch && (
                             <div className="text-center py-8">
                                 <div className="w-10 h-10 border-2 border-t-2 border-t-black border-gray-200 rounded-full animate-spin mx-auto mb-3"></div>
                                 <p className="text-xs text-black">Loading employees data...</p>
                             </div>
                         )}
 
-                        {!loading && selectedBranch && branchEmployees.length > 0 ? (
+                        {!branchEmployeesLoading && selectedBranch && branchEmployees.length > 0 ? (
                             <div>
                                 <div className="mb-3 flex justify-between items-center">
                                     <h3 className="text-sm font-semibold text-black">
@@ -4302,7 +4334,7 @@ const Dashboard = () => {
                                     </table>
                                 </div>
                             </div>
-                        ) : !loading && selectedBranch && branchEmployees.length === 0 ? (
+                        ) : !branchEmployeesLoading && selectedBranch && branchEmployees.length === 0 ? (
                             <div className="text-center py-8">
                                 <svg className="w-12 h-12 text-black mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -5942,6 +5974,10 @@ const Dashboard = () => {
                 branch={selectedBranchForModal}
                 apiBaseUrl={API_BASE_URL}
                 userData={userData}
+                preloadedEngaged={selectedBranchForModal ? branchEngagedData[selectedBranchForModal.branch] : null}
+                preloadedRemaining={selectedBranchForModal ? branchRemainingData[selectedBranchForModal.branch] : null}
+                preloadedAllocation={selectedBranchForModal ? allocationSummary[selectedBranchForModal.branch] : null}
+                canExportProp={canExport}
             />
             <OtherFollowupModal
                 isOpen={showOtherFollowupModal}
@@ -5989,6 +6025,11 @@ const Dashboard = () => {
                 customEndDate={customEndDate}
                 selectedCampaigns={selectedCampaigns}
                 allCampaigns={allCampaigns}
+            />
+            <EmployeeTime
+                isOpen={showEmployeeTimeModal}
+                onClose={() => setShowEmployeeTimeModal(false)}
+                userData={userData}
             />
         </div>
     );

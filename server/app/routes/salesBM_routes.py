@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from urllib.parse import unquote
 from pydantic import BaseModel
+from datetime import date
 import logging
 
 from app.database import SessionLocal
@@ -15,6 +16,17 @@ router = APIRouter(prefix="/tada-salesbm", tags=["TADA Sales & BM"])
 class CalcRequest(BaseModel):
     branch_code: str
     one_way_km: str
+
+class UpdateMainRequest(BaseModel):
+    ho_corrected_km: Optional[str] = None
+    ho_remark: Optional[str] = None
+    verification_status: Optional[str] = None
+
+
+class SubmitHistoryRequest(BaseModel):
+    record_ids: list[int]
+    submitted_by_name: Optional[str] = "HO"
+    submitted_by_uid: Optional[str] = ""    
 
 
 class CreateRequest(BaseModel):
@@ -35,7 +47,16 @@ class CreateRequest(BaseModel):
 
 class TempIdsRequest(BaseModel):
     temp_ids: list[int]
-    branch_code: str    
+    branch_code: str
+
+
+class PaidDateRequest(BaseModel):
+    paid_date: Optional[date] = None
+
+
+class BulkPaidDateRequest(BaseModel):
+    record_ids: list[int]
+    paid_date: Optional[date] = None    
 
 def get_db():
     db = SessionLocal()
@@ -63,8 +84,8 @@ def _serialize(r) -> dict:
         "engineer_name": r.engineer_name,
         "engineer_uid": r.engineer_uid,
         "employee_id": r.employee_id,
-        "labour_sale_expected": r.labour_sale_expected,
-        "part_sale_expected": r.part_sale_expected,
+        "labour_sale_expected": getattr(r, "labour_sale_expected", None),
+        "part_sale_expected": getattr(r, "part_sale_expected", None),
         "branch_code": r.branch_code,
         "created_by": r.created_by,
         "created_at": str(r.created_at) if r.created_at else None,
@@ -120,3 +141,51 @@ def history(branch_code: Optional[str] = None, skip: int = 0,
             limit: int = 500, db: Session = Depends(get_db)):
     bc = unquote(branch_code) if branch_code else None
     return [_serialize(r) for r in ctrl.get_salesbm_history(db, bc, skip, limit)]    
+
+@router.get("/branch-engineers-summary")
+def branch_engineers_summary(branch_code: str, db: Session = Depends(get_db)):
+    return ctrl.get_salesbm_branch_engineers(db, unquote(branch_code))
+
+
+@router.get("/engineer-records")
+def engineer_records(branch_code: str, engineer_uid: Optional[str] = None,
+                     engineer_name: Optional[str] = None, db: Session = Depends(get_db)):
+    rows = ctrl.get_salesbm_engineer_records(
+        db, unquote(branch_code),
+        engineer_uid or None, unquote(engineer_name) if engineer_name else None,
+    )
+    return [_serialize(r) for r in rows]
+
+
+@router.put("/records/{record_id}/update")
+def update_main_record(record_id: int, payload: UpdateMainRequest,
+                       db: Session = Depends(get_db)):
+    return ctrl.update_salesbm_main_record(
+        db, record_id, payload.dict(exclude_unset=True)
+    )
+
+
+@router.post("/submit-to-history")
+def submit_to_history(payload: SubmitHistoryRequest, db: Session = Depends(get_db)):
+    return ctrl.submit_salesbm_to_history(
+        db, payload.record_ids, payload.submitted_by_name, payload.submitted_by_uid
+    )
+
+
+@router.get("/history/grouped")
+def history_grouped(branch_code: Optional[str] = None, db: Session = Depends(get_db)):
+    bc = unquote(branch_code) if branch_code else None
+    return ctrl.get_salesbm_history_grouped(db, bc)
+
+
+@router.put("/history/{record_id}/paid-date")
+def salesbm_history_paid_date(record_id: int, payload: PaidDateRequest, db: Session = Depends(get_db)):
+    """Set/clear paid_date on a single Sales & BM history record."""
+    rec = ctrl.update_salesbm_history_paid_date(db, record_id, payload.paid_date)
+    return {"id": rec.id, "paid_date": str(rec.paid_date) if rec.paid_date else None}
+
+
+@router.put("/history/bulk-paid-date")
+def salesbm_history_bulk_paid_date(payload: BulkPaidDateRequest, db: Session = Depends(get_db)):
+    """Apply paid_date to many Sales & BM history records at once (voucher-wise apply)."""
+    return ctrl.bulk_update_salesbm_history_paid_date(db, payload.record_ids, payload.paid_date)    

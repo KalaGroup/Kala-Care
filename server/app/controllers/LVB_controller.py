@@ -6,6 +6,7 @@ from app.models.LVB_model import LocalVendor, LocalVendorBill, LocalVendorBillHi
 from sqlalchemy import or_, func, cast
 from sqlalchemy.types import Date
 from app.models.LVB_temp_model import LocalVendorBillTemp
+from app.controllers.LVB_voucher_controller import LVBVoucherController
 
 class LocalVendorController:
 
@@ -136,6 +137,7 @@ class LocalVendorBillController:
         for bill in bills:
             history = LocalVendorBillHistory(
                 original_bill_id=bill.id,
+                submit_voucher_no=bill.submit_voucher_no,
                 vendor_id=bill.vendor_id,
                 vendor_name=bill.vendor_name,
                 is_registered=bill.is_registered,
@@ -242,12 +244,27 @@ class LocalVendorBillTempController:
         return True
 
     @staticmethod
-    def submit_to_main(db: Session, temp_ids: List[int], branch_code: str) -> int:
+    def submit_to_main(db: Session, temp_ids: List[int], branch_code: str):
+        """Move temp rows to the main local_vendor_bills table.
+        The whole batch shares ONE HO-submission voucher (submit_voucher_no),
+        counted separately per branch and reset each financial year.
+        Returns (count, submit_voucher_no)."""
         temps = db.query(LocalVendorBillTemp).filter(
             LocalVendorBillTemp.id.in_(temp_ids),
             LocalVendorBillTemp.branch_code == branch_code,
             LocalVendorBillTemp.is_deleted == False
         ).all()
+
+        if not temps:
+            return 0, None
+
+        ref_dates = [
+            (t.invoice_date.date() if hasattr(t.invoice_date, 'date') else t.invoice_date)
+            for t in temps
+        ]
+        batch_ref_date = min(ref_dates)
+        submit_voucher = LVBVoucherController.generate_voucher(db, branch_code, batch_ref_date)
+
         count = 0
         for t in temps:
             main = LocalVendorBill(
@@ -266,13 +283,14 @@ class LocalVendorBillTempController:
                 line_work_amount=t.line_work_amount,
                 description=t.description,
                 remark=t.remark,
+                submit_voucher_no=submit_voucher,
                 branch_code=t.branch_code,
                 created_by=t.created_by,
                 created_by_name=t.created_by_name,
-                verification_status='Pending',
             )
             db.add(main)
+            db.flush()
             t.is_deleted = True
             count += 1
         db.flush()
-        return count    
+        return count, submit_voucher

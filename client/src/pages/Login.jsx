@@ -151,6 +151,7 @@ const Login = () => {
                     is_blocked: response.data.user.is_blocked,
                     can_export: response.data.user.can_export,
                     can_access_expense: response.data.user.can_access_expense === true,  // <-- new
+                    session_id: response.data.user.session_id,  // <-- login session for logout tracking
                     branches: branches                      // <-- all accessible branches
                 }));
 

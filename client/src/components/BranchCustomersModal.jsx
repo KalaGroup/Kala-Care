@@ -26,7 +26,8 @@ ChartJS.register(
     ArcElement
 );
 
-const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData }) => {
+const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
+    preloadedEngaged, preloadedRemaining, preloadedAllocation, canExportProp }) => {
     const [branchData, setBranchData] = useState(null);
     const [totalCustomersData, setTotalCustomersData] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -43,11 +44,27 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData })
 
     const themeColor = '#2f3192';
 
+    // useEffect(() => {
+    //     if (isOpen && branch) {
+    //         fetchBranchCampaignCustomers();
+    //         fetchBranchTotalCustomers();
+    //     }
+    // }, [isOpen, branch]);
+
     useEffect(() => {
-        if (isOpen && branch) {
-            fetchBranchCampaignCustomers();
-            fetchBranchTotalCustomers();
-        }
+        if (!isOpen || !branch) return;
+
+        if (preloadedEngaged) setBranchData(preloadedEngaged);
+        else fetchBranchCampaignCustomers();
+
+        if (preloadedRemaining) setTotalCustomersData(preloadedRemaining);
+        else fetchBranchTotalCustomers();
+
+        if (preloadedAllocation) setAllocationSummary(preloadedAllocation);
+        else fetchBranchAllocationSummary();
+
+        if (typeof canExportProp === 'boolean') setCanExport(canExportProp);
+        else fetchExportPermission();
     }, [isOpen, branch]);
 
     const fetchBranchCampaignCustomers = async () => {
@@ -290,14 +307,14 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData })
         }
     };
 
-    useEffect(() => {
-        if (isOpen && branch) {
-            fetchBranchCampaignCustomers();
-            fetchBranchTotalCustomers();
-            fetchBranchAllocationSummary();
-            fetchExportPermission();
-        }
-    }, [isOpen, branch]);
+    // useEffect(() => {
+    //     if (isOpen && branch) {
+    //         fetchBranchCampaignCustomers();
+    //         fetchBranchTotalCustomers();
+    //         fetchBranchAllocationSummary();
+    //         fetchExportPermission();
+    //     }
+    // }, [isOpen, branch]);
 
     // Campaign-wise Customer Breakdown Data
     const getCampaignBreakdownData = () => {
@@ -1046,8 +1063,8 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData })
                                                         <td className="border border-gray-300 px-1 py-1.5 text-center">
                                                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-black">
                                                                 {customer.last_status
-    ? customer.last_status.charAt(0).toUpperCase() + customer.last_status.slice(1)
-    : 'Pending'}
+                                                                    ? customer.last_status.charAt(0).toUpperCase() + customer.last_status.slice(1)
+                                                                    : 'Pending'}
                                                             </span>
                                                         </td>
                                                         <td className="border border-gray-300 px-1 py-1.5 text-[10px] text-black text-center">
