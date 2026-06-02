@@ -335,6 +335,10 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
         }
       });
       next['Service Request No.'] = String(record.service_request_no || '');
+      // Auto-fill the 1-way KM from the picked SR into the on-screen field.
+      // (RECORD_TO_FORM_MAP fills "KMs Travelled", but the SR-mode input uses
+      //  "KMs Travelled(1 Way)" — copy it so it shows up and stays editable.)
+      next['KMs Travelled(1 Way)'] = String(record.kms_travelled || '');
       // Auto-fill engineer UID from the existing SR record (locked, non-editable)
       next['Service Engineer UID'] = String(record.service_engineer_uid || '');
       // Look up employee_id for this UID from branchEngineerList
@@ -917,7 +921,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
         {activeTab === 'manual' && (() => {
           // Keys that stay editable after an SR is auto-filled
           const EDITABLE_AFTER_FILL = new Set([
-            'Service Engineer Name', 'KMs Travelled',
+            'Service Engineer Name', 'KMs Travelled(1 Way)',
             // Service Engineer UID and Employee ID are NOT editable after fill
           ]);
           // Fields shown in "No Service Request Number" mode (all editable)
@@ -2646,8 +2650,20 @@ const BranchAdminExpense = () => {
           hour: 'numeric', minute: '2-digit', hour12: true,
         });
       };
+      // ── Map the on-screen "KMs Travelled(1 Way)" field to the backend column ──
+      // Backend reads the "KMs Travelled" column (and doubles it for two_way_km).
+      // SR mode auto-fills "KMs Travelled" directly, so it saved fine. No-SR mode
+      // types into "KMs Travelled(1 Way)", which the backend ignores — so the value
+      // was lost. Copy it across so BOTH modes persist the KM correctly.
+      const oneWayKmInput = manualForm['KMs Travelled(1 Way)'];
+      const resolvedKms =
+        oneWayKmInput !== undefined && String(oneWayKmInput).trim() !== ''
+          ? String(oneWayKmInput).trim()
+          : (manualForm['KMs Travelled'] || '');
+
       const normalizedForm = {
         ...manualForm,
+        'KMs Travelled': resolvedKms,
         'SR Trip Start Date & Time': toDisplayDT(manualForm['SR Trip Start Date & Time']),
         'SR Reach at Site Date & Time': toDisplayDT(manualForm['SR Reach at Site Date & Time']),
       };
@@ -4542,14 +4558,14 @@ const BranchAdminExpense = () => {
     };
 
     if (key === 'km_rate') {
-      const effBranch = getEffectiveBranchForRecord(record, allRecords);
-      const rate = getBranchDARate(effBranch);
-      if (!rate || !rate.km_rate) {
+      const km = getDraftEffectiveKM();
+      const rate = getKmRateForRecord(record, km, allRecords);
+      if (!rate) {
         return <div className="text-[11px] text-center text-gray-400">-</div>;
       }
       return (
         <div className="text-[11px] text-center font-semibold text-gray-700">
-          ₹{rate.km_rate.toFixed(2)}
+          ₹{rate.toFixed(2)}
         </div>
       );
     }
@@ -5679,19 +5695,22 @@ const BranchAdminExpense = () => {
     );
   };
 
-  /* ─── KM Rate / DA / Total calculation logic (mirrors HOExpense) ──────────── */
+  /* ─── KM Rate / DA / Total calculation logic (2×2 master, mirrors HOExpense) ── */
   const loadKMRates = useCallback(async () => {
     try {
       const { data } = await axios.get(`${API_BASE_URL}/expense/branch-km-rates`);
       const rates = {};
       (data || []).forEach(rate => {
         rates[rate.branch_code] = {
-          km_rate: rate.km_rate,
-          range_start_km: rate.range_start_km,
-          range_end_km: rate.range_end_km,
-          range_amount: rate.range_amount,
-          above_km: rate.above_km,
-          above_amount: rate.above_amount,
+          km_threshold: rate.km_threshold,
+          single_low_rate: rate.single_low_rate,
+          single_low_da: rate.single_low_da,
+          multi_low_rate: rate.multi_low_rate,
+          multi_low_da: rate.multi_low_da,
+          single_high_rate: rate.single_high_rate,
+          single_high_da: rate.single_high_da,
+          multi_high_rate: rate.multi_high_rate,
+          multi_high_da: rate.multi_high_da,
         };
       });
       setKmRates(rates);
@@ -5700,16 +5719,27 @@ const BranchAdminExpense = () => {
     }
   }, []);
 
+  // True if the branch has any non-zero rate/DA configured
+  const branchHasRates = useCallback((m) =>
+    !!m && [
+      m.single_low_rate, m.single_low_da, m.multi_low_rate, m.multi_low_da,
+      m.single_high_rate, m.single_high_da, m.multi_high_rate, m.multi_high_da,
+    ].some((v) => (parseFloat(v) || 0) > 0), []);
+
   const getBranchDARate = useCallback((branchCode) => {
-    const r = kmRates[branchCode];
-    if (!r) return null;
+    const m = kmRates[branchCode];
+    if (!m) return null;
+    const num = (v) => (v === '' || v === null || v === undefined ? 0 : parseFloat(v) || 0);
     return {
-      range_start_km: r.range_start_km != null ? parseFloat(r.range_start_km) : null,
-      range_end_km: r.range_end_km != null ? parseFloat(r.range_end_km) : null,
-      range_amount: r.range_amount ? parseFloat(r.range_amount) : 0,
-      above_km: r.above_km != null ? parseFloat(r.above_km) : null,
-      above_amount: r.above_amount ? parseFloat(r.above_amount) : 0,
-      km_rate: r.km_rate ? parseFloat(r.km_rate) : 0,
+      km_threshold: m.km_threshold ? parseFloat(m.km_threshold) : 100,
+      single_low_rate: num(m.single_low_rate),
+      single_low_da: num(m.single_low_da),
+      multi_low_rate: num(m.multi_low_rate),
+      multi_low_da: num(m.multi_low_da),
+      single_high_rate: num(m.single_high_rate),
+      single_high_da: num(m.single_high_da),
+      multi_high_rate: num(m.multi_high_rate),
+      multi_high_da: num(m.multi_high_da),
     };
   }, [kmRates]);
 
@@ -5731,25 +5761,95 @@ const BranchAdminExpense = () => {
   }, []);
 
   const getEffectiveBranchForRecord = useCallback((record, recordsList) => {
-    let rate = getBranchDARate(record.sd_branch_code);
-    if (rate && (rate.range_amount > 0 || rate.above_amount > 0 || rate.km_rate > 0)) {
-      return record.sd_branch_code;
-    }
+    if (branchHasRates(getBranchDARate(record.sd_branch_code))) return record.sd_branch_code;
     if (record.service_engineer_uid) {
       const primary = findEngineerPrimaryBranch(record.service_engineer_uid, recordsList);
-      if (primary) {
-        rate = getBranchDARate(primary);
-        if (rate && (rate.range_amount > 0 || rate.above_amount > 0 || rate.km_rate > 0)) {
-          return primary;
-        }
-      }
+      if (primary && branchHasRates(getBranchDARate(primary))) return primary;
     }
-    const hoRate = getBranchDARate('HO');
-    if (hoRate && (hoRate.range_amount > 0 || hoRate.above_amount > 0 || hoRate.km_rate > 0)) {
-      return 'HO';
-    }
+    if (branchHasRates(getBranchDARate('HO'))) return 'HO';
     return record.sd_branch_code;
-  }, [getBranchDARate, findEngineerPrimaryBranch]);
+  }, [getBranchDARate, findEngineerPrimaryBranch, branchHasRates]);
+
+  // ── SR-per-day map: `${engineerUid}__${YYYY-MM-DD}` -> SR count, by SR Reach-at-Site date ──
+  // Cached on the recordsList identity so repeated cell renders don't rebuild it.
+  const srPerDayCacheRef = useRef({ source: null, map: {} });
+  const getSrPerDayMap = useCallback((recordsList) => {
+    if (srPerDayCacheRef.current.source === recordsList) return srPerDayCacheRef.current.map;
+    const map = {};
+    (recordsList || []).forEach((r) => {
+      const uid = String(r.service_engineer_uid || '').trim();
+      const dt = r.sr_reach_at_site_datetime;
+      if (!dt) return;
+      const d = new Date(dt);
+      if (isNaN(d.getTime())) return;
+      const key = `${uid}__${d.toISOString().slice(0, 10)}`;
+      map[key] = (map[key] || 0) + 1;
+    });
+    srPerDayCacheRef.current = { source: recordsList, map };
+    return map;
+  }, []);
+
+  const getSrCountForRecord = useCallback((record, recordsList) => {
+    const map = getSrPerDayMap(recordsList);
+    const uid = String(record.service_engineer_uid || '').trim();
+    const dt = record.sr_reach_at_site_datetime;
+    if (!dt) return 1;
+    const d = new Date(dt);
+    if (isNaN(d.getTime())) return 1;
+    return map[`${uid}__${d.toISOString().slice(0, 10)}`] || 1;
+  }, [getSrPerDayMap]);
+
+  // Is this record the LAST SR of the engineer's day? (by sr_reach_at_site_datetime, tie-broken by id)
+  const isLastSrOfDayRef = useRef({ source: null, map: {} });
+  const isLastSrOfDay = useCallback((record, recordsList) => {
+    if (isLastSrOfDayRef.current.source !== recordsList) {
+      // Build, per `${uid}__${YYYY-MM-DD}`, the id of the latest SR that day
+      const lastByDay = {};
+      (recordsList || []).forEach((r) => {
+        const uid = String(r.service_engineer_uid || '').trim();
+        const dt = r.sr_reach_at_site_datetime;
+        if (!dt) return;
+        const d = new Date(dt);
+        if (isNaN(d.getTime())) return;
+        const key = `${uid}__${d.toISOString().slice(0, 10)}`;
+        const cur = lastByDay[key];
+        // later timestamp wins; tie → higher id wins
+        if (!cur || d.getTime() > cur.t || (d.getTime() === cur.t && (r.id || 0) > cur.id)) {
+          lastByDay[key] = { t: d.getTime(), id: r.id || 0 };
+        }
+      });
+      isLastSrOfDayRef.current = { source: recordsList, map: lastByDay };
+    }
+    const uid = String(record.service_engineer_uid || '').trim();
+    const dt = record.sr_reach_at_site_datetime;
+    if (!dt) return true;
+    const d = new Date(dt);
+    if (isNaN(d.getTime())) return true;
+    const last = isLastSrOfDayRef.current.map[`${uid}__${d.toISOString().slice(0, 10)}`];
+    if (!last) return true;
+    return (record.id || 0) === last.id;
+  }, []);
+
+  // Pick { rate, da } from the 2×2 master. Rate applies to EVERY SR; DA is per-DAY
+  // (only the last SR of the engineer's day keeps the slab DA, the rest get DA = 0).
+  const getRateAndDAForRecord = useCallback((record, effectiveKM, recordsList) => {
+    if (effectiveKM === null) return { rate: 0, da: 0 };
+    const m = getBranchDARate(getEffectiveBranchForRecord(record, recordsList));
+    if (!m) return { rate: 0, da: 0 };
+    const high = effectiveKM > m.km_threshold;   // km == threshold counts as LOW
+    const multi = getSrCountForRecord(record, recordsList) > 1;
+    let rate, da;
+    if (multi && high) { rate = m.multi_high_rate; da = m.multi_high_da; }
+    else if (multi && !high) { rate = m.multi_low_rate; da = m.multi_low_da; }
+    else if (!multi && high) { rate = m.single_high_rate; da = m.single_high_da; }
+    else { rate = m.single_low_rate; da = m.single_low_da; }
+    // DA per day → only the last SR of the day carries DA
+    if (!isLastSrOfDay(record, recordsList)) da = 0;
+    return { rate, da };
+  }, [getBranchDARate, getEffectiveBranchForRecord, getSrCountForRecord, isLastSrOfDay]);
+
+  const getKmRateForRecord = useCallback((record, effectiveKM, recordsList) =>
+    getRateAndDAForRecord(record, effectiveKM, recordsList).rate, [getRateAndDAForRecord]);
 
   // Effective KM priority: ho_corrected_km -> branch_verified_km -> two_way_km
   const getEffectiveKM = useCallback((record) => {
@@ -5770,30 +5870,16 @@ const BranchAdminExpense = () => {
 
   const calculateDAmount = useCallback((record, effectiveKM, recordsList) => {
     if (effectiveKM === null) return null;
-    const effectiveBranch = getEffectiveBranchForRecord(record, recordsList);
-    const rate = getBranchDARate(effectiveBranch);
-    if (!rate) return null;
-    let da = 0;
-    if (rate.range_start_km !== null && rate.range_end_km !== null) {
-      if (effectiveKM >= rate.range_start_km && effectiveKM <= rate.range_end_km) {
-        da = rate.range_amount;
-      } else if (rate.above_km !== null && effectiveKM > rate.above_km) {
-        da = rate.above_amount;
-      }
-    } else if (rate.above_km !== null) {
-      if (effectiveKM > rate.above_km) da = rate.above_amount;
-    }
-    return da;
-  }, [getBranchDARate, getEffectiveBranchForRecord]);
+    return getRateAndDAForRecord(record, effectiveKM, recordsList).da;
+  }, [getRateAndDAForRecord]);
 
   const calculateTotalAmountDynamic = useCallback((record, effectiveKM, daAmount, recordsList, freightCharges = 0) => {
     if (effectiveKM === null) return null;
-    const effectiveBranch = getEffectiveBranchForRecord(record, recordsList);
-    const rate = getBranchDARate(effectiveBranch);
-    if (!rate || rate.km_rate === 0) return null;
+    const { rate } = getRateAndDAForRecord(record, effectiveKM, recordsList);
+    if (!rate) return null;
     const freight = parseFloat(freightCharges) || 0;
-    return (effectiveKM * rate.km_rate) + (daAmount || 0) + freight;
-  }, [getBranchDARate, getEffectiveBranchForRecord]);
+    return (effectiveKM * rate) + (daAmount || 0) + freight;
+  }, [getRateAndDAForRecord]);
 
   // Load KM rates once on mount (needed for DA/Total calculation in submitted view)
   useEffect(() => {

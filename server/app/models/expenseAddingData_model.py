@@ -9,15 +9,22 @@ class BranchKMRate(Base):
     id = Column(Integer, primary_key=True, index=True)
     branch_code = Column(String(50), nullable=False, unique=True, index=True)
     branch_name = Column(String(200), nullable=False)
-    km_rate = Column(Float, default=0.0)
-    
-    # DA fields
-    range_start_km = Column(Float, nullable=True)  # Start of range (e.g., 0)
-    range_end_km = Column(Float, nullable=True)    # End of range (e.g., 100)
-    range_amount = Column(Float, default=0.0)      # Amount for the range
-    
-    above_km = Column(Float, nullable=True)        # Threshold for above (e.g., 100)
-    above_amount = Column(Float, default=0.0)      # Amount for above threshold
+    # KM threshold separating the "low" and "high" distance slabs (e.g. 100)
+    km_threshold = Column(Float, default=100.0)
+
+    # ── Rate (₹/km) + DA (₹) for each (SR-count × distance) slab ──
+    # 1 SR/day · km ≤ threshold
+    single_low_rate = Column(Float, default=0.0)
+    single_low_da   = Column(Float, default=0.0)
+    # >1 SR/day · km ≤ threshold
+    multi_low_rate  = Column(Float, default=0.0)
+    multi_low_da    = Column(Float, default=0.0)
+    # 1 SR/day · km > threshold
+    single_high_rate = Column(Float, default=0.0)
+    single_high_da   = Column(Float, default=0.0)
+    # >1 SR/day · km > threshold
+    multi_high_rate  = Column(Float, default=0.0)
+    multi_high_da    = Column(Float, default=0.0)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

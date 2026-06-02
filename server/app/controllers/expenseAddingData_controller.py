@@ -20,61 +20,54 @@ def get_branch_km_rate(db: Session, branch_code: str):
     ).first()
 
 
-def create_or_update_branch_km_rate(db: Session, branch_code: str, branch_name: str, 
-                                   km_rate: float, range_start_km: float, 
-                                   range_end_km: float, range_amount: float,
-                                   above_km: float, above_amount: float, 
-                                   created_by: str):
-    """Create or update branch KM rate and DA rates"""
+def create_or_update_branch_km_rate(db: Session, branch_code: str, branch_name: str,
+                                    data: Dict, created_by: str):
+    """Create or update the per-branch rate master (2×2 slabs)."""
+    fields = dict(
+        km_threshold     = data.get('km_threshold', 100.0),
+        single_low_rate  = data.get('single_low_rate', 0.0),
+        single_low_da    = data.get('single_low_da', 0.0),
+        multi_low_rate   = data.get('multi_low_rate', 0.0),
+        multi_low_da     = data.get('multi_low_da', 0.0),
+        single_high_rate = data.get('single_high_rate', 0.0),
+        single_high_da   = data.get('single_high_da', 0.0),
+        multi_high_rate  = data.get('multi_high_rate', 0.0),
+        multi_high_da    = data.get('multi_high_da', 0.0),
+    )
+
     existing = get_branch_km_rate(db, branch_code)
-    
     if existing:
-        existing.km_rate = km_rate
-        existing.range_start_km = range_start_km
-        existing.range_end_km = range_end_km
-        existing.range_amount = range_amount
-        existing.above_km = above_km
-        existing.above_amount = above_amount
+        for k, v in fields.items():
+            setattr(existing, k, v)
         existing.updated_by = created_by
         existing.updated_at = datetime.now()
         db.commit()
         db.refresh(existing)
         return existing
-    else:
-        new_rate = models.BranchKMRate(
-            branch_code=branch_code,
-            branch_name=branch_name,
-            km_rate=km_rate,
-            range_start_km=range_start_km,
-            range_end_km=range_end_km,
-            range_amount=range_amount,
-            above_km=above_km,
-            above_amount=above_amount,
-            created_by=created_by
-        )
-        db.add(new_rate)
-        db.commit()
-        db.refresh(new_rate)
-        return new_rate
+
+    new_rate = models.BranchKMRate(
+        branch_code=branch_code,
+        branch_name=branch_name,
+        created_by=created_by,
+        **fields,
+    )
+    db.add(new_rate)
+    db.commit()
+    db.refresh(new_rate)
+    return new_rate
 
 
 def save_all_branch_km_rates(db: Session, rates_data: List[Dict], created_by: str):
-    """Save all branch KM rates with DA rates at once"""
+    """Save all branch rate masters at once."""
     saved_rates = []
     for rate_data in rates_data:
-        rate = create_or_update_branch_km_rate(
+        saved_rates.append(create_or_update_branch_km_rate(
             db,
             rate_data['branch_code'],
             rate_data['branch_name'],
-            rate_data['km_rate'],
-            rate_data.get('range_start_km'),
-            rate_data.get('range_end_km'),
-            rate_data.get('range_amount', 0.0),
-            rate_data.get('above_km'),
-            rate_data.get('above_amount', 0.0),
-            created_by
-        )
-        saved_rates.append(rate)
+            rate_data,
+            created_by,
+        ))
     return saved_rates
 
 

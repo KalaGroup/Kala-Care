@@ -768,6 +768,7 @@ const HOExpense = () => {
   });
 
   const tableContainerRef = useRef(null);
+  const srPerDayMapRef = useRef({});
   const topScrollBarRef = useRef(null);
 
   useEffect(() => {
@@ -970,8 +971,7 @@ const HOExpense = () => {
     if (!record) return;
 
     const effectiveKM = getEffectiveKM(record);
-    const effectiveBranch = getEffectiveBranchForRecord(record);
-    const branchRate = getBranchDARate(effectiveBranch);
+    const kmRate = getKmRateForRecord(record, effectiveKM);
 
     let newDA = null;
     let newTotal = null;
@@ -979,8 +979,8 @@ const HOExpense = () => {
     if (value !== '' && !isNaN(parseFloat(value))) {
       // Manual DA provided
       newDA = parseFloat(value).toFixed(2);
-      if (effectiveKM !== null && branchRate && branchRate.km_rate > 0) {
-        newTotal = ((effectiveKM * branchRate.km_rate) + parseFloat(value) + getEffectiveFreight(record)).toFixed(2);
+      if (effectiveKM !== null && kmRate > 0) {
+        newTotal = ((effectiveKM * kmRate) + parseFloat(value) + getEffectiveFreight(record)).toFixed(2);
       }
     } else {
       // Cleared → use rule-based DA
@@ -1016,8 +1016,7 @@ const HOExpense = () => {
     if (!record) return;
 
     const effectiveKM = getEffectiveKM(record);
-    const effectiveBranch = getEffectiveBranchForRecord(record);
-    const branchRate = getBranchDARate(effectiveBranch);
+    const kmRate = getKmRateForRecord(record, effectiveKM);
     const freight = (value !== '' && !isNaN(parseFloat(value))) ? parseFloat(value) : 0;
 
     // DA currently in effect: manual override if present, else rule-based
@@ -1030,8 +1029,8 @@ const HOExpense = () => {
     }
 
     let newTotal = null;
-    if (effectiveKM !== null && branchRate && branchRate.km_rate > 0) {
-      newTotal = ((effectiveKM * branchRate.km_rate) + daNum + freight).toFixed(2);
+    if (effectiveKM !== null && kmRate > 0) {
+      newTotal = ((effectiveKM * kmRate) + daNum + freight).toFixed(2);
       setDynamicTotalAmounts(prev => ({ ...prev, [recordId]: newTotal }));
     }
 
@@ -1359,41 +1358,37 @@ const HOExpense = () => {
     });
 
     const resolveBranch = (rec) => {
-      let rate = getBranchDARate(rec.branch_code);
-      if (rate && (rate.range_amount > 0 || rate.above_amount > 0 || rate.km_rate > 0)) return rec.branch_code;
-      if (primaryBranch) {
-        rate = getBranchDARate(primaryBranch);
-        if (rate && (rate.range_amount > 0 || rate.above_amount > 0 || rate.km_rate > 0)) return primaryBranch;
-      }
-      const ho = getBranchDARate('HO');
-      if (ho && (ho.range_amount > 0 || ho.above_amount > 0 || ho.km_rate > 0)) return 'HO';
+      if (branchHasRates(getBranchDARate(rec.branch_code))) return rec.branch_code;
+      if (primaryBranch && branchHasRates(getBranchDARate(primaryBranch))) return primaryBranch;
+      if (branchHasRates(getBranchDARate('HO'))) return 'HO';
       return rec.branch_code;
     };
 
+    // SR-per-day count within THIS engineer's record set
+    const dayMap = buildSrPerDayMap(records);
+
     let total = 0;
     records.forEach(record => {
-      // If already verified with stored amount, use stored value (matches Details view)
       if (record.verification_status === 'Verified' && record.total_amount) {
         total += parseFloat(record.total_amount) || 0;
         return;
       }
-      // Otherwise compute dynamically
       const effectiveKM = getEffectiveKM(record);
       if (effectiveKM === null) return;
 
-      const branch = resolveBranch(record);
-      const rate = getBranchDARate(branch);
-      if (!rate || rate.km_rate === 0) return;
+      const m = getBranchDARate(resolveBranch(record));
+      if (!m) return;
+      const high = effectiveKM > m.km_threshold;
+      const multi = getSrCountForRecord(record, dayMap) > 1;
+      let rate = 0, da = 0;
+      if (multi && high) { rate = m.multi_high_rate; da = m.multi_high_da; }
+      else if (multi && !high) { rate = m.multi_low_rate; da = m.multi_low_da; }
+      else if (!multi && high) { rate = m.single_high_rate; da = m.single_high_da; }
+      else { rate = m.single_low_rate; da = m.single_low_da; }
 
-      let da = 0;
-      if (rate.range_start_km !== null && rate.range_end_km !== null) {
-        if (effectiveKM >= rate.range_start_km && effectiveKM <= rate.range_end_km) da = rate.range_amount;
-        else if (rate.above_km !== null && effectiveKM > rate.above_km) da = rate.above_amount;
-      } else if (rate.above_km !== null && effectiveKM > rate.above_km) {
-        da = rate.above_amount;
-      }
+      if (!rate) return;
       const freight = parseFloat(record.freight_charges) || 0;
-      total += (effectiveKM * rate.km_rate) + da + freight;
+      total += (effectiveKM * rate) + da + freight;
     });
     return total;
   };
@@ -2627,17 +2622,73 @@ const HOExpense = () => {
   const totalTableWidth = columnOrder.reduce((s, k) => s + (COL_MAP[k]?.width || 120), 0);
 
   const getBranchDARate = (branchCode) => {
-    const branchRate = kmRates[branchCode];
-    if (!branchRate) return null;
+    const m = kmRates[branchCode];
+    if (!m) return null;
+    const num = (v) => (v === '' || v === null || v === undefined ? 0 : parseFloat(v) || 0);
     return {
-      range_start_km: branchRate.range_start_km ? parseFloat(branchRate.range_start_km) : null,
-      range_end_km: branchRate.range_end_km ? parseFloat(branchRate.range_end_km) : null,
-      range_amount: branchRate.range_amount ? parseFloat(branchRate.range_amount) : 0,
-      above_km: branchRate.above_km ? parseFloat(branchRate.above_km) : null,
-      above_amount: branchRate.above_amount ? parseFloat(branchRate.above_amount) : 0,
-      km_rate: branchRate.km_rate ? parseFloat(branchRate.km_rate) : 0
+      km_threshold: m.km_threshold ? parseFloat(m.km_threshold) : 100,
+      single_low_rate: num(m.single_low_rate),
+      single_low_da: num(m.single_low_da),
+      multi_low_rate: num(m.multi_low_rate),
+      multi_low_da: num(m.multi_low_da),
+      single_high_rate: num(m.single_high_rate),
+      single_high_da: num(m.single_high_da),
+      multi_high_rate: num(m.multi_high_rate),
+      multi_high_da: num(m.multi_high_da),
     };
   };
+
+  // True if the branch has any non-zero rate/DA configured
+  const branchHasRates = (m) =>
+    !!m && [
+      m.single_low_rate, m.single_low_da, m.multi_low_rate, m.multi_low_da,
+      m.single_high_rate, m.single_high_da, m.multi_high_rate, m.multi_high_da,
+    ].some((v) => (parseFloat(v) || 0) > 0);
+
+  // ── SR-per-day map: `${engineerUid}__${YYYY-MM-DD}` -> count of SRs reached that day ──
+  const buildSrPerDayMap = (records) => {
+    const map = {};
+    (records || []).forEach((r) => {
+      const uid = r.service_engineer_uid || '';
+      const dt = r.sr_reach_at_site_datetime;
+      if (!dt) return;
+      const d = new Date(dt);
+      if (isNaN(d.getTime())) return;
+      const key = `${uid}__${d.toISOString().slice(0, 10)}`;
+      map[key] = (map[key] || 0) + 1;
+    });
+    return map;
+  };
+
+  useEffect(() => {
+    srPerDayMapRef.current = buildSrPerDayMap(engineerRecords);
+  }, [engineerRecords]);
+
+  const getSrCountForRecord = (record, mapOverride) => {
+    const map = mapOverride || srPerDayMapRef.current || {};
+    const uid = record.service_engineer_uid || '';
+    const dt = record.sr_reach_at_site_datetime;
+    if (!dt) return 1;
+    const d = new Date(dt);
+    if (isNaN(d.getTime())) return 1;
+    return map[`${uid}__${d.toISOString().slice(0, 10)}`] || 1;
+  };
+
+  // Pick { rate, da } from the 2×2 master for a record
+  const getRateAndDAForRecord = (record, effectiveKM, srCount) => {
+    if (effectiveKM === null) return { rate: 0, da: 0 };
+    const m = getBranchDARate(getEffectiveBranchForRecord(record));
+    if (!m) return { rate: 0, da: 0 };
+    const high = effectiveKM > m.km_threshold;   // km exactly == threshold counts as LOW
+    const multi = (srCount || 1) > 1;
+    if (multi && high) return { rate: m.multi_high_rate, da: m.multi_high_da };
+    if (multi && !high) return { rate: m.multi_low_rate, da: m.multi_low_da };
+    if (!multi && high) return { rate: m.single_high_rate, da: m.single_high_da };
+    return { rate: m.single_low_rate, da: m.single_low_da };
+  };
+
+  const getKmRateForRecord = (record, effectiveKM) =>
+    getRateAndDAForRecord(record, effectiveKM, getSrCountForRecord(record)).rate;
 
   const findEngineerPrimaryBranch = (engineerUid) => {
     const engineerRecordsList = engineerRecords.filter(r => r.service_engineer_uid === engineerUid);
@@ -2659,23 +2710,12 @@ const HOExpense = () => {
   };
 
   const getEffectiveBranchForRecord = (record) => {
-    let branchRate = getBranchDARate(record.branch_code);
-    if (branchRate && (branchRate.range_amount > 0 || branchRate.above_amount > 0 || branchRate.km_rate > 0)) {
-      return record.branch_code;
-    }
+    if (branchHasRates(getBranchDARate(record.branch_code))) return record.branch_code;
     if (record.service_engineer_uid) {
       const primaryBranch = findEngineerPrimaryBranch(record.service_engineer_uid);
-      if (primaryBranch) {
-        branchRate = getBranchDARate(primaryBranch);
-        if (branchRate && (branchRate.range_amount > 0 || branchRate.above_amount > 0 || branchRate.km_rate > 0)) {
-          return primaryBranch;
-        }
-      }
+      if (primaryBranch && branchHasRates(getBranchDARate(primaryBranch))) return primaryBranch;
     }
-    const hoRate = getBranchDARate('HO');
-    if (hoRate && (hoRate.range_amount > 0 || hoRate.above_amount > 0 || hoRate.km_rate > 0)) {
-      return 'HO';
-    }
+    if (branchHasRates(getBranchDARate('HO'))) return 'HO';
     return record.branch_code;
   };
 
@@ -2706,32 +2746,15 @@ const HOExpense = () => {
 
   const calculateDAmount = (record, effectiveKM) => {
     if (effectiveKM === null) return null;
-    const effectiveBranch = getEffectiveBranchForRecord(record);
-    const branchRate = getBranchDARate(effectiveBranch);
-    if (!branchRate) return null;
-    let daAmount = 0;
-    if (branchRate.range_start_km !== null && branchRate.range_end_km !== null) {
-      if (effectiveKM >= branchRate.range_start_km && effectiveKM <= branchRate.range_end_km) {
-        daAmount = branchRate.range_amount;
-      } else if (branchRate.above_km !== null && effectiveKM > branchRate.above_km) {
-        daAmount = branchRate.above_amount;
-      }
-    } else if (branchRate.above_km !== null) {
-      if (effectiveKM > branchRate.above_km) {
-        daAmount = branchRate.above_amount;
-      }
-    }
-    return daAmount;
+    return getRateAndDAForRecord(record, effectiveKM, getSrCountForRecord(record)).da;
   };
 
   const calculateTotalAmountDynamic = (record, effectiveKM, daAmount) => {
     if (effectiveKM === null) return null;
-    const effectiveBranch = getEffectiveBranchForRecord(record);
-    const branchRate = getBranchDARate(effectiveBranch);
-    if (!branchRate || branchRate.km_rate === 0) return null;
+    const rate = getKmRateForRecord(record, effectiveKM);
+    if (!rate) return null;
     const freight = getEffectiveFreight(record);
-    const total = (effectiveKM * branchRate.km_rate) + (daAmount || 0) + freight;
-    return total;
+    return (effectiveKM * rate) + (daAmount || 0) + freight;
   };
 
   const updateAllCalculations = useCallback(() => {
@@ -2752,13 +2775,12 @@ const HOExpense = () => {
         // Manual override: use typed value, recalc total
         const daAmount = parseFloat(manualDA);
         const effectiveKM = getEffectiveKM(record);
-        const effectiveBranch = getEffectiveBranchForRecord(record);
-        const branchRate = getBranchDARate(effectiveBranch);
+        const kmRate = getKmRateForRecord(record, effectiveKM);
 
         newDAAmounts[record.id] = daAmount.toFixed(2);
 
-        if (effectiveKM !== null && branchRate && branchRate.km_rate > 0) {
-          const total = (effectiveKM * branchRate.km_rate) + daAmount + getEffectiveFreight(record);
+        if (effectiveKM !== null && kmRate > 0) {
+          const total = (effectiveKM * kmRate) + daAmount + getEffectiveFreight(record);
           newTotalAmounts[record.id] = total.toFixed(2);
         }
       } else {
@@ -3023,10 +3045,9 @@ const HOExpense = () => {
     }
 
     if (key === 'km_rate_applied') {
-      const effectiveBranch = getEffectiveBranchForRecord(record);
-      const branchRate = getBranchDARate(effectiveBranch);
-      const dynamicRate = branchRate && branchRate.km_rate > 0 ? branchRate.km_rate : null;
-      const displayValue = dynamicRate !== null ? dynamicRate : (record.km_rate_applied || '-');
+      const effectiveKM = getEffectiveKM(record);
+      const dynamicRate = getKmRateForRecord(record, effectiveKM);
+      const displayValue = dynamicRate > 0 ? dynamicRate : (record.km_rate_applied || '-');
       return (
         <div className="text-[11px] truncate text-center font-semibold">
           {displayValue !== '-' ? `₹${displayValue}` : '-'}
@@ -3058,25 +3079,28 @@ const HOExpense = () => {
       const rates = {};
       response.data.forEach(rate => {
         rates[rate.branch_code] = {
-          km_rate: rate.km_rate,
-          range_start_km: rate.range_start_km,
-          range_end_km: rate.range_end_km,
-          range_amount: rate.range_amount,
-          above_km: rate.above_km,
-          above_amount: rate.above_amount
+          km_threshold: rate.km_threshold,
+          single_low_rate: rate.single_low_rate,
+          single_low_da: rate.single_low_da,
+          multi_low_rate: rate.multi_low_rate,
+          multi_low_da: rate.multi_low_da,
+          single_high_rate: rate.single_high_rate,
+          single_high_da: rate.single_high_da,
+          multi_high_rate: rate.multi_high_rate,
+          multi_high_da: rate.multi_high_da,
         };
       });
 
+      const blank = {
+        km_threshold: 100,
+        single_low_rate: '', single_low_da: '',
+        multi_low_rate: '', multi_low_da: '',
+        single_high_rate: '', single_high_da: '',
+        multi_high_rate: '', multi_high_da: '',
+      };
       const allRates = {};
       Object.keys(branchMap).forEach(branch => {
-        allRates[branch] = rates[branch] || {
-          km_rate: '',
-          range_start_km: '',
-          range_end_km: '',
-          range_amount: '',
-          above_km: '',
-          above_amount: ''
-        };
+        allRates[branch] = rates[branch] || { ...blank };
       });
       setKmRates(allRates);
       setOriginalKmRates(JSON.parse(JSON.stringify(allRates)));
@@ -3130,15 +3154,19 @@ const HOExpense = () => {
   const saveKMRates = async () => {
     setLoadingKMRates(true);
     try {
+      const num = (v) => (v === '' || v === null || v === undefined ? 0 : parseFloat(v) || 0);
       const ratesData = Object.entries(kmRates).map(([branch_code, data]) => ({
         branch_code,
         branch_name: branchMap[branch_code],
-        km_rate: parseFloat(data.km_rate) || 0,
-        range_start_km: data.range_start_km ? parseFloat(data.range_start_km) : null,
-        range_end_km: data.range_end_km ? parseFloat(data.range_end_km) : null,
-        range_amount: parseFloat(data.range_amount) || 0,
-        above_km: data.above_km ? parseFloat(data.above_km) : null,
-        above_amount: parseFloat(data.above_amount) || 0
+        km_threshold: data.km_threshold ? parseFloat(data.km_threshold) : 100,
+        single_low_rate: num(data.single_low_rate),
+        single_low_da: num(data.single_low_da),
+        multi_low_rate: num(data.multi_low_rate),
+        multi_low_da: num(data.multi_low_da),
+        single_high_rate: num(data.single_high_rate),
+        single_high_da: num(data.single_high_da),
+        multi_high_rate: num(data.multi_high_rate),
+        multi_high_da: num(data.multi_high_da),
       }));
 
       await axios.post(`${API_BASE_URL}/expense/branch-km-rates/bulk`, ratesData, {
@@ -3481,7 +3509,7 @@ const HOExpense = () => {
       ...prev,
       [branch]: {
         ...prev[branch],
-        [field]: value === '' ? '' : parseFloat(value)
+        [field]: value,
       }
     }));
   };
@@ -6238,36 +6266,66 @@ const HOExpense = () => {
                     const branchData = kmRates[branchCode] || {};
                     return (
                       <div key={branchCode} className="bg-gray-50 rounded-lg p-2 sm:p-3 hover:shadow-md transition-shadow">
-                        <h3 className="text-xs sm:text-sm font-bold text-gray-800 mb-2 pb-1.5 border-b" style={{ borderColor: themeColor + '40' }}>
-                          {branchName} ({branchCode})
-                        </h3>
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 sm:gap-3">
-                          <div className="bg-white rounded-lg p-2 shadow-sm">
-                            <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wide">KM Rate</label>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-gray-600 font-medium text-xs">₹</span>
-                              <input type="number" value={branchData.km_rate || ''} onChange={(e) => handleKMRateChange(branchCode, 'km_rate', e.target.value)} onKeyPress={(e) => e.key === 'Enter' && saveKMRates()} placeholder="0.00" className="flex-1 px-2 py-1.5 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-opacity-50 transition-all text-gray-900" />
-                              <span className="text-gray-600 text-xs font-medium">/ KM</span>
-                            </div>
+                        <div className="flex items-center justify-between mb-2 pb-1.5 border-b" style={{ borderColor: themeColor + '40' }}>
+                          <h3 className="text-xs sm:text-sm font-bold text-gray-800">
+                            {branchName} ({branchCode})
+                          </h3>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] sm:text-xs font-semibold text-gray-600">KM Threshold</span>
+                            <input
+                              type="number"
+                              value={branchData.km_threshold ?? ''}
+                              onChange={(e) => handleKMRateChange(branchCode, 'km_threshold', e.target.value)}
+                              placeholder="100"
+                              className="w-20 px-2 py-1 border border-gray-300 rounded-lg text-xs text-center focus:outline-none focus:ring-2 focus:ring-opacity-50 text-gray-900"
+                            />
+                            <span className="text-gray-500 text-[10px]">km</span>
                           </div>
-                          <div className="bg-white rounded-lg p-2 shadow-sm">
-                            <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wide">Range-based DA</label>
-                            <div className="space-y-1.5">
-                              <div className="flex items-center gap-1.5">
-                                <div className="flex-1"><input type="number" value={branchData.range_start_km || ''} onChange={(e) => handleKMRateChange(branchCode, 'range_start_km', e.target.value)} placeholder="From km" className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-opacity-50 text-gray-900" /></div>
-                                <span className="text-gray-400 text-[10px]">→</span>
-                                <div className="flex-1"><input type="number" value={branchData.range_end_km || ''} onChange={(e) => handleKMRateChange(branchCode, 'range_end_km', e.target.value)} placeholder="To km" className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-opacity-50 text-gray-900" /></div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-3">
+                          {[
+                            { title: '1 SR / day · ≤ threshold', rateKey: 'single_low_rate', daKey: 'single_low_da', accent: '#2563eb' },
+                            { title: '>1 SR / day · ≤ threshold', rateKey: 'multi_low_rate', daKey: 'multi_low_da', accent: '#7c3aed' },
+                            { title: '1 SR / day · > threshold', rateKey: 'single_high_rate', daKey: 'single_high_da', accent: '#059669' },
+                            { title: '>1 SR / day · > threshold', rateKey: 'multi_high_rate', daKey: 'multi_high_da', accent: '#d97706' },
+                          ].map((slab) => (
+                            <div key={slab.rateKey} className="bg-white rounded-lg p-2 shadow-sm border-l-4" style={{ borderColor: slab.accent }}>
+                              <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wide">
+                                {slab.title}
+                              </label>
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1">
+                                  <span className="block text-[9px] text-gray-400 mb-0.5">Rate (₹/km)</span>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-gray-600 text-xs">₹</span>
+                                    <input
+                                      type="number"
+                                      value={branchData[slab.rateKey] ?? ''}
+                                      onChange={(e) => handleKMRateChange(branchCode, slab.rateKey, e.target.value)}
+                                      onKeyPress={(e) => e.key === 'Enter' && saveKMRates()}
+                                      placeholder="0.00"
+                                      className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-opacity-50 text-gray-900"
+                                    />
+                                  </div>
+                                </div>
+                                <div className="flex-1">
+                                  <span className="block text-[9px] text-gray-400 mb-0.5">DA (₹)</span>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-gray-600 text-xs">₹</span>
+                                    <input
+                                      type="number"
+                                      value={branchData[slab.daKey] ?? ''}
+                                      onChange={(e) => handleKMRateChange(branchCode, slab.daKey, e.target.value)}
+                                      onKeyPress={(e) => e.key === 'Enter' && saveKMRates()}
+                                      placeholder="0.00"
+                                      className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-opacity-50 text-gray-900"
+                                    />
+                                  </div>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-1.5"><span className="text-gray-600 font-medium text-xs">₹</span><input type="number" value={branchData.range_amount || ''} onChange={(e) => handleKMRateChange(branchCode, 'range_amount', e.target.value)} placeholder="Amount" className="flex-1 px-2 py-1.5 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-opacity-50 text-gray-900" /></div>
                             </div>
-                          </div>
-                          <div className="bg-white rounded-lg p-2 shadow-sm">
-                            <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wide">Above Range DA</label>
-                            <div className="space-y-1.5">
-                              <div className="flex items-center gap-1.5"><span className="text-gray-600 font-medium text-[10px]">Greater than</span><input type="number" value={branchData.above_km || ''} onChange={(e) => handleKMRateChange(branchCode, 'above_km', e.target.value)} placeholder="km" className="w-20 px-2 py-1.5 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-opacity-50 text-gray-900" /><span className="text-gray-400 text-[10px]">km</span></div>
-                              <div className="flex items-center gap-1.5"><span className="text-gray-600 font-medium text-xs">₹</span><input type="number" value={branchData.above_amount || ''} onChange={(e) => handleKMRateChange(branchCode, 'above_amount', e.target.value)} placeholder="Amount" className="flex-1 px-2 py-1.5 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-opacity-50 text-gray-900" /></div>
-                            </div>
-                          </div>
+                          ))}
                         </div>
                       </div>
                     );

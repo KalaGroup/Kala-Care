@@ -170,6 +170,11 @@ def is_within_last_30_days(raw_value, days: int = 30) -> bool:
     cutoff = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days)
     return parsed >= cutoff
 
+def reach_date_key(raw_value) -> Optional[str]:
+    """Date portion (YYYY-MM-DD) of SR Reach at Site Date & Time, for SR-per-day grouping."""
+    parsed = parse_sr_closed_date(raw_value)   # generic multi-format parser
+    return parsed.date().isoformat() if parsed else None    
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -230,64 +235,86 @@ def find_branch_for_engineer(
     return 'HO'
 
 
-def calculate_km_rate(db: Session, branch_code: str) -> Optional[str]:
-    """Calculate KM Rate based on branch"""
-    branch_rate = get_branch_km_rate(db, branch_code)
+def branch_has_rates(branch_rate) -> bool:
+    """True if the branch master has any non-zero rate/DA slab configured."""
     if not branch_rate:
-        return None
-    
-    km_rate_value = branch_rate.km_rate if branch_rate.km_rate else 0
-    return str(km_rate_value) if km_rate_value else None
+        return False
+    fields = (
+        'single_low_rate', 'single_low_da', 'multi_low_rate', 'multi_low_da',
+        'single_high_rate', 'single_high_da', 'multi_high_rate', 'multi_high_da',
+    )
+    return any(float(getattr(branch_rate, f) or 0) > 0 for f in fields)
+
+
+def pick_rate_da(branch_rate, effective_km, sr_count: int):
+    """Pick (rate, da) from the 2×2 master: (1 vs >1 SR/day) × (km ≤ vs > threshold)."""
+    if not branch_rate or effective_km is None:
+        return 0.0, 0.0
+    threshold = float(branch_rate.km_threshold or 100)
+    high = float(effective_km) > threshold          # km == threshold counts as LOW
+    multi = (sr_count or 1) > 1
+    if multi and high:
+        return float(branch_rate.multi_high_rate or 0), float(branch_rate.multi_high_da or 0)
+    if multi and not high:
+        return float(branch_rate.multi_low_rate or 0), float(branch_rate.multi_low_da or 0)
+    if (not multi) and high:
+        return float(branch_rate.single_high_rate or 0), float(branch_rate.single_high_da or 0)
+    return float(branch_rate.single_low_rate or 0), float(branch_rate.single_low_da or 0)
 
 
 def update_record_calculations(
     db: Session,
     record,
     file_branch_hints: Optional[List[str]] = None,
+    sr_count: int = 1,
 ) -> bool:
     """
-    Update calculated fields for a single record
-    - Two Way KM from KMs Travelled
-    - KM Rate from branch configuration
+    Update calculated fields for a single record:
+      - Two Way KM from KMs Travelled
+      - KM Rate from the 2×2 branch master, picked by (SR-per-day count) × (km vs threshold)
+
+    NOTE on DA: DA is a PER-DAY amount, not per-SR. The km rate (and km amount)
+    applies to every SR, but the slab DA is applied only to the LAST SR of the
+    engineer's day; all earlier same-day SRs get DA = 0. DA is not stored here —
+    it is computed downstream (frontend matrix + HO/Sales controllers), which own
+    the "last SR of the day" decision. This function only stamps the per-SR rate.
     """
     updated = False
-    
-    # Store old values to check changes
     old_two_way_km = record.two_way_km
     old_km_rate = record.km_rate_applied
-    
-    # 1. Calculate Two Way KM from KMs Travelled
+
+    # 1. Two Way KM
     new_two_way_km = calculate_two_way_km(record.kms_travelled)
     if new_two_way_km != old_two_way_km:
         record.two_way_km = new_two_way_km
         updated = True
-        logger.debug(f"Updated Two Way KM for record {record.id}: {old_two_way_km} -> {new_two_way_km}")
-    
-    # Determine which branch to use for rate calculation
+
+    # 2. Resolve branch (fall back to engineer's majority branch / HO if unconfigured)
     branch_code_to_use = record.sd_branch_code
-    
-    # Check if current branch has rate configuration
     branch_rate = get_branch_km_rate(db, branch_code_to_use)
-    
-    # If no rate found for current branch, find correct branch for engineer
-    if not branch_rate and record.service_engineer_uid:
-        corrected_branch = find_branch_for_engineer(
-            db,
-            record.service_engineer_uid,
-            branch_code_to_use,
+    if not branch_has_rates(branch_rate) and record.service_engineer_uid:
+        corrected = find_branch_for_engineer(
+            db, record.service_engineer_uid, branch_code_to_use,
             file_branch_hints=file_branch_hints,
         )
-        if corrected_branch != branch_code_to_use:
-            branch_code_to_use = corrected_branch
-            logger.debug(f"Using branch {branch_code_to_use} for engineer {record.service_engineer_uid}")
-    
-    # 2. Calculate KM Rate based on branch
-    new_km_rate = calculate_km_rate(db, branch_code_to_use)
+        if corrected != branch_code_to_use:
+            branch_code_to_use = corrected
+            branch_rate = get_branch_km_rate(db, branch_code_to_use)
+
+    # 3. Effective KM = two_way_km at branch stage
+    eff_km = None
+    if record.two_way_km:
+        try:
+            eff_km = float(record.two_way_km)
+        except (ValueError, TypeError):
+            eff_km = None
+
+    rate, _da = pick_rate_da(branch_rate, eff_km, sr_count)
+    new_km_rate = str(rate) if rate else None
     if new_km_rate != old_km_rate:
         record.km_rate_applied = new_km_rate
         updated = True
-        logger.debug(f"Updated KM Rate for record {record.id}: {old_km_rate} -> {new_km_rate}")
-    
+
     return updated
 
 
@@ -330,11 +357,15 @@ def process_tada_file(db: Session, file_path: str, branch_code: str, uploaded_by
     logger.info(f"Branch '{branch_code}' TADA upload day-limit = {days_limit} days")
 
     engineer_file_branches: Dict[str, List[str]] = defaultdict(list)
+    engineer_day_sr_count: Dict[Tuple[str, str], int] = defaultdict(int)
     for _, r in df.iterrows():
         eng_uid = parse_as_string(r.get("Service Engineer UID"))
         br_code = parse_as_string(r.get("SD Branch Code"))
         if eng_uid and br_code:
             engineer_file_branches[eng_uid].append(br_code)
+        dkey = reach_date_key(r.get("SR Reach at Site Date & Time"))
+        if eng_uid and dkey:
+            engineer_day_sr_count[(eng_uid, dkey)] += 1
 
     new_count = 0
     updated_count = 0
@@ -486,7 +517,12 @@ def process_tada_file(db: Session, file_path: str, branch_code: str, uploaded_by
             db.add(new_record)
             db.flush()
             hints = engineer_file_branches.get(new_record.service_engineer_uid, [])
-            update_record_calculations(db, new_record, file_branch_hints=hints)
+            dkey = reach_date_key(new_record.sr_reach_at_site_datetime)
+            sr_count = (
+                engineer_day_sr_count.get((new_record.service_engineer_uid, dkey), 1)
+                if dkey else 1
+            )
+            update_record_calculations(db, new_record, file_branch_hints=hints, sr_count=sr_count)
             new_count += 1
 
             if new_count % 100 == 0:

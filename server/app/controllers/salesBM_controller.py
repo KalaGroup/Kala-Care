@@ -14,45 +14,151 @@ from app.controllers.voucher_controller import generate_voucher_no
 logger = logging.getLogger(__name__)
 
 
+def _branch_has_rates(row) -> bool:
+    """True if the branch master has any non-zero rate/DA slab configured."""
+    if not row:
+        return False
+    fields = (
+        'single_low_rate', 'single_low_da', 'multi_low_rate', 'multi_low_da',
+        'single_high_rate', 'single_high_da', 'multi_high_rate', 'multi_high_da',
+    )
+    return any(float(getattr(row, f) or 0) > 0 for f in fields)
+
+
 def _get_branch_rate(db: Session, branch_code: str):
+    """Return the 2×2 master row (as a dict) for the branch, falling back to HO."""
     def pick(code):
         row = db.query(BranchKMRate).filter(BranchKMRate.branch_code == code).first()
-        if not row:
-            return None
-        km_rate = float(row.km_rate or 0)
-        range_amount = float(row.range_amount or 0)
-        above_amount = float(row.above_amount or 0)
-        if km_rate == 0 and range_amount == 0 and above_amount == 0:
+        if not _branch_has_rates(row):
             return None
         return {
-            "km_rate": km_rate,
-            "range_start_km": float(row.range_start_km) if row.range_start_km is not None else None,
-            "range_end_km": float(row.range_end_km) if row.range_end_km is not None else None,
-            "range_amount": range_amount,
-            "above_km": float(row.above_km) if row.above_km is not None else None,
-            "above_amount": above_amount,
+            "km_threshold": float(row.km_threshold) if row.km_threshold is not None else 100.0,
+            "single_low_rate": float(row.single_low_rate or 0),
+            "single_low_da": float(row.single_low_da or 0),
+            "multi_low_rate": float(row.multi_low_rate or 0),
+            "multi_low_da": float(row.multi_low_da or 0),
+            "single_high_rate": float(row.single_high_rate or 0),
+            "single_high_da": float(row.single_high_da or 0),
+            "multi_high_rate": float(row.multi_high_rate or 0),
+            "multi_high_da": float(row.multi_high_da or 0),
         }
     return pick(branch_code) or pick("HO")
 
 
-def _compute_da(km: float, rate: dict) -> float:
+def _pick_rate_da(rate: dict, km: float, sr_count: int):
+    """Pick (rate, da) from the 2×2 master: (1 vs >1 SR/day) × (km ≤ vs > threshold)."""
     if not rate:
+        return 0.0, 0.0
+    threshold = float(rate.get("km_threshold") or 100)
+    high = float(km) > threshold          # km == threshold counts as LOW
+    multi = (sr_count or 1) > 1
+    if multi and high:
+        return rate["multi_high_rate"], rate["multi_high_da"]
+    if multi and not high:
+        return rate["multi_low_rate"], rate["multi_low_da"]
+    if (not multi) and high:
+        return rate["single_high_rate"], rate["single_high_da"]
+    return rate["single_low_rate"], rate["single_low_da"]
+
+def _salesbm_sr_count(db: Session, branch_code: str, engineer_uid: str,
+                      engineer_name: str, date_value, exclude_temp_id=None) -> int:
+    """
+    Count how many Sales & BM entries this engineer has on the same DATE
+    (across temp + main), to decide 1-SR vs >1-SR per day.
+    """
+    target = _parse_any_date(date_value)
+    if target is None:
+        return 1
+    target_day = target.date()
+
+    def same_eng(q, model):
+        if engineer_uid:
+            return q.filter(model.engineer_uid == engineer_uid)
+        return q.filter(model.engineer_name == engineer_name)
+
+    count = 0
+    for model in (SalesBMTemp, SalesBM):
+        q = db.query(model).filter(model.branch_code == branch_code)
+        q = same_eng(q, model)
+        for r in q.all():
+            if exclude_temp_id is not None and model is SalesBMTemp and r.id == exclude_temp_id:
+                continue
+            d = _parse_any_date(r.date)
+            if d and d.date() == target_day:
+                count += 1
+    return count if count > 0 else 1    
+
+def _salesbm_effective_km(model, r) -> float:
+    """Effective two-way km for a Sales & BM row (HO corrected km wins on main rows)."""
+    val = None
+    if model is SalesBM and getattr(r, "ho_corrected_km", None) not in (None, ""):
+        val = r.ho_corrected_km
+    elif r.two_way_km not in (None, ""):
+        val = r.two_way_km
+    try:
+        return float(val) if val not in (None, "") else 0.0
+    except (ValueError, TypeError):
         return 0.0
-    da = 0.0
-    rs, re_ = rate["range_start_km"], rate["range_end_km"]
-    ak = rate["above_km"]
-    if rs is not None and re_ is not None:
-        if rs <= km <= re_:
-            da = rate["range_amount"]
-        elif ak is not None and km > ak:
-            da = rate["above_amount"]
-    elif ak is not None and km > ak:
-        da = rate["above_amount"]
-    return da
 
 
-def calculate_salesbm_amounts(db: Session, branch_code: str, one_way_km: str) -> dict:
-    """Calculate two_way_km, rate, da, amount, total_amount from one_way_km."""
+def _reapply_day_da(db: Session, branch_code: str, engineer_uid: str,
+                    engineer_name: str, date_value):
+    """
+    DA is per-DAY, not per-SR. For an engineer's SRs on the same date:
+      - the rate/DA SLAB is chosen from the day's TOTAL km
+        (sum of every SR's two-way km that day) × (1 vs >1 SR/day),
+      - that rate is applied to EACH SR's OWN km to get its amount,
+      - the full slab DA is applied ONLY to the LAST SR of the day,
+      - every other same-day SR gets DA = 0.
+    Recomputes rate/amount/da/total across temp + main for the whole day group.
+    """
+    target = _parse_any_date(date_value)
+    if target is None:
+        return
+    target_day = target.date()
+
+    def same_eng(q, model):
+        if engineer_uid:
+            return q.filter(model.engineer_uid == engineer_uid)
+        return q.filter(model.engineer_name == engineer_name)
+
+    group = []  # (sort_key, model, record, km)
+    for model in (SalesBMTemp, SalesBM):
+        q = same_eng(db.query(model).filter(model.branch_code == branch_code), model)
+        for r in q.all():
+            d = _parse_any_date(r.date)
+            if d and d.date() == target_day:
+                sort_key = (getattr(r, "created_at", None) or datetime.min, r.id)
+                km = _salesbm_effective_km(model, r)
+                group.append((sort_key, model, r, km))
+
+    if not group:
+        return
+
+    group.sort(key=lambda t: t[0])                 # oldest first → last element = last SR of day
+    last_key = (group[-1][1], group[-1][2].id)     # (model, id) of the last SR
+    sr_count = len(group)
+    day_total_km = sum(km for _, _, _, km in group)  # day's TOTAL km decides the slab
+    rate_info = _get_branch_rate(db, branch_code)
+
+    # Slab (rate + DA) is picked ONCE from the day's total km, then reused for every SR
+    rate, full_da = _pick_rate_da(rate_info, day_total_km, sr_count) if rate_info else (0.0, 0.0)
+
+    for _, model, r, km in group:
+        amount = km * rate                          # rate applied to each SR's OWN km
+        da = full_da if (model, r.id) == last_key else 0.0   # DA only on the last SR of the day
+        total = amount + da
+        r.rate = f"{rate:.2f}"
+        r.amount = f"{amount:.2f}"
+        r.da = f"{da:.2f}"
+        r.total_amount = f"{total:.2f}"
+
+    db.commit()    
+
+
+def calculate_salesbm_amounts(db: Session, branch_code: str, one_way_km: str,
+                              sr_count: int = 1) -> dict:
+    """Calculate two_way_km, rate, da, amount, total_amount from one_way_km using the 2×2 master."""
     try:
         km1 = float(one_way_km) if one_way_km not in (None, "") else 0.0
     except (ValueError, TypeError):
@@ -69,13 +175,12 @@ def calculate_salesbm_amounts(db: Session, branch_code: str, one_way_km: str) ->
             "total_amount": "0.00",
         }
 
-    km_rate = rate_info["km_rate"]
-    da = _compute_da(km2, rate_info)
-    amount = km2 * km_rate
+    rate, da = _pick_rate_da(rate_info, km2, sr_count)
+    amount = km2 * rate
     total = amount + da
     return {
         "two_way_km": f"{km2:.2f}",
-        "rate": f"{km_rate:.2f}",
+        "rate": f"{rate:.2f}",
         "da": f"{da:.2f}",
         "amount": f"{amount:.2f}",
         "total_amount": f"{total:.2f}",
@@ -84,7 +189,14 @@ def calculate_salesbm_amounts(db: Session, branch_code: str, one_way_km: str) ->
 
 def create_salesbm_entry(db: Session, payload: dict, branch_code: str, created_by: str):
     try:
-        calc = calculate_salesbm_amounts(db, branch_code, payload.get("one_way_km") or "0")
+        # Count this engineer's SRs on the same date (existing temp + main) and add this new one
+        sr_count = _salesbm_sr_count(
+            db, branch_code,
+            payload.get("engineer_uid") or "",
+            payload.get("engineer_name") or "",
+            payload.get("date"),
+        ) + 1
+        calc = calculate_salesbm_amounts(db, branch_code, payload.get("one_way_km") or "0", sr_count=sr_count)
         record = SalesBMTemp(
             date=payload.get("date"),
             sr_invoice_engine_no=payload.get("sr_invoice_engine_no") or None,
@@ -108,6 +220,12 @@ def create_salesbm_entry(db: Session, payload: dict, branch_code: str, created_b
         )
         db.add(record)
         db.commit()
+        db.refresh(record)
+        # DA is per-day: keep DA only on the last SR of the day, zero the earlier ones
+        _reapply_day_da(
+            db, branch_code,
+            record.engineer_uid or "", record.engineer_name or "", record.date,
+        )
         db.refresh(record)
         return record
     except Exception as e:
@@ -199,8 +317,9 @@ def get_salesbm_history(db: Session, branch_code: Optional[str] = None,
         logger.error(f"get_salesbm_history error: {e}")
         raise HTTPException(status_code=500, detail=str(e))       
 
-def recompute_salesbm_amounts(db: Session, branch_code: str, effective_two_way_km) -> dict:
-    """Recompute rate/da/amount/total from an EFFECTIVE two-way km
+def recompute_salesbm_amounts(db: Session, branch_code: str, effective_two_way_km,
+                              sr_count: int = 1) -> dict:
+    """Recompute rate/da/amount/total from an EFFECTIVE two-way km using the 2×2 master
     (e.g. HO corrected km is already a two-way value, used directly)."""
     try:
         km2 = float(effective_two_way_km) if effective_two_way_km not in (None, "") else 0.0
@@ -209,12 +328,11 @@ def recompute_salesbm_amounts(db: Session, branch_code: str, effective_two_way_k
     rate_info = _get_branch_rate(db, branch_code)
     if not rate_info:
         return {"rate": "0.00", "da": "0.00", "amount": "0.00", "total_amount": "0.00"}
-    km_rate = rate_info["km_rate"]
-    da = _compute_da(km2, rate_info)
-    amount = km2 * km_rate
+    rate, da = _pick_rate_da(rate_info, km2, sr_count)
+    amount = km2 * rate
     total = amount + da
     return {
-        "rate": f"{km_rate:.2f}",
+        "rate": f"{rate:.2f}",
         "da": f"{da:.2f}",
         "amount": f"{amount:.2f}",
         "total_amount": f"{total:.2f}",
@@ -259,12 +377,12 @@ def update_salesbm_main_record(db: Session, record_id: int, payload: dict) -> di
     try:
         if "ho_corrected_km" in payload:
             rec.ho_corrected_km = payload["ho_corrected_km"]
-            effective = payload["ho_corrected_km"] or rec.two_way_km
-            calc = recompute_salesbm_amounts(db, rec.branch_code, effective)
-            rec.rate = calc["rate"]
-            rec.da = calc["da"]
-            rec.amount = calc["amount"]
-            rec.total_amount = calc["total_amount"]
+            db.flush()  # make the new ho_corrected_km visible to the day-group recompute
+            # Recompute the whole day group so DA stays on the last SR of the day only
+            _reapply_day_da(
+                db, rec.branch_code, rec.engineer_uid or "", rec.engineer_name or "", rec.date,
+            )
+            db.refresh(rec)
         if "ho_remark" in payload:
             rec.ho_remark = payload["ho_remark"]
         if "verification_status" in payload:

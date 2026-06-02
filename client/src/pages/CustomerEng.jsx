@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import Swal from 'sweetalert2';
@@ -720,7 +720,8 @@ const CustomerEng = () => {
                     customer.customer_name?.toLowerCase().includes(term) ||
                     customer.mobile?.includes(searchTerm) ||
                     customer.email?.toLowerCase().includes(term) ||
-                    customer.contact_person?.toLowerCase().includes(term)
+                    customer.contact_person?.toLowerCase().includes(term) ||
+                    customer.last_followup_user?.toLowerCase().includes(term)
                 ) {
                     otherMatches.push(customer);
                 }
@@ -913,117 +914,94 @@ const CustomerEng = () => {
 
         // ========== STEP 6: USER SORTING (overrides all default sorting) ==========
         if (sortConfig.key) {
+            const dir = sortConfig.direction === 'asc' ? 1 : -1;
+
+            // A value counts as "blank" if it is null / undefined / empty string.
+            const isBlankVal = (v) => v === null || v === undefined || v === '';
+
             filtered.sort((a, b) => {
-                let aValue, bValue;
+                // --- Campaign columns keep their own multi-level logic ---
+                if (sortConfig.key.startsWith('campaign_')) {
+                    const campaignName = sortConfig.key.replace('campaign_', '');
 
+                    const aInCampaign = a.campaigns?.includes(campaignName) || false;
+                    const bInCampaign = b.campaigns?.includes(campaignName) || false;
+                    if (aInCampaign !== bInCampaign) {
+                        return sortConfig.direction === 'asc'
+                            ? (aInCampaign ? -1 : 1)
+                            : (aInCampaign ? 1 : -1);
+                    }
+
+                    const aIsTransferred = a.campaign_transferred?.[campaignName] || false;
+                    const bIsTransferred = b.campaign_transferred?.[campaignName] || false;
+                    if (aIsTransferred !== bIsTransferred) {
+                        return sortConfig.direction === 'asc'
+                            ? (aIsTransferred ? -1 : 1)
+                            : (aIsTransferred ? 1 : -1);
+                    }
+
+                    const statusOrder = { 'wip': 1, 'completed': 2, 'rejected': 3 };
+                    const aOrder = statusOrder[a.campaign_status?.[campaignName]] || 0;
+                    const bOrder = statusOrder[b.campaign_status?.[campaignName]] || 0;
+                    if (aOrder !== bOrder) {
+                        return sortConfig.direction === 'asc' ? aOrder - bOrder : bOrder - aOrder;
+                    }
+
+                    const dateA = a.next_followup_date ? new Date(a.next_followup_date).getTime() : 0;
+                    const dateB = b.next_followup_date ? new Date(b.next_followup_date).getTime() : 0;
+                    return sortConfig.direction === 'asc' ? dateA - dateB : dateB - dateA;
+                }
+
+                // --- Flags column: rows with NO flag always sink to the bottom ---
+                if (sortConfig.key === 'flags') {
+                    const getFlagPriority = (flags) => {
+                        if (!flags) return 99;
+                        if (flags.C1) return 1;
+                        if (flags.C2) return 2;
+                        if (flags.C3) return 3;
+                        if (flags.C4) return 4;
+                        if (flags.C5) return 5;
+                        if (flags.C6) return 6;
+                        if (flags.C7) return 7;
+                        return 99;
+                    };
+                    const aP = getFlagPriority(a.followup_flags);
+                    const bP = getFlagPriority(b.followup_flags);
+                    const aNo = aP === 99, bNo = bP === 99;
+                    if (aNo && bNo) return 0;
+                    if (aNo) return 1;     // no flag -> bottom
+                    if (bNo) return -1;    // no flag -> bottom
+                    return (aP - bP) * dir;
+                }
+
+                // --- Pick the raw value for the remaining columns ---
+                let aRaw, bRaw, isDate = false;
                 switch (sortConfig.key) {
-                    case 'instance_id':
-                        aValue = a.instance_id || '';
-                        bValue = b.instance_id || '';
-                        break;
-                    case 'customer_name':
-                        aValue = a.customer_name || '';
-                        bValue = b.customer_name || '';
-                        break;
-                    case 'warranty_expiry':
-                        aValue = a.warranty_expiry_date ? new Date(a.warranty_expiry_date).getTime() : 0;
-                        bValue = b.warranty_expiry_date ? new Date(b.warranty_expiry_date).getTime() : 0;
-                        break;
-                    case 'agreement_end_date':
-                        aValue = a.agreement_end_date ? new Date(a.agreement_end_date).getTime() : 0;
-                        bValue = b.agreement_end_date ? new Date(b.agreement_end_date).getTime() : 0;
-                        break;
-                    case 'branch_id':
-                        aValue = a.branch_id || '';
-                        bValue = b.branch_id || '';
-                        break;
-                    case 'last_followup_date':
-                        aValue = a.last_followup_date ? new Date(a.last_followup_date).getTime() : 0;
-                        bValue = b.last_followup_date ? new Date(b.last_followup_date).getTime() : 0;
-                        break;
-                    case 'last_followup_user':
-                        aValue = a.last_followup_user || '';
-                        bValue = b.last_followup_user || '';
-                        break;
-                    case 'next_followup_date':
-                        aValue = a.next_followup_date ? new Date(a.next_followup_date).getTime() : 0;
-                        bValue = b.next_followup_date ? new Date(b.next_followup_date).getTime() : 0;
-                        break;
-                    case 'remark':
-                        aValue = a.last_followup_remark || '';
-                        bValue = b.last_followup_remark || '';
-                        break;
-                    case 'flags':  // For Latest Flag column sorting - Sort by priority (C1 highest priority)
-                        // Get the highest priority flag (C1 is highest, C7 is lowest)
-                        const getFlagPriority = (flags) => {
-                            if (!flags) return 99; // No flag = lowest priority
-                            if (flags.C1) return 1;   // C1 - highest priority
-                            if (flags.C2) return 2;
-                            if (flags.C3) return 3;
-                            if (flags.C4) return 4;
-                            if (flags.C5) return 5;
-                            if (flags.C6) return 6;
-                            if (flags.C7) return 7;
-                            return 99; // No flag
-                        };
-
-                        aValue = getFlagPriority(a.followup_flags);
-                        bValue = getFlagPriority(b.followup_flags);
-                        break;
+                    case 'instance_id': aRaw = a.instance_id; bRaw = b.instance_id; break;
+                    case 'customer_name': aRaw = a.customer_name; bRaw = b.customer_name; break;
+                    case 'branch_id': aRaw = a.branch_id; bRaw = b.branch_id; break;
+                    case 'last_followup_user': aRaw = a.last_followup_user; bRaw = b.last_followup_user; break;
+                    case 'remark': aRaw = a.last_followup_remark; bRaw = b.last_followup_remark; break;
+                    case 'warranty_expiry': aRaw = a.warranty_expiry_date; bRaw = b.warranty_expiry_date; isDate = true; break;
+                    case 'agreement_end_date': aRaw = a.agreement_end_date; bRaw = b.agreement_end_date; isDate = true; break;
+                    case 'last_followup_date': aRaw = a.last_followup_date; bRaw = b.last_followup_date; isDate = true; break;
+                    case 'next_followup_date': aRaw = a.next_followup_date; bRaw = b.next_followup_date; isDate = true; break;
                     default:
-                        if (sortConfig.key.startsWith('campaign_')) {
-                            const campaignName = sortConfig.key.replace('campaign_', '');
-
-                            // 1st priority: Customers in campaign come first
-                            const aInCampaign = a.campaigns?.includes(campaignName) || false;
-                            const bInCampaign = b.campaigns?.includes(campaignName) || false;
-
-                            if (aInCampaign !== bInCampaign) {
-                                return sortConfig.direction === 'asc'
-                                    ? (aInCampaign ? -1 : 1)
-                                    : (aInCampaign ? 1 : -1);
-                            }
-
-                            // 2nd priority: Transferred status
-                            const aIsTransferred = a.campaign_transferred?.[campaignName] || false;
-                            const bIsTransferred = b.campaign_transferred?.[campaignName] || false;
-
-                            if (aIsTransferred !== bIsTransferred) {
-                                if (sortConfig.direction === 'asc') {
-                                    return aIsTransferred ? -1 : 1;
-                                } else {
-                                    return aIsTransferred ? 1 : -1;
-                                }
-                            }
-
-                            // 3rd priority: Status (WIP < Completed < Rejected)
-                            const aStatus = a.campaign_status?.[campaignName] || '';
-                            const bStatus = b.campaign_status?.[campaignName] || '';
-
-                            const statusOrder = { 'wip': 1, 'completed': 2, 'rejected': 3 };
-                            const aOrder = statusOrder[aStatus] || 0;
-                            const bOrder = statusOrder[bStatus] || 0;
-
-                            if (aOrder !== bOrder) {
-                                return sortConfig.direction === 'asc' ? aOrder - bOrder : bOrder - aOrder;
-                            }
-
-                            // 4th priority: Next followup date
-                            const dateA = a.next_followup_date ? new Date(a.next_followup_date).getTime() : 0;
-                            const dateB = b.next_followup_date ? new Date(b.next_followup_date).getTime() : 0;
-                            return sortConfig.direction === 'asc' ? dateA - dateB : dateB - dateA;
-                        } else {
-                            return 0;
-                        }
+                        return 0;
                 }
 
-                if (aValue < bValue) {
-                    return sortConfig.direction === 'asc' ? -1 : 1;
+                // --- Blank handling: blank rows ALWAYS go to the bottom, never sorted in ---
+                const aBlank = isBlankVal(aRaw);
+                const bBlank = isBlankVal(bRaw);
+                if (aBlank && bBlank) return 0;
+                if (aBlank) return 1;
+                if (bBlank) return -1;
+
+                // --- Compare only the real (non-blank) values ---
+                if (isDate) {
+                    return (new Date(aRaw).getTime() - new Date(bRaw).getTime()) * dir;
                 }
-                if (aValue > bValue) {
-                    return sortConfig.direction === 'asc' ? 1 : -1;
-                }
-                return 0;
+                return String(aRaw).localeCompare(String(bRaw), undefined, { numeric: true, sensitivity: 'base' }) * dir;
             });
         }
 
@@ -1035,8 +1013,14 @@ const CustomerEng = () => {
             setDisplayedCustomers(filtered);
             setHasMore(false);
         } else {
-            setDisplayedCustomers(filtered.slice(0, ITEMS_PER_PAGE));
-            setHasMore(filtered.length > ITEMS_PER_PAGE);
+            // When a sort is active, keep the same number of rows already loaded
+            // so the table re-orders in place instead of collapsing/scrolling (no flicker).
+            const keepCount = sortConfig.key
+                ? Math.max(displayedCustomers.length, ITEMS_PER_PAGE)
+                : ITEMS_PER_PAGE;
+            const sliceEnd = Math.min(keepCount, filtered.length);
+            setDisplayedCustomers(filtered.slice(0, sliceEnd));
+            setHasMore(sliceEnd < filtered.length);
         }
 
         const counts = { C1: 0, C2: 0, C3: 0, C4: 0, C5: 0, C6: 0, C7: 0 };
@@ -2955,13 +2939,33 @@ const CustomerEng = () => {
         }
     };
 
+    // Remembers the table scroll position across a sort-triggered re-render
+    const sortScrollRef = useRef(null);
+
     // Handle sort
     const handleSort = (key) => {
+        // Capture scroll BEFORE the rows re-render so the table doesn't jump
+        if (tableContainerRef.current) {
+            sortScrollRef.current = {
+                left: tableContainerRef.current.scrollLeft,
+                top: tableContainerRef.current.scrollTop
+            };
+        }
         setSortConfig(prev => ({
             key,
             direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
         }));
     };
+
+    // Restore scroll right after the sort re-renders the rows.
+    // Runs before the browser paints, so the table stays put (no visible move).
+    useLayoutEffect(() => {
+        if (sortScrollRef.current && tableContainerRef.current) {
+            tableContainerRef.current.scrollLeft = sortScrollRef.current.left;
+            tableContainerRef.current.scrollTop = sortScrollRef.current.top;
+            sortScrollRef.current = null;
+        }
+    }, [displayedCustomers]);
 
     const getSortIcon = (key) => {
         if (sortConfig.key !== key) {
@@ -5107,7 +5111,10 @@ const CustomerEng = () => {
                                                         return (
                                                             <td key={colId} className="px-1 py-1 text-[12px] text-black whitespace-nowrap border-r border-gray-200 w-[65px] text-left">
                                                                 <div className="truncate" title={customer.last_followup_user || "-"}>
-                                                                    {customer.last_followup_user || "-"}
+                                                                    {/* {customer.last_followup_user || "-"} */}
+                                                                    {searchTerm && customer.last_followup_user
+                                                                        ? highlightText(customer.last_followup_user, searchTerm)
+                                                                        : (customer.last_followup_user || "-")}
                                                                 </div>
                                                             </td>
                                                         );

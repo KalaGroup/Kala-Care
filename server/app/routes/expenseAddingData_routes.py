@@ -40,26 +40,32 @@ def get_db():
 class BranchKMRateSchema(BaseModel):
     branch_code: str
     branch_name: str
-    km_rate: float
-    range_start_km: Optional[float] = None
-    range_end_km: Optional[float] = None
-    range_amount: float = 0.0
-    above_km: Optional[float] = None
-    above_amount: float = 0.0
+    km_threshold: float = 100.0
+    single_low_rate: float = 0.0
+    single_low_da: float = 0.0
+    multi_low_rate: float = 0.0
+    multi_low_da: float = 0.0
+    single_high_rate: float = 0.0
+    single_high_da: float = 0.0
+    multi_high_rate: float = 0.0
+    multi_high_da: float = 0.0
 
 
 class BranchKMRateResponse(BaseModel):
     id: int
     branch_code: str
     branch_name: str
-    km_rate: float
-    range_start_km: Optional[float] = None
-    range_end_km: Optional[float] = None
-    range_amount: float
-    above_km: Optional[float] = None
-    above_amount: float
+    km_threshold: float
+    single_low_rate: float
+    single_low_da: float
+    multi_low_rate: float
+    multi_low_da: float
+    single_high_rate: float
+    single_high_da: float
+    multi_high_rate: float
+    multi_high_da: float
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
