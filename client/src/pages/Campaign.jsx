@@ -1310,7 +1310,7 @@ const Campaign = () => {
     }
   };
 
-  const openEditModal = async (campaign, e) => {
+  const openEditModal = (campaign, e) => {
     e.stopPropagation();
 
     setEditCampaignData({
@@ -1326,8 +1326,8 @@ const Campaign = () => {
       scripts: campaign.scripts || []
     });
     setImportedFile(null);
-    await validateAssets(campaign.asset_numbers || []);
-    setShowEditCampaign(true);
+    setShowEditCampaign(true);          // open instantly
+    validateAssets(campaign.asset_numbers || []); // validate in background (shows the spinner)
   };
 
   const openDeleteServiceConfirm = (service, e) => {

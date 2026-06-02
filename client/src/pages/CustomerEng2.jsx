@@ -159,6 +159,10 @@ const CustomerEng2 = () => {
   const [activeRemarkDropdown, setActiveRemarkDropdown] = useState(null);
   const [remarkDropdownPosition, setRemarkDropdownPosition] = useState(null);
   const remarkDropdownRef = useRef(null);
+  const REJECT_REASONS_EDIT_TRIGGER = (import.meta.env.VITE_REJECT_REASONS_EDIT_TRIGGER || '')
+    .split(',')
+    .map(r => r.trim().toLowerCase())
+    .filter(Boolean);
 
   // Diary states
   const [showDieryModal, setShowDieryModal] = useState(false);
@@ -1794,11 +1798,8 @@ const CustomerEng2 = () => {
         const rejectReason = selectedRR?.content?.toLowerCase() || "";
 
         // Check if reject reason is 'wrong number' or 'call not connected'
-        if (
-          rejectReason.includes("wrong number") ||
-          rejectReason.includes("Incorrect contact details") ||
-          rejectReason.includes("call not connected")
-        ) {
+        if (REJECT_REASONS_EDIT_TRIGGER.some(reason => rejectReason.includes(reason))) {
+
           const result = await Swal.fire({
             title: 'Edit Customer Details?',
             html: `You selected "<strong>${selectedRR.content}</strong>" as reject reason.<br/><br/>Do you want to edit customer details?`,

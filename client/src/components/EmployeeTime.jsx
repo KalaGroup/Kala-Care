@@ -5,6 +5,7 @@ import { IoClose } from "react-icons/io5";
 
 const themeColor = '#2f3192';
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
+const MASTER_ADMIN_ID = import.meta.env.VITE_MASTER_ADMIN_ID;
 
 const branchNameMap = {
     'HO': 'Pune Office',
@@ -67,7 +68,7 @@ const EmployeeTime = ({ isOpen, onClose, userData }) => {
                 `${API_BASE_URL}/performance/employee-time-report?${params.toString()}`
             );
             const allRows = res.data?.rows || [];
-            setRows(allRows.filter(r => r.user_id !== 'kala000001'));
+            setRows(allRows.filter(r => r.user_id !== MASTER_ADMIN_ID));
         } catch (err) {
             console.error('Error fetching time report:', err);
             setRows([]);

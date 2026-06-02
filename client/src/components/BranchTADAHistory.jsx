@@ -150,6 +150,7 @@ const BranchTADAHistory = ({ branchCode, branchName, themeColor, onClose, canExp
   const [search, setSearch] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [voucherSort, setVoucherSort] = useState(''); // '' | 'asc' | 'desc'
 
   useEffect(() => {
     if (!branchCode) return;
@@ -184,7 +185,7 @@ const BranchTADAHistory = ({ branchCode, branchName, themeColor, onClose, canExp
 
   const switchTab = (t) => {
     setActiveTab(t); setSelectedVoucher(null); setSelectedEngineer(null);
-    setSearch(''); setDateFrom(''); setDateTo('');
+    setSearch(''); setDateFrom(''); setDateTo(''); setVoucherSort('');
   };
 
   const allGroups = useMemo(() => {
@@ -198,7 +199,7 @@ const BranchTADAHistory = ({ branchCode, branchName, themeColor, onClose, canExp
 
   const filteredGroups = useMemo(() => {
     const s = search.trim().toLowerCase();
-    return allGroups.filter(g => {
+    const out = allGroups.filter(g => {
       const matchSearch = !s ||
         String(g.voucher_no || '').toLowerCase().includes(s) ||
         String(g.submitted_by || g.uploaded_by || '').toLowerCase().includes(s) ||
@@ -210,7 +211,17 @@ const BranchTADAHistory = ({ branchCode, branchName, themeColor, onClose, canExp
       const matchTo = !dateTo || !ps || ps <= dateTo;
       return matchSearch && matchFrom && matchTo;
     });
-  }, [allGroups, search, dateFrom, dateTo]);
+
+    if (voucherSort) {
+      out.sort((a, b) => {
+        const cmp = String(a.voucher_no || '').localeCompare(
+          String(b.voucher_no || ''), undefined, { numeric: true, sensitivity: 'base' }
+        );
+        return voucherSort === 'asc' ? cmp : -cmp;
+      });
+    }
+    return out;
+  }, [allGroups, search, dateFrom, dateTo, voucherSort]);
 
   const voucherRecords = useMemo(() => {
     if (!selectedVoucher) return [];
@@ -382,8 +393,31 @@ const BranchTADAHistory = ({ branchCode, branchName, themeColor, onClose, canExp
               <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
                 className="px-1.5 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
             </div>
-            {(search || dateFrom || dateTo) && (
-              <button onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); }}
+            <div className="flex items-center gap-1 px-2 py-1 border border-indigo-200 rounded-lg bg-indigo-50">
+              <span className="text-[10px] font-bold text-indigo-600 uppercase whitespace-nowrap">Voucher:</span>
+              <button
+                onClick={() => setVoucherSort(s => s === 'asc' ? '' : 'asc')}
+                className="px-2 py-0.5 rounded text-[11px] font-semibold transition-all"
+                style={voucherSort === 'asc'
+                  ? { background: themeColor, color: '#fff' }
+                  : { background: '#fff', color: '#374151', border: '1px solid #c7d2fe' }}
+                title="Sort by voucher code ascending"
+              >
+                A → Z
+              </button>
+              <button
+                onClick={() => setVoucherSort(s => s === 'desc' ? '' : 'desc')}
+                className="px-2 py-0.5 rounded text-[11px] font-semibold transition-all"
+                style={voucherSort === 'desc'
+                  ? { background: themeColor, color: '#fff' }
+                  : { background: '#fff', color: '#374151', border: '1px solid #c7d2fe' }}
+                title="Sort by voucher code descending"
+              >
+                Z → A
+              </button>
+            </div>
+            {(search || dateFrom || dateTo || voucherSort) && (
+              <button onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); setVoucherSort(''); }}
                 className="px-2 py-1.5 text-xs text-red-600 border border-red-300 rounded-lg hover:bg-red-50">Clear</button>
             )}
             <ExportBtn onClick={exportVoucherList} />

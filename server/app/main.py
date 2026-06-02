@@ -1,3 +1,12 @@
+import logging
+
+# Hide harmless "ConnectionResetError: [WinError 10054]" spam on Windows
+class _SuppressConnLost(logging.Filter):
+    def filter(self, record):
+        return "_call_connection_lost" not in record.getMessage()
+
+logging.getLogger("asyncio").addFilter(_SuppressConnLost())
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles

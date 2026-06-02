@@ -15,28 +15,32 @@ class CampaignController:
     # ==================== Asset Validation ====================
     
     def validate_asset_numbers(self, asset_numbers: List[str]) -> Dict[str, List[str]]:
-        """Validate asset numbers against customers table"""
+        """Validate asset numbers against customers table (single batched query)"""
         if not asset_numbers:
             return {"valid": [], "invalid": []}
-        
+    
         # Remove duplicates and empty values
         unique_assets = list(set([str(num).strip() for num in asset_numbers if num and str(num).strip()]))
-        
-        valid_assets = []
-        invalid_assets = []
-        
-        for asset in unique_assets:
-            # Check if asset exists in customers table as instance_id
-            customer = self.db.query(Customer).filter(Customer.instance_id == asset).first()
-            if customer:
-                valid_assets.append(asset)
-            else:
-                invalid_assets.append(asset)
-        
-        return {
-            "valid": valid_assets,
-            "invalid": invalid_assets
-        }
+        if not unique_assets:
+            return {"valid": [], "invalid": []}
+    
+        # ONE query instead of one-per-asset. Only select the id column (no full rows).
+        # Chunk the IN(...) list so very large campaigns stay under driver limits.
+        existing_ids = set()
+        CHUNK = 1000
+        for i in range(0, len(unique_assets), CHUNK):
+            chunk = unique_assets[i:i + CHUNK]
+            rows = (
+                self.db.query(Customer.instance_id)
+                .filter(Customer.instance_id.in_(chunk))
+                .all()
+            )
+            existing_ids.update(r[0] for r in rows)
+    
+        valid_assets = [a for a in unique_assets if a in existing_ids]
+        invalid_assets = [a for a in unique_assets if a not in existing_ids]
+    
+        return {"valid": valid_assets, "invalid": invalid_assets}
     
     # ==================== Service Management ====================
     
@@ -531,104 +535,92 @@ class CampaignController:
         return results
 
     def get_campaign_customers_with_followups(self, campaign_id: int) -> Dict[str, Any]:
-        """Get all customers for a campaign with their last follow-up data"""
+        """Get all customers for a campaign with their last follow-up data (batched)"""
         from app.models.engagement_model import FollowUp
-        
-        # Get campaign
+
         campaign = self.get_campaign(campaign_id)
-        
         if not campaign:
             raise HTTPException(status_code=404, detail="Campaign not found")
-        
-        # Get all valid asset numbers for this campaign
+
         asset_numbers = campaign.asset_numbers or []
-        
-        # Get all completed follow-ups for this campaign
-        completed_followups = self.db.query(FollowUp).filter(
-            FollowUp.campaign_id == campaign_id,
-            FollowUp.status == 'completed'
-        ).all()
-        
-        # Get set of completed customer instance IDs
-        completed_instance_ids = set([f.customer_instance_id for f in completed_followups if f.customer_instance_id])
-        
-        # Separate remaining and completed customers
-        remaining_asset_numbers = [asset for asset in asset_numbers if asset not in completed_instance_ids]
-        completed_asset_numbers = [asset for asset in asset_numbers if asset in completed_instance_ids]
-        
-        # Also include any completed customers that might have been added via follow-ups but not in asset_numbers
-        # (This handles edge cases where a follow-up was marked completed but the asset wasn't in the original list)
-        for followup in completed_followups:
-            if followup.customer_instance_id and followup.customer_instance_id not in completed_asset_numbers:
-                completed_asset_numbers.append(followup.customer_instance_id)
-        
-        customers_data = {
-            "remaining": [],
-            "completed": []
-        }
-        
-        # Process remaining customers (from asset_numbers not completed)
+
+        # ---- 1. Pull EVERY follow-up for this campaign in ONE query (date desc) ----
+        all_followups = (
+            self.db.query(FollowUp)
+            .filter(FollowUp.campaign_id == campaign_id)
+            .order_by(FollowUp.followup_date.desc())
+            .all()
+        )
+
+        # Build "latest" maps in a single pass (list is already newest-first)
+        latest_completed = {}
+        latest_open = {}
+        completed_instance_ids = set()
+        for f in all_followups:
+            cid = f.customer_instance_id
+            if not cid:
+                continue
+            if f.status == 'completed':
+                completed_instance_ids.add(cid)
+                if cid not in latest_completed:
+                    latest_completed[cid] = f
+            else:
+                if cid not in latest_open:
+                    latest_open[cid] = f
+
+        # ---- 2. Split remaining vs completed ----
+        remaining_asset_numbers = [a for a in asset_numbers if a not in completed_instance_ids]
+        completed_asset_numbers = [a for a in asset_numbers if a in completed_instance_ids]
+
+        # Completed follow-ups whose asset wasn't in the original list (edge case)
+        for cid in completed_instance_ids:
+            if cid not in completed_asset_numbers:
+                completed_asset_numbers.append(cid)
+
+        # ---- 3. Fetch ALL needed customers in ONE query (chunked) ----
+        needed_ids = list(set(remaining_asset_numbers + completed_asset_numbers))
+        customer_map = {}
+        CHUNK = 1000
+        for i in range(0, len(needed_ids), CHUNK):
+            chunk = needed_ids[i:i + CHUNK]
+            for c in self.db.query(Customer).filter(Customer.instance_id.in_(chunk)).all():
+                customer_map[c.instance_id] = c
+
+        def build_info(customer, fu, default_status=None):
+            return {
+                "instance_id": customer.instance_id,
+                "customer_name": customer.customer_name,
+                "phone_number": customer.phone_number,
+                "email": customer.email,
+                "branch_id": customer.branch_id,
+                "location": customer.location,
+                "last_status": fu.status if fu else default_status,
+                "last_followup_user_name": fu.user_name if fu else None,
+                "last_followup_user_id": fu.user_id if fu else None,
+                "last_followup_date": fu.followup_date.isoformat() if fu and fu.followup_date else None,
+                "next_followup_date": fu.next_followup_date.isoformat() if fu and fu.next_followup_date else None,
+                "latest_flag": fu.followup_flag if fu else None,
+                "latest_remark": fu.followup_remark if fu else None,
+                "quotation_sent": fu.quotation_sent if fu else False,
+                "quotation_value": fu.quotation_value if fu else None,
+            }
+
+        customers_data = {"remaining": [], "completed": []}
+
         for asset_number in remaining_asset_numbers:
-            customer = self.db.query(Customer).filter(Customer.instance_id == asset_number).first()
-            
+            customer = customer_map.get(asset_number)
             if customer:
-                # Get last follow-up for this customer and campaign (not completed)
-                last_followup = self.db.query(FollowUp).filter(
-                    FollowUp.campaign_id == campaign_id,
-                    FollowUp.customer_instance_id == asset_number,
-                    FollowUp.status != 'completed'  # Get non-completed follow-ups
-                ).order_by(FollowUp.followup_date.desc()).first()
-                
-                customer_info = {
-                    "instance_id": customer.instance_id,
-                    "customer_name": customer.customer_name,
-                    "phone_number": customer.phone_number,
-                    "email": customer.email,
-                    "branch_id": customer.branch_id,
-                    "location": customer.location,
-                    "last_status": last_followup.status if last_followup else None,
-                    "last_followup_user_name": last_followup.user_name if last_followup else None,
-                    "last_followup_user_id": last_followup.user_id if last_followup else None,
-                    "last_followup_date": last_followup.followup_date.isoformat() if last_followup and last_followup.followup_date else None,
-                    "next_followup_date": last_followup.next_followup_date.isoformat() if last_followup and last_followup.next_followup_date else None,
-                    "latest_flag": last_followup.followup_flag if last_followup else None,
-                    "latest_remark": last_followup.followup_remark if last_followup else None,
-                    "quotation_sent": last_followup.quotation_sent if last_followup else False,
-                    "quotation_value": last_followup.quotation_value if last_followup else None
-                }
-                customers_data["remaining"].append(customer_info)
-        
-        # Process completed customers
+                customers_data["remaining"].append(
+                    build_info(customer, latest_open.get(asset_number))
+                )
+
         for asset_number in completed_asset_numbers:
-            customer = self.db.query(Customer).filter(Customer.instance_id == asset_number).first()
-            
+            customer = customer_map.get(asset_number)
             if customer:
-                # Get the completed follow-up for this customer
-                completed_followup = self.db.query(FollowUp).filter(
-                    FollowUp.campaign_id == campaign_id,
-                    FollowUp.customer_instance_id == asset_number,
-                    FollowUp.status == 'completed'
-                ).order_by(FollowUp.followup_date.desc()).first()
-                
-                customer_info = {
-                    "instance_id": customer.instance_id,
-                    "customer_name": customer.customer_name,
-                    "phone_number": customer.phone_number,
-                    "email": customer.email,
-                    "branch_id": customer.branch_id,
-                    "location": customer.location,
-                    "last_status": completed_followup.status if completed_followup else "completed",
-                    "last_followup_user_name": completed_followup.user_name if completed_followup else None,
-                    "last_followup_user_id": completed_followup.user_id if completed_followup else None,
-                    "last_followup_date": completed_followup.followup_date.isoformat() if completed_followup and completed_followup.followup_date else None,
-                    "next_followup_date": completed_followup.next_followup_date.isoformat() if completed_followup and completed_followup.next_followup_date else None,
-                    "latest_flag": completed_followup.followup_flag if completed_followup else None,
-                    "latest_remark": completed_followup.followup_remark if completed_followup else None,
-                    "quotation_sent": completed_followup.quotation_sent if completed_followup else False,
-                    "quotation_value": completed_followup.quotation_value if completed_followup else None
-                }
-                customers_data["completed"].append(customer_info)
-        
+                customers_data["completed"].append(
+                    build_info(customer, latest_completed.get(asset_number), default_status="completed")
+                )
+
         return {
             "campaign_info": {
                 "id": campaign.id,
@@ -637,9 +629,9 @@ class CampaignController:
                 "status": campaign.status,
                 "total_customers": len(asset_numbers),
                 "remaining_count": len(remaining_asset_numbers),
-                "completed_count": len(completed_asset_numbers)
+                "completed_count": len(completed_asset_numbers),
             },
-            "customers": customers_data
+            "customers": customers_data,
         }    
 
 # ==================== Manual CSP SR Entry ====================

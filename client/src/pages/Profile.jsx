@@ -736,8 +736,10 @@ const Profile = () => {
     const canGrantExport = isMasterAdmin || isITAdmin;
     const canGrantExpense = isMasterAdmin || isITAdmin;
     const canViewCDBUpdate = isMasterAdmin || isITAdmin;
-    const RESTRICTED_USER_IDS = ['31240001', '31250001', '31240012'];
-    const isRestrictedUser = user && RESTRICTED_USER_IDS.includes(String(user.user_id));
+    const RESTRICTED_USER_IDS = (import.meta.env.VITE_RESTRICTED_USER_IDS || '')
+        .split(',')
+        .map(id => id.trim())
+        .filter(Boolean); const isRestrictedUser = user && RESTRICTED_USER_IDS.includes(String(user.user_id));
 
     // Helper to highlight search term in text
     const highlightText = (text, search) => {
@@ -917,7 +919,7 @@ const Profile = () => {
             if (response.data.success && response.data.employees) {
                 let employeesData = response.data.employees;
 
-                const visibleEmployees = employeesData.filter(e => e.user_id !== 'kala000001');
+                const visibleEmployees = employeesData.filter(e => e.user_id !== MASTER_ADMIN_ID);
 
                 setEmployees(employeesData);
                 setFilteredEmployees(employeesData);
@@ -950,22 +952,38 @@ const Profile = () => {
             cancelButtonColor: '#d33',
             confirmButtonText: 'Yes, logout',
             cancelButtonText: 'Cancel'
-        }).then(async (result) => {
+        }).then((result) => {
             if (result.isConfirmed) {
+                // Show a brief loading state so the user knows logout is happening
+                Swal.fire({
+                    title: 'Logging out...',
+                    allowOutsideClick: false,
+                    didOpen: () => Swal.showLoading()
+                });
+
                 try {
                     const stored = JSON.parse(sessionStorage.getItem('user') || '{}');
                     if (stored.session_id) {
-                        await axios.post(`${API_BASE_URL}/users/logout`, {
+                        const url = `${API_BASE_URL}/users/logout`;
+                        const payload = JSON.stringify({
                             session_id: stored.session_id,
                             logout_type: 'manual',
                         });
+                        if (navigator.sendBeacon) {
+                            const blob = new Blob([payload], { type: 'application/json' });
+                            navigator.sendBeacon(url, blob);
+                        } else {
+                            axios.post(url, JSON.parse(payload)).catch((e) =>
+                                console.error('Logout tracking failed:', e)
+                            );
+                        }
                     }
-                } catch (e) { console.error('Logout tracking failed:', e); }
+                } catch (e) {
+                    console.error('Logout tracking failed:', e);
+                }
+
                 sessionStorage.removeItem('user');
-                showToast('success', 'Logged out successfully');
-                setTimeout(() => {
-                    navigate('/');
-                }, 1000);
+                navigate('/');
             }
         });
     };
@@ -2334,7 +2352,7 @@ const Profile = () => {
                                                         </tr>
                                                     ) : filteredEmployees && filteredEmployees.length > 0 ? (
                                                         [...filteredEmployees]
-                                                            .filter(emp => emp.user_id !== 'kala000001')
+                                                            .filter(emp => emp.user_id !== MASTER_ADMIN_ID)
                                                             .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
                                                             .slice(0, visibleEmployeeCount)
                                                             .map((emp, index) => (

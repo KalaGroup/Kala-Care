@@ -32,6 +32,7 @@ const BranchOEHistory = ({ branchCode, branchName, themeColor = '#2f3192', canEx
   const [selected, setSelected] = useState(null);
   const [records, setRecords] = useState([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
+  const [voucherSort, setVoucherSort] = useState(''); // '' | 'asc' | 'desc'
 
   // Optional: a simple Excel export that doesn't depend on the parent
   const exportToExcel = (data, filename, headers) => {
@@ -88,6 +89,16 @@ const BranchOEHistory = ({ branchCode, branchName, themeColor = '#2f3192', canEx
 
   const recTotal = records.reduce((s, r) => s + parseFloat(r.amount || 0), 0);
 
+  const sortedGroups = React.useMemo(() => {
+    if (!voucherSort) return groups;
+    return [...groups].sort((a, b) => {
+      const cmp = String(a.submit_voucher_no || '').localeCompare(
+        String(b.submit_voucher_no || ''), undefined, { numeric: true, sensitivity: 'base' }
+      );
+      return voucherSort === 'asc' ? cmp : -cmp;
+    });
+  }, [groups, voucherSort]);
+
   const PaidBadge = ({ value }) =>
     value ? (
       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-100 text-green-800 text-[10px] font-bold whitespace-nowrap">
@@ -135,6 +146,38 @@ const BranchOEHistory = ({ branchCode, branchName, themeColor = '#2f3192', canEx
                 <span className="text-[11px] font-bold" style={{ color: themeColor }}>
                   {branchName || branchCode} ({branchCode})
                 </span>
+                <div className="flex items-center gap-1 px-2 py-1 border border-indigo-200 rounded-lg bg-indigo-50">
+                  <span className="text-[10px] font-bold text-indigo-600 uppercase whitespace-nowrap">Voucher:</span>
+                  <button
+                    onClick={() => setVoucherSort(s => s === 'asc' ? '' : 'asc')}
+                    className="px-2 py-0.5 rounded text-[11px] font-semibold transition-all"
+                    style={voucherSort === 'asc'
+                      ? { background: themeColor, color: '#fff' }
+                      : { background: '#fff', color: '#374151', border: '1px solid #c7d2fe' }}
+                    title="Sort by voucher code ascending"
+                  >
+                    A → Z
+                  </button>
+                  <button
+                    onClick={() => setVoucherSort(s => s === 'desc' ? '' : 'desc')}
+                    className="px-2 py-0.5 rounded text-[11px] font-semibold transition-all"
+                    style={voucherSort === 'desc'
+                      ? { background: themeColor, color: '#fff' }
+                      : { background: '#fff', color: '#374151', border: '1px solid #c7d2fe' }}
+                    title="Sort by voucher code descending"
+                  >
+                    Z → A
+                  </button>
+                  {voucherSort && (
+                    <button
+                      onClick={() => setVoucherSort('')}
+                      className="px-1.5 py-0.5 rounded text-[11px] font-semibold text-red-600 hover:bg-red-50"
+                      title="Clear sort"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
                 {canExport && groups.length > 0 && (
                   <button
                     onClick={() => exportToExcel(
@@ -235,7 +278,7 @@ const BranchOEHistory = ({ branchCode, branchName, themeColor = '#2f3192', canEx
                   ))}
                 </tr></thead>
                 <tbody className="divide-y divide-gray-100">
-                  {groups.map((g, idx) => (
+                  {sortedGroups.map((g, idx) => (
                     <tr key={`${g.branch_code}-${g.submit_voucher_no}`} className="hover:bg-blue-50/40" style={{ height: '38px' }}>
                       <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-medium">{idx + 1}</td>
                       <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center">

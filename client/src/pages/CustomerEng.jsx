@@ -87,6 +87,10 @@ const CustomerEng = () => {
     const [showAgreementFilter, setShowAgreementFilter] = useState(false);
     const [agreementFilterPosition, setAgreementFilterPosition] = useState(null);
     const agreementFilterRef = useRef(null);
+    const REJECT_REASONS_EDIT_TRIGGER = (import.meta.env.VITE_REJECT_REASONS_EDIT_TRIGGER || '')
+        .split(',')
+        .map(r => r.trim().toLowerCase())
+        .filter(Boolean);
 
     // Diary states
     const [showDieryModal, setShowDieryModal] = useState(false);
@@ -2199,11 +2203,8 @@ const CustomerEng = () => {
                 const rejectReason = selectedRR?.content?.toLowerCase() || '';
 
                 // Check if reject reason is 'wrong number' or 'call not connected'
-                if (
-                    rejectReason.includes("wrong number") ||
-                    rejectReason.includes("Incorrect contact details") ||
-                    rejectReason.includes("call not connected")
-                ) {
+                if (REJECT_REASONS_EDIT_TRIGGER.some(reason => rejectReason.includes(reason))) {
+
                     const result = await Swal.fire({
                         title: 'Edit Customer Details?',
                         html: `You selected "<strong>${selectedRR.content}</strong>" as reject reason.<br/><br/>Do you want to edit customer details?`,
@@ -4547,111 +4548,111 @@ const CustomerEng = () => {
                                                                 <div className="relative flex items-center gap-1" ref={branchFilterRef}>
                                                                     <span>Branch ID</span>
                                                                     {!(currentUser?.role === 'employee' && userBranch !== 'HO') && (
-                                                                    <>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            if (!showBranchFilter) {
-                                                                                const rect = e.currentTarget.getBoundingClientRect();
-                                                                                setBranchFilterPosition({ top: rect.bottom + 4, left: rect.left });
-                                                                            }
-                                                                            setShowBranchFilter(prev => !prev);
-                                                                        }}
-                                                                        className={`p-0.5 rounded hover:bg-gray-200 transition-colors ${selectedBranches.length > 0 ? 'text-blue-600' : 'text-gray-400'}`}
-                                                                        title="Filter branches"
-                                                                    >
-                                                                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                                                            <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V17a1 1 0 01-.553.894l-4 2A1 1 0 017 19v-8.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd" />
-                                                                        </svg>
-                                                                    </button>
+                                                                        <>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    if (!showBranchFilter) {
+                                                                                        const rect = e.currentTarget.getBoundingClientRect();
+                                                                                        setBranchFilterPosition({ top: rect.bottom + 4, left: rect.left });
+                                                                                    }
+                                                                                    setShowBranchFilter(prev => !prev);
+                                                                                }}
+                                                                                className={`p-0.5 rounded hover:bg-gray-200 transition-colors ${selectedBranches.length > 0 ? 'text-blue-600' : 'text-gray-400'}`}
+                                                                                title="Filter branches"
+                                                                            >
+                                                                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                                                    <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V17a1 1 0 01-.553.894l-4 2A1 1 0 017 19v-8.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd" />
+                                                                                </svg>
+                                                                            </button>
 
-                                                                    {showBranchFilter && branchFilterPosition && (
-                                                                        <div
-                                                                            className="bg-white border border-gray-300 rounded-lg shadow-2xl min-w-[220px]"
-                                                                            style={{
-                                                                                position: 'fixed',
-                                                                                top: `${branchFilterPosition.top}px`,
-                                                                                left: `${branchFilterPosition.left}px`,
-                                                                                fontSize: '11px',
-                                                                                zIndex: 999999
-                                                                            }}
-                                                                            onClick={e => e.stopPropagation()}
-                                                                            onMouseDown={e => e.stopPropagation()}
-                                                                        >
-                                                                            {/* Header */}
-                                                                            <div className="px-2 py-1.5 border-b border-gray-200 flex justify-between items-center bg-gray-50 rounded-t-lg">
-                                                                                <span className="font-bold text-black text-[11px]">Filter Branch</span>
-                                                                                {selectedBranches.length > 0 && (
-                                                                                    <button
-                                                                                        onClick={() => setSelectedBranches([])}
-                                                                                        className="text-[10px] text-red-500 hover:text-red-700 font-medium"
-                                                                                    >
-                                                                                        Clear ({selectedBranches.length})
-                                                                                    </button>
-                                                                                )}
-                                                                            </div>
+                                                                            {showBranchFilter && branchFilterPosition && (
+                                                                                <div
+                                                                                    className="bg-white border border-gray-300 rounded-lg shadow-2xl min-w-[220px]"
+                                                                                    style={{
+                                                                                        position: 'fixed',
+                                                                                        top: `${branchFilterPosition.top}px`,
+                                                                                        left: `${branchFilterPosition.left}px`,
+                                                                                        fontSize: '11px',
+                                                                                        zIndex: 999999
+                                                                                    }}
+                                                                                    onClick={e => e.stopPropagation()}
+                                                                                    onMouseDown={e => e.stopPropagation()}
+                                                                                >
+                                                                                    {/* Header */}
+                                                                                    <div className="px-2 py-1.5 border-b border-gray-200 flex justify-between items-center bg-gray-50 rounded-t-lg">
+                                                                                        <span className="font-bold text-black text-[11px]">Filter Branch</span>
+                                                                                        {selectedBranches.length > 0 && (
+                                                                                            <button
+                                                                                                onClick={() => setSelectedBranches([])}
+                                                                                                className="text-[10px] text-red-500 hover:text-red-700 font-medium"
+                                                                                            >
+                                                                                                Clear ({selectedBranches.length})
+                                                                                            </button>
+                                                                                        )}
+                                                                                    </div>
 
-                                                                            {/* Select All */}
-                                                                            <div className="px-2 py-1 border-b border-gray-200 hover:bg-gray-50">
-                                                                                <label className="flex items-center gap-1.5 cursor-pointer">
-                                                                                    <input
-                                                                                        type="checkbox"
-                                                                                        checked={selectedBranches.length === 0}
-                                                                                        onChange={() => setSelectedBranches([])}
-                                                                                        className="h-3 w-3 rounded border-gray-300"
-                                                                                        style={{ accentColor: '#2f3192' }}
-                                                                                    />
-                                                                                    <span className="text-black font-semibold text-[11px]">(Select All)</span>
-                                                                                </label>
-                                                                            </div>
-
-                                                                            {/* Branch options with name */}
-                                                                            <div className="max-h-[220px] overflow-y-auto">
-                                                                                {uniqueBranches.map(branch => (
-                                                                                    <div key={branch} className="px-2 py-1 hover:bg-blue-50 border-b border-gray-50">
+                                                                                    {/* Select All */}
+                                                                                    <div className="px-2 py-1 border-b border-gray-200 hover:bg-gray-50">
                                                                                         <label className="flex items-center gap-1.5 cursor-pointer">
                                                                                             <input
                                                                                                 type="checkbox"
-                                                                                                checked={selectedBranches.includes(branch)}
-                                                                                                onChange={() => {
-                                                                                                    setSelectedBranches(prev =>
-                                                                                                        prev.includes(branch)
-                                                                                                            ? prev.filter(b => b !== branch)
-                                                                                                            : [...prev, branch]
-                                                                                                    );
-                                                                                                }}
-                                                                                                className="h-3 w-3 rounded border-gray-300 flex-shrink-0"
+                                                                                                checked={selectedBranches.length === 0}
+                                                                                                onChange={() => setSelectedBranches([])}
+                                                                                                className="h-3 w-3 rounded border-gray-300"
                                                                                                 style={{ accentColor: '#2f3192' }}
                                                                                             />
-                                                                                            <div className="flex flex-col min-w-0">
-                                                                                                <span className="text-black text-[11px] font-medium leading-tight text-left">
-                                                                                                    {branch === '' ? '(Blank)' : branch}
-                                                                                                </span>
-                                                                                                {branch !== '' && branchMap[branch] && (
-                                                                                                    <span className="text-gray-500 text-[10px] leading-tight truncate">
-                                                                                                        {branchMap[branch]}
-                                                                                                    </span>
-                                                                                                )}
-                                                                                            </div>
+                                                                                            <span className="text-black font-semibold text-[11px]">(Select All)</span>
                                                                                         </label>
                                                                                     </div>
-                                                                                ))}
-                                                                            </div>
 
-                                                                            {/* Footer */}
-                                                                            <div className="px-2 py-1.5 border-t border-gray-200 bg-gray-50 rounded-b-lg">
-                                                                                <button
-                                                                                    onClick={() => setShowBranchFilter(false)}
-                                                                                    className="w-full text-[11px] text-white rounded px-2 py-1 font-medium hover:opacity-90"
-                                                                                    style={{ backgroundColor: '#2f3192' }}
-                                                                                >
-                                                                                    Apply
-                                                                                </button>
-                                                                            </div>
-                                                                        </div>
-                                                                    )}
-                                                                    </>
+                                                                                    {/* Branch options with name */}
+                                                                                    <div className="max-h-[220px] overflow-y-auto">
+                                                                                        {uniqueBranches.map(branch => (
+                                                                                            <div key={branch} className="px-2 py-1 hover:bg-blue-50 border-b border-gray-50">
+                                                                                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                                                                                    <input
+                                                                                                        type="checkbox"
+                                                                                                        checked={selectedBranches.includes(branch)}
+                                                                                                        onChange={() => {
+                                                                                                            setSelectedBranches(prev =>
+                                                                                                                prev.includes(branch)
+                                                                                                                    ? prev.filter(b => b !== branch)
+                                                                                                                    : [...prev, branch]
+                                                                                                            );
+                                                                                                        }}
+                                                                                                        className="h-3 w-3 rounded border-gray-300 flex-shrink-0"
+                                                                                                        style={{ accentColor: '#2f3192' }}
+                                                                                                    />
+                                                                                                    <div className="flex flex-col min-w-0">
+                                                                                                        <span className="text-black text-[11px] font-medium leading-tight text-left">
+                                                                                                            {branch === '' ? '(Blank)' : branch}
+                                                                                                        </span>
+                                                                                                        {branch !== '' && branchMap[branch] && (
+                                                                                                            <span className="text-gray-500 text-[10px] leading-tight truncate">
+                                                                                                                {branchMap[branch]}
+                                                                                                            </span>
+                                                                                                        )}
+                                                                                                    </div>
+                                                                                                </label>
+                                                                                            </div>
+                                                                                        ))}
+                                                                                    </div>
+
+                                                                                    {/* Footer */}
+                                                                                    <div className="px-2 py-1.5 border-t border-gray-200 bg-gray-50 rounded-b-lg">
+                                                                                        <button
+                                                                                            onClick={() => setShowBranchFilter(false)}
+                                                                                            className="w-full text-[11px] text-white rounded px-2 py-1 font-medium hover:opacity-90"
+                                                                                            style={{ backgroundColor: '#2f3192' }}
+                                                                                        >
+                                                                                            Apply
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
+                                                                        </>
                                                                     )}
                                                                 </div>
                                                             </SortableTableHeader>

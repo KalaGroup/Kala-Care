@@ -47,6 +47,7 @@ ChartJS.register(
 // Theme color
 const themeColor = '#2f3192';
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
+const MASTER_ADMIN_ID = import.meta.env.VITE_MASTER_ADMIN_ID;
 
 // Constants moved outside component to prevent recreation on every render
 const FLAG_ORDER = ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7'];
@@ -129,6 +130,19 @@ const Dashboard = () => {
 
     // Time period filter state
     const [timePeriod, setTimePeriod] = useState('all');
+
+    // Highlight time-dependent counts whenever a non-"all" filter is active.
+    // 'all' (Calendar) renders the raw value; any other selection turns it yellow.
+    const isTimeFiltered = timePeriod !== 'all';
+    const TimeValue = ({ children, style }) =>
+        isTimeFiltered ? (
+            <span style={{ backgroundColor: '#fde047', borderRadius: '4px', padding: '0 4px', ...style }}>
+                {children}
+            </span>
+        ) : (
+            <>{children}</>
+        );
+
     const tableContainerRef = useRef(null);
     const topScrollBarRef = useRef(null);
     const [customStartDate, setCustomStartDate] = useState(null);
@@ -174,8 +188,10 @@ const Dashboard = () => {
     const [summaryStats, setSummaryStats] = useState(null);
     const [canExport, setCanExport] = useState(false);
     const [showEmployeeTimeModal, setShowEmployeeTimeModal] = useState(false);
-    const TIME_REPORT_ALLOWED_IDS = ['kala000001', '31240002'];
-    const canViewTimeReport = userData && TIME_REPORT_ALLOWED_IDS.includes(String(userData.user_id));
+    const TIME_REPORT_ALLOWED_IDS = (import.meta.env.VITE_TIME_REPORT_ALLOWED_IDS || '')
+        .split(',')
+        .map(id => id.trim())
+        .filter(Boolean); const canViewTimeReport = userData && TIME_REPORT_ALLOWED_IDS.includes(String(userData.user_id));
 
     // Additional stats state
     const [activityStats, setActivityStats] = useState([]);
@@ -533,15 +549,35 @@ const Dashboard = () => {
     }, [userData?.user_id]);
 
     // Load data when time period changes - PREVENT INFINITE LOOP
+    // NOTE: fetch functions are intentionally NOT in the dependency array — they are
+    // defined later in this component, so referencing them here would throw
+    // "Cannot access before initialization". They are read at call-time inside the
+    // effect body (which runs after render), where they are fully defined.
     useEffect(() => {
-        if (userData && loadedTabs.overall && !isInitialMount.current && !isLoadingData.current) {
+        if (userData && loadedTabs.overall && !isInitialMount.current && activeTab === 'overall') {
             isDataLoaded.current = false;
-            // Reset only time-dependent fetch flag; allocation/engaged/remaining are time-independent
             hasFetchedBranchPerformance.current = false;
-            // Do NOT clear branchEngagedData, branchRemainingData, allocationSummary - they don't depend on time
-            loadOverallTabData();
+
+            // Give the filter-change fetches a FRESH AbortController, exactly like the
+            // tab-switch path does. Without this, the request fired on filter change can
+            // be cancelled before it lands, so KALA Performance / Campaign Overview keep
+            // stale values until a tab switch creates a fresh controller and refetches.
+            abortControllerRef.current?.abort();
+            abortControllerRef.current = new AbortController();
+
+            if (isMasterAdmin || isITAdmin) {
+                fetchSummaryStats();
+                fetchCampaignPerformance();
+                fetchBranchPerformance();
+                fetchAllEmployeesPerformanceWithCampaigns();
+            } else if (isBranchAdmin) {
+                fetchBranchPerformanceForBranchAdmin();
+                fetchBranchEmployeesForBranchAdmin();
+                fetchCampaignPerformance();
+            }
         }
-    }, [timePeriod, customStartDate, customEndDate]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [timePeriod, customStartDate, customEndDate, activeTab, userData, isMasterAdmin, isITAdmin, isBranchAdmin]);
 
     // Load branch overview tab data when activated OR time period changes
     useEffect(() => {
@@ -562,9 +598,12 @@ const Dashboard = () => {
             if (!loadedTabs['branch-report']) {
                 loadEmployeeProgressTabData();
                 markTabAsLoaded('branch-report');
+            } else if (isBranchAdmin) {
+                // Re-fetch when time period changes (branch admin auto-loads its own branch)
+                fetchBranchEmployeesForBranchAdmin();
             }
         }
-    }, [activeTab, userData, isMasterAdmin, isITAdmin, isBranchAdmin]);
+    }, [activeTab, userData, isMasterAdmin, isITAdmin, isBranchAdmin, timePeriod, customStartDate, customEndDate]);
 
     useEffect(() => {
         if (activeTab === 'campaign-success' && userData && (isMasterAdmin || isITAdmin)) {
@@ -969,7 +1008,7 @@ const Dashboard = () => {
         const hideKalaUser = selectedBranchesList.includes('HO');
 
         const filteredEmployees = hideKalaUser
-            ? branchEmployees.filter(emp => String(emp.user_id).toLowerCase() !== 'kala000001')
+            ? branchEmployees.filter(emp => String(emp.user_id) !== MASTER_ADMIN_ID)
             : branchEmployees;
 
         if (!branchEmployeeSortState.sortKey) return filteredEmployees;
@@ -3448,11 +3487,11 @@ const Dashboard = () => {
                                                 <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>Attended:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap">{summaryStats?.attended_customers || 0}</span>
+                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.attended_customers || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>Remaining:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap">{summaryStats?.remaining_customers || 0}</span>
+                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.remaining_customers || 0}</TimeValue></span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -3473,11 +3512,11 @@ const Dashboard = () => {
                                                 <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>Attended:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap">{summaryStats?.attended_assets || 0}</span>
+                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.attended_assets || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>Remaining:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap">{summaryStats?.remaining_assets || 0}</span>
+                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.remaining_assets || 0}</TimeValue></span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -3498,19 +3537,19 @@ const Dashboard = () => {
                                                 <div className="w-[60%] grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-semibold">
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>WIP:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap">{summaryStats?.wip_assets || 0}</span>
+                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.wip_assets || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>FR:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap">{summaryStats?.rescheduled_assets || 0}</span>
+                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.rescheduled_assets || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>R:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap">{summaryStats?.rejected_assets || 0}</span>
+                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.rejected_assets || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>C:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap">{summaryStats?.completed_assets || 0}</span>
+                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.completed_assets || 0}</TimeValue></span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -4293,11 +4332,11 @@ const Dashboard = () => {
                                                             </button>
                                                         </td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300">{getBranchDisplayName(employeeRecord.branch)}</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300">{totalFollowups}</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300">{employeeRecord.wip_count || 0}</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300">{employeeRecord.rescheduled_count || 0}</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300">{employeeRecord.rejected_count || 0}</td>
-                                                        <td className="px-3 py-2 text-xs font-medium text-center border border-gray-300 text-black">{completedFollowups}</td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{totalFollowups}</TimeValue></td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.wip_count || 0}</TimeValue></td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.rescheduled_count || 0}</TimeValue></td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.rejected_count || 0}</TimeValue></td>
+                                                        <td className="px-3 py-2 text-xs font-medium text-center border border-gray-300 text-black"><TimeValue>{completedFollowups}</TimeValue></td>
                                                         <td className="px-3 py-2 text-center border border-gray-300">
                                                             <button
                                                                 onClick={() => handleCampaignProgressClick(employeeRecord)}
@@ -4404,7 +4443,7 @@ const Dashboard = () => {
                                     {/* LEFT */}
                                     <div className="w-[30%] flex justify-center">
                                         <p className="text-lg font-bold text-gray-900">
-                                            {campaignPerformance.reduce((sum, c) => sum + (c.attended_customers || 0), 0)}
+                                            <TimeValue>{campaignPerformance.reduce((sum, c) => sum + (c.attended_customers || 0), 0)}</TimeValue>
                                         </p>
                                     </div>
 
@@ -4415,17 +4454,17 @@ const Dashboard = () => {
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Active Camp:</span>
                                             <span className="font-bold text-lg whitespace-nowrap">
-                                                {campaignPerformance
+                                                <TimeValue>{campaignPerformance
                                                     .filter(c => c.status === 'active')
-                                                    .reduce((sum, c) => sum + (c.attended_customers || 0), 0)}
+                                                    .reduce((sum, c) => sum + (c.attended_customers || 0), 0)}</TimeValue>
                                             </span>
                                         </div>
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Inactive Camp:</span>
                                             <span className="font-bold text-lg whitespace-nowrap">
-                                                {campaignPerformance
+                                                <TimeValue>{campaignPerformance
                                                     .filter(c => c.status === 'inactive')
-                                                    .reduce((sum, c) => sum + (c.attended_customers || 0), 0)}
+                                                    .reduce((sum, c) => sum + (c.attended_customers || 0), 0)}</TimeValue>
                                             </span>
                                         </div>
                                     </div>
@@ -4443,10 +4482,10 @@ const Dashboard = () => {
                                     {/* LEFT */}
                                     <div className="w-[30%] flex justify-center">
                                         <p className="text-lg font-bold text-gray-900">
-                                            {campaignPerformance.reduce((sum, c) => {
+                                            <TimeValue>{campaignPerformance.reduce((sum, c) => {
                                                 const completed = c.completed_count || c.total_completed_followups || c.completed || 0;
                                                 return sum + completed;
-                                            }, 0)}
+                                            }, 0)}</TimeValue>
                                         </p>
                                     </div>
 
@@ -4457,23 +4496,23 @@ const Dashboard = () => {
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Active Camp:</span>
                                             <span className="font-bold text-lg whitespace-nowrap">
-                                                {campaignPerformance
+                                                <TimeValue>{campaignPerformance
                                                     .filter(c => c.status === 'active')
                                                     .reduce((sum, c) => {
                                                         const completed = c.completed_count || c.total_completed_followups || c.completed || 0;
                                                         return sum + completed;
-                                                    }, 0)}
+                                                    }, 0)}</TimeValue>
                                             </span>
                                         </div>
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Inactive Camp:</span>
                                             <span className="font-bold text-lg whitespace-nowrap">
-                                                {campaignPerformance
+                                                <TimeValue>{campaignPerformance
                                                     .filter(c => c.status === 'inactive')
                                                     .reduce((sum, c) => {
                                                         const completed = c.completed_count || c.total_completed_followups || c.completed || 0;
                                                         return sum + completed;
-                                                    }, 0)}
+                                                    }, 0)}</TimeValue>
                                             </span>
                                         </div>
                                     </div>
@@ -4492,7 +4531,7 @@ const Dashboard = () => {
                                     {/* LEFT */}
                                     <div className="w-[30%] flex justify-center">
                                         <p className="text-lg font-bold text-gray-900">
-                                            {campaignPerformance.length > 0
+                                            <TimeValue>{campaignPerformance.length > 0
                                                 ? (() => {
                                                     const totalAttended = campaignPerformance.reduce((sum, c) => sum + (c.attended_customers || 0), 0);
                                                     const totalCompleted = campaignPerformance.reduce((sum, c) => {
@@ -4502,7 +4541,7 @@ const Dashboard = () => {
                                                     const avgSuccessRate = totalAttended > 0 ? (totalCompleted / totalAttended) * 100 : 0;
                                                     return avgSuccessRate.toFixed(1);
                                                 })()
-                                                : 0}%
+                                                : 0}%</TimeValue>
                                         </p>
                                     </div>
 
@@ -4743,20 +4782,20 @@ const Dashboard = () => {
                                                             </td>
                                                             <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200">{totalCustomers}</td>
                                                             <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200">{remaining2}</td>
-                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200">{attended}</td>
-                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200">{wip}</td>
-                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200">{rescheduled}</td>
-                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200">{rejected}</td>
-                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200">{completed}</td>
+                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{attended}</TimeValue></td>
+                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{wip}</TimeValue></td>
+                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{rescheduled}</TimeValue></td>
+                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{rejected}</TimeValue></td>
+                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{completed}</TimeValue></td>
                                                             <td className="px-2 py-1 text-center border-r border-gray-200">
                                                                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium inline-block ${successPercentage >= 70 ? 'bg-green-100 text-black' :
                                                                     successPercentage >= 40 ? 'text-black' : 'text-black'}`}>
-                                                                    {successPercentage}%
+                                                                    <TimeValue>{successPercentage}%</TimeValue>
                                                                 </span>
                                                             </td>
                                                             {flagOrder.map(flag => (
                                                                 <td key={flag} className="px-2 py-1 text-center text-sm text-black border-r border-gray-200">
-                                                                    {flagBreakdown[flag] || 0}
+                                                                    <TimeValue>{flagBreakdown[flag] || 0}</TimeValue>
                                                                 </td>
                                                             ))}
                                                         </tr>
@@ -5022,11 +5061,11 @@ const Dashboard = () => {
                                                                                     {campaignTotals?.total_customers || 0}
                                                                                 </td>
                                                                                 <td style={{ padding: '4px 8px', fontSize: '12px', color: 'black', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>
-                                                                                    {campaignTotals?.total_followups || 0}
+                                                                                    <TimeValue>{campaignTotals?.total_followups || 0}</TimeValue>
                                                                                 </td>
                                                                                 <td style={{ padding: '4px 8px', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>
                                                                                     <span style={{ padding: '2px 8px', borderRadius: '9999px', fontSize: '12px', fontWeight: '500', backgroundColor: `${themeColor}20`, color: themeColor }}>
-                                                                                        {activity.total_count || 0}
+                                                                                        <TimeValue>{activity.total_count || 0}</TimeValue>
                                                                                     </span>
                                                                                 </td>
                                                                                 <td
@@ -5098,11 +5137,11 @@ const Dashboard = () => {
                                                                                 {campaignTotals?.total_customers || 0}
                                                                             </td>
                                                                             <td style={{ padding: '4px 8px', fontSize: '12px', color: 'black', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>
-                                                                                {campaignTotals?.total_followups || 0}
+                                                                                <TimeValue>{campaignTotals?.total_followups || 0}</TimeValue>
                                                                             </td>
                                                                             <td style={{ padding: '4px 8px', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>
                                                                                 <span style={{ padding: '2px 8px', borderRadius: '9999px', fontSize: '12px', fontWeight: '500', backgroundColor: `${themeColor}20`, color: themeColor }}>
-                                                                                    {activity.total_count || 0}
+                                                                                    <TimeValue>{activity.total_count || 0}</TimeValue>
                                                                                 </span>
                                                                             </td>
                                                                             <td style={{ padding: '4px 8px', fontSize: '12px', color: 'black', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>
@@ -5286,11 +5325,11 @@ const Dashboard = () => {
                                                                                 {campaignTotals?.total_customers || 0}
                                                                             </td>
                                                                             <td style={{ padding: '4px 8px', fontSize: '12px', color: 'black', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>
-                                                                                {campaignTotals?.total_followups || 0}
+                                                                                <TimeValue>{campaignTotals?.total_followups || 0}</TimeValue>
                                                                             </td>
                                                                             <td style={{ padding: '4px 8px', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>
                                                                                 <span style={{ padding: '2px 8px', borderRadius: '9999px', fontSize: '12px', fontWeight: '500', backgroundColor: `${themeColor}20`, color: themeColor }}>
-                                                                                    {activity.total_count || 0}
+                                                                                    <TimeValue>{activity.total_count || 0}</TimeValue>
                                                                                 </span>
                                                                             </td>
                                                                             <td style={{ padding: '4px 8px', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>
@@ -5601,11 +5640,11 @@ const Dashboard = () => {
                                                                                     {rrCampaignTotals?.total_customers || 0}
                                                                                 </td>
                                                                                 <td style={{ padding: '4px 8px', fontSize: '12px', color: 'black', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>
-                                                                                    {rrCampaignTotals?.total_followups || 0}
+                                                                                    <TimeValue>{rrCampaignTotals?.total_followups || 0}</TimeValue>
                                                                                 </td>
                                                                                 <td style={{ padding: '4px 8px', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>
                                                                                     <span style={{ padding: '2px 8px', borderRadius: '9999px', fontSize: '12px', fontWeight: '500', backgroundColor: `${themeColor}20`, color: themeColor }}>
-                                                                                        {reason.total_count || 0}
+                                                                                        <TimeValue>{reason.total_count || 0}</TimeValue>
                                                                                     </span>
                                                                                 </td>
                                                                                 <td
@@ -5677,11 +5716,11 @@ const Dashboard = () => {
                                                                                 {rrCampaignTotals?.total_customers || 0}
                                                                             </td>
                                                                             <td style={{ padding: '4px 8px', fontSize: '12px', color: 'black', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>
-                                                                                {rrCampaignTotals?.total_followups || 0}
+                                                                                <TimeValue>{rrCampaignTotals?.total_followups || 0}</TimeValue>
                                                                             </td>
                                                                             <td style={{ padding: '4px 8px', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>
                                                                                 <span style={{ padding: '2px 8px', borderRadius: '9999px', fontSize: '12px', fontWeight: '500', backgroundColor: `${themeColor}20`, color: themeColor }}>
-                                                                                    {reason.total_count || 0}
+                                                                                    <TimeValue>{reason.total_count || 0}</TimeValue>
                                                                                 </span>
                                                                             </td>
                                                                             <td style={{ padding: '4px 8px', fontSize: '12px', color: 'black', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>
@@ -5865,11 +5904,11 @@ const Dashboard = () => {
                                                                                 {rrCampaignTotals?.total_customers || 0}
                                                                             </td>
                                                                             <td style={{ padding: '4px 8px', fontSize: '12px', color: 'black', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>
-                                                                                {rrCampaignTotals?.total_followups || 0}
+                                                                                <TimeValue>{rrCampaignTotals?.total_followups || 0}</TimeValue>
                                                                             </td>
                                                                             <td style={{ padding: '4px 8px', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>
                                                                                 <span style={{ padding: '2px 8px', borderRadius: '9999px', fontSize: '12px', fontWeight: '500', backgroundColor: `${themeColor}20`, color: themeColor }}>
-                                                                                    {reason.total_count || 0}
+                                                                                    <TimeValue>{reason.total_count || 0}</TimeValue>
                                                                                 </span>
                                                                             </td>
                                                                             <td style={{ padding: '4px 8px', textAlign: 'center', border: '1px solid #E5E7EB', wordWrap: 'break-word' }}>

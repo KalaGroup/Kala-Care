@@ -34,6 +34,14 @@ const convertUTCToIST = (dateTimeString) => {
 const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, isBranchAdmin, isMasterAdmin, isITAdmin }) => {
     const navigate = useNavigate();
 
+    // Yellow highlight for time-dependent counts. 'all' (Calendar) = no highlight.
+    const isTimeFiltered = timePeriod !== 'all';
+    const TimeValue = ({ children }) => (
+        isTimeFiltered
+            ? <span style={{ backgroundColor: '#fde047', borderRadius: '4px', padding: '0 4px' }}>{children}</span>
+            : <>{children}</>
+    );
+
     const handleOpenCustomerFromFollowup = (followup) => {
         if (!followup) return;
         setShowAllFollowupsModal(false);
@@ -136,10 +144,14 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         return () => clearTimeout(t);
     }, [followupSearchTerm]);
 
-    // Format date for API
+    // Format date for API — use LOCAL (IST) date parts so the chosen day isn't
+    // shifted to the previous day by UTC conversion (toISOString shifts IST dates back).
     const formatDateForAPI = useCallback((date) => {
         if (!date) return null;
-        return date.toISOString().split('T')[0];
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
     }, []);
 
     // Get date range text for display (for the stats section)
@@ -217,7 +229,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
     // Fetch main performance data - THIS respects the time filter
     const fetchMyPerformance = useCallback(async () => {
-        if (fetchingRef.current) return;
+        // NOTE: do NOT early-return on fetchingRef here. A filter change can fire while
+        // the initial-mount fetch is still in flight; bailing out silently dropped the
+        // refetch, so counts only updated after a tab switch remounted the component.
         if (!userData || !userData.user_id) {
             setLoading(false);
             return;
@@ -1372,7 +1386,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                         )}
                     </h3>
                     <p className="text-lg sm:text-xl font-bold text-black mt-1">
-                        {performance.total_followups || 0}
+                        <TimeValue>{performance.total_followups || 0}</TimeValue>
                     </p>
 
                     {/* Hover Tooltip */}
@@ -1386,22 +1400,22 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
                 <div className="bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md transition-shadow text-center flex flex-col justify-between min-h-[90px]">
                     <h3 className="text-[11px] sm:text-[12px] font-semibold text-black leading-tight">Work In Progress</h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1">{performance.wip_count || 0}</p>
+                    <p className="text-lg sm:text-xl font-bold text-black mt-1"><TimeValue>{performance.wip_count || 0}</TimeValue></p>
                 </div>
 
                 <div className="bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md transition-shadow text-center flex flex-col justify-between min-h-[90px]">
                     <h3 className="text-[11px] sm:text-[12px] font-semibold text-black leading-tight">Rescheduled</h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1">{performance.rescheduled_count || 0}</p>
+                    <p className="text-lg sm:text-xl font-bold text-black mt-1"><TimeValue>{performance.rescheduled_count || 0}</TimeValue></p>
                 </div>
 
                 <div className="bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md transition-shadow text-center flex flex-col justify-between min-h-[90px]">
                     <h3 className="text-[11px] sm:text-[12px] font-semibold text-black leading-tight">Rejected</h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1">{performance.rejected_count || 0}</p>
+                    <p className="text-lg sm:text-xl font-bold text-black mt-1"><TimeValue>{performance.rejected_count || 0}</TimeValue></p>
                 </div>
 
                 <div className="bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md transition-shadow text-center flex flex-col justify-between min-h-[90px]">
                     <h3 className="text-[11px] sm:text-[12px] font-semibold text-black leading-tight">Completed</h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1">{performance.completed_count || 0}</p>
+                    <p className="text-lg sm:text-xl font-bold text-black mt-1"><TimeValue>{performance.completed_count || 0}</TimeValue></p>
                 </div>
 
                 <div
@@ -1412,7 +1426,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                         Quotation Required
                     </h3>
                     <p className="text-lg sm:text-xl font-bold text-black mt-1">
-                        {quotationCount}
+                        <TimeValue>{quotationCount}</TimeValue>
                     </p>
 
                     {/* Hover Tooltip */}
@@ -1431,7 +1445,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                         Quotation Sent
                     </h3>
                     <p className="text-lg sm:text-xl font-bold text-black mt-1">
-                        {quotationSentCount}
+                        <TimeValue>{quotationSentCount}</TimeValue>
                     </p>
 
                     {/* Hover Tooltip */}

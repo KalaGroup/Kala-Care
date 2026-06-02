@@ -51,25 +51,22 @@ def can_view_branch_data(role: str) -> bool:
 
 def convert_ist_to_utc_datetime(date_str: str, is_end_date: bool = False):
     """
-    Convert IST date string to UTC datetime object
+    Build an IST-naive day boundary. created_at is IST wall-clock (GETDATE()),
+    so we must NOT convert to UTC — just return start/end of the IST day.
+    (Name kept for compatibility; it no longer shifts to UTC.)
     """
     if not date_str:
         return None
-    
+
     try:
         dt = datetime.strptime(date_str, '%Y-%m-%d')
         if is_end_date:
             dt = dt.replace(hour=23, minute=59, second=59, microsecond=999999)
         else:
             dt = dt.replace(hour=0, minute=0, second=0, microsecond=0)
-        
-        # Make timezone-aware as IST
-        dt_ist = dt.replace(tzinfo=IST)
-        # Convert to UTC
-        dt_utc = dt_ist.astimezone(timezone.utc)
-        return dt_utc
+        return dt  # naive IST boundary — matches stored created_at
     except Exception as e:
-        print(f"Error converting date to UTC: {e}")
+        print(f"Error converting date: {e}")
         return None
 
 def get_db():

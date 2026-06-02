@@ -5,28 +5,27 @@ import BranchAdminExpense from '../components/BranchAdminExpense';
 import HOExpense from '../components/HOExpense';
 
 const Expense = () => {
-  // Get user from sessionStorage
   const user = JSON.parse(sessionStorage.getItem('user'));
 
-  // Check if user is branch_admin
-  const isBranchAdmin = user?.role === 'branch_admin' || user?.role === 'employee';
+  // An employee is a branch admin ONLY if they are not at HO
+  const isBranchAdmin =
+    user?.role === 'branch_admin' ||
+    (user?.role === 'employee' && user?.branch !== 'HO');
 
-  // Check if user is master_admin, it_admin, or employee with HO branch
+  // HO-level views: master_admin, it_admin, or an employee at HO
   const isMasterOrITAdmin = user?.role === 'master_admin' || user?.role === 'it_admin';
   const isHOEmployee = user?.role === 'employee' && user?.branch === 'HO';
-
-  // Show HOExpense for master_admin, it_admin, and HO employees
   const showHOExpense = isMasterOrITAdmin || isHOEmployee;
 
-  // If user is branch_admin, show BranchAdminExpense component
   if (isBranchAdmin) {
     return <BranchAdminExpense />;
   }
 
-  // If user is master_admin, it_admin, or HO employee, show HOExpense component
   if (showHOExpense) {
     return <HOExpense />;
   }
-}
+
+  return null; // fallback so the component always returns something
+};
 
 export default Expense;

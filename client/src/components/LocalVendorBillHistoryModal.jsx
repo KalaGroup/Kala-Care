@@ -18,6 +18,7 @@ const LocalVendorBillHistoryModal = ({
   const [loading, setLoading] = useState(false);
   const [groups, setGroups] = useState([]);
   const [branchFilter, setBranchFilter] = useState('');
+  const [voucherSort, setVoucherSort] = useState(''); // '' | 'asc' | 'desc'
   const [selected, setSelected] = useState(null);
   const [records, setRecords] = useState([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
@@ -99,10 +100,18 @@ const LocalVendorBillHistoryModal = ({
     }
   };
 
-  const visibleGroups = useMemo(
-    () => groups.filter(g => !branchFilter || g.branch_code === branchFilter),
-    [groups, branchFilter]
-  );
+  const visibleGroups = useMemo(() => {
+    const out = groups.filter(g => !branchFilter || g.branch_code === branchFilter);
+    if (voucherSort) {
+      out.sort((a, b) => {
+        const cmp = String(a.submit_voucher_no || '').localeCompare(
+          String(b.submit_voucher_no || ''), undefined, { numeric: true, sensitivity: 'base' }
+        );
+        return voucherSort === 'asc' ? cmp : -cmp;
+      });
+    }
+    return out;
+  }, [groups, branchFilter, voucherSort]);
   const recTotal = records.reduce((s, r) => s + parseFloat(r.payment_amount || 0), 0);
 
   return (
@@ -144,6 +153,38 @@ const LocalVendorBillHistoryModal = ({
                   <button onClick={() => setBranchFilter('')}
                     className="px-1.5 py-0.5 text-[10px] text-red-600 border border-red-300 rounded hover:bg-red-50">Clear</button>
                 )}
+                <div className="flex items-center gap-1 px-2 py-1 border border-indigo-200 rounded-lg bg-indigo-50">
+                  <span className="text-[10px] font-bold text-indigo-600 uppercase whitespace-nowrap">Voucher:</span>
+                  <button
+                    onClick={() => setVoucherSort(s => s === 'asc' ? '' : 'asc')}
+                    className="px-2 py-0.5 rounded text-[11px] font-semibold transition-all"
+                    style={voucherSort === 'asc'
+                      ? { background: themeColor, color: '#fff' }
+                      : { background: '#fff', color: '#374151', border: '1px solid #c7d2fe' }}
+                    title="Sort by voucher code ascending"
+                  >
+                    A → Z
+                  </button>
+                  <button
+                    onClick={() => setVoucherSort(s => s === 'desc' ? '' : 'desc')}
+                    className="px-2 py-0.5 rounded text-[11px] font-semibold transition-all"
+                    style={voucherSort === 'desc'
+                      ? { background: themeColor, color: '#fff' }
+                      : { background: '#fff', color: '#374151', border: '1px solid #c7d2fe' }}
+                    title="Sort by voucher code descending"
+                  >
+                    Z → A
+                  </button>
+                  {voucherSort && (
+                    <button
+                      onClick={() => setVoucherSort('')}
+                      className="px-1.5 py-0.5 rounded text-[11px] font-semibold text-red-600 hover:bg-red-50"
+                      title="Clear sort"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
                 {canExport && visibleGroups.length > 0 && (
                   <button
                     onClick={() => exportToExcel(visibleGroups.map(g => ({

@@ -165,7 +165,7 @@ const ALL_COLUMNS = [
   { key: 'task_assigned_datetime', label: 'Task Assigned Date & Time', width: 115 },
   { key: 'sr_reach_at_site_datetime', label: 'SR Reach at Site Date & Time', width: 120 },
   { key: 'km_verification_remark', label: 'Branch Verification Remark', width: 145 },
-  { key: 'sr_reach_at_site_datetime', label: 'SR Reach at Site Date & Time', width: 110 },
+  { key: 'sr_trip_start_datetime', label: 'SR Trip Start Date & Time', width: 115 },
   { key: 'sr_trip_start_lat_long', label: 'SR Trip Start Lat Long', width: 120 },
   { key: 'sr_reach_at_site_lat_long', label: 'SR Reach at Site Lat Long', width: 125 },
   { key: 'kms_travelled', label: 'KMs Travelled', width: 75 },
@@ -190,7 +190,38 @@ const OE_TABLE_COLS = [
 ];
 const oeTableActualWidth = OE_TABLE_COLS.reduce((s, c) => s + c.w, 0);
 
-const DEFAULT_COL_ORDER = ALL_COLUMNS.map(c => c.key);
+const DEFAULT_COL_ORDER = [
+  'verification_status', // Verify — moved to start
+  'sr_no',
+  'installation_site_address',
+  'account',
+  'service_request_no',
+  'sr_sub_type',
+  'sr_trip_start_datetime',
+  'sr_reach_at_site_datetime',
+  'kms_travelled',
+  'two_way_km',
+  'branch_verified_km',
+  'km_verification_remark',
+  'ho_corrected_km',
+  'ho_remark',
+  'km_rate_applied',
+  'da_amount',
+  'freight_charges',
+  'total_amount',
+  'appointment_number',
+  'sr_type',
+  'sr_due_date',
+  'task_start_date',
+  'task_end_date',
+  'task_status',
+  'task_assigned_datetime',
+  'sr_trip_start_lat_long',
+  'sr_reach_at_site_lat_long',
+  'sr_closed_date',
+  'sr_status',
+];
+
 const COL_MAP = Object.fromEntries(ALL_COLUMNS.map(c => [c.key, c]));
 
 const exportToExcel = (data, filename, headers) => {
@@ -695,7 +726,7 @@ const HOExpense = () => {
   const [vendorList, setVendorList] = useState([]);
   const [loadingVendorList, setLoadingVendorList] = useState(false);
   const [vendorSearch, setVendorSearch] = useState('');
-  
+
   const [dynamicDAAmounts, setDynamicDAAmounts] = useState({});
   const [dynamicTotalAmounts, setDynamicTotalAmounts] = useState({});
   const [localDAAmounts, setLocalDAAmounts] = useState({});
@@ -725,7 +756,7 @@ const HOExpense = () => {
   // Table States
   const [columnOrder, setColumnOrder] = useState(() => {
     try {
-      const saved = localStorage.getItem('hoExpense_col_order');
+      const saved = localStorage.getItem('hoExpense_col_order_v2');
       if (saved && Array.isArray(JSON.parse(saved))) {
         const savedOrder = JSON.parse(saved);
         // Append columns added after the saved order (e.g. freight_charges)
@@ -740,7 +771,7 @@ const HOExpense = () => {
   const topScrollBarRef = useRef(null);
 
   useEffect(() => {
-    localStorage.setItem('hoExpense_col_order', JSON.stringify(columnOrder));
+    localStorage.setItem('hoExpense_col_order_v2', JSON.stringify(columnOrder));
   }, [columnOrder]);
 
   // Reset local states only when ENGINEER changes (not when records merely refresh)
@@ -4684,7 +4715,7 @@ const HOExpense = () => {
                         <div className="overflow-auto" style={{ maxHeight: '550px', scrollbarWidth: 'thin' }}>
                           <table className="w-full border-collapse border border-gray-200" style={{ minWidth: '2100px' }}>
                             <thead className="sticky top-0 z-20"><tr style={{ backgroundColor: '#f0f1ff' }}>
-                              {[['Verify', 60, true], ['Sr.', 45], ['Date', 90], ['SR/Inv/Engine No.', 150], ['Customer', 160], ['Location', 140], ['Work Description', 180], ['Labour Sale Exp.', 120], ['Part Sale Exp.', 120], ['Remark', 150], ['KM 2-Way', 80], ['HO Corrected KM', 110], ['Rate', 70], ['DA', 90], ['Amount', 95], ['HO Remark', 150], ['Status', 90]].map(([l, w, sticky], i) =>
+                              {[['Verify', 60, true], ['Sr.', 45], ['Date', 90], ['SR/Inv/Engine No.', 150], ['Customer', 160], ['Location', 140], ['KM 2-Way', 80], ['HO Corrected KM', 110], ['Rate', 70], ['DA', 90], ['Amount', 95], ['HO Remark', 150], ['Work Description', 180], ['Labour Sale Exp.', 120], ['Part Sale Exp.', 120], ['Remark', 150], ['Status', 90]].map(([l, w, sticky], i) =>
                                 <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border border-gray-200 uppercase text-center" style={{ minWidth: `${w}px`, backgroundColor: '#f0f1ff', ...(sticky && { position: 'sticky', left: 0, zIndex: 30, boxShadow: '2px 0 4px -2px rgba(0,0,0,0.1)' }) }}>{l}</th>)}
                             </tr></thead>
                             <tbody>
@@ -4704,10 +4735,6 @@ const HOExpense = () => {
                                     <td className="px-2 py-0.5 border border-gray-200 text-[11px]"><div className="truncate" title={rec.sr_invoice_engine_no}>{rec.sr_invoice_engine_no || '-'}</div></td>
                                     <td className="px-2 py-0.5 border border-gray-200 text-[11px]"><div className="truncate" title={rec.customer_name}>{rec.customer_name || '-'}</div></td>
                                     <td className="px-2 py-0.5 border border-gray-200 text-[11px]"><div className="truncate" title={rec.location}>{rec.location || '-'}</div></td>
-                                    <td className="px-2 py-0.5 border border-gray-200 text-[11px]"><div className="truncate" title={rec.work_description}>{rec.work_description || '-'}</div></td>
-                                    <td className="px-2 py-0.5 border border-gray-200 text-[11px] text-center">{rec.labour_sale_expected || '-'}</td>
-                                    <td className="px-2 py-0.5 border border-gray-200 text-[11px] text-center">{rec.part_sale_expected || '-'}</td>
-                                    <td className="px-2 py-0.5 border border-gray-200 text-[11px]"><div className="truncate" title={rec.remark}>{rec.remark || '-'}</div></td>
                                     <td className="px-2 py-0.5 border border-gray-200 text-[11px] text-center">{rec.two_way_km || '-'}</td>
                                     <td className="px-2 py-0.5 border border-gray-200 text-center">
                                       <div className="relative">
@@ -4742,6 +4769,10 @@ const HOExpense = () => {
                                         placeholder="Add remark"
                                         className={`w-full px-1 py-0.5 text-[11px] border rounded ${isVerified ? 'bg-gray-100 cursor-not-allowed' : 'border-gray-300'}`} />
                                     </td>
+                                    <td className="px-2 py-0.5 border border-gray-200 text-[11px]"><div className="truncate" title={rec.work_description}>{rec.work_description || '-'}</div></td>
+                                    <td className="px-2 py-0.5 border border-gray-200 text-[11px] text-center">{rec.labour_sale_expected || '-'}</td>
+                                    <td className="px-2 py-0.5 border border-gray-200 text-[11px] text-center">{rec.part_sale_expected || '-'}</td>
+                                    <td className="px-2 py-0.5 border border-gray-200 text-[11px]"><div className="truncate" title={rec.remark}>{rec.remark || '-'}</div></td>
                                     <td className="px-2 py-0.5 border border-gray-200 text-center">
                                       <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold ${isVerified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{isVerified ? 'Verified' : 'Pending'}</span>
                                     </td>
@@ -4751,13 +4782,13 @@ const HOExpense = () => {
                             </tbody>
                             <tfoot className="sticky bottom-0"><tr style={{ backgroundColor: '#f0f1ff' }}>
                               <td className="border border-gray-200" style={{ position: 'sticky', left: 0, zIndex: 25, backgroundColor: '#f0f1ff', boxShadow: '2px 0 4px -2px rgba(0,0,0,0.1)' }} />
-                              <td colSpan={13} className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border border-gray-200">
+                              <td colSpan={9} className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border border-gray-200">
                                 {salesBMKmFilter ? `Filtered Total (KM > ${salesBMKmFilter})` : 'Grand Total'}
                               </td>
                               <td className="px-2 py-1.5 text-[11px] font-bold text-center border border-gray-200" style={{ color: themeColor }}>
                                 ₹{salesBMTabTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </td>
-                              <td colSpan={2} className="border border-gray-200" />
+                              <td colSpan={6} className="border border-gray-200" />
                             </tr></tfoot>
                           </table>
                         </div>
@@ -6687,10 +6718,10 @@ const HOExpense = () => {
                   {expenseHeads.length === 0 && (<div className="text-center py-6 sm:py-8 text-black text-[11px] sm:text-xs">No expense heads added yet. Add your first expense head above.</div>)}
                 </div>
               </div>
-              <div className="sticky bottom-0 bg-white border-t px-4 sm:px-6 py-3 sm:py-4 flex justify-end"><button onClick={() => setShowExpenseHeadModal(false)} className="px-3 sm:px-4 py-1.5 sm:py-2 border rounded-lg text-[11px] sm:text-xs font-medium text-black hover:bg-gray-50 transition-colors" style={{ borderColor: '#D1D5DB' }}>Close</button></div>
             </div>
           </div>
         )}
+
         {showDayLimitsModal && (
           <div
             style={{

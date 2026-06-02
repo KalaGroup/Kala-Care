@@ -10,6 +10,9 @@ from app.models.engagement_model import FollowUp, Activity, RR
 from app.models.user_model import User
 from app.models.campaign_model import Campaign
 
+# IST timezone (UTC+5:30) — created_at is stored in IST via SQL Server GETDATE()
+IST = timezone(timedelta(hours=5, minutes=30))
+
 # Branch name mapping helper
 BRANCH_NAME_MAP = {
     '420435_1': 'Ch.Sambhaji Nagar',
@@ -42,29 +45,29 @@ class EmployeePerformanceController:
     @staticmethod
     def apply_time_filter(query, model, time_period: str = 'all', start_date=None, end_date=None):
         """
-        Apply time filter to query based on time_period or custom date range
+        Apply time filter to query based on time_period or custom date range.
+        created_at is stored in IST (SQL Server GETDATE()), so ALL boundaries
+        must be IST-naive datetimes — never UTC.
         """
-        # Handle custom date range - these come as datetime objects from routes
+        # Custom range: start_date/end_date arrive as IST-naive datetimes from the route
         if start_date is not None and end_date is not None:
-            # If they are already datetime objects (from route conversion)
             if isinstance(start_date, datetime) and isinstance(end_date, datetime):
                 return query.filter(model.created_at >= start_date, model.created_at <= end_date)
-            # If they are strings, parse them
             elif isinstance(start_date, str) and isinstance(end_date, str):
                 try:
                     start = datetime.strptime(start_date, '%Y-%m-%d')
-                    end = datetime.strptime(end_date, '%Y-%m-%d')
                     # Add one day to end date to include the full end date
-                    end = end + timedelta(days=1)
+                    end = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
                     return query.filter(model.created_at >= start, model.created_at <= end)
                 except Exception as e:
                     print(f"Error parsing custom dates: {e}")
                     return query
             else:
                 return query
-        
+
         if time_period and time_period != 'all':
-            now = datetime.now(timezone.utc)
+            # IST "now" as a naive datetime to match IST-stored created_at
+            now = datetime.now(IST).replace(tzinfo=None)
             if time_period == 'month':
                 cutoff_date = now - timedelta(days=30)
             elif time_period == '3months':
@@ -75,9 +78,9 @@ class EmployeePerformanceController:
                 cutoff_date = now - timedelta(days=365)
             else:
                 return query
-            
+
             return query.filter(model.created_at >= cutoff_date)
-        
+
         return query
     
     @staticmethod

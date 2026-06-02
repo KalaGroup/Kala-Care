@@ -227,21 +227,31 @@ function Navbar({ children }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [branchDropdownOpen]);
 
-  // Send logout time to backend (manual or auto), then clear session
-  const recordLogoutAndClear = async (logoutType = 'manual') => {
+  // Send logout time to backend (manual or auto), then clear session.
+  // Uses sendBeacon so the redirect is INSTANT and isn't blocked by the
+  // tracking request — the logout is still recorded server-side.
+  const recordLogoutAndClear = (logoutType = 'manual') => {
     try {
       const stored = JSON.parse(sessionStorage.getItem('user') || '{}');
       if (stored.session_id) {
-        // Use the SAME axios path style as the login call (/api/users/...)
-        // so the request actually reaches the backend.
-        await axios.post(`${import.meta.env.VITE_BACKEND_URL}/users/logout`, {
+        const url = `${import.meta.env.VITE_BACKEND_URL}/users/logout`;
+        const payload = JSON.stringify({
           session_id: stored.session_id,
           logout_type: logoutType,
         });
+
+        if (navigator.sendBeacon) {
+          const blob = new Blob([payload], { type: 'application/json' });
+          navigator.sendBeacon(url, blob);
+        } else {
+          // Fallback: fire without awaiting so it never blocks logout.
+          axios.post(url, JSON.parse(payload)).catch((e) =>
+            console.error('Logout tracking failed:', e)
+          );
+        }
       }
     } catch (e) {
       console.error('Logout tracking failed:', e);
-      // never block logout on a tracking failure
     } finally {
       sessionStorage.removeItem('user');
       sessionStorage.removeItem('token');
@@ -376,8 +386,10 @@ function Navbar({ children }) {
       }
     ];
 
-    const hiddenUserIds = ['31240001', '31250001', '31240012'];
-    const restrictedPaths = ['/import', '/campaigns'];
+    const hiddenUserIds = (import.meta.env.VITE_RESTRICTED_USER_IDS || '')
+      .split(',')
+      .map(id => id.trim())
+      .filter(Boolean); const restrictedPaths = ['/import', '/campaigns'];
     return allItems.filter(item => {
       if (hiddenUserIds.includes(String(user?.user_id)) && restrictedPaths.includes(item.path)) {
         return false;
@@ -1074,8 +1086,8 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
                               disabled={isActive}
                               onClick={() => handleBranchSwitch(b)}
                               className={`w-full text-left px-2 py-1 text-[10px] transition-colors flex items-center gap-1.5 ${isActive
-                                  ? 'bg-green-50 text-green-800 cursor-default font-semibold'
-                                  : 'text-gray-700 hover:bg-gray-50 cursor-pointer'
+                                ? 'bg-green-50 text-green-800 cursor-default font-semibold'
+                                : 'text-gray-700 hover:bg-gray-50 cursor-pointer'
                                 }`}
                             >
                               {isActive && <span className="text-green-600">✓</span>}

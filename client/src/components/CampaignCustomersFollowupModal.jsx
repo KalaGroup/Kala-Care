@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 
 const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl }) => {
@@ -38,24 +38,29 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
         return {};
     };
 
-    // Unique flags from data for the dropdown
-    const uniqueFlags = [...new Set(customers.map(c => c.latest_flag).filter(Boolean))];
+    // Unique flags from data for the dropdown (recompute only when data changes)
+    const uniqueFlags = useMemo(
+        () => [...new Set(customers.map(c => c.latest_flag).filter(Boolean))],
+        [customers]
+    );
 
-    // Filter customers based on search term, status AND flag
-    const filteredCustomers = customers.filter(customer => {
-        const matchesSearch =
-            customer.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            customer.instance_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            customer.phone_number?.includes(searchTerm) ||
-            customer.email?.toLowerCase().includes(searchTerm.toLowerCase());
+    // Filter customers — recompute only when data or a filter actually changes
+    const filteredCustomers = useMemo(() => {
+        const term = searchTerm.toLowerCase();
+        return customers.filter(customer => {
+            const matchesSearch =
+                customer.customer_name?.toLowerCase().includes(term) ||
+                customer.instance_id?.toLowerCase().includes(term) ||
+                customer.phone_number?.includes(searchTerm) ||
+                customer.email?.toLowerCase().includes(term);
 
-        const status = (customer.last_status || 'pending').toLowerCase();
-        const matchesStatus = statusFilter === 'all' || status === statusFilter;
+            const status = (customer.last_status || 'pending').toLowerCase();
+            const matchesStatus = statusFilter === 'all' || status === statusFilter;
+            const matchesFlag = flagFilter === 'all' || customer.latest_flag === flagFilter;
 
-        const matchesFlag = flagFilter === 'all' || customer.latest_flag === flagFilter;
-
-        return matchesSearch && matchesStatus && matchesFlag;
-    });
+            return matchesSearch && matchesStatus && matchesFlag;
+        });
+    }, [customers, searchTerm, statusFilter, flagFilter]);
 
     const fetchCampaignCustomers = async () => {
         try {
