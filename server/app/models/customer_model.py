@@ -49,6 +49,8 @@ class AMCAgreement(Base):
     agreement_start_date = Column(DateTime, nullable=True)
     agreement_end_date = Column(DateTime, nullable=True)
     agreement_product_name = Column(String(500), nullable=True)
+    agreement_invoice_type = Column(String(200), nullable=True)
+    commissioning_date = Column(DateTime, nullable=True)
     last_agreement_number = Column(String(200), nullable=True)
     last_agreement_no_of_years = Column(Integer, nullable=True)
     last_agreement_type = Column(String(100), nullable=True)

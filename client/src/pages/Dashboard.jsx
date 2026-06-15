@@ -542,11 +542,19 @@ const Dashboard = () => {
     }, [userData, loadedTabs.overall]);
 
     // Fetch export permission as soon as userData is available (independent of tab)
+    //commented by nik
+    // useEffect(() => {
+    //     if (userData && userData.user_id) {
+    //         fetchExportPermission();
+    //     }
+    // }, [userData?.user_id]);
+
+    //added by nik
     useEffect(() => {
-        if (userData && userData.user_id) {
-            fetchExportPermission();
+        if (userData) {
+            setCanExport(Boolean(userData.can_export));
         }
-    }, [userData?.user_id]);
+    }, [userData]);
 
     // Load data when time period changes - PREVENT INFINITE LOOP
     // NOTE: fetch functions are intentionally NOT in the dependency array — they are
@@ -2295,6 +2303,7 @@ const Dashboard = () => {
     }, [userData, timePeriod, customStartDate, customEndDate]);
 
     const fetchCampaignPerformance = useCallback(async () => {
+        
         const signal = abortControllerRef.current?.signal;
         try {
             if (isMounted.current) setCampaignLoading(true);

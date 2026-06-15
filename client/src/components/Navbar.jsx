@@ -119,7 +119,7 @@ function Navbar({ children }) {
           {/* Modal Header - Compact */}
           <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-2 flex justify-between items-center">
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold text-gray-900">Terminology Guide</h2>
+              <h2 className="text-base font-semibold text-gray-900">Abbreviations Guide</h2>
             </div>
             <button
               onClick={() => setShowTerminologyModal(false)}

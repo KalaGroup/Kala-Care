@@ -559,7 +559,8 @@ class EngagementController:
         followups_by_customer: Dict[int, List[FollowUp]] = {}
         for f in all_followups_for_customers:
             followups_by_customer.setdefault(f.customer_id, []).append(f)
-        
+            
+        #added by nik
         # ========== OPTIMIZATION: Fetch ALL "transfer-source" campaigns in ONE query ==========
         # For each active campaign, find OLDER campaigns with same name+service
         # Note: MSSQL doesn't support tuple IN syntax, so use or_(and_(...)) instead
@@ -581,9 +582,6 @@ class EngagementController:
             key = (c.name, c.service)
             # Don't include the active campaign itself in its own transfer-source list
             if c.id in active_campaign_ids:
-                # Only exclude if this is exactly the active campaign for this key.
-                # Since active campaigns are identified by id, just skip when this id is the active one
-                # for this key. We'll filter precisely below per active campaign.
                 pass
             transfer_campaigns_by_pair.setdefault(key, []).append(c)
         

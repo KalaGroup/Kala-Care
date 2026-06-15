@@ -1506,39 +1506,81 @@ class EmployeePerformanceController:
                 Campaign.status == 'active'
             ).order_by(Campaign.name).all()
             
+            #commented by nik
+            # If branch_admin, filter campaigns that have customers in their branch
+            # if user_role and user_role.lower() == 'branch_admin' and user_branch:
+            #     filtered_campaigns = []
+                
+            #     for campaign in campaigns:
+            #         asset_numbers = campaign.asset_numbers or []
+            #         if asset_numbers:
+            #             # Check if any customer from this branch is in asset_numbers
+            #             branch_customers = db.query(Customer).filter(
+            #                 Customer.instance_id.in_(asset_numbers),
+            #                 Customer.branch_id == user_branch
+            #             ).first()
+                        
+            #             if branch_customers:
+            #                 filtered_campaigns.append(campaign)
+            #                 continue
+                    
+            #         # Also check if there are any follow-ups from this branch for this campaign
+            #         from app.models.engagement_model import FollowUp
+            #         from app.models.user_model import User
+                    
+            #         branch_users = db.query(User.user_id).filter(User.branch == user_branch).all()
+            #         branch_user_ids = [u[0] for u in branch_users]
+                    
+            #         if branch_user_ids:
+            #             branch_followups = db.query(FollowUp).filter(
+            #                 FollowUp.campaign_id == campaign.id,
+            #                 FollowUp.user_id.in_(branch_user_ids)
+            #             ).first()
+                        
+            #             if branch_followups:
+            #                 filtered_campaigns.append(campaign)
+                
+            #     campaigns = filtered_campaigns
+
+            #added by nik
             # If branch_admin, filter campaigns that have customers in their branch
             if user_role and user_role.lower() == 'branch_admin' and user_branch:
+                from app.models.engagement_model import FollowUp
+                from app.models.user_model import User
+
+                # Pull this branch's customer instance_ids ONCE (indexed query) and
+                # do the asset_numbers membership test in Python. The old code ran
+                # Customer.instance_id.in_(asset_numbers) per campaign, and
+                # asset_numbers can hold 2600+ ids — past SQL Server's 2100-param
+                # IN() limit, which is what raised the 07002 error.
+                branch_rows = db.query(Customer.instance_id).filter(
+                    Customer.branch_id == user_branch
+                ).all()
+                branch_instance_ids = {r[0] for r in branch_rows if r[0]}
+
+                # Branch user_ids fetched ONCE (was re-queried inside the loop).
+                branch_user_ids = [
+                    u[0] for u in db.query(User.user_id)
+                    .filter(User.branch == user_branch).all()
+                ]
+
+                # Campaign ids that already have a follow-up from any branch user.
+                campaigns_with_branch_followups = set()
+                if branch_user_ids:
+                    rows = db.query(FollowUp.campaign_id).filter(
+                        FollowUp.user_id.in_(branch_user_ids),
+                        FollowUp.campaign_id.isnot(None)
+                    ).distinct().all()
+                    campaigns_with_branch_followups = {r[0] for r in rows}
+
                 filtered_campaigns = []
-                
                 for campaign in campaigns:
-                    asset_numbers = campaign.asset_numbers or []
-                    if asset_numbers:
-                        # Check if any customer from this branch is in asset_numbers
-                        branch_customers = db.query(Customer).filter(
-                            Customer.instance_id.in_(asset_numbers),
-                            Customer.branch_id == user_branch
-                        ).first()
-                        
-                        if branch_customers:
-                            filtered_campaigns.append(campaign)
-                            continue
-                    
-                    # Also check if there are any follow-ups from this branch for this campaign
-                    from app.models.engagement_model import FollowUp
-                    from app.models.user_model import User
-                    
-                    branch_users = db.query(User.user_id).filter(User.branch == user_branch).all()
-                    branch_user_ids = [u[0] for u in branch_users]
-                    
-                    if branch_user_ids:
-                        branch_followups = db.query(FollowUp).filter(
-                            FollowUp.campaign_id == campaign.id,
-                            FollowUp.user_id.in_(branch_user_ids)
-                        ).first()
-                        
-                        if branch_followups:
-                            filtered_campaigns.append(campaign)
-                
+                    asset_set = set(campaign.asset_numbers or [])
+                    if asset_set and (branch_instance_ids & asset_set):
+                        filtered_campaigns.append(campaign)
+                    elif campaign.id in campaigns_with_branch_followups:
+                        filtered_campaigns.append(campaign)
+
                 campaigns = filtered_campaigns
             
             result = [
@@ -2689,6 +2731,7 @@ class EmployeePerformanceController:
         Work time is computed on the fly from login/logout — nothing daily is stored.
         """
         try:
+            from datetime import timedelta
             from app.models.login_activity_model import LoginSession, now_ist
             from app.models.user_model import User
 
@@ -2732,20 +2775,38 @@ class EmployeePerformanceController:
                 m = (secs % 3600) // 60
                 return f"{h}h {m}m"
 
-            def session_secs(s):
+            # One place decides logout_time + status + duration.
+            # The 3 client signals (manual/auto/close) are best-effort; on a
+            # crash, power loss, dropped sendBeacon, or frozen background tab
+            # NONE of them fire and logout_time stays NULL forever -> stuck on
+            # "Active". So self-heal: any open session that can't still be live
+            # is marked 'expired' with a synthesized logout time.
+            def resolve_session(s):
+                # Already closed -> trust stored values.
                 if s.logout_time:
                     if s.duration_seconds is not None:
-                        return max(s.duration_seconds, 0)
-                    return max(int((s.logout_time - s.login_time).total_seconds()), 0)
+                        dur = max(s.duration_seconds, 0)
+                    else:
+                        dur = max(int((s.logout_time - s.login_time).total_seconds()), 0)
+                    return s.logout_time, (s.logout_type or "unknown"), dur
+
                 if not s.login_time:
-                    return 0
-                # Open session
+                    return None, "no-logout", 0
+
+                # Open session on TODAY's date.
                 if day == today:
-                    raw = int((now - s.login_time).total_seconds())
-                else:
-                    end_of_day = datetime.combine(day, datetime.max.time())
-                    raw = int((end_of_day - s.login_time).total_seconds())
-                return max(min(raw, MAX_OPEN_SESSION_SECS), 0)
+                    open_secs = int((now - s.login_time).total_seconds())
+                    if open_secs <= MAX_OPEN_SESSION_SECS:
+                        return None, "active", max(open_secs, 0)      # genuinely live
+                    synth = s.login_time + timedelta(seconds=MAX_OPEN_SESSION_SECS)
+                    return synth, "expired", MAX_OPEN_SESSION_SECS
+
+                # Open session on a PAST day -> never closed. Auto-close at
+                # min(login + 10h, end of that day) so it never shows as Active.
+                end_of_day = datetime.combine(day, datetime.max.time())
+                close_at = min(s.login_time + timedelta(seconds=MAX_OPEN_SESSION_SECS), end_of_day)
+                dur = max(int((close_at - s.login_time).total_seconds()), 0)
+                return close_at, "expired", dur
 
             rows = []
             for s in sessions:
@@ -2753,11 +2814,7 @@ class EmployeePerformanceController:
                 branch = u.branch if u else (s.branch or 'N/A')
                 user_name = (u.name if u else None) or s.user_name or 'N/A'
 
-                secs = session_secs(s)
-                if s.logout_time:
-                    status_label = s.logout_type or "unknown"
-                else:
-                    status_label = "active" if day == today else "no-logout"
+                logout_dt, status_label, secs = resolve_session(s)
 
                 rows.append({
                     "user_id": s.user_id,
@@ -2765,7 +2822,7 @@ class EmployeePerformanceController:
                     "branch": branch,
                     "branch_display": get_branch_display_name(branch),
                     "login_time": s.login_time.isoformat() if s.login_time else None,
-                    "logout_time": s.logout_time.isoformat() if s.logout_time else None,
+                    "logout_time": logout_dt.isoformat() if logout_dt else None,
                     "session_seconds": secs,
                     "work_time": fmt_secs(secs),
                     "logout_type": status_label,

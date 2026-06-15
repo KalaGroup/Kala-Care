@@ -2346,6 +2346,7 @@ const Campaign = () => {
                 {/* Dates and Status */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                   <div>
+                    {/* commented by nik
                     <label className="block text-xs font-semibold text-black mb-1">Start Date *</label>
                     <input
                       type="date"
@@ -2372,6 +2373,20 @@ const Campaign = () => {
                       style={{ '--tw-ring-color': themeColor }}
                       disabled={editLoading}
                       min={new Date().toISOString().split('T')[0]} // Add this line
+                    /> */}
+                    <label className="block text-xs font-semibold text-black mb-1">Start Date *</label>
+                    <input
+                      type="date"
+                      value={editCampaignData.start_date}
+                      required
+                      onChange={(e) => {
+                        // Editing: only remove the past-date lock. Let the user decide
+                        // start/end dates freely — don't auto-clear or force anything.
+                        setEditCampaignData({ ...editCampaignData, start_date: e.target.value });
+                      }}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
+                      style={{ '--tw-ring-color': themeColor }}
+                      disabled={editLoading}
                     />
                   </div>
                   <div>

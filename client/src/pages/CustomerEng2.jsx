@@ -1993,6 +1993,47 @@ const CustomerEng2 = () => {
             );
             return;
           }
+          //commented by nik
+          //     }
+          //   }
+          // }
+
+          // setLoading(true);
+          // const submitToast = toast.loading(
+          //   editingFollowup ? "Updating follow-up..." : "Creating follow-ups...",
+          // );
+        }
+      }
+    }
+    //added by nik
+    // ===== "Other"-only confirmation =====
+    // If the user picked ONLY "Other" (no real campaign), ask once if they're sure
+    // they don't want to select a campaign. Skipped when editing an existing follow-up.
+    if (!editingFollowup) {
+      const onlyOtherSelected =
+        selectedCampaignsForFollowup.length === 1 &&
+        selectedCampaignsForFollowup.includes('other');
+
+      if (onlyOtherSelected) {
+        const result = await Swal.fire({
+          title: 'Continue without a campaign?',
+          html: `You selected only <strong>"Other"</strong> and no campaign.<br/><br/>Are you sure you don't want to select a campaign?`,
+          icon: 'question',
+          showCancelButton: true,
+          showCloseButton: true,
+          confirmButtonColor: '#406093',
+          cancelButtonColor: '#d33',
+          confirmButtonText: 'Yes, continue with Other',
+          cancelButtonText: 'No, let me select a campaign',
+          reverseButtons: true,
+          allowOutsideClick: false,
+          allowEscapeKey: false
+        });
+
+        // "No", the X (close), or any dismissal → stop, save nothing,
+        // let the user go back and select a campaign.
+        if (!result.isConfirmed) {
+          return;
         }
       }
     }
@@ -5573,13 +5614,34 @@ const CustomerEng2 = () => {
                         <td className="px-2 py-2 border border-gray-300 text-center align-middle">
                           <select
                             value={campaignData.activity_id || ""}
-                            onChange={(e) =>
-                              updateCampaignFollowupData(
-                                campaignId,
-                                "activity_id",
-                                e.target.value,
-                              )
-                            }
+                            onChange={(e) => {
+                              const newActivityId = e.target.value;
+                              updateCampaignFollowupData(campaignId, 'activity_id', newActivityId);
+
+                              if (newActivityId) {
+                                const selectedActivity = activities.find(a => a.id === parseInt(newActivityId));
+                                const content = (selectedActivity?.content || '').toLowerCase();
+                                const currentStatus = campaignData.status || 'rescheduled';
+
+                                const isNowBlocked =
+                                  (content.includes('quotation send') && currentStatus === 'rescheduled') ||
+                                  (content.includes('quotation required') && (currentStatus === 'wip' || currentStatus === 'completed'));
+
+                                if (isNowBlocked) {
+                                  const safeDefault = content.includes('quotation send') ? 'wip' : 'rescheduled';
+                                  updateCampaignFollowupData(campaignId, 'status', safeDefault);
+
+                                  if (safeDefault === 'wip') {
+                                    updateCampaignFollowupData(campaignId, 'quotation_sent', false);
+                                  }
+                                  if (safeDefault === 'rescheduled') {
+                                    updateCampaignFollowupData(campaignId, 'quotation_sent', false);
+                                    updateCampaignFollowupData(campaignId, 'quotation_no', '');
+                                    updateCampaignFollowupData(campaignId, 'quotation_value', '');
+                                  }
+                                }
+                              }
+                            }}
                             className="w-full border border-gray-300 rounded-lg px-2 py-1 text-[11px] focus:ring-2 focus:border-transparent transition-all text-center text-black"
                             style={{ "--tw-ring-color": themeColor }}
                             required
@@ -5636,7 +5698,9 @@ const CustomerEng2 = () => {
                         </td>
 
                         <td className="px-2 py-1.5 border border-gray-300 text-center align-middle">
-                          <select
+
+                          {/*commented by nik
+                           <select
                             value={campaignData.status || 'rescheduled'}
                             onChange={(e) => {
                               const newStatus = e.target.value;
@@ -5660,6 +5724,51 @@ const CustomerEng2 = () => {
                             <option value="wip">Work in Progress</option>
                             <option value="completed">Completed</option>
                             <option value="rejected">Rejected</option>
+                          </select> */}
+                          {/*added by nik */}
+                          <select
+                            value={campaignData.status || 'rescheduled'}
+                            onChange={(e) => {
+                              const newStatus = e.target.value;
+
+                              // If quotation is sent, prevent changing status to "rescheduled"
+                              if (campaignData.quotation_sent && newStatus === 'rescheduled') {
+                                const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
+                                toast.error(`Cannot change status to "Follow-up Reschedule" because quotation has already been sent for campaign "${campaign?.name}".`);
+                                return;
+                              }
+
+                              updateCampaignFollowupData(campaignId, 'status', newStatus);
+                              if (newStatus !== 'rejected') {
+                                updateCampaignFollowupData(campaignId, 'rr_id', '');
+                              }
+                            }}
+                            className="w-full border border-gray-300 rounded-lg px-2 py-1 text-[11px] focus:ring-2 focus:border-transparent transition-all font-medium text-center text-black"
+                            style={{ '--tw-ring-color': "themeColor" }}
+                          >
+                            {(() => {
+                              const selectedActivity = activities.find(
+                                a => a.id === parseInt(campaignData.activity_id)
+                              );
+                              const activityContent = (selectedActivity?.content || '').toLowerCase();
+
+                              const isQuotationSendActivity = activityContent.includes('quotation send');
+                              const isQuotationRequiredActivity = activityContent.includes('quotation required');
+
+                              const options = [
+                                { value: 'rescheduled', label: 'Follow-up Reschedule' },
+                                { value: 'wip', label: 'Work in Progress' },
+                                { value: 'completed', label: 'Completed' },
+                                { value: 'rejected', label: 'Rejected' },
+                              ];
+
+                              return options.map(opt => {
+                                if (isQuotationSendActivity && opt.value === 'rescheduled') return null;
+                                if (isQuotationRequiredActivity && opt.value === 'wip') return null;
+                                if (isQuotationRequiredActivity && opt.value === 'completed') return null;
+                                return <option key={opt.value} value={opt.value}>{opt.label}</option>;
+                              });
+                            })()}
                           </select>
                         </td>
 
@@ -5668,9 +5777,11 @@ const CustomerEng2 = () => {
                             {!isOther && campaignData.status === 'rejected' ? (
                               <select
                                 value={campaignData.rr_id || ""}
+                                //commented by nik
                                 onChange={(e) =>
                                   updateCampaignFollowupData(campaignId, "rr_id", e.target.value)
                                 }
+
                                 className={`w-full border rounded-lg px-2 py-1 text-[11px] ${!campaignData.rr_id ? 'border-red-500 bg-red-50' : 'border-gray-300'
                                   }`}
                                 style={{ "--tw-ring-color": themeColor }}

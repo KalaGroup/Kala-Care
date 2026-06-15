@@ -23,7 +23,7 @@ def get_db():
         db.close()
 
 FILE_TYPES = [
-    "AMC Agreement History",
+    "AMC Population Report",
     "Asset Detailed Report",
     "Asset Details with Last Oil Service",
     "Anubandhan Plus Quotes Report",

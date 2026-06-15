@@ -265,9 +265,13 @@ const CampaignCustomersModal = ({ isOpen, onClose, campaign, apiBaseUrl, userDat
                 <div className="relative w-screen h-screen max-w-none bg-white shadow-2xl overflow-hidden rounded-none">
                     {/* Header */}
                     <div className="relative px-3 sm:px-5 py-2 sm:py-3" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}>
-                        <div className="absolute top-0 right-0 w-48 sm:w-64 h-48 sm:h-64 bg-white/5 rounded-full -mr-24 sm:-mr-32 -mt-24 sm:-mt-32"></div>
-                        <div className="absolute bottom-0 left-0 w-36 sm:w-48 h-36 sm:h-48 bg-white/5 rounded-full -ml-18 sm:-ml-24 -mb-18 sm:-mb-24"></div>
-
+                        {/*commented by nik*/}
+                        {/* <div className="absolute top-0 right-0 w-48 sm:w-64 h-48 sm:h-64 bg-white/5 rounded-full -mr-24 sm:-mr-32 -mt-24 sm:-mt-32"></div>
+                        <div className="absolute bottom-0 left-0 w-36 sm:w-48 h-36 sm:h-48 bg-white/5 rounded-full -ml-18 sm:-ml-24 -mb-18 sm:-mb-24"></div> */}
+                        {/*added by nik*/}
+                        <div className="absolute top-0 right-0 w-48 sm:w-64 h-48 sm:h-64 bg-white/5 rounded-full -mr-24 sm:-mr-32 -mt-24 sm:-mt-32 pointer-events-none"></div>
+                        <div className="absolute bottom-0 left-0 w-36 sm:w-48 h-36 sm:h-48 bg-white/5 rounded-full -ml-18 sm:-ml-24 -mb-18 sm:-mb-24 pointer-events-none"></div>
+                        
                         <div className="relative flex items-center justify-between gap-2">
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-1.5 sm:gap-2 mb-0.5">

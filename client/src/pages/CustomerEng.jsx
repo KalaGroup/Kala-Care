@@ -2134,6 +2134,38 @@ const CustomerEng = () => {
     };
 
     // Add this function to check if WIP quotation can be created (must be > 90 days since last WIP quotation)
+    //nik commented
+    // const canCreateWipQuotation = (campaignId) => {
+    //     // Get all followups for this campaign with WIP status and quotation sent
+    //     const wipQuotations = customerFollowups.filter(
+    //         f => f.campaign_id === parseInt(campaignId) &&
+    //             f.status === 'wip' &&
+    //             f.quotation_sent === true
+    //     );
+
+    //     if (wipQuotations.length === 0) {
+    //         return true; // No existing WIP quotation, can create
+    //     }
+
+    //     // Get the latest WIP quotation
+    //     const latestWip = wipQuotations.sort((a, b) =>
+    //         new Date(b.followup_date) - new Date(a.followup_date)
+    //     )[0];
+
+    //     // Calculate days since last WIP quotation
+    //     const today = new Date();
+    //     today.setHours(0, 0, 0, 0);
+    //     const lastWipDate = new Date(latestWip.followup_date);
+    //     lastWipDate.setHours(0, 0, 0, 0);
+
+    //     const diffTime = today - lastWipDate;
+    //     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    //     // Allow only if more than 90 days have passed
+    //     return diffDays > 90;
+    // };
+
+    //nik - quotation can be send 2 times
     const canCreateWipQuotation = (campaignId) => {
         // Get all followups for this campaign with WIP status and quotation sent
         const wipQuotations = customerFollowups.filter(
@@ -2146,22 +2178,20 @@ const CustomerEng = () => {
             return true; // No existing WIP quotation, can create
         }
 
-        // Get the latest WIP quotation
-        const latestWip = wipQuotations.sort((a, b) =>
-            new Date(b.followup_date) - new Date(a.followup_date)
-        )[0];
-
-        // Calculate days since last WIP quotation
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const lastWipDate = new Date(latestWip.followup_date);
-        lastWipDate.setHours(0, 0, 0, 0);
 
-        const diffTime = today - lastWipDate;
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        // Count how many WIP quotations were sent within the last 90 days
+        const recentWipCount = wipQuotations.filter(f => {
+            if (!f.followup_date) return false;
+            const wipDate = new Date(f.followup_date);
+            wipDate.setHours(0, 0, 0, 0);
+            const diffDays = Math.ceil((today - wipDate) / (1000 * 60 * 60 * 24));
+            return diffDays <= 90;
+        }).length;
 
-        // Allow only if more than 90 days have passed
-        return diffDays > 90;
+        // Allow up to 2 WIP quotations within 90 days; block the 3rd
+        return recentWipCount < 2;
     };
 
     const handleSubmitFollowup = async (e) => {
@@ -2351,6 +2381,7 @@ const CustomerEng = () => {
             if (!isOtherType && campaignData.status === 'wip' && campaignData.quotation_sent) {
                 if (!canCreateWipQuotation(campaignId)) {
                     const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
+                    // toast.error(`Cannot send quotation with WIP status for campaign "${campaign?.name}". Last WIP quotation was sent within the last 90 days. Please wait until 90 days have passed or use a different status.`);
                     toast.error(`Cannot send quotation with WIP status for campaign "${campaign?.name}". Last WIP quotation was sent within the last 90 days. Please wait until 90 days have passed or use a different status.`);
                     return;
                 }
@@ -2373,13 +2404,92 @@ const CustomerEng = () => {
                 campaignData.quotation_value = '';
             }
         }
+        //commmented by nik
+        // setLoading(true);
+        // const submitToast = toast.loading(editingFollowup ? 'Updating follow-up...' : 'Creating follow-ups...');
+
+        // try {
+        //     for (const campaignId of selectedCampaignsForFollowup) {
+        //         const campaignData = campaignFollowupData[campaignId];
+        //         const isOtherType = campaignId === 'other';
+
+        //added by nik
+        // ===== Same-product (sibling) campaign prompt =====
+        // If the customer is also enrolled in OTHER active campaigns with the SAME
+        // product (service) as a selected one, offer to record the same follow-up
+        // there too. "Yes" -> both campaigns get the same follow-up; "No" -> only
+        // the originally selected ones. Skipped when editing an existing follow-up.
+        let campaignsToSubmit = [...selectedCampaignsForFollowup];
+        const effectiveData = { ...campaignFollowupData };
+
+        if (!editingFollowup) {
+            const selectedSet = new Set(selectedCampaignsForFollowup.map(String));
+            const siblingToSource = {}; // siblingCampaignId -> sourceCampaignId (data to copy)
+
+            for (const campaignId of selectedCampaignsForFollowup) {
+                if (campaignId === 'other') continue;
+                const src = selectableCampaigns.find(c => String(c.id) === String(campaignId));
+                const service = (src?.service || '').trim().toLowerCase();
+                if (!service) continue;
+
+                // enrolled campaigns with the same product, not already selected
+                customerCampaigns.forEach(c => {
+                    if (String(c.id) === String(campaignId)) return;
+                    if (selectedSet.has(String(c.id))) return;
+                    if ((c.service || '').trim().toLowerCase() !== service) return;
+                    if (!(String(c.id) in siblingToSource)) {
+                        siblingToSource[String(c.id)] = campaignId; // first matching source wins
+                    }
+                });
+            }
+
+            const siblingIds = Object.keys(siblingToSource);
+            if (siblingIds.length > 0) {
+                const listHtml = siblingIds.map(sid => {
+                    const c = customerCampaigns.find(cc => String(cc.id) === sid);
+                    return `<li><strong>${c?.name || sid}</strong> (${c?.service || ''})</li>`;
+                }).join('');
+
+                const result = await Swal.fire({
+                    title: 'Same product — apply to other campaign too?',
+                    html: `This customer is also enrolled in the following campaign(s) with the same product:<ul style="text-align:left;margin-top:8px;">${listHtml}</ul>Do you want to record the same follow-up there as well?`,
+                    icon: 'question',
+                    showCancelButton: true,
+                    showCloseButton: true,
+                    confirmButtonColor: '#406093',
+                    cancelButtonColor: '#d33',
+                    confirmButtonText: 'Yes, apply to both',
+                    cancelButtonText: 'No, only selected',
+                    reverseButtons: true,
+                    allowOutsideClick: false,
+                    allowEscapeKey: false
+                });
+
+                // If user closed the popup (X button) or it was dismissed without a real choice,
+                // stop everything — do NOT save anything.
+                if (result.dismiss === Swal.DismissReason.close) {
+                    setLoading(false);
+                    return;
+                }
+
+                if (result.isConfirmed) {
+                    siblingIds.forEach(sid => {
+                        const sourceId = siblingToSource[sid];
+                        const c = customerCampaigns.find(cc => String(cc.id) === sid);
+                        const realId = c ? c.id : sid;
+                        effectiveData[realId] = { ...effectiveData[sourceId] }; // copy same follow-up data
+                        campaignsToSubmit.push(realId);
+                    });
+                }
+            }
+        }
 
         setLoading(true);
         const submitToast = toast.loading(editingFollowup ? 'Updating follow-up...' : 'Creating follow-ups...');
 
         try {
-            for (const campaignId of selectedCampaignsForFollowup) {
-                const campaignData = campaignFollowupData[campaignId];
+            for (const campaignId of campaignsToSubmit) {
+                const campaignData = effectiveData[campaignId];
                 const isOtherType = campaignId === 'other';
 
                 if (isOtherType) {
@@ -2496,11 +2606,18 @@ const CustomerEng = () => {
             }
 
             toast.dismiss(submitToast);
-            toast.success(editingFollowup ? 'Follow-up updated successfully!' : `${selectedCampaignsForFollowup.length} follow-up(s) created successfully!`);
+            //commented by nik
+            // toast.success(editingFollowup ? 'Follow-up updated successfully!' : `${selectedCampaignsForFollowup.length} follow-up(s) created successfully!`);
+
+            // // Save each submitted remark to sessionStorage history (last 5)
+            // selectedCampaignsForFollowup.forEach(campaignId => {
+            //     const remark = campaignFollowupData[campaignId]?.remark;
+            //added by nik
+            toast.success(editingFollowup ? 'Follow-up updated successfully!' : `${campaignsToSubmit.length} follow-up(s) created successfully!`);
 
             // Save each submitted remark to sessionStorage history (last 5)
-            selectedCampaignsForFollowup.forEach(campaignId => {
-                const remark = campaignFollowupData[campaignId]?.remark;
+            campaignsToSubmit.forEach(campaignId => {
+                const remark = effectiveData[campaignId]?.remark;
                 if (remark && remark.trim()) {
                     saveRemarkToHistory(remark);
                 }
@@ -6087,7 +6204,29 @@ const CustomerEng = () => {
                                                 <td className="px-2 py-1.5 border border-gray-300 text-center align-middle">
                                                     <select
                                                         value={campaignData.activity_id || ''}
-                                                        onChange={(e) => updateCampaignFollowupData(campaignId, 'activity_id', e.target.value)}
+                                                        //commented by nik
+                                                        // onChange={(e) => updateCampaignFollowupData(campaignId, 'activity_id', e.target.value)}
+                                                        //added by nik
+                                                        onChange={(e) => {
+                                                            const newActivityId = e.target.value;
+                                                            updateCampaignFollowupData(campaignId, 'activity_id', newActivityId);
+
+                                                            if (newActivityId) {
+                                                                const selectedActivity = activities.find(a => a.id === parseInt(newActivityId));
+                                                                const content = (selectedActivity?.content || '').toLowerCase();
+
+                                                                const currentStatus = campaignData.status || 'rescheduled';
+
+                                                                const isNowBlocked =
+                                                                    (content.includes('quotation send') && currentStatus === 'rescheduled') ||
+                                                                    (content.includes('quotation required') && (currentStatus === 'wip' || currentStatus === 'completed'));
+
+                                                                if (isNowBlocked) {
+                                                                    const safeDefault = content.includes('quotation send') ? 'wip' : 'rescheduled';
+                                                                    updateCampaignFollowupData(campaignId, 'status', safeDefault);
+                                                                }
+                                                            }
+                                                        }}
                                                         className="w-full border border-gray-300 rounded-lg px-2 py-1 text-[11px] focus:ring-2 focus:border-transparent transition-all text-center text-black"
                                                         style={{ '--tw-ring-color': themeColor }}
                                                         required
@@ -6142,7 +6281,8 @@ const CustomerEng = () => {
                                                     </select>
                                                 </td>
                                                 <td className="px-2 py-1.5 border border-gray-300 text-center align-middle">
-                                                    <select
+                                                    {/* commented by nik */}
+                                                    {/* <select
                                                         value={campaignData.status || 'rescheduled'}
                                                         onChange={(e) => {
                                                             const newStatus = e.target.value;
@@ -6166,6 +6306,56 @@ const CustomerEng = () => {
                                                         <option value="wip">Work in Progress</option>
                                                         <option value="completed">Completed</option>
                                                         <option value="rejected">Rejected</option>
+                                                    </select> */}
+                                                    {/* added by nik */}
+                                                    <select
+                                                        value={campaignData.status || 'rescheduled'}
+                                                        onChange={(e) => {
+                                                            const newStatus = e.target.value;
+
+                                                            // If quotation is sent, prevent changing status to "rescheduled"
+                                                            if (campaignData.quotation_sent && newStatus === 'rescheduled') {
+                                                                const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
+                                                                toast.error(`Cannot change status to "Follow-up Reschedule" because quotation has already been sent for campaign "${campaign?.name}".`);
+                                                                return;
+                                                            }
+
+                                                            updateCampaignFollowupData(campaignId, 'status', newStatus);
+                                                            if (newStatus !== 'rejected') {
+                                                                updateCampaignFollowupData(campaignId, 'rr_id', '');
+                                                            }
+                                                        }}
+                                                        className="w-full border border-gray-300 rounded-lg px-2 py-1 text-[11px] focus:ring-2 focus:border-transparent transition-all font-medium text-center text-black"
+                                                        style={{ '--tw-ring-color': "themeColor" }}
+                                                    >
+                                                        {(() => {
+                                                            const selectedActivity = activities.find(
+                                                                a => a.id === parseInt(campaignData.activity_id)
+                                                            );
+                                                            const activityContent = (selectedActivity?.content || '').toLowerCase();
+
+                                                            const isQuotationSendActivity = activityContent.includes('quotation send');
+                                                            const isQuotationRequiredActivity = activityContent.includes('quotation required');
+
+                                                            const options = [
+                                                                { value: 'rescheduled', label: 'Follow-up Reschedule' },
+                                                                { value: 'wip', label: 'Work in Progress' },
+                                                                { value: 'completed', label: 'Completed' },
+                                                                { value: 'rejected', label: 'Rejected' },
+                                                            ];
+
+                                                            return options.map(opt => {
+                                                                if (isQuotationSendActivity && opt.value === 'rescheduled') return null;
+                                                                if (isQuotationRequiredActivity && opt.value === 'wip') return null;
+                                                                if (isQuotationRequiredActivity && opt.value === 'completed') return null;
+
+                                                                return (
+                                                                    <option key={opt.value} value={opt.value}>
+                                                                        {opt.label}
+                                                                    </option>
+                                                                );
+                                                            });
+                                                        })()}
                                                     </select>
                                                 </td>
 
@@ -6210,7 +6400,7 @@ const CustomerEng = () => {
                                                                 if (e.target.checked && campaignData.status === 'wip') {
                                                                     if (!canCreateWipQuotation(campaignId)) {
                                                                         const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
-                                                                        toast.error(`Cannot send quotation with WIP status for campaign "${campaign?.name}". Last WIP quotation was sent within the last 90 days.`);
+                                                                        toast.error(`Cannot send quotation with WIP status for campaign "${campaign?.name}". 2 WIP quotations have already been sent within the last 90 days.`);
                                                                         return;
                                                                     }
                                                                 }

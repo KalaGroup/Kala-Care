@@ -20,7 +20,7 @@ import * as XLSX from 'xlsx';
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
 
 const FILE_TYPES = [
-    "AMC Agreement History",
+    "AMC Population Report",
     "Asset Detailed Report",
     "Asset Details with Last Oil Service",
     "Anubandhan Plus Quotes Report",
@@ -34,13 +34,26 @@ const FILE_TYPES = [
 
 // Define expected columns for each file type to display in the UI
 const FILE_TYPE_COLUMNS = {
-    "AMC Agreement History": [
+    //commented by nik
+    // "AMC Agreement History": [
+    //     "ZONE NAME", "SD ID", "SD NAME", "BRANCH ID", "BRANCH NAME",
+    //     "INSTANCE ID", "SEGMENT", "KVA RATING", "ENGINE MODEL",
+    //     "AGREEMENT NUMBER", "NUMBER OF AGREEMENT YEARS", "AGREEMENT NAME",
+    //     "AGREEMENT STATUS", "AGREEMENT TYPE", "AGREEMENT CREATED DATE",
+    //     "AGREEMENT START DATE", "AGREEMENT END DATE", "AGREEMENT PRODUCT NAME",
+    //     "LAST AGREEMENT NUMBER", "LAST AGREEMENT NO OF YEARS", "LAST AGREEMENT TYPE",
+    //     "LAST AGREEMENT STATUS", "LAST AGREEMENT PRODUCT NAME",
+    //     "LAST AGREEMENT START DATE", "LAST AGREEMENT END DATE"
+    // ],
+    //added by nik
+    "AMC Population Report": [
         "ZONE NAME", "SD ID", "SD NAME", "BRANCH ID", "BRANCH NAME",
         "INSTANCE ID", "SEGMENT", "KVA RATING", "ENGINE MODEL",
         "AGREEMENT NUMBER", "NUMBER OF AGREEMENT YEARS", "AGREEMENT NAME",
         "AGREEMENT STATUS", "AGREEMENT TYPE", "AGREEMENT CREATED DATE",
         "AGREEMENT START DATE", "AGREEMENT END DATE", "AGREEMENT PRODUCT NAME",
-        "LAST AGREEMENT NUMBER", "LAST AGREEMENT NO OF YEARS", "LAST AGREEMENT TYPE",
+        "AGREEMENT INVOICE TYPE", "COMMISSIONING DATE",
+        "LAST AGREEMENT NO OF YEARS", "LAST AGREEMENT TYPE",
         "LAST AGREEMENT STATUS", "LAST AGREEMENT PRODUCT NAME",
         "LAST AGREEMENT START DATE", "LAST AGREEMENT END DATE"
     ],

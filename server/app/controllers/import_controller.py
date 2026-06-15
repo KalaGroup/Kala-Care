@@ -169,7 +169,7 @@ class ImportController:
         
         # Exact column names for each file type
         column_mapping = {
-            'AMC Agreement History': 'INSTANCE ID',
+            'AMC Population Report': 'INSTANCE ID',
             'Asset Detailed Report': 'ASSET NUMBER',
             'Asset Details with Last Oil Service': 'ASSET NUMBER',
             'Anubandhan Plus Quotes Report': 'Pulse Instance ID',
@@ -214,7 +214,7 @@ class ImportController:
         
         # Exact column names for each file type
         column_mapping = {
-            'AMC Agreement History': None,
+            'AMC Population Report': None,
             'Asset Detailed Report': 'ENGINE SERIAL NO',
             'Asset Details with Last Oil Service': 'ENGINE SERIAL NO',
             'Anubandhan Plus Quotes Report': 'EngineNo',
@@ -238,7 +238,7 @@ class ImportController:
         
         # Exact column names for each file type that contain branch ID
         column_mapping = {
-            'AMC Agreement History': 'BRANCH ID',
+            'AMC Population Report': 'BRANCH ID',
             'Asset Detailed Report': 'BRANCH ID',
             'Asset Details with Last Oil Service': 'BRANCH ID',
             'Anubandhan Plus Quotes Report': None,  # No branch ID in this file
@@ -480,7 +480,28 @@ class ImportController:
                 'pan_number': ['PAN Card No.', 'PAN Number', 'PAN', 'pan_card_no', 'pan_number'],
                 'location': ['INSTALLATION SITE ADDRESS', 'Location', 'DG Location', 'Installation Site Address', 'Billing Location', 'location', 'address']
             }
+        #commented by nik
+        # for field, possible_cols in field_mappings.items():
+        #     current_value = getattr(customer, field)
+            
+        #     for col in possible_cols:
+        #         if col in row and pd.notna(row[col]) and row[col] != '':
+        #             value = row[col]
+                    
+        #             if field == 'phone_number':
+        #                 processed_value = re.sub(r'\D', '', self.convert_to_string(value))
+        #             elif field in ['customer_name', 'email', 'location']:
+        #                 processed_value = self.truncate_string(value, 500)
+        #             else:
+        #                 processed_value = self.convert_to_string(value)
+                    
+        #             if current_value is None or current_value != processed_value:
+        #                 setattr(customer, field, processed_value)
+        #                 updated = True
+        #                 break
         
+        # return updated
+        #added by nik
         for field, possible_cols in field_mappings.items():
             current_value = getattr(customer, field)
             
@@ -494,6 +515,12 @@ class ImportController:
                         processed_value = self.truncate_string(value, 500)
                     else:
                         processed_value = self.convert_to_string(value)
+                    
+                    # Skip if the source value processed down to nothing
+                    # (e.g. "NA", "-", whitespace) so it can't wipe a good value.
+                    # `continue` lets the next candidate column be tried.
+                    if processed_value is None or processed_value == '':
+                        continue
                     
                     if current_value is None or current_value != processed_value:
                         setattr(customer, field, processed_value)
@@ -561,7 +588,20 @@ class ImportController:
                 'pan_number': ['PAN Card No.', 'PAN Number', 'PAN', 'pan_card_no', 'pan_number'],
                 'location': ['INSTALLATION SITE ADDRESS', 'Location', 'DG Location', 'Installation Site Address', 'Billing Location', 'location', 'address']
             }
-        
+        #commented by nik
+        # for field, possible_cols in field_mappings.items():
+        #     for col in possible_cols:
+        #         if col in row and pd.notna(row[col]) and row[col] != '':
+        #             value = row[col]
+        #             if field == 'phone_number':
+        #                 value = re.sub(r'\D', '', self.convert_to_string(value))
+        #             elif field in ['customer_name', 'email', 'location']:
+        #                 value = self.truncate_string(value, 500)
+        #             else:
+        #                 value = self.convert_to_string(value)
+        #             customer_data[field] = value
+        #             break
+        #added by nik
         for field, possible_cols in field_mappings.items():
             for col in possible_cols:
                 if col in row and pd.notna(row[col]) and row[col] != '':
@@ -572,6 +612,12 @@ class ImportController:
                         value = self.truncate_string(value, 500)
                     else:
                         value = self.convert_to_string(value)
+                    
+                    # Skip empties so we don't store "" / None, and so the
+                    # next candidate column gets a chance.
+                    if value is None or value == '':
+                        continue
+                    
                     customer_data[field] = value
                     break
     
@@ -579,13 +625,24 @@ class ImportController:
         """Validate if file has all required columns based on file type"""
         
         expected_columns = {
-            'AMC Agreement History': [
-                'ZONE NAME', 'SD ID', 'SD NAME', 'BRANCH ID', 'BRANCH NAME', 
-                'INSTANCE ID', 'SEGMENT', 'KVA RATING', 'ENGINE MODEL', 
+            # 'AMC Population Report': [
+            #     'ZONE NAME', 'SD ID', 'SD NAME', 'BRANCH ID', 'BRANCH NAME', 
+            #     'INSTANCE ID', 'SEGMENT', 'KVA RATING', 'ENGINE MODEL', 
+            #     'AGREEMENT NUMBER', 'NUMBER OF AGREEMENT YEARS', 'AGREEMENT NAME',
+            #     'AGREEMENT STATUS', 'AGREEMENT TYPE', 'AGREEMENT CREATED DATE',
+            #     'AGREEMENT START DATE', 'AGREEMENT END DATE', 'AGREEMENT PRODUCT NAME',
+            #     'LAST AGREEMENT NUMBER', 'LAST AGREEMENT NO OF YEARS', 'LAST AGREEMENT TYPE',
+            #     'LAST AGREEMENT STATUS', 'LAST AGREEMENT PRODUCT NAME',
+            #     'LAST AGREEMENT START DATE', 'LAST AGREEMENT END DATE'
+            # ],
+            'AMC Population Report': [
+                'ZONE NAME', 'SD ID', 'SD NAME', 'BRANCH ID', 'BRANCH NAME',
+                'INSTANCE ID', 'SEGMENT', 'KVA RATING', 'ENGINE MODEL',
                 'AGREEMENT NUMBER', 'NUMBER OF AGREEMENT YEARS', 'AGREEMENT NAME',
                 'AGREEMENT STATUS', 'AGREEMENT TYPE', 'AGREEMENT CREATED DATE',
                 'AGREEMENT START DATE', 'AGREEMENT END DATE', 'AGREEMENT PRODUCT NAME',
-                'LAST AGREEMENT NUMBER', 'LAST AGREEMENT NO OF YEARS', 'LAST AGREEMENT TYPE',
+                'AGREEMENT INVOICE TYPE', 'COMMISSIONING DATE',
+                'LAST AGREEMENT NO OF YEARS', 'LAST AGREEMENT TYPE',
                 'LAST AGREEMENT STATUS', 'LAST AGREEMENT PRODUCT NAME',
                 'LAST AGREEMENT START DATE', 'LAST AGREEMENT END DATE'
             ],
@@ -732,7 +789,7 @@ class ImportController:
     def get_critical_columns(self, file_type):
         """Get critical columns that must be present for each file type"""
         critical = {
-            'AMC Agreement History': ['INSTANCE ID', 'AGREEMENT NUMBER'],
+            'AMC Population Report': ['INSTANCE ID', 'AGREEMENT NUMBER'],
             'Asset Detailed Report': ['ASSET NUMBER', 'ENGINE SERIAL NO'],
             'Asset Details with Last Oil Service': ['ASSET NUMBER', 'ENGINE SERIAL NO'],
             'Anubandhan Plus Quotes Report': ['Pulse Instance ID', 'QuotationRefNo', 'EngineNo'],
@@ -768,13 +825,13 @@ class ImportController:
         return existing_record
     
     def import_amc_agreement(self, file: UploadFile):
-        """Import AMC Agreement History Report - Only take first ACTIVE record per instance_id"""
+        """Import AMC Population Report Report - Only take first ACTIVE record per instance_id"""
         contents = file.file.read()
         df = pd.read_excel(io.BytesIO(contents))
         
-        is_valid, message = self.validate_file_format(df, 'AMC Agreement History')
+        is_valid, message = self.validate_file_format(df, 'AMC Population Report')
         if not is_valid:
-            raise HTTPException(status_code=400, detail=f"Invalid file format for AMC Agreement History: {message}")
+            raise HTTPException(status_code=400, detail=f"Invalid file format for AMC Population Report: {message}")
         
         # Group by instance_id and take only the first ACTIVE record for each
         # First, filter for Active agreements
@@ -785,7 +842,7 @@ class ImportController:
         
         # ── FAST: dict iteration + bulk preload ──
         records = first_active_df.to_dict('records')
-        instance_ids = [self.extract_instance_id(r, 'AMC Agreement History') for r in records]
+        instance_ids = [self.extract_instance_id(r, 'AMC Population Report') for r in records]
         existing_map = self._bulk_load_by_instance_id(AMCAgreement, instance_ids)
         customer_cache = self._bulk_load_by_instance_id(Customer, instance_ids)
         
@@ -796,13 +853,13 @@ class ImportController:
         with self.db.no_autoflush:
             for row in records:
                 try:
-                    instance_id = self.extract_instance_id(row, 'AMC Agreement History')
+                    instance_id = self.extract_instance_id(row, 'AMC Population Report')
                     
                     if not instance_id:
                         continue
                     
                     # Update or create customer
-                    self.update_or_create_customer(instance_id, row, 'AMC Agreement History', cache=customer_cache)
+                    self.update_or_create_customer(instance_id, row, 'AMC Population Report', cache=customer_cache)
                     
                     # Prepare agreement data
                     agreement_data = {
@@ -824,6 +881,8 @@ class ImportController:
                         'agreement_start_date': self.parse_date(row.get('AGREEMENT START DATE')),
                         'agreement_end_date': self.parse_date(row.get('AGREEMENT END DATE')),
                         'agreement_product_name': self.truncate_string(row.get('AGREEMENT PRODUCT NAME')),
+                        'agreement_invoice_type': self.truncate_string(row.get('AGREEMENT INVOICE TYPE'), 200),
+                        'commissioning_date': self.parse_date(row.get('COMMISSIONING DATE')),
                         'last_agreement_number': self.truncate_string(row.get('LAST AGREEMENT NUMBER'), 200),
                         'last_agreement_no_of_years': self.convert_to_numeric(row.get('LAST AGREEMENT NO OF YEARS')),
                         'last_agreement_type': self.truncate_string(row.get('LAST AGREEMENT TYPE'), 100),
@@ -1990,7 +2049,7 @@ class ImportController:
         """Process uploaded file based on type"""
         try:
             import_functions = {
-                'AMC Agreement History': self.import_amc_agreement,
+                'AMC Population Report': self.import_amc_agreement,
                 'Asset Detailed Report': self.import_asset_detailed,
                 'Asset Details with Last Oil Service': self.import_asset_service,
                 'Anubandhan Plus Quotes Report': self.import_anubandhan_plus_quotes,
