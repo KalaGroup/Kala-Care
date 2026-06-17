@@ -258,92 +258,10 @@ class EditCustomerController:
         days_since_last_send = (datetime.now() - last_send).days
         return days_since_last_send >= 10
     
-    def send_test_email(self, test_email: str = None) -> bool:
-        """Send a test email to verify email configuration"""
-        try:
-            # Get email configuration
-            smtp_server = os.getenv('SMTP_SERVER')
-            smtp_port = int(os.getenv('SMTP_PORT', 587))
-            smtp_username = os.getenv('SMTP_USERNAME')
-            smtp_password = os.getenv('SMTP_PASSWORD')
-            from_email = os.getenv('FROM_EMAIL', smtp_username)
-            
-            # Use provided test email or default from env
-            recipient_email = test_email or os.getenv('TEST_RECIPIENT_EMAIL')
-            
-            # Validate all required fields
-            missing_fields = []
-            if not smtp_server:
-                missing_fields.append("SMTP_SERVER")
-            if not smtp_port:
-                missing_fields.append("SMTP_PORT")
-            if not smtp_username:
-                missing_fields.append("SMTP_USERNAME")
-            if not smtp_password:
-                missing_fields.append("SMTP_PASSWORD")
-            if not recipient_email:
-                missing_fields.append("TEST_RECIPIENT_EMAIL")
-                
-            if missing_fields:
-                logger.error(f"Missing email configuration: {', '.join(missing_fields)}")
-                return False
-            
-            # Create test email
-            current_time = datetime.now()
-            subject = f"Test Email - Customer Edit History System - {current_time.strftime('%Y-%m-%d %H:%M:%S')}"
-            html_body = f"""
-            <html>
-            <body>
-                <h2>Test Email</h2>
-                <p>This is a test email from the Customer Edit History System.</p>
-                <p>If you're receiving this, the email configuration is working correctly.</p>
-                <p><strong>Time sent:</strong> {current_time.strftime('%Y-%m-%d %H:%M:%S')}</p>
-                <p><strong>Server:</strong> {smtp_server}</p>
-                <p><strong>Configuration Status:</strong> ✅ Working</p>
-            </body>
-            </html>
-            """
-            
-            text_body = f"""
-            Test Email
-            This is a test email from the Customer Edit History System.
-            If you're receiving this, the email configuration is working correctly.
-            Time sent: {current_time.strftime('%Y-%m-%d %H:%M:%S')}
-            Server: {smtp_server}
-            Configuration Status: Working
-            """
-            
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = subject
-            msg['From'] = from_email
-            msg['To'] = recipient_email
-            
-            part1 = MIMEText(text_body, 'plain')
-            part2 = MIMEText(html_body, 'html')
-            msg.attach(part1)
-            msg.attach(part2)
-            
-            # Send email
-            with smtplib.SMTP(smtp_server, smtp_port) as server:
-                server.starttls()
-                server.login(smtp_username, smtp_password)
-                server.send_message(msg)
-            
-            return True
-            
-        except smtplib.SMTPAuthenticationError as e:
-            logger.error(f"SMTP Authentication failed: {e}")
-            print(f"SMTP Authentication failed! Please check your email credentials.")
-            return False
-        except Exception as e:
-            logger.error(f"Error sending test email: {str(e)}")
-            print(f"Error: {str(e)}")
-            return False
-    
     def get_last_10_days_edit_history(self) -> List[CustomerEditHistory]:
         """Get edit history entries from the last 10 days"""
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=10)
+        start_date = end_date - timedelta(days=11)
         
         history_entries = self.db.query(CustomerEditHistory).filter(
             CustomerEditHistory.created_at >= start_date,
@@ -398,7 +316,9 @@ class EditCustomerController:
         
         return csv_content
     
-    def send_last_10_days_edit_history_email(self, force_send: bool = False) -> bool:
+    def send_last_10_days_edit_history_email(self, force_send: bool = False,
+                                             start_date: datetime = None,
+                                             end_date: datetime = None) -> bool:
         """
         Send email with last 10 days edit history to configured recipients
         Only sends if 10 days have passed since last send, unless force_send=True
@@ -410,12 +330,17 @@ class EditCustomerController:
                 days_since = (datetime.now() - last_send).days if last_send else 0
                 return False
             
-            # Calculate date range for last 10 days
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=10)
-            
-            # Get edit history for last 10 days
-            history_entries = self.get_last_10_days_edit_history()
+            # Use the reporting window passed in; fall back to the last 11 days
+            if end_date is None:
+                end_date = datetime.now()
+            if start_date is None:
+                start_date = end_date - timedelta(days=11)
+
+            # Get edit history within the window
+            history_entries = self.db.query(CustomerEditHistory).filter(
+                CustomerEditHistory.created_at >= start_date,
+                CustomerEditHistory.created_at <= end_date
+            ).order_by(desc(CustomerEditHistory.created_at)).all()
             
             if not history_entries:
                 # Still update last send date to avoid checking every day

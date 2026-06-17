@@ -53,6 +53,7 @@ import {
   WrenchScrewdriverIcon,
   CubeIcon,
   InboxIcon,
+  PaperAirplaneIcon,
 } from "@heroicons/react/24/outline";
 import { CiExport } from "react-icons/ci";
 import { FaCheck } from "react-icons/fa";
@@ -149,6 +150,13 @@ const CustomerEng2 = () => {
   const [statusFilterPosition, setStatusFilterPosition] = useState(null);
   const statusFilterRef = useRef(null);
 
+  const [letterHistory, setLetterHistory] = useState([]);
+  const [letterHistoryLoading, setLetterHistoryLoading] = useState(false);
+  const [editingLetterRecordId, setEditingLetterRecordId] = useState(null);
+  const [viewLetterHtml, setViewLetterHtml] = useState(null);
+  const [viewLetterBareHtml, setViewLetterBareHtml] = useState('');
+  const [viewLetterAttachments, setViewLetterAttachments] = useState([]);
+
   // Multi-assets box state
   const [relatedAssets, setRelatedAssets] = useState([]);
   const [loadingRelatedAssets, setLoadingRelatedAssets] = useState(false);
@@ -176,6 +184,32 @@ const CustomerEng2 = () => {
 
   // Get user from localStorage
   const [currentUser, setCurrentUser] = useState(null);
+
+  // ==================== Send Letter wizard states ====================
+  const COMPANY_NAME = 'KALA Care';
+  const COMPANY_FULL = 'KALA Care Global LLP';
+  const COMPANY_LOGO = '/logo.png'; // place the file in the public/ folder
+  const LETTER_ATTACH_EXTS = ['mp4', 'jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx'];
+
+  const [showLetterWizard, setShowLetterWizard] = useState(false);
+  const [letterStep, setLetterStep] = useState(1);
+  const [wizardLetterFormats, setWizardLetterFormats] = useState([]);
+  const [letterFormatsLoading, setLetterFormatsLoading] = useState(false);
+  const [selectedLetterFormat, setSelectedLetterFormat] = useState(null);
+  const [letterAttachments, setLetterAttachments] = useState([]);
+  const [letterRefNo, setLetterRefNo] = useState('');
+  const [letterFy, setLetterFy] = useState('');
+  const [letterSeq, setLetterSeq] = useState(1);
+  const [previousLetters, setPreviousLetters] = useState([]);
+  const [logoDataUrl, setLogoDataUrl] = useState('');
+  const [letterSending, setLetterSending] = useState(false);
+  const [letterChannels, setLetterChannels] = useState([]);
+  const [letterEmailTo, setLetterEmailTo] = useState('');
+  const [letterWhatsappTo, setLetterWhatsappTo] = useState('');
+  const [letterFields, setLetterFields] = useState({
+    ref_no: '', date: '', to_name: '', to_address: '', instance_id: '',
+    engine_model: '', agreement_no: '', contact: '', email: '', subject: '', body: ''
+  });
 
   // Warranty Expiry date range filter
   const [warrantyDateRange, setWarrantyDateRange] = useState({ from: '', to: '' });
@@ -909,6 +943,14 @@ const CustomerEng2 = () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [showCustomerDetails]);
+
+  // Load this customer's letter history when the details view opens
+  useEffect(() => {
+    if (showCustomerDetails && customerDetails?.instance_id) {
+      fetchLetterHistory(customerDetails.instance_id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCustomerDetails, customerDetails?.instance_id]);
 
   // Handle browser navigation/back button warning while in customer details
   useEffect(() => {
@@ -2661,6 +2703,598 @@ const CustomerEng2 = () => {
       }
     });
     setCustomers(sortedCustomers);
+  };
+
+  // ==================== Send Letter wizard helpers ====================
+  const getBranchNameForLetter = (branchId) => {
+    const branchMap = {
+      'HO': 'Pune Office', '420435_1': 'Ch.Sambhaji Nagar', '420435_2': 'Ahilyanagar',
+      '420435_3': 'Beed', '420435_4': 'Nanded', '420435_5': 'Babhaleshwar',
+      '420435_6': 'Latur', '420435_7': 'Parbhani', '420435_8': 'Hubli',
+      '420435_9': 'Belagavi', '420435_10': 'Hospet', '420435_11': 'Ballari',
+      '420435_12': 'Bagalkot', '420435_13': 'Gulbarga', '420435_14': 'Bijapur'
+    };
+    return branchMap[branchId] || branchId || '';
+  };
+
+  // Reuses already-fetched customerDetails + customerCompleteData — no extra fetch
+  const getLetterValues = () => {
+    const assetDetail = customerCompleteData?.asset_detailed?.[0] || {};
+    const amcs = customerCompleteData?.amc_agreements || [];
+    const latestAmc = [...amcs].sort((a, b) =>
+      new Date(b.agreement_start_date || 0) - new Date(a.agreement_start_date || 0)
+    )[0] || {};
+    const fmtD = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    const kva = latestAmc.kva_rating || assetDetail.kva_rating || '';
+    return {
+      customer_name: customerDetails?.customer_name || '',
+      instance_id: customerDetails?.instance_id || '',
+      engine_model: assetDetail.engine_model || '',
+      kva,
+      engine_with_kva: kva ? `${assetDetail.engine_model || ''} (${kva} KVA)`.trim() : (assetDetail.engine_model || ''),
+      agreement_no: latestAmc.agreement_number || '',
+      agreement_end: fmtD(latestAmc.agreement_end_date),
+      warranty_expiry: fmtD(assetDetail.warranty_expiry_date),
+      branch_id: customerDetails?.branch_id || '',
+      branch_name: getBranchNameForLetter(customerDetails?.branch_id),
+      email: customerDetails?.email || '',
+      contact: customerDetails?.phone_number || '',
+      location: customerDetails?.location || '',
+      date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+    };
+  };
+
+  const applyLetterPlaceholders = (tpl, v) =>
+    (tpl || '')
+      .replace(/{customer_name}/gi, v.customer_name || '')
+      .replace(/{instance_id}/gi, v.instance_id || '')
+      .replace(/{engine_model}/gi, v.engine_with_kva || v.engine_model || '')
+      .replace(/{kva}/gi, v.kva || '')
+      .replace(/{agreement_no}/gi, v.agreement_no || '')
+      .replace(/{agreement_end}/gi, v.agreement_end || '')
+      .replace(/{warranty_expiry}/gi, v.warranty_expiry || '')
+      .replace(/{branch}/gi, v.branch_name || v.branch_id || '')
+      .replace(/{date}/gi, v.date || '');
+
+  const buildDefaultLetterBody = (v) =>
+    `Dear Sir/Madam,
+
+This is to bring to your kind attention that the AMC / warranty for your DG Set (Engine Model ${v.engine_model || '-'}) is due to expire on ${v.warranty_expiry || v.agreement_end || '-'}.
+
+To ensure uninterrupted service and optimal performance of your equipment, we request you to renew your maintenance contract before the due date.
+
+Our representative from the ${v.branch_name || 'nearest'} branch will get in touch with you shortly. For any queries, please contact your nearest ${COMPANY_NAME} branch.
+
+Thanking you,
+For ${COMPANY_NAME}
+${COMPANY_FULL}${v.branch_name ? ' - ' + v.branch_name : ''}`;
+
+  const fetchLetterFormatsForWizard = async () => {
+    setLetterFormatsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/v1/campaigns/letter-master/formats`);
+      if (!res.ok) throw new Error('Failed to load letter formats');
+      const data = await res.json();
+      setWizardLetterFormats(data);
+    } catch (e) {
+      toast.error(e.message || 'Failed to load letter formats');
+    } finally {
+      setLetterFormatsLoading(false);
+    }
+  };
+
+  const openLetterWizard = async () => {
+    if (!customerDetails) {
+      toast.error('Customer details are still loading. Please wait.');
+      return;
+    }
+    setLetterStep(1);
+    setSelectedLetterFormat(null);
+    setLetterAttachments([]);
+    setLetterChannels([]);
+    setEditingLetterRecordId(null);
+    setShowLetterWizard(true);
+    fetchLetterFormatsForWizard();
+
+    // Load the public logo once and cache it as a base64 data URI so it
+    // renders in the preview, the print window, AND the emailed HTML
+    // (email clients can't load a relative path or browser-origin URL).
+    if (!logoDataUrl) {
+      try {
+        const logoRes = await fetch(COMPANY_LOGO);
+        if (logoRes.ok) {
+          const blob = await logoRes.blob();
+          const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          setLogoDataUrl(dataUrl);
+        }
+      } catch (e) {
+        // non-blocking — falls back to text-only header
+      }
+    }
+    try {
+      const res = await fetch(`${API_BASE_URL}/v1/engagement/letter/next-ref?instance_id=${encodeURIComponent(customerDetails.instance_id || '')}`);
+      if (res.ok) {
+        const d = await res.json();
+        setLetterRefNo(d.ref_no);
+        setLetterFy(d.financial_year);
+        setLetterSeq(d.sequence);
+        setPreviousLetters(d.previous_letters || []);
+      }
+    } catch (e) {
+      // non-blocking
+    }
+  };
+
+  const selectLetterFormat = (fmt) => {
+    setSelectedLetterFormat(fmt);
+    setLetterAttachments((fmt.default_attachments || []).map(a => ({ ...a })));
+  };
+
+  const prepareLetterFields = () => {
+    const v = getLetterValues();
+    const fmt = selectedLetterFormat;
+    const body = (fmt && fmt.letter_format && fmt.letter_format.trim())
+      ? applyLetterPlaceholders(fmt.letter_format, v)
+      : buildDefaultLetterBody(v);
+    setLetterFields({
+      ref_no: letterRefNo || `KC/${letterFy || ''}/01`,
+      date: v.date,
+      to_name: v.customer_name,
+      to_address: v.location || v.branch_name || '',
+      instance_id: v.instance_id,
+      engine_model: v.engine_with_kva,
+      agreement_no: v.agreement_no,
+      contact: v.contact,
+      email: v.email,
+      subject: 'Renewal of Annual Maintenance Contract (AMC)',
+      body
+    });
+  };
+
+  const goToLetterStep = (step) => {
+    if (step >= 2 && !selectedLetterFormat) {
+      toast.error('Please select a Format Type first');
+      return;
+    }
+    if (step === 3) prepareLetterFields();
+    if (step === 4) {
+      if (!letterFields.body) prepareLetterFields();
+      setLetterChannels(selectedLetterFormat?.channels || []);
+      setLetterEmailTo(customerDetails?.email || '');
+      setLetterWhatsappTo(String(customerDetails?.phone_number || ''));
+    }
+    setLetterStep(step);
+  };
+
+  const handleLetterAddAttachment = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const accepted = [];
+    for (const file of files) {
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (!LETTER_ATTACH_EXTS.includes(ext)) {
+        toast.error(`"${file.name}" type not allowed`);
+        continue;
+      }
+      if (file.size > 25 * 1024 * 1024) {
+        toast.error(`"${file.name}" exceeds 25MB`);
+        continue;
+      }
+      accepted.push(file);
+    }
+    accepted.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64Content = reader.result.split(',')[1];
+        setLetterAttachments(prev => [...prev, {
+          name: file.name, content: base64Content,
+          type: file.type || 'application/octet-stream', size: file.size
+        }]);
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  };
+
+  const removeLetterWizardAttachment = (i) =>
+    setLetterAttachments(prev => prev.filter((_, idx) => idx !== i));
+
+  const escapeLetterHtml = (s) =>
+    String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const buildLetterHtml = () => {
+    const f = letterFields;
+    return `
+<div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:780px;margin:0 auto;padding:28px;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid ${themeColor};padding-bottom:12px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      ${logoDataUrl ? `<img src="${logoDataUrl}" alt="${escapeLetterHtml(COMPANY_NAME)}" style="height:52px;width:auto;object-fit:contain;" />` : ''}
+      <div>
+        <div style="font-size:18px;font-weight:700;color:${themeColor};">${escapeLetterHtml(COMPANY_NAME)}</div>
+        <div style="font-size:11px;color:#555;">${escapeLetterHtml(COMPANY_FULL)}</div>
+      </div>
+    </div>
+    <div style="text-align:right;font-size:12px;line-height:1.6;">
+      <div><strong>Ref No:</strong> ${escapeLetterHtml(f.ref_no)}</div>
+      <div><strong>Date:</strong> ${escapeLetterHtml(f.date)}</div>
+    </div>
+  </div>
+  <div style="margin-top:18px;font-size:13px;line-height:1.6;">
+    <div><strong>To,</strong></div>
+    <div>${escapeLetterHtml(f.to_name)}</div>
+    <div style="white-space:pre-wrap;">${escapeLetterHtml(f.to_address)}</div>
+    <div style="margin-top:6px;color:#333;font-size:12px;">
+      Instance ID: ${escapeLetterHtml(f.instance_id)} &nbsp;|&nbsp; Engine Model: ${escapeLetterHtml(f.engine_model)}<br/>
+      Agreement No: ${escapeLetterHtml(f.agreement_no)} &nbsp;|&nbsp; Contact: ${escapeLetterHtml(f.contact)}<br/>
+      Email: ${escapeLetterHtml(f.email)}
+    </div>
+  </div>
+  <div style="margin-top:16px;font-size:13px;"><strong>Subject:</strong> ${escapeLetterHtml(f.subject)}</div>
+  ${previousLetters.length > 0 ? `
+  <div style="margin-top:10px;font-size:11px;color:#555;border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;background:#fafafa;">
+    <strong style="color:#333;">Ref. previous correspondence:</strong>
+    ${previousLetters.map(pl => `${escapeLetterHtml(pl.ref_no)}${pl.date ? ' dated ' + escapeLetterHtml(pl.date) : ''}`).join(' &nbsp;•&nbsp; ')}
+  </div>` : ''}
+  <div style="margin-top:12px;font-size:13px;line-height:1.7;white-space:pre-wrap;">${escapeLetterHtml(f.body)}</div>
+</div>`;
+  };
+
+  const buildLetterText = () => {
+    const f = letterFields;
+    return `${COMPANY_NAME}
+Ref No: ${f.ref_no}   Date: ${f.date}
+
+To,
+${f.to_name}
+${f.to_address}
+Instance ID: ${f.instance_id} | Engine Model: ${f.engine_model}
+Agreement No: ${f.agreement_no} | Contact: ${f.contact}
+Email: ${f.email}
+
+Subject: ${f.subject}
+
+${f.body}`;
+  };
+
+  const handlePrintLetter = async () => {
+    // Letter first; then images full-width and each PDF page rendered page-wise; videos name-only.
+    const w = openPrintWindow();
+    if (!w) return;
+    await renderAndPrint(w, buildLetterHtml(), letterAttachments, escapeLetterHtml(letterFields.ref_no || 'Letter'));
+  };
+
+  const toggleLetterSendChannel = (ch) =>
+    setLetterChannels(prev => prev.includes(ch) ? prev.filter(c => c !== ch) : [...prev, ch]);
+
+  const handleSendLetter = async () => {
+    if (letterChannels.length === 0) { toast.error('Select at least one channel to send'); return; }
+    if (letterChannels.includes('email') && !letterEmailTo.trim()) { toast.error('Enter a recipient email address'); return; }
+    if (letterChannels.includes('whatsapp') && !letterWhatsappTo.trim()) { toast.error('Enter a WhatsApp number'); return; }
+
+    setLetterSending(true);
+    const t = toast.loading('Sending letter...');
+    try {
+      const payload = {
+        customer_id: selectedCustomer,
+        instance_id: customerDetails?.instance_id,
+        format_type_id: selectedLetterFormat?.id,
+        format_type_name: selectedLetterFormat?.format_type_name,
+        record_id: editingLetterRecordId,
+        ref_no: letterFields.ref_no,
+        financial_year: letterFy,
+        sequence: letterSeq,
+        subject: letterFields.subject,
+        letter_fields: letterFields,
+        letter_html: buildLetterHtml(),
+        letter_text: buildLetterText(),
+        channels: letterChannels,
+        email_to: letterEmailTo,
+        whatsapp_to: letterWhatsappTo,
+        attachments: letterAttachments.map(a => ({ name: a.name, content: a.content, type: a.type })),
+        sent_by_id: currentUser?.user_id || currentUser?.id,
+        sent_by_name: currentUser?.name
+      };
+      const res = await fetch(`${API_BASE_URL}/v1/engagement/letter/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || 'Failed to send letter');
+
+      toast.dismiss(t);
+      if (data.status === 'sent') {
+        toast.success(`Letter sent successfully (${data.ref_no})`);
+      } else if (data.status === 'partial') {
+        toast(`Sent with issues (${data.ref_no}): ${(data.errors || []).join(', ')}`, { icon: '⚠️', duration: 6000 });
+      } else {
+        toast.error(`Failed to send: ${(data.errors || []).join(', ') || 'Unknown error'}`);
+      }
+      if (data.status !== 'failed') {
+        setEditingLetterRecordId(null);
+        setShowLetterWizard(false);
+        if (customerDetails?.instance_id) fetchLetterHistory(customerDetails.instance_id);
+      }
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e.message || 'Failed to send letter');
+    } finally {
+      setLetterSending(false);
+    }
+  };
+
+  // ==================== Letter history / draft / view ====================
+  const fetchLetterHistory = async (instanceId) => {
+    if (!instanceId) return;
+    setLetterHistoryLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/v1/engagement/letter/history?instance_id=${encodeURIComponent(instanceId)}`);
+      const data = res.ok ? await res.json() : [];
+      setLetterHistory(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setLetterHistory([]);
+    } finally {
+      setLetterHistoryLoading(false);
+    }
+  };
+
+  // Click a Ref No → reopen that letter in the wizard (drafts to edit & send, sent to re-send)
+  const openLetterDraft = async (recordId) => {
+    const t = toast.loading('Loading letter...');
+    try {
+      const res = await fetch(`${API_BASE_URL}/v1/engagement/letter/record/${recordId}`);
+      if (!res.ok) throw new Error('Failed to load letter');
+      const r = await res.json();
+      toast.dismiss(t);
+
+      const fmt = {
+        id: r.format_type_id,
+        format_type_name: r.format_type_name || 'Saved Letter',
+        channels: r.channels || [],
+        default_attachments: [],
+        letter_format: ''
+      };
+      setSelectedLetterFormat(fmt);
+      setEditingLetterRecordId(r.id);
+      setLetterRefNo(r.ref_no);
+      setLetterFy(r.financial_year || '');
+      setLetterSeq(r.sequence_number || 1);
+      setLetterAttachments(r.attachments || []);
+      setLetterChannels(r.channels || []);
+      setLetterEmailTo(r.email_to || '');
+      setLetterWhatsappTo(r.whatsapp_to || '');
+      setPreviousLetters([]);
+      setLetterFields((r.letter_fields && Object.keys(r.letter_fields).length)
+        ? r.letter_fields
+        : {
+          ref_no: r.ref_no, date: '', to_name: '', to_address: '',
+          instance_id: r.instance_id, engine_model: '', agreement_no: '',
+          contact: '', email: r.email_to || '', subject: r.subject || '',
+          body: r.letter_body || ''
+        });
+
+      if (!logoDataUrl) {
+        try {
+          const lr = await fetch(COMPANY_LOGO);
+          if (lr.ok) {
+            const blob = await lr.blob();
+            const dataUrl = await new Promise((resolve, reject) => {
+              const fr = new FileReader();
+              fr.onloadend = () => resolve(fr.result);
+              fr.onerror = reject;
+              fr.readAsDataURL(blob);
+            });
+            setLogoDataUrl(dataUrl);
+          }
+        } catch (e) { /* ignore */ }
+      }
+
+      setLetterStep(3);
+      setShowLetterWizard(true);
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e.message || 'Failed to load letter');
+    }
+  };
+
+  // Eye icon → read-only view (on-screen shows file names only)
+  const viewLetterRecord = async (recordId) => {
+    const t = toast.loading('Loading letter...');
+    try {
+      const res = await fetch(`${API_BASE_URL}/v1/engagement/letter/record/${recordId}`);
+      if (!res.ok) throw new Error('Failed to load letter');
+      const r = await res.json();
+      toast.dismiss(t);
+      const atts = r.attachments || [];
+      const bare = r.letter_html || '<p style="padding:20px;font-family:Arial">No letter content stored.</p>';
+      const namesHtml = atts.length
+        ? `<div style="max-width:780px;margin:18px auto 0;padding-top:12px;border-top:1px solid #ddd;font-family:Arial,Helvetica,sans-serif;">
+                     <div style="font-size:12px;font-weight:700;color:#111;margin-bottom:6px;">Attachments (${atts.length}):</div>
+                     <ul style="margin:0;padding-left:18px;font-size:12px;color:#333;line-height:1.7;">
+                       ${atts.map(a => `<li>${escapeLetterHtml(a.name)}</li>`).join('')}
+                     </ul>
+                   </div>`
+        : '';
+      setViewLetterBareHtml(bare);
+      setViewLetterAttachments(atts);
+      setViewLetterHtml(bare + namesHtml);
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e.message || 'Failed to load letter');
+    }
+  };
+
+  // Lazy-load pdf.js (once) so PDF attachments can be rasterised to images for printing
+  const loadPdfJsForPrint = () => new Promise((resolve, reject) => {
+    if (window.pdfjsLib) return resolve(window.pdfjsLib);
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    s.onload = () => {
+      try {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      } catch (e) { /* ignore */ }
+      resolve(window.pdfjsLib);
+    };
+    s.onerror = () => reject(new Error('Could not load the PDF renderer'));
+    document.head.appendChild(s);
+  });
+
+  const base64ToUint8Array = (b64) => {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  };
+
+  // Render every page of a base64 PDF to PNG data URLs (so each page prints full-width, page-wise)
+  const renderPdfBase64ToImages = async (b64, scale = 2) => {
+    const pdfjsLib = await loadPdfJsForPrint();
+    const pdf = await pdfjsLib.getDocument({ data: base64ToUint8Array(b64) }).promise;
+    const images = [];
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      images.push(canvas.toDataURL('image/png'));
+    }
+    return images;
+  };
+
+  // Build attachment print HTML:
+  //   image → full-width (name + image)
+  //   pdf   → every page rendered as a full-width image, page by page
+  //   video → file name only
+  const buildAttachmentPrintHtmlAsync = async (attachments) => {
+    const atts = attachments || [];
+    if (atts.length === 0) return '';
+    const page = (title, inner) =>
+      `<div style="page-break-before:always;max-width:780px;margin:0 auto;padding:18px 0;font-family:Arial,Helvetica,sans-serif;">
+               <div style="font-size:12px;font-weight:700;color:#111;margin-bottom:8px;">${escapeLetterHtml(title)}</div>
+               ${inner}
+             </div>`;
+    const imgStyle = 'max-width:100%;border:1px solid #ddd;border-radius:4px;display:block;margin:0 auto;';
+    let html = '';
+    for (const a of atts) {
+      const type = (a.type || '').toLowerCase();
+      const ext = (a.name || '').split('.').pop().toLowerCase();
+      const isImage = type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+      const isPdf = type === 'application/pdf' || ext === 'pdf';
+      const isVideo = type.startsWith('video/') || ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext);
+
+      if (a.content && isImage) {
+        html += page(`Attachment: ${a.name}`, `<img src="data:${a.type || 'image/png'};base64,${a.content}" style="${imgStyle}" />`);
+      } else if (a.content && isPdf) {
+        try {
+          const imgs = await renderPdfBase64ToImages(a.content, 2);
+          imgs.forEach((src, i) => {
+            html += page(`Attachment: ${a.name} — page ${i + 1}/${imgs.length}`, `<img src="${src}" style="${imgStyle}" />`);
+          });
+        } catch (e) {
+          html += page(`Attachment: ${a.name}`, `<div style="font-size:11px;color:#888;">[Could not render PDF — name only]</div>`);
+        }
+      } else if (isVideo) {
+        html += page(`Attachment: ${a.name}`, `<div style="font-size:11px;color:#888;">[Video file — name only]</div>`);
+      } else {
+        html += page(`Attachment: ${a.name}`, `<div style="font-size:11px;color:#888;">[File attached]</div>`);
+      }
+    }
+    return html;
+  };
+
+  // Opens the print window synchronously (so pop-up blockers allow it) with a placeholder
+  const openPrintWindow = () => {
+    const w = window.open('', '_blank');
+    if (!w) { toast.error('Please allow pop-ups to print'); return null; }
+    w.document.open();
+    w.document.write('<html><head><title>Letter</title></head><body style="margin:0;font-family:Arial,Helvetica,sans-serif;"><div style="padding:24px;color:#555;">Preparing print… please wait.</div></body></html>');
+    w.document.close();
+    return w;
+  };
+
+  // Builds attachment pages (async — may rasterise PDF pages), injects everything into the
+  // already-open window via the DOM, waits for all images to load, then prints from the parent.
+  const renderAndPrint = async (w, letterBodyHtml, attachments, titleText) => {
+    let attHtml = '';
+    try { attHtml = await buildAttachmentPrintHtmlAsync(attachments); } catch (e) { attHtml = ''; }
+    if (!w || w.closed) return;
+    try { w.document.title = titleText || 'Letter'; } catch (e) { /* ignore */ }
+    const body = w.document.body;
+    body.style.margin = '0';
+    body.innerHTML = `<div style="max-width:780px;margin:0 auto;">${letterBodyHtml}</div>${attHtml}`;
+    const doPrint = () => { try { w.focus(); w.print(); } catch (e) { /* ignore */ } };
+    const imgs = w.document.images;
+    const total = imgs.length;
+    if (total === 0) { setTimeout(doPrint, 250); return; }
+    let done = 0;
+    const check = () => { done++; if (done >= total) setTimeout(doPrint, 250); };
+    for (let i = 0; i < total; i++) {
+      const im = imgs[i];
+      if (im.complete) check();
+      else { im.onload = check; im.onerror = check; }
+    }
+  };
+
+  const printViewedLetter = async () => {
+    if (!viewLetterBareHtml) return;
+    const w = openPrintWindow();
+    if (!w) return;
+    await renderAndPrint(w, viewLetterBareHtml, viewLetterAttachments, 'Letter');
+  };
+
+  const handleSaveLetterDraft = async () => {
+    if (!letterFields.body && !letterFields.subject) { toast.error('Nothing to save yet'); return; }
+    setLetterSending(true);
+    const t = toast.loading('Saving draft...');
+    try {
+      const payload = {
+        record_id: editingLetterRecordId,
+        customer_id: selectedCustomer,
+        instance_id: customerDetails?.instance_id,
+        format_type_id: selectedLetterFormat?.id,
+        format_type_name: selectedLetterFormat?.format_type_name,
+        record_id: editingLetterRecordId,
+        ref_no: letterFields.ref_no,
+        financial_year: letterFy,
+        sequence: letterSeq,
+        subject: letterFields.subject,
+        letter_fields: letterFields,
+        letter_html: buildLetterHtml(),
+        letter_text: buildLetterText(),
+        letter_fields: letterFields,
+        channels: letterChannels.length ? letterChannels : (selectedLetterFormat?.channels || []),
+        email_to: letterEmailTo || customerDetails?.email || '',
+        whatsapp_to: letterWhatsappTo || String(customerDetails?.phone_number || ''),
+        attachments: letterAttachments.map(a => ({ name: a.name, content: a.content, type: a.type })),
+        sent_by_id: currentUser?.user_id || currentUser?.id,
+        sent_by_name: currentUser?.name
+      };
+      const res = await fetch(`${API_BASE_URL}/v1/engagement/letter/save-draft`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || 'Failed to save draft');
+      toast.dismiss(t);
+      toast.success(`Draft saved (${data.ref_no})`);
+      setEditingLetterRecordId(data.record_id);
+      setShowLetterWizard(false);
+      if (customerDetails?.instance_id) fetchLetterHistory(customerDetails.instance_id);
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e.message || 'Failed to save draft');
+    } finally {
+      setLetterSending(false);
+    }
   };
 
   // Handle edit customer button click - Add this function if not already present
@@ -5314,6 +5948,16 @@ const CustomerEng2 = () => {
             </h3>
             <div className="flex flex-wrap gap-1.5">
               {isAdmin && (
+                <button
+                  onClick={openLetterWizard}
+                  className="px-2 py-1 sm:px-2 sm:py-1.5 text-[11px] sm:text-xs text-white rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-1.5"
+                  style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}
+                >
+                  <PaperAirplaneIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                  Send Letter
+                </button>
+              )}
+              {isAdmin && (
                 <>
                   <button
                     onClick={() => {
@@ -6535,6 +7179,107 @@ const CustomerEng2 = () => {
           </div>
         </div>
 
+        {/* Letter History */}
+        <div className="bg-white rounded-xl shadow-lg p-3 sm:p-4 mb-3 sm:mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm sm:text-base font-semibold flex items-center gap-2">
+              <PaperAirplaneIcon className="h-3 w-3 sm:h-4 sm:w-4" style={{ color: themeColor }} />
+              Letter History
+            </h2>
+            {letterHistoryLoading && (
+              <span className="text-[11px] text-gray-400 flex items-center gap-1">
+                <ArrowPathIcon className="h-3 w-3 animate-spin" /> Loading…
+              </span>
+            )}
+          </div>
+
+          <div className="overflow-x-auto overflow-y-auto max-h-[360px] custom-scrollbar">
+            <table className="w-full min-w-[800px] border-collapse">
+              <thead className="bg-gray-50 sticky top-0">
+                <tr className="border-b border-gray-200">
+                  <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Ref No</th>
+                  <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Format Type</th>
+                  <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Channels</th>
+                  <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Date</th>
+                  <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Sent By</th>
+                  <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Status</th>
+                  <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black whitespace-nowrap">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {letterHistory.map((lt) => {
+                  const isDraft = lt.status === 'draft';
+                  const statusStyle =
+                    lt.status === 'sent' ? 'bg-green-100 text-green-700'
+                      : lt.status === 'draft' ? 'bg-amber-100 text-amber-700'
+                        : lt.status === 'partial' ? 'bg-orange-100 text-orange-700'
+                          : 'bg-red-100 text-red-700';
+                  const chs = lt.channels || [];
+                  return (
+                    <tr key={lt.id} className="hover:bg-gray-50 border-b border-gray-100">
+                      <td className="px-2 py-1.5 text-center text-[11px] whitespace-nowrap border-r border-gray-100">
+                        {isDraft ? (
+                          <button
+                            onClick={() => openLetterDraft(lt.id)}
+                            className="font-semibold underline hover:opacity-80"
+                            style={{ color: themeColor }}
+                            title="Open draft to edit & send"
+                          >
+                            {lt.ref_no}
+                          </button>
+                        ) : (
+                          <span className="font-semibold text-black" title="Already sent">{lt.ref_no}</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{lt.format_type_name || '-'}</td>
+                      <td className="px-2 py-1.5 text-center text-[11px] border-r border-gray-100">
+                        <div className="flex gap-1 justify-center flex-wrap">
+                          {chs.length === 0 && <span className="text-gray-400">-</span>}
+                          {chs.includes('email') && (
+                            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] ${lt.sent_email ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                              <EnvelopeIcon className="h-2.5 w-2.5" /> Email
+                            </span>
+                          )}
+                          {chs.includes('whatsapp') && (
+                            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] ${lt.sent_whatsapp ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                              <ChatBubbleLeftRightIcon className="h-2.5 w-2.5" /> WhatsApp
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100 whitespace-nowrap">{formatDateTime(lt.created_at)}</td>
+                      <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100 whitespace-nowrap">
+                        {lt.sent_by_name || '-'}{lt.sent_by_id ? ` (${lt.sent_by_id})` : ''}
+                      </td>
+                      <td className="px-2 py-1.5 text-center text-[11px] border-r border-gray-100">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${statusStyle}`}>
+                          {lt.status || '-'}
+                        </span>
+                      </td>
+                      <td className="px-2 py-1.5 text-center whitespace-nowrap">
+                        <button
+                          onClick={() => viewLetterRecord(lt.id)}
+                          className="p-0.5 hover:bg-gray-100 rounded-lg"
+                          title="View letter PDF"
+                        >
+                          <EyeIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {letterHistory.length === 0 && !letterHistoryLoading && (
+                  <tr>
+                    <td colSpan="7" className="px-2 py-3 text-center text-[11px] text-gray-500">
+                      No letters yet for this customer
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         {/* PDF Chat Panel */}
         {showPdfViewer && pdfViewerCampaign && (
           <div
@@ -6893,6 +7638,410 @@ const CustomerEng2 = () => {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* View Letter (read-only PDF) */}
+        {viewLetterHtml && (
+          <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center z-[60] p-3">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-hidden flex flex-col">
+              <div className="px-4 py-3 flex justify-between items-center border-b border-gray-200"
+                style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <DocumentTextIcon className="h-4 w-4 text-white" /> Letter
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button onClick={printViewedLetter}
+                    className="px-2 py-1 bg-white text-[11px] rounded-md font-medium hover:bg-gray-100 flex items-center gap-1"
+                    style={{ color: themeColor }}>
+                    <DocumentTextIcon className="h-3 w-3" /> Print / PDF
+                  </button>
+                  <button onClick={() => setViewLetterHtml(null)}
+                    className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100">
+                    <XMarkIcon className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3 bg-gray-50 custom-scrollbar">
+                <div dangerouslySetInnerHTML={{ __html: viewLetterHtml }} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Send Letter Wizard */}
+        {showLetterWizard && (
+          <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-end lg:items-center justify-center z-50 p-2 sm:p-3">
+            <div className="bg-white rounded-xl shadow-2xl w-full lg:max-w-4xl max-h-[94vh] overflow-hidden flex flex-col">
+              {/* Header */}
+              <div className="px-4 py-3 flex justify-between items-center"
+                style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
+                <h3 className="text-sm sm:text-base font-semibold text-white flex items-center gap-2">
+                  <PaperAirplaneIcon className="h-4 w-4 text-white" />
+                  Send Letter
+                </h3>
+                <button onClick={() => !letterSending && setShowLetterWizard(false)}
+                  className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100" disabled={letterSending}>
+                  <XMarkIcon className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Step indicator */}
+              <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+                <div className="flex items-center justify-between max-w-2xl mx-auto">
+                  {[
+                    { n: 1, label: 'Format Type' },
+                    { n: 2, label: 'Customer Info' },
+                    { n: 3, label: 'Letter' },
+                    { n: 4, label: 'Review & Send' },
+                  ].map((s, idx) => (
+                    <React.Fragment key={s.n}>
+                      <button type="button"
+                        onClick={() => (s.n < letterStep ? setLetterStep(s.n) : goToLetterStep(s.n))}
+                        className="flex flex-col items-center gap-1 flex-shrink-0">
+                        <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${letterStep >= s.n ? 'text-white' : 'bg-gray-200 text-gray-600'}`}
+                          style={(letterStep >= s.n) ? { backgroundColor: themeColor } : {}}>
+                          {letterStep > s.n ? '✓' : s.n}
+                        </span>
+                        <span className={`text-[10px] font-medium ${letterStep >= s.n ? 'text-black' : 'text-gray-400'}`}>{s.label}</span>
+                      </button>
+                      {idx < 3 && (
+                        <div className="flex-1 h-0.5 mx-1" style={{ backgroundColor: letterStep > s.n ? themeColor : '#e5e7eb' }} />
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                {/* STEP 1 — Format Type */}
+                {letterStep === 1 && (
+                  <div className="space-y-4 max-w-2xl mx-auto">
+                    <div>
+                      <label className="block text-xs font-semibold text-black mb-1">Format Type *</label>
+                      {letterFormatsLoading ? (
+                        <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
+                          <ArrowPathIcon className="h-4 w-4 animate-spin" style={{ color: themeColor }} /> Loading formats...
+                        </div>
+                      ) : (
+                        <select
+                          value={selectedLetterFormat?.id || ''}
+                          onChange={(e) => {
+                            const fmt = wizardLetterFormats.find(f => String(f.id) === e.target.value);
+                            if (fmt) selectLetterFormat(fmt); else setSelectedLetterFormat(null);
+                          }}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-black focus:ring-2"
+                          style={{ '--tw-ring-color': themeColor }}
+                        >
+                          <option value="">-- Select a format --</option>
+                          {wizardLetterFormats.map(f => (
+                            <option key={f.id} value={f.id}>{f.format_type_name}</option>
+                          ))}
+                        </select>
+                      )}
+                      {!letterFormatsLoading && wizardLetterFormats.length === 0 && (
+                        <p className="text-[11px] text-red-500 mt-1">No letter formats found. Add one from Campaign → Letter Master.</p>
+                      )}
+                    </div>
+
+                    {selectedLetterFormat && (
+                      <div className="space-y-3">
+                        <div className="border border-gray-200 rounded-lg p-3">
+                          <p className="text-[11px] font-bold text-black uppercase mb-1.5">Channels</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {(selectedLetterFormat.channels || []).length === 0 && <span className="text-xs text-gray-400">None set</span>}
+                            {(selectedLetterFormat.channels || []).includes('email') && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs"><EnvelopeIcon className="h-3 w-3" /> Email</span>
+                            )}
+                            {(selectedLetterFormat.channels || []).includes('whatsapp') && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs"><ChatBubbleLeftRightIcon className="h-3 w-3" /> WhatsApp</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="border border-gray-200 rounded-lg p-3">
+                          <p className="text-[11px] font-bold text-black uppercase mb-1.5">Default Attachments</p>
+                          {(selectedLetterFormat.default_attachments || []).length === 0 ? (
+                            <span className="text-xs text-gray-400">None</span>
+                          ) : (
+                            <div className="space-y-1">
+                              {selectedLetterFormat.default_attachments.map((a, i) => (
+                                <div key={i} className="flex items-center gap-2 text-xs text-black">
+                                  <DocumentTextIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
+                                  <span className="truncate">{a.name}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div className="border border-gray-200 rounded-lg p-3">
+                          <p className="text-[11px] font-bold text-black uppercase mb-1.5">Letter Format</p>
+                          <pre className="text-xs text-black whitespace-pre-wrap break-words font-sans leading-relaxed max-h-40 overflow-y-auto">
+                            {selectedLetterFormat.letter_format || 'No template text — a default AMC letter will be used.'}
+                          </pre>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* STEP 2 — Customer Info (uses already-fetched data) */}
+                {letterStep === 2 && (() => {
+                  const v = getLetterValues();
+                  return (
+                    <div className="space-y-3 max-w-3xl mx-auto">
+                      <div className="border border-gray-200 rounded-lg overflow-hidden">
+                        <div className="px-3 py-1.5 bg-gray-50 border-b text-xs font-bold text-black">Customer Details</div>
+                        <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          <div><span className="font-semibold">Instance ID:</span> {v.instance_id || '-'}</div>
+                          <div><span className="font-semibold">Customer Name:</span> {v.customer_name || '-'}</div>
+                          <div><span className="font-semibold">Contact:</span> {formatPhoneNumber(v.contact)}</div>
+                          <div><span className="font-semibold">Email:</span> {v.email || '-'}</div>
+                          <div><span className="font-semibold">Branch:</span> {v.branch_id || '-'} {v.branch_name ? `(${v.branch_name})` : ''}</div>
+                          <div><span className="font-semibold">Location:</span> {v.location || '-'}</div>
+                        </div>
+                      </div>
+                      <div className="border border-gray-200 rounded-lg overflow-hidden">
+                        <div className="px-3 py-1.5 bg-gray-50 border-b text-xs font-bold text-black">Asset Details</div>
+                        <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          <div><span className="font-semibold">Engine Model:</span> {v.engine_model || '-'}</div>
+                          <div><span className="font-semibold">KVA Rating:</span> {v.kva || '-'}</div>
+                          <div><span className="font-semibold">Agreement No:</span> {v.agreement_no || '-'}</div>
+                          <div><span className="font-semibold">Agreement End:</span> {v.agreement_end || '-'}</div>
+                          <div><span className="font-semibold">Warranty Expiry:</span> {v.warranty_expiry || '-'}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* STEP 3 — Editable letter page */}
+                {letterStep === 3 && (
+                  <div className="space-y-3 max-w-3xl mx-auto">
+                    <div className="border border-gray-300 rounded-lg p-4 sm:p-6 bg-white">
+                      <div className="flex justify-between items-start border-b-2 pb-3" style={{ borderColor: themeColor }}>
+                        <div className="flex items-center gap-3">
+                          {logoDataUrl ? (
+                            <img src={logoDataUrl} alt={COMPANY_NAME} className="h-12 w-auto object-contain" />
+                          ) : (
+                            <div className="w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold" style={{ backgroundColor: themeColor }}>KC</div>
+                          )}
+                          <div>
+                            <div className="text-base font-bold" style={{ color: themeColor }}>{COMPANY_NAME}</div>
+                            <div className="text-[10px] text-gray-500">{COMPANY_FULL}</div>
+                          </div>
+                        </div>
+                        <div className="text-right space-y-1">
+                          <div className="flex items-center gap-1 justify-end text-[11px]">
+                            <span className="font-semibold">Ref No:</span>
+                            <input value={letterFields.ref_no} readOnly disabled
+                              className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] w-28 text-right bg-gray-100 cursor-not-allowed" />
+                          </div>
+                          <div className="flex items-center gap-1 justify-end text-[11px]">
+                            <span className="font-semibold">Date:</span>
+                            <input value={letterFields.date} readOnly disabled
+                              className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] w-28 text-right bg-gray-100 cursor-not-allowed" />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 space-y-1.5 text-xs">
+                        <span className="font-semibold">To,</span>
+                        <input value={letterFields.to_name} onChange={(e) => setLetterFields(p => ({ ...p, to_name: e.target.value }))}
+                          className="w-full border border-gray-200 rounded px-2 py-1 text-xs" placeholder="Customer name" />
+                        <textarea value={letterFields.to_address} onChange={(e) => setLetterFields(p => ({ ...p, to_address: e.target.value }))}
+                          className="w-full border border-gray-200 rounded px-2 py-1 text-xs" rows="2" placeholder="Address" />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          <div>
+                            <label className="text-[10px] text-gray-500">Instance ID (locked)</label>
+                            <input value={letterFields.instance_id} readOnly disabled
+                              className="w-full border border-gray-200 rounded px-2 py-1 text-xs bg-gray-100 cursor-not-allowed" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-gray-500">Engine Model (locked)</label>
+                            <input value={letterFields.engine_model} readOnly disabled
+                              className="w-full border border-gray-200 rounded px-2 py-1 text-xs bg-gray-100 cursor-not-allowed" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-gray-500">Agreement No (locked)</label>
+                            <input value={letterFields.agreement_no} readOnly disabled
+                              className="w-full border border-gray-200 rounded px-2 py-1 text-xs bg-gray-100 cursor-not-allowed" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-gray-500">Contact</label>
+                            <input value={letterFields.contact} onChange={(e) => setLetterFields(p => ({ ...p, contact: e.target.value }))}
+                              className="w-full border border-gray-200 rounded px-2 py-1 text-xs" />
+                          </div>
+                          <div className="sm:col-span-2">
+                            <label className="text-[10px] text-gray-500">Email</label>
+                            <input value={letterFields.email} onChange={(e) => setLetterFields(p => ({ ...p, email: e.target.value }))}
+                              className="w-full border border-gray-200 rounded px-2 py-1 text-xs" />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3">
+                        <label className="text-[10px] text-gray-500">Subject</label>
+                        <input value={letterFields.subject} onChange={(e) => setLetterFields(p => ({ ...p, subject: e.target.value }))}
+                          className="w-full border border-gray-200 rounded px-2 py-1 text-xs font-semibold" />
+                      </div>
+
+                      {previousLetters.length > 0 && (
+                        <div className="mt-3 border border-gray-200 rounded-lg bg-gray-50 px-3 py-2">
+                          <p className="text-[10px] font-bold text-black uppercase tracking-wide mb-1">
+                            Previous Letters (last {previousLetters.length})
+                          </p>
+                          <div className="space-y-1">
+                            {previousLetters.map((pl, i) => (
+                              <div key={i} className="flex items-center justify-between text-[11px] text-black">
+                                <span className="font-semibold">{pl.ref_no}</span>
+                                <span className="text-gray-600">{pl.date || '-'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="mt-2">
+                        <label className="text-[10px] text-gray-500">Letter Body</label>
+                        <textarea value={letterFields.body} onChange={(e) => setLetterFields(p => ({ ...p, body: e.target.value }))}
+                          className="w-full border border-gray-200 rounded px-2 py-2 text-xs leading-relaxed" style={{ minHeight: '220px' }} />
+                      </div>
+                    </div>
+
+                    <div className="border border-gray-200 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-[11px] font-bold text-black uppercase">Attachments ({letterAttachments.length})</p>
+                        <div className="flex items-center gap-2">
+                          <input type="file" multiple accept=".mp4,.jpg,.jpeg,.png,.pdf,.doc,.docx"
+                            onChange={handleLetterAddAttachment} className="hidden" id="letter-extra-attach" />
+                          <label htmlFor="letter-extra-attach"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-white rounded-md cursor-pointer"
+                            style={{ backgroundColor: themeColor }}>
+                            <PlusIcon className="h-3 w-3" /> Add file
+                          </label>
+                          <button onClick={handlePrintLetter}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] border border-gray-300 rounded-md hover:bg-gray-50 text-black">
+                            <DocumentTextIcon className="h-3 w-3" /> Print
+                          </button>
+                        </div>
+                      </div>
+                      {letterAttachments.length === 0 ? (
+                        <span className="text-xs text-gray-400">No attachments</span>
+                      ) : (
+                        <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                          {letterAttachments.map((a, i) => (
+                            <div key={i} className="flex items-center justify-between p-1.5 bg-gray-50 rounded border">
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <DocumentTextIcon className="h-3.5 w-3.5 shrink-0" style={{ color: themeColor }} />
+                                <span className="text-[11px] text-black truncate">{a.name}</span>
+                                {a.size && <span className="text-[10px] text-gray-400 shrink-0">({(a.size / 1024).toFixed(0)} KB)</span>}
+                              </div>
+                              <button onClick={() => removeLetterWizardAttachment(i)} className="text-red-500 hover:text-red-700 shrink-0 ml-1">
+                                <XMarkIcon className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* STEP 4 — Review & Send */}
+                {letterStep === 4 && (
+                  <div className="space-y-3 max-w-3xl mx-auto">
+                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="px-3 py-1.5 bg-gray-50 border-b text-xs font-bold text-black flex items-center justify-between">
+                        <span>Letter Preview</span>
+                        <button onClick={handlePrintLetter} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] border border-gray-300 rounded hover:bg-gray-100">
+                          <DocumentTextIcon className="h-3 w-3" /> Print
+                        </button>
+                      </div>
+                      <div className="p-2 max-h-[40vh] overflow-y-auto bg-gray-50">
+                        <div dangerouslySetInnerHTML={{ __html: buildLetterHtml() }} />
+                      </div>
+                    </div>
+
+                    <div className="border border-gray-200 rounded-lg p-3 space-y-3">
+                      <p className="text-[11px] font-bold text-black uppercase">Send Via</p>
+                      <div className="flex flex-wrap gap-2">
+                        <label className={`flex items-center gap-1.5 px-3 py-2 border rounded-md cursor-pointer text-sm ${letterChannels.includes('email') ? 'border-[#2f3192] bg-[#2f3192]/10 text-[#2f3192]' : 'border-gray-300 text-black'}`}>
+                          <input type="checkbox" className="hidden" checked={letterChannels.includes('email')} onChange={() => toggleLetterSendChannel('email')} />
+                          <EnvelopeIcon className="h-4 w-4" /> Email
+                        </label>
+                        <label className={`flex items-center gap-1.5 px-3 py-2 border rounded-md cursor-pointer text-sm ${letterChannels.includes('whatsapp') ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-300 text-black'}`}>
+                          <input type="checkbox" className="hidden" checked={letterChannels.includes('whatsapp')} onChange={() => toggleLetterSendChannel('whatsapp')} />
+                          <ChatBubbleLeftRightIcon className="h-4 w-4" /> WhatsApp
+                        </label>
+                      </div>
+
+                      {letterChannels.includes('email') && (
+                        <div>
+                          <label className="text-[10px] text-gray-500">Recipient Email</label>
+                          <input value={letterEmailTo} onChange={(e) => setLetterEmailTo(e.target.value)}
+                            className="w-full border border-gray-300 rounded-lg px-2 py-1 text-xs text-black" placeholder="customer@email.com" />
+                        </div>
+                      )}
+                      {letterChannels.includes('whatsapp') && (
+                        <div>
+                          <label className="text-[10px] text-gray-500">WhatsApp Number (with country code)</label>
+                          <input value={letterWhatsappTo} onChange={(e) => setLetterWhatsappTo(e.target.value)}
+                            className="w-full border border-gray-300 rounded-lg px-2 py-1 text-xs text-black" placeholder="9198xxxxxxxx" />
+                          <p className="text-[10px] text-gray-400 mt-0.5">Letter text is sent over WhatsApp; file attachments go via email.</p>
+                        </div>
+                      )}
+                      <div className="text-[11px] text-gray-600">
+                        <span className="font-semibold">Ref No:</span> {letterFields.ref_no} &nbsp;·&nbsp;
+                        <span className="font-semibold">Attachments:</span> {letterAttachments.length}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-4 py-3 border-t border-gray-200 flex justify-between gap-2 bg-white">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => letterStep > 1 ? setLetterStep(letterStep - 1) : setShowLetterWizard(false)}
+                    disabled={letterSending}
+                    className="px-3 py-1.5 border border-gray-300 rounded-lg text-[11px] font-medium text-black hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    {letterStep > 1 ? 'Back' : 'Cancel'}
+                  </button>
+                  {(letterStep === 3 || letterStep === 4) && (
+                    <button
+                      onClick={handleSaveLetterDraft}
+                      disabled={letterSending}
+                      className="px-3 py-1.5 border rounded-lg text-[11px] font-medium hover:bg-gray-50 disabled:opacity-50"
+                      style={{ color: themeColor, borderColor: themeColor }}
+                    >
+                      Save as Draft
+                    </button>
+                  )}
+                </div>
+                {letterStep < 4 ? (
+                  <button
+                    onClick={() => goToLetterStep(letterStep + 1)}
+                    className="px-4 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 flex items-center gap-1.5"
+                    style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}
+                  >
+                    Next <ChevronRightIcon className="h-3 w-3" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSendLetter}
+                    disabled={letterSending}
+                    className="px-4 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+                    style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}
+                  >
+                    {letterSending ? <ArrowPathIcon className="h-3 w-3 animate-spin" /> : <PaperAirplaneIcon className="h-3 w-3" />}
+                    Send Letter
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}

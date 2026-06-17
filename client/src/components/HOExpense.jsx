@@ -674,6 +674,7 @@ const HOExpense = () => {
   const [billWiseVerificationStatus, setBillWiseVerificationStatus] = useState({});
   const [billWiseSavingStates, setBillWiseSavingStates] = useState({});
   const [submittingBillWiseToHistory, setSubmittingBillWiseToHistory] = useState(false);
+  const [billWiseTab, setBillWiseTab] = useState('pending'); // 'pending' | 'verified'
 
   // ─── Sales & BM (merged Sales + KM Wise), voucher-wise like Service Engineer ───
   const [loadingSalesBM, setLoadingSalesBM] = useState(false);
@@ -721,6 +722,8 @@ const HOExpense = () => {
   const [kmRates, setKmRates] = useState({});
   const [originalKmRates, setOriginalKmRates] = useState({});
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshingSalesBM, setRefreshingSalesBM] = useState(false);
+  const [refreshingBillWise, setRefreshingBillWise] = useState(false);
 
   const [showVendorListModal, setShowVendorListModal] = useState(false);
   const [vendorList, setVendorList] = useState([]);
@@ -1491,9 +1494,11 @@ const HOExpense = () => {
         };
       }).sort((a, b) => String(a.voucher_no).localeCompare(String(b.voucher_no)));
       setVoucherGroups(builtVoucherGroups);
+      return builtVoucherGroups;
     } catch (error) {
       console.error('Error loading engineer summary:', error);
       toast.error('Failed to load engineer data');
+      return [];
     } finally {
       setLoadingEngineerSummary(false);
       setLoadingCalculatedTotals(false);
@@ -1989,6 +1994,51 @@ const HOExpense = () => {
     }
   };
 
+  // Refresh Bill Wise in place — voucher summary OR voucher detail (keeps the open engineer/customer)
+  const refreshBillWise = async () => {
+    if (!selectedBranchForSummary) return;
+    setRefreshingBillWise(true);
+    try {
+      if (selectedBillWisePeriod) {
+        const curType = selectedBillWiseEngineer?.type || null;
+        const curName = selectedBillWiseEngineer?.name || null;
+        const res = await axios.get(`${API_BASE_URL}/tada-bill-wise/voucher-records`, {
+          params: { branch_code: selectedBranchForSummary.branch_code, voucher_no: selectedBillWisePeriod.voucher_no },
+        });
+        const records = res.data || [];
+        setBillWisePeriodRecords(records);
+        const verify = {};
+        records.forEach(r => { verify[r.id] = r.verification_status === 'Verified'; });
+        setBillWiseVerificationStatus(verify);
+        if (curType && curName) {
+          const map = {};
+          records.forEach(r => {
+            const type = r.entry_type === 'BM' ? 'BM' : 'SE';
+            const submitter = r.submitted_by || r.uploaded_by || r.created_by || selectedBillWisePeriod.submitted_by || '';
+            const name = (type === 'SE' ? r.engineer_name : submitter) || 'Unknown';
+            const key = `${type}__${name}`;
+            if (!map[key]) map[key] = { type, name, records: [], record_count: 0, verified_count: 0, total: 0, verified_total: 0 };
+            const g = map[key];
+            g.records.push(r);
+            g.record_count += 1;
+            const amt = parseFloat(r.amount) || 0;
+            g.total += amt;
+            if (r.verification_status === 'Verified') { g.verified_count += 1; g.verified_total += amt; }
+          });
+          setSelectedBillWiseEngineer(map[`${curType}__${curName}`] || null);
+        }
+      } else {
+        await loadBranchBillWiseSummary(selectedBranchForSummary);
+      }
+      toast.success('Refreshed!', { duration: 1500 });
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to refresh');
+    } finally {
+      setRefreshingBillWise(false);
+    }
+  };
+
   // ─── Memos for totals ────────────────────────────────────────────────
   const billWiseTotalAmount = useMemo(
     () => billWisePeriodRecords.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
@@ -2082,6 +2132,92 @@ const HOExpense = () => {
       d[x.id] = '';
     });
     setSalesBMVerify(v); setSalesBMCorr(c); setSalesBMRemark(r); setSalesBMDA(d);
+  };
+
+  // Refresh Sales & BM in place — stays on the current voucher / engineer view
+  const refreshSalesBM = async () => {
+    if (!selectedBranchForSummary) return;
+    setRefreshingSalesBM(true);
+    const curVoucherNo = selectedSalesBMVoucher?.voucher_no || null;
+    const curEngKey = selectedSalesBMEngineer
+      ? (selectedSalesBMEngineer.engineer_uid || selectedSalesBMEngineer.engineer_name)
+      : null;
+    const curTab = salesBMTab;
+    try {
+      const engRes = await axios.get(`${API_BASE_URL}/tada-salesbm/branch-engineers-summary`, {
+        params: { branch_code: selectedBranchForSummary.branch_code },
+      });
+      const engineers = engRes.data || [];
+      const results = await Promise.all(engineers.map(e =>
+        axios.get(`${API_BASE_URL}/tada-salesbm/engineer-records`, {
+          params: { branch_code: selectedBranchForSummary.branch_code, engineer_uid: e.engineer_uid || '', engineer_name: e.engineer_name || '' },
+        }).then(r => ({ e, records: r.data || [] })).catch(() => ({ e, records: [] }))
+      ));
+
+      const vmap = {};
+      results.forEach(({ e, records }) => {
+        records.forEach(rec => {
+          const v = String(rec.voucher_no || '').trim() || 'No Voucher';
+          const uid = e.engineer_uid || e.engineer_name;
+          if (!vmap[v]) vmap[v] = {};
+          if (!vmap[v][uid]) vmap[v][uid] = { engineer_uid: e.engineer_uid, engineer_name: e.engineer_name, records: [] };
+          vmap[v][uid].records.push(rec);
+        });
+      });
+
+      const groups = Object.entries(vmap).map(([voucher_no, engMap]) => {
+        const fmtP = d => d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : null;
+        const engs = Object.values(engMap).map(en => {
+          const ds = en.records.map(r => { const d = new Date(r.date); return isNaN(d.getTime()) ? null : d; }).filter(Boolean);
+          const minD = ds.length ? new Date(Math.min(...ds)) : null;
+          const maxD = ds.length ? new Date(Math.max(...ds)) : null;
+          return {
+            engineer_uid: en.engineer_uid,
+            engineer_name: en.engineer_name,
+            records: en.records,
+            record_count: en.records.length,
+            verified_count: en.records.filter(r => r.verification_status === 'Verified').length,
+            total: en.records.reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0),
+            period_start: fmtP(minD),
+            period_end: fmtP(maxD),
+          };
+        }).sort((a, b) => String(a.engineer_name).localeCompare(String(b.engineer_name)));
+        const submitterSet = new Set();
+        engs.forEach(en => en.records.forEach(r => { if (r.created_by) submitterSet.add(r.created_by); }));
+        return {
+          voucher_no,
+          submitted_by: submitterSet.size ? Array.from(submitterSet).join(', ') : '-',
+          engineers: engs,
+          engineer_count: engs.length,
+          record_count: engs.reduce((s, e) => s + e.record_count, 0),
+          verified_count: engs.reduce((s, e) => s + e.verified_count, 0),
+          total: engs.reduce((s, e) => s + e.total, 0),
+        };
+      }).sort((a, b) => String(a.voucher_no).localeCompare(String(b.voucher_no)));
+
+      setSalesBMVoucherGroups(groups);
+
+      if (curVoucherNo) {
+        const vg = groups.find(g => g.voucher_no === curVoucherNo) || null;
+        setSelectedSalesBMVoucher(vg);
+        if (vg && curEngKey) {
+          const eng = vg.engineers.find(en => (en.engineer_uid || en.engineer_name) === curEngKey);
+          if (eng) {
+            openSalesBMEngineer(eng);
+            setSalesBMTab(curTab);
+          } else {
+            setSelectedSalesBMEngineer(null);
+            setSalesBMRecords([]);
+          }
+        }
+      }
+      toast.success('Refreshed!', { duration: 1500 });
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to refresh');
+    } finally {
+      setRefreshingSalesBM(false);
+    }
   };
 
   const autoSaveSalesBMField = useCallback((recordId, field, value, originalValue) => {
@@ -2822,12 +2958,19 @@ const HOExpense = () => {
   // Updated refresh function with loading state
   const refreshCurrentView2 = useCallback(async () => {
     setRefreshing(true);
+    // Remember which voucher is open so we can stay on the engineers list after refresh
+    const curVoucherNo = selectedVoucher?.voucher_no || null;
     try {
       if (selectedEngineerDetail && selectedBranchForSummary) {
         await loadEngineerDetails(selectedEngineerDetail.uid, selectedEngineerDetail.name, selectedBranchForSummary.branch_code);
         toast.success('Records refreshed!', { duration: 1500 });
       } else if (selectedBranchForSummary) {
-        await loadEngineersSummary(selectedBranchForSummary);
+        const built = await loadEngineersSummary(selectedBranchForSummary);
+        // If we were inside a voucher's engineer list, re-open that same voucher
+        if (curVoucherNo && Array.isArray(built)) {
+          const vg = built.find(v => v.voucher_no === curVoucherNo);
+          setSelectedVoucher(vg || null);
+        }
         toast.success('Engineer list refreshed!', { duration: 1500 });
       } else {
         await loadBranches();
@@ -2838,7 +2981,7 @@ const HOExpense = () => {
     } finally {
       setRefreshing(false);
     }
-  }, [selectedEngineerDetail, selectedBranchForSummary]);
+  }, [selectedEngineerDetail, selectedBranchForSummary, selectedVoucher]);
 
   const renderCell = (record, key, idx) => {
     if (key === 'sr_no') {
@@ -4510,6 +4653,26 @@ const HOExpense = () => {
                         </h2>
                       </div>
                       <div className="flex gap-2 items-center">
+                        {selectedSalesBMVoucher && (
+                          <button
+                            onClick={refreshSalesBM}
+                            disabled={refreshingSalesBM}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg disabled:opacity-50"
+                            style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}
+                          >
+                            {refreshingSalesBM ? (
+                              <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                              </svg>
+                            ) : (
+                              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                              </svg>
+                            )}
+                            Refresh
+                          </button>
+                        )}
                         {canExport && !selectedSalesBMVoucher && (
                           <button
                             onClick={() => exportToExcel(
@@ -4981,6 +5144,24 @@ const HOExpense = () => {
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
+                        <button
+                          onClick={refreshBillWise}
+                          disabled={refreshingBillWise}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg disabled:opacity-50"
+                          style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}
+                        >
+                          {refreshingBillWise ? (
+                            <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                          ) : (
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                          )}
+                          Refresh
+                        </button>
                         {canExport && !selectedBillWiseEngineer && (
                           <button
                             onClick={() => {
@@ -5002,7 +5183,7 @@ const HOExpense = () => {
                                 `billwise_${selectedBillWisePeriod.voucher_no}_list.xlsx`,
                                 [
                                   { key: 'type', label: 'Type' },
-                                  { key: 'name', label: 'Engineer / Customer' },
+                                  { key: 'name', label: 'Engineer Name' },
                                   { key: 'record_count', label: 'No. of Activity' },
                                   { key: 'verified_count', label: 'Verified' },
                                   { key: 'total', label: 'Total Amount' },
@@ -5092,7 +5273,8 @@ const HOExpense = () => {
                         const map = {};
                         billWisePeriodRecords.forEach(r => {
                           const type = r.entry_type === 'BM' ? 'BM' : 'SE';
-                          const name = (type === 'SE' ? r.engineer_name : r.customer_name) || 'Unknown';
+                          const submitter = r.submitted_by || r.uploaded_by || r.created_by || selectedBillWisePeriod.submitted_by || '';
+                          const name = (type === 'SE' ? r.engineer_name : submitter) || 'Unknown';
                           const key = `${type}__${name}`;
                           if (!map[key]) map[key] = { type, name, records: [], record_count: 0, verified_count: 0, total: 0, verified_total: 0 };
                           const g = map[key];
@@ -5109,7 +5291,7 @@ const HOExpense = () => {
                           <div className="p-4 overflow-x-auto">
                             <table className="min-w-full border-collapse border border-gray-200">
                               <thead className="bg-gray-50"><tr>
-                                {['Sr. No.', 'Type', 'Engineer / Customer', 'No. of Activity', 'Verified', 'Total Amount', 'Verified Amount'].map(h =>
+                                {['Sr. No.', 'Type', 'Engineer Name', 'No. of Activity', 'Verified', 'Total Amount', 'Verified Amount'].map(h =>
                                   <th key={h} className="border border-gray-300 px-2 py-1.5 text-center text-xs font-semibold text-black">{h}</th>)}
                               </tr></thead>
                               <tbody>
@@ -5123,7 +5305,7 @@ const HOExpense = () => {
                                       </span>
                                     </td>
                                     <td className="border border-gray-300 px-4 py-0 text-sm font-medium">
-                                      <button onClick={() => setSelectedBillWiseEngineer(g)} className="text-[#2f3192] underline hover:font-bold bg-transparent border-0 p-0 text-left">{g.name}</button>
+                                      <button onClick={() => { setSelectedBillWiseEngineer(g); setBillWiseTab('pending'); }} className="text-[#2f3192] underline hover:font-bold bg-transparent border-0 p-0 text-left">{g.name}</button>
                                     </td>
                                     <td className="border border-gray-300 px-2 py-0 text-center text-sm font-semibold">{g.record_count}</td>
                                     <td className="border border-gray-300 px-2 py-0 text-center text-sm">{g.verified_count}</td>
@@ -5193,26 +5375,49 @@ const HOExpense = () => {
                           ];
                         const minW = cols.reduce((s, c) => s + c.w, 0);
                         const amountColIdx = cols.findIndex(c => c.key === '_amount');
+                        const isVerifiedRow = (r) => billWiseVerificationStatus[r.id] ?? (r.verification_status === 'Verified');
+                        const tabRows = rows.filter(r => billWiseTab === 'verified' ? isVerifiedRow(r) : !isVerifiedRow(r));
+                        const pendingCount = rows.filter(r => !isVerifiedRow(r)).length;
+                        const verifiedCount = rows.filter(r => isVerifiedRow(r)).length;
                         const total = rows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-                        const verifiedTotal = rows.reduce((s, r) => {
-                          const v = billWiseVerificationStatus[r.id] ?? (r.verification_status === 'Verified');
-                          return v ? s + (parseFloat(r.amount) || 0) : s;
-                        }, 0);
+                        const verifiedTotal = rows.reduce((s, r) => isVerifiedRow(r) ? s + (parseFloat(r.amount) || 0) : s, 0);
+                        const tabTotal = tabRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
                         return (
                           <>
-                            {/* Stats */}
+                            {/* Stats + Tabs */}
                             <div className="px-3 py-1.5 border-b bg-white flex flex-wrap gap-2 items-center">
+                              <button
+                                onClick={() => setBillWiseTab('pending')}
+                                className="px-3 py-1 text-[11px] font-semibold rounded-md transition-all border"
+                                style={{
+                                  backgroundColor: billWiseTab === 'pending' ? themeColor : '#f9fafb',
+                                  color: billWiseTab === 'pending' ? 'white' : '#374151',
+                                  borderColor: billWiseTab === 'pending' ? themeColor : '#e5e7eb',
+                                }}
+                              >
+                                Pending ({pendingCount})
+                              </button>
+                              <button
+                                onClick={() => setBillWiseTab('verified')}
+                                className="px-3 py-1 text-[11px] font-semibold rounded-md transition-all border"
+                                style={{
+                                  backgroundColor: billWiseTab === 'verified' ? '#059669' : '#f9fafb',
+                                  color: billWiseTab === 'verified' ? 'white' : '#374151',
+                                  borderColor: billWiseTab === 'verified' ? '#059669' : '#e5e7eb',
+                                }}
+                              >
+                                Verified ({verifiedCount})
+                              </button>
+
+                              <span className="mx-1 h-5 w-px bg-gray-300" />
+
                               <div className="flex items-center gap-1 px-2 py-1 rounded bg-gray-50 border border-gray-200">
                                 <span className="text-[9px] font-bold text-gray-500 uppercase">Count:</span>
-                                <span className="text-[10px] font-bold text-gray-800">{rows.length}</span>
+                                <span className="text-[10px] font-bold text-gray-800">{tabRows.length}</span>
                               </div>
                               <div className="flex items-center gap-1 px-2 py-1 rounded bg-blue-50 border border-blue-100">
-                                <span className="text-[9px] font-bold text-blue-600 uppercase">Total Amount:</span>
-                                <span className="text-[10px] font-bold text-blue-800">₹{total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                              </div>
-                              <div className="flex items-center gap-1 px-2 py-1 rounded bg-green-50 border border-green-100">
-                                <span className="text-[9px] font-bold text-green-600 uppercase">Verified Amount:</span>
-                                <span className="text-[10px] font-bold text-green-800">₹{verifiedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                <span className="text-[9px] font-bold text-blue-600 uppercase">{billWiseTab === 'verified' ? 'Verified Amount:' : 'Pending Amount:'}</span>
+                                <span className="text-[10px] font-bold text-blue-800">₹{tabTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                               </div>
                             </div>
 
@@ -5233,7 +5438,7 @@ const HOExpense = () => {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {rows.map((rec, idx) => {
+                                  {tabRows.map((rec, idx) => {
                                     const isVerified = billWiseVerificationStatus[rec.id] ?? (rec.verification_status === 'Verified');
                                     const isSaving = billWiseSavingStates[rec.id];
                                     const rowBg = isVerified ? '#f0fdf4' : '#ffffff';
@@ -5297,9 +5502,9 @@ const HOExpense = () => {
                                 <tfoot className="sticky bottom-0">
                                   <tr style={{ backgroundColor: '#f0f1ff' }}>
                                     <td className="border border-gray-300" style={{ position: 'sticky', left: 0, zIndex: 25, backgroundColor: '#f0f1ff', boxShadow: '2px 0 4px -2px rgba(0,0,0,0.1)' }} />
-                                    <td colSpan={amountColIdx - 1} className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border border-gray-300">Grand Total</td>
+                                    <td colSpan={amountColIdx - 1} className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border border-gray-300">{billWiseTab === 'verified' ? 'Verified Total' : 'Pending Total'}</td>
                                     <td className="px-2 py-1.5 text-[11px] font-bold text-center border border-gray-300" style={{ color: themeColor }}>
-                                      ₹{total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      ₹{tabTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </td>
                                     <td colSpan={cols.length - amountColIdx - 1} className="border border-gray-300" />
                                   </tr>

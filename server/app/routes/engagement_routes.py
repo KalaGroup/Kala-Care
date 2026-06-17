@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -337,3 +337,54 @@ async def get_campaign_script_pdf(
     """Fetch a single campaign script's PDF content on demand (lazy load)."""
     controller = EngagementController(db)
     return controller.get_campaign_script_pdf(campaign_id, script_index)
+
+# ==================== Letter Sending ====================
+
+@router.get("/letter/next-ref", response_model=dict)
+async def get_letter_next_ref(
+    instance_id: str = Query(..., description="Customer instance_id"),
+    db: Session = Depends(get_db)
+):
+    """Preview the next letter Ref No (KC/FY/NN) for an instance_id."""
+    controller = EngagementController(db)
+    return controller.get_next_letter_ref(instance_id)
+
+
+@router.get("/letter/history", response_model=list)
+async def get_letter_history(
+    instance_id: str = Query(..., description="Customer instance_id"),
+    db: Session = Depends(get_db)
+):
+    """List letters already sent for an instance_id."""
+    controller = EngagementController(db)
+    return controller.get_letter_history(instance_id)
+
+
+@router.post("/letter/send", response_model=dict)
+async def send_letter(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db)
+):
+    """Send a letter via email and/or WhatsApp and record it with a Ref No."""
+    controller = EngagementController(db)
+    return controller.send_letter(payload)
+
+
+@router.post("/letter/save-draft", response_model=dict)
+async def save_letter_draft(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db)
+):
+    """Save (create/update) a letter as a draft without sending."""
+    controller = EngagementController(db)
+    return controller.save_letter_draft(payload)
+
+
+@router.get("/letter/record/{record_id}", response_model=dict)
+async def get_letter_record(
+    record_id: int,
+    db: Session = Depends(get_db)
+):
+    """Full single letter (html, fields, attachments) for viewing or reopening a draft."""
+    controller = EngagementController(db)
+    return controller.get_letter_record(record_id)    

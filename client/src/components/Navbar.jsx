@@ -92,7 +92,8 @@ function Navbar({ children }) {
         { symbol: "W", meaning: "Work in Progress", description: "Ongoing" },
         { symbol: "C", meaning: "Completed", description: "Business converted" },
         { symbol: "R", meaning: "Rejected", description: "Rejected by customer" },
-        { symbol: "FR", meaning: "Rescheduled", description: "Follow-up rescheduled" }
+        { symbol: "FR", meaning: "Rescheduled", description: "Follow-up rescheduled" },
+        { symbol: "NC", meaning: "Not Connected", description: "Call not connected during follow-up" }
       ]
     },
     flagIndicators: {
@@ -440,6 +441,14 @@ function Navbar({ children }) {
         icon: ClipboardDocumentListIcon,
         description: 'Minutes of Meeting tracking',
         allowedRoles: ['master_admin', 'it_admin']
+      },
+      {
+        path: '/knowledge-book',
+        name: 'Knowledge Book',
+        icon: BookOpenIcon,
+        description: 'Product brochures, photos, videos & documents',
+        allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
+
       },
       // {
       //   path: '/knowledge-bank',

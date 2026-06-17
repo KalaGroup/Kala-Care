@@ -93,3 +93,31 @@ class AssetValidationResponse(BaseModel):
     invalid_assets: List[str]
     total_valid: int
     total_invalid: int
+
+class LetterFormatBase(BaseModel):
+    format_type_name: str
+    channels: List[str] = []
+    default_attachments: List[Dict[str, Any]] = []
+    letter_format: Optional[str] = None
+
+
+class LetterFormatCreate(LetterFormatBase):
+    pass
+
+
+class LetterFormatUpdate(BaseModel):
+    format_type_name: Optional[str] = None
+    channels: Optional[List[str]] = None
+    default_attachments: Optional[List[Dict[str, Any]]] = None
+    letter_format: Optional[str] = None
+
+
+class LetterFormatResponse(LetterFormatBase):
+    id: int
+    created_by_id: Optional[str] = None
+    created_by_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True    

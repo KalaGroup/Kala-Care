@@ -19,7 +19,9 @@ const SOURCE_META = {
   bill_wise: {
     short: 'BW', label: 'Bill Wise', accent: '#ea580c', bg: '#ffedd5',
     amountKey: 'amount',
-    groupKey: (r) => ((r.entry_type === 'BM' ? r.customer_name : r.engineer_name) || 'Unknown'),
+    groupKey: (r) => ((r.entry_type === 'BM'
+      ? (r.submitted_by || r.uploaded_by || r.created_by || r.customer_name)
+      : r.engineer_name) || 'Unknown'),
   },
 };
 
@@ -514,7 +516,7 @@ const BranchTADAHistory = ({ branchCode, branchName, themeColor, onClose, canExp
               <table className="border-collapse w-full">
                 <thead className="sticky top-0 z-10">
                   <tr style={{ backgroundColor: detailMeta.bg }}>
-                    {['Sr. No.', 'Engineer / Customer', 'No. of Records', 'Total Amount', 'Paid'].map((h, i) => (
+                    {['Sr. No.', 'Engineer Name', 'No. of Records', 'Total Amount', 'Paid'].map((h, i) => (
                       <th key={i} className="px-3 py-2 text-[11px] font-bold text-gray-700 border border-gray-200 uppercase whitespace-nowrap text-center">{h}</th>
                     ))}
                   </tr>

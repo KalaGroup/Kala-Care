@@ -16,6 +16,7 @@ import ExDashboard from './pages/ExDashboard';
 import MOMTracking from './pages/MOMTracking';
 import SalseANDFinance from './pages/SalseANDFinance';
 import KnowledgeBank from './pages/KnowledgeBank';
+import KnowledgeBook from './pages/KnowledgeBook';
 
 // Helper function to check if user is any type of admin
 const isAdmin = (role) => {
@@ -167,6 +168,14 @@ function Layout() {
         </ProtectedRoute>
       } />
 
+      {/* Knowledge Book Page */}
+      <Route path="/knowledge-book" element={
+        <ProtectedRoute allowedRoles={['master_admin', 'it_admin', 'branch_admin', 'employee']}
+        >
+          <KnowledgeBook />
+        </ProtectedRoute>
+      } />
+
       {/* Knowledge Bank Page - ONLY master_admin and it_admin can access */}
       <Route path="/knowledge-bank" element={
         <ProtectedRoute allowedRoles={['master_admin', 'it_admin']}>
@@ -176,7 +185,7 @@ function Layout() {
 
       {/* MODIFIED: Expense Page - With branch check for employees */}
       <Route path="/expense" element={
-        <ProtectedRoute 
+        <ProtectedRoute
           allowedRoles={['master_admin', 'it_admin', 'branch_admin', 'employee']}
           customCheck={canAccessExpensePages}
         >
@@ -186,7 +195,7 @@ function Layout() {
 
       {/* MODIFIED: Expense Dashboard Page - With branch check for employees */}
       <Route path="/expense-dashboard" element={
-        <ProtectedRoute 
+        <ProtectedRoute
           allowedRoles={['master_admin', 'it_admin', 'branch_admin', 'employee']}
           customCheck={canAccessExpensePages}
         >

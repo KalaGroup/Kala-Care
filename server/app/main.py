@@ -44,7 +44,8 @@ from app.routes import (
     branch_submit_limits_routes,
     Imprest_routes,
     TADA_bill_wise_routes,
-    salesBM_routes
+    salesBM_routes,
+    knowledge_book_routes
 )
 
 # ---------------- LOAD ENV ---------------- #
@@ -112,41 +113,60 @@ def backfill_primary_branches(db):
 
 # ---------------- EMAIL FUNCTIONS ---------------- #
 
-def send_initial_emails():
-    """Send initial emails on server startup"""
-    try:
-        db = SessionLocal()
-        controller = EditCustomerController(db)
-        
-        print("\n📧 Sending initial emails...")
-        
-        # Send test email
-        controller.send_test_email()
-        
-        # Send initial 10-day report
-        controller.send_last_10_days_edit_history_email(force_send=True)
-        
-        db.close()
-        print("✅ Initial emails sent\n")
-        
-    except Exception as e:
-        print(f"❌ Error sending initial emails: {e}\n")
+def get_report_window(today):
+    """
+    Return (start_date, end_date) for the report based on today's date,
+    or None if today is not a send day.
+
+      10th -> 1st..10th  (plus the 31st of the previous month if it had 31 days)
+      20th -> 11th..20th
+      end  -> 21st..30th  (or 21st..last-day for February: 28th/29th)
+    """
+    import calendar
+    y, m, d = today.year, today.month, today.day
+    last_day = calendar.monthrange(y, m)[1]              # 28 / 29 / 30 / 31
+    end_send_day = 30 if last_day >= 30 else last_day    # Feb -> 28 or 29
+
+    # ----- 10th send: 1st..10th, plus leftover 31st of previous month -----
+    if d == 10:
+        pm, py = (12, y - 1) if m == 1 else (m - 1, y)
+        prev_last = calendar.monthrange(py, pm)[1]
+        start = datetime(py, pm, 31) if prev_last == 31 else datetime(y, m, 1)
+        return start, datetime(y, m, 10, 23, 59, 59)
+
+    # ----- 20th send: 11th..20th -----
+    if d == 20:
+        return datetime(y, m, 11), datetime(y, m, 20, 23, 59, 59)
+
+    # ----- end-of-month send: 21st..30th  (or 21st..28th/29th for Feb) -----
+    if d == end_send_day:
+        return datetime(y, m, 21), datetime(y, m, end_send_day, 23, 59, 59)
+
+    return None
+
 
 def scheduled_10_day_report_sender():
-    """Background thread to send reports every 10 days at 9:00 AM"""
+    """Send the edit-history report on the 10th, 20th and end-of-month at 9:00 AM."""
     while True:
         try:
             now = datetime.now()
-            
             if now.hour == 9 and now.minute == 0:
-                db = SessionLocal()
-                controller = EditCustomerController(db)
-                controller.send_last_10_days_edit_history_email(force_send=False)
-                db.close()
-                time.sleep(3600)
+                window = get_report_window(now)
+                if window:
+                    start_date, end_date = window
+                    db = SessionLocal()
+                    controller = EditCustomerController(db)
+                    controller.send_last_10_days_edit_history_email(
+                        force_send=True,
+                        start_date=start_date,
+                        end_date=end_date,
+                    )
+                    db.close()
+                    time.sleep(3600)  # avoid re-sending within the same hour
+                else:
+                    time.sleep(60)
             else:
                 time.sleep(60)
-                
         except Exception as e:
             print(f"Email scheduler error: {e}")
             time.sleep(300)
@@ -167,13 +187,10 @@ def startup():
             # Backfill multi-branch access for existing users (one-time migration)
             backfill_primary_branches(db)
             
-            # Send initial emails
-            send_initial_emails()
-            
             # Start email scheduler
             email_thread = threading.Thread(target=scheduled_10_day_report_sender, daemon=True)
             email_thread.start()
-            print("✅ Email scheduler started (reports every 10 days at 9:00 AM)")
+            print("✅ Email scheduler started (reports on 10th, 20th, 30th at 9:00 AM)")
             
         finally:
             db.close()
@@ -226,6 +243,7 @@ app.include_router(branch_submit_limits_routes.router, prefix="/api")
 app.include_router(Imprest_routes.router, prefix="/api")
 app.include_router(TADA_bill_wise_routes.router, prefix="/api")
 app.include_router(salesBM_routes.router, prefix="/api")
+app.include_router(knowledge_book_routes.router, prefix="/api")
 
 # ---------------- ROOT ---------------- #
 

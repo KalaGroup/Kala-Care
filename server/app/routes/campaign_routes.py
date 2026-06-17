@@ -186,3 +186,32 @@ def get_user_csp_sr_count(
     """Count of CSP SRs manually added by a user"""
     controller = CampaignController(db)
     return {"count": controller.get_user_csp_sr_count(user_id)}
+
+# ==================== Letter Master (Letter Format) endpoints ====================
+
+@router.get("/letter-master/formats", response_model=List[campaign_schema.LetterFormatResponse])
+def get_all_letter_formats(db: Session = Depends(get_db)):
+    controller = CampaignController(db)
+    return controller.get_all_letter_formats()
+
+@router.get("/letter-master/formats/{format_id}", response_model=campaign_schema.LetterFormatResponse)
+def get_letter_format(format_id: int, db: Session = Depends(get_db)):
+    controller = CampaignController(db)
+    return controller.get_letter_format(format_id)
+
+@router.post("/letter-master/formats", response_model=campaign_schema.LetterFormatResponse, status_code=status.HTTP_201_CREATED)
+def create_letter_format(request: Request, data: campaign_schema.LetterFormatCreate, db: Session = Depends(get_db)):
+    controller = CampaignController(db)
+    user_data = get_user_from_request(request)
+    return controller.create_letter_format(data, user_data)
+
+@router.put("/letter-master/formats/{format_id}", response_model=campaign_schema.LetterFormatResponse)
+def update_letter_format(request: Request, format_id: int, data: campaign_schema.LetterFormatUpdate, db: Session = Depends(get_db)):
+    controller = CampaignController(db)
+    user_data = get_user_from_request(request)
+    return controller.update_letter_format(format_id, data, user_data)
+
+@router.delete("/letter-master/formats/{format_id}")
+def delete_letter_format(format_id: int, db: Session = Depends(get_db)):
+    controller = CampaignController(db)
+    return controller.delete_letter_format(format_id)

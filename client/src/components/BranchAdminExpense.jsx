@@ -1593,6 +1593,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
                         <select value={bwSeBillDraft.bill_submitted}
                           onChange={e => setBwSeBillDraft(p => ({ ...p, bill_submitted: e.target.value }))}
                           className={`${inputCls} bg-white`}>
+                          <option value="">— Select —</option>
                           <option value="Yes">Yes</option>
                           <option value="No">No</option>
                         </select>
@@ -1846,6 +1847,19 @@ const MANUAL_FORM_INITIAL = {
   'Engineer Remark': '', 'Exception Remark': '', 'OTP Remark': '', 'PDF Generated': '',
 };
 
+// Effective 2-way KM for a row at the branch stage: branch_verified_km if set, else two_way_km.
+const effKmOf = (r) => {
+  if (r && r.branch_verified_km != null && String(r.branch_verified_km).trim() !== '') {
+    const v = parseFloat(r.branch_verified_km);
+    if (!isNaN(v)) return v;
+  }
+  if (r && r.two_way_km != null && String(r.two_way_km).trim() !== '') {
+    const v = parseFloat(r.two_way_km);
+    if (!isNaN(v)) return v;
+  }
+  return 0;
+};
+
 /* ═══════════════════════════════════════════════════════════════════════════════
    Main Component
 ═══════════════════════════════════════════════════════════════════════════════ */
@@ -2041,15 +2055,17 @@ const BranchAdminExpense = () => {
     if (!result.isConfirmed) return;
     try {
       await axios.delete(`${API_BASE_URL}/tada-bill-wise/records/${id}`);
-      setBillWiseDrafts(prev => prev.filter(r => r.id !== id));
+      setBillWiseDrafts(prev => prev.filter(r => r.id !== id));   // instant removal from view
       setBillWiseDraftSelected(prev => { const n = { ...prev }; delete n[id]; return n; });
       fetchBillWiseBlockedCombos();   // delete removes the combo → TADA draft unblocks
       toast.success('Record deleted');
+      fetchBillWiseDrafts();          // keep the drill-in group in sync
     } catch (err) {
       if (err.response?.status === 404) {
         setBillWiseDrafts(prev => prev.filter(r => r.id !== id));
         setBillWiseDraftSelected(prev => { const n = { ...prev }; delete n[id]; return n; });
         toast.success('Record removed');
+        fetchBillWiseDrafts();
       } else {
         toast.error(err.response?.data?.detail || 'Failed to delete record');
       }
@@ -2194,15 +2210,19 @@ const BranchAdminExpense = () => {
     if (!result.isConfirmed) return;
     try {
       await axios.delete(`${API_BASE_URL}/tada-salesbm/records/${id}`);
-      setSalesBmDrafts(prev => prev.filter(r => r.id !== id));
+      setSalesBmDrafts(prev => prev.filter(r => r.id !== id));   // instant removal from view
       setSalesBmDraftSelected(prev => { const n = { ...prev }; delete n[id]; return n; });
       toast.success('Record deleted');
+      // Re-fetch so the remaining same-day SRs of this engineer show their
+      // recomputed DA (backend rebalances per-day DA on delete).
+      fetchSalesBmDrafts();
     } catch (err) {
       if (err.response?.status === 404) {
         // Already gone on the server — just remove it from the view.
         setSalesBmDrafts(prev => prev.filter(r => r.id !== id));
         setSalesBmDraftSelected(prev => { const n = { ...prev }; delete n[id]; return n; });
         toast.success('Record removed');
+        fetchSalesBmDrafts();
       } else {
         toast.error(err.response?.data?.detail || 'Failed to delete record');
       }
@@ -3916,7 +3936,7 @@ const BranchAdminExpense = () => {
       <tr>
         <th style="width:50px;">Sr. No.</th>
         <th style="width:200px;">Period (Date)</th>
-        <th>Engineer / Customer</th>
+        <th>Engineer Name</th>
         <th style="width:120px;">No. of Activity</th>
         <th style="width:150px;">Total Amount</th>
       </tr>
@@ -5031,7 +5051,9 @@ const BranchAdminExpense = () => {
   };
 
   const SalesBmDraftView = () => {
-    if (loadingSalesBmDrafts) {
+    // Only block the whole view on the FIRST load. A delete triggers a background
+    // re-fetch (to refresh per-day DA) — don't flash a spinner over the table then.
+    if (loadingSalesBmDrafts && salesBmDrafts.length === 0) {
       return <div className="text-center py-16"><p className="text-sm text-gray-500">Loading Sales & BM TADA…</p></div>;
     }
     if (salesBmDrafts.length === 0) {
@@ -5122,19 +5144,31 @@ const BranchAdminExpense = () => {
         </div>
       );
     }
+    // Use the LIVE group (recomputed from salesBmDrafts) instead of the click-time
+    // snapshot, so a delete drops the row and refreshes the remaining DA without a reload.
+    const livePeriod = salesBmDraftPeriodGroups.find(g => g.key === salesBmDraftPeriod.key);
+    if (!livePeriod) {
+      // Every record in this engineer's group was deleted — go back to the list.
+      return (
+        <div className="text-center py-16">
+          <p className="text-sm text-gray-500 font-medium">All records in this group were removed</p>
+          <button onClick={() => setSalesBmDraftPeriod(null)} className="mt-2 text-xs font-semibold underline" style={{ color: themeColor }}>← Back to list</button>
+        </div>
+      );
+    }
     return (
       <>
         <div className="px-3 py-2 border-b bg-blue-50 flex items-center gap-2 flex-wrap">
           <button onClick={() => setSalesBmDraftPeriod(null)} className="inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md" style={{ background: 'linear-gradient(135deg, #64748b, #475569)' }}>← Back</button>
           <span className="text-[11px] text-gray-600">Engineer:</span>
-          <span className="text-[11px] font-bold text-purple-700">{salesBmDraftPeriod.engineerName}</span>
+          <span className="text-[11px] font-bold text-purple-700">{livePeriod.engineerName}</span>
           <span className="text-gray-300">|</span>
           <span className="text-[11px] text-gray-600">Period:</span>
-          <span className="text-[11px] font-bold text-gray-800">{fmt(salesBmDraftPeriod.periodStart)} → {fmt(salesBmDraftPeriod.periodEnd)}</span>
+          <span className="text-[11px] font-bold text-gray-800">{fmt(livePeriod.periodStart)} → {fmt(livePeriod.periodEnd)}</span>
           <span className="text-gray-300">|</span>
-          <span className="text-[11px] text-gray-600">Records:</span><span className="text-[11px] font-bold">{salesBmDraftPeriod.records.length}</span>
+          <span className="text-[11px] text-gray-600">Records:</span><span className="text-[11px] font-bold">{livePeriod.records.length}</span>
           <span className="text-gray-300">|</span>
-          <span className="text-[11px] text-gray-600">Total:</span><span className="text-[11px] font-bold text-purple-700">₹{salesBmDraftPeriod.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+          <span className="text-[11px] text-gray-600">Total:</span><span className="text-[11px] font-bold text-purple-700">₹{livePeriod.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
         </div>
         <div className="overflow-auto" style={{ maxHeight: '650px', scrollbarWidth: 'thin' }}>
           <table className="border-collapse w-full" style={{ minWidth: '2020px' }}>
@@ -5159,7 +5193,7 @@ const BranchAdminExpense = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {salesBmDraftPeriod.records.map((rec, idx) => (
+              {livePeriod.records.map((rec, idx) => (
                 <tr key={rec.id || idx} className="hover:bg-blue-50/30" style={{ height: '32px' }}>
                   <td className="px-2 py-1 text-center border-r border-gray-100">
                     <input type="checkbox" checked={!!salesBmDraftSelected[rec.id]} onChange={e => setSalesBmDraftSelected(prev => ({ ...prev, [rec.id]: e.target.checked }))} />
@@ -5203,7 +5237,9 @@ const BranchAdminExpense = () => {
   };
 
   const BillWiseDraftView = () => {
-    if (loadingBillWiseDrafts) {
+    // Only block the whole view on the FIRST load. A delete triggers a background
+    // re-fetch — don't flash a spinner over the table then.
+    if (loadingBillWiseDrafts && billWiseDrafts.length === 0) {
       return <div className="text-center py-16"><p className="text-sm text-gray-500">Loading Bill Wise…</p></div>;
     }
     if (billWiseDrafts.length === 0) {
@@ -5239,7 +5275,7 @@ const BranchAdminExpense = () => {
                     );
                   })()}
                 </th>
-                {['Sr. No.', 'Date Range', 'Type', 'Engineer / Customer', 'Records', 'Total Amount'].map((l, i) => (
+                {['Sr. No.', 'Date Range', 'Type', 'Engineer Name', 'Records', 'Total Amount'].map((l, i) => (
                   <th key={i} className="px-3 py-2 text-[10px] font-bold text-gray-700 uppercase border-b-2 border-r border-gray-200 last:border-r-0 text-center" style={{ backgroundColor: '#f0f1ff' }}>{l}</th>
                 ))}
               </tr>
@@ -5297,20 +5333,32 @@ const BranchAdminExpense = () => {
     }
 
     // ── DRILL-IN (this group's records) ──
-    const isBM = billWiseDraftPeriod.entryType === 'BM';
+    // Use the LIVE group (recomputed from billWiseDrafts) instead of the click-time
+    // snapshot, so a delete drops the row without a reload.
+    const liveGroup = billWiseDraftPeriodGroups.find(g => g.key === billWiseDraftPeriod.key);
+    if (!liveGroup) {
+      // Every record in this group was deleted — go back to the list.
+      return (
+        <div className="text-center py-16">
+          <p className="text-sm text-gray-500 font-medium">All records in this group were removed</p>
+          <button onClick={() => setBillWiseDraftPeriod(null)} className="mt-2 text-xs font-semibold underline" style={{ color: themeColor }}>← Back to list</button>
+        </div>
+      );
+    }
+    const isBM = liveGroup.entryType === 'BM';
     return (
       <>
         <div className="px-3 py-2 border-b bg-blue-50 flex items-center gap-2 flex-wrap">
           <button onClick={() => setBillWiseDraftPeriod(null)} className="inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md" style={{ background: 'linear-gradient(135deg, #64748b, #475569)' }}>← Back</button>
           <span className="text-[11px] text-gray-600">Period:</span>
-          <span className="text-[11px] font-bold text-gray-800">{fmt(billWiseDraftPeriod.periodStart)} → {fmt(billWiseDraftPeriod.periodEnd)}</span>
+          <span className="text-[11px] font-bold text-gray-800">{fmt(liveGroup.periodStart)} → {fmt(liveGroup.periodEnd)}</span>
           <span className="text-gray-300">|</span>
           <span className="text-[11px] text-gray-600">{isBM ? 'Employee' : 'Engineer'}:</span>
-          <span className="text-[11px] font-bold text-purple-700">{billWiseDraftPeriod.name}</span>
+          <span className="text-[11px] font-bold text-purple-700">{liveGroup.name}</span>
           <span className="text-gray-300">|</span>
-          <span className="text-[11px] text-gray-600">Records:</span><span className="text-[11px] font-bold">{billWiseDraftPeriod.records.length}</span>
+          <span className="text-[11px] text-gray-600">Records:</span><span className="text-[11px] font-bold">{liveGroup.records.length}</span>
           <span className="text-gray-300">|</span>
-          <span className="text-[11px] text-gray-600">Total:</span><span className="text-[11px] font-bold text-purple-700">₹{billWiseDraftPeriod.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+          <span className="text-[11px] text-gray-600">Total:</span><span className="text-[11px] font-bold text-purple-700">₹{liveGroup.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
         </div>
         <div className="overflow-auto" style={{ maxHeight: '650px', scrollbarWidth: 'thin' }}>
           <table className="border-collapse w-full" style={{ minWidth: isBM ? '1510px' : '2450px' }}>
@@ -5327,7 +5375,7 @@ const BranchAdminExpense = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {billWiseDraftPeriod.records.map((rec, idx) => (
+              {liveGroup.records.map((rec, idx) => (
                 <tr key={rec.id || idx} className="hover:bg-blue-50/30" style={{ height: '32px' }}>
                   <td className="px-2 py-1 text-center border-r border-gray-100">
                     <input type="checkbox" checked={!!billWiseDraftSelected[rec.id]} onChange={e => setBillWiseDraftSelected(prev => ({ ...prev, [rec.id]: e.target.checked }))} />
@@ -5830,23 +5878,60 @@ const BranchAdminExpense = () => {
     return (record.id || 0) === last.id;
   }, []);
 
-  // Pick { rate, da } from the 2×2 master. Rate applies to EVERY SR; DA is per-DAY
-  // (only the last SR of the engineer's day keeps the slab DA, the rest get DA = 0).
+  // Sum of effective KM for ALL of the engineer's SRs on the same day
+  // (by sr_reach_at_site_datetime). Cached on recordsList identity.
+  const dayTotalKmRef = useRef({ source: null, map: {} });
+  const getDayTotalKM = useCallback((record, recordsList) => {
+    if (dayTotalKmRef.current.source !== recordsList) {
+      const map = {};
+      (recordsList || []).forEach((r) => {
+        const uid = String(r.service_engineer_uid || '').trim();
+        const dt = r.sr_reach_at_site_datetime;
+        if (!dt) return;
+        const d = new Date(dt);
+        if (isNaN(d.getTime())) return;
+        const key = `${uid}__${d.toISOString().slice(0, 10)}`;
+        map[key] = (map[key] || 0) + effKmOf(r);
+      });
+      dayTotalKmRef.current = { source: recordsList, map };
+    }
+    const uid = String(record.service_engineer_uid || '').trim();
+    const dt = record.sr_reach_at_site_datetime;
+    if (!dt) return effKmOf(record);
+    const d = new Date(dt);
+    if (isNaN(d.getTime())) return effKmOf(record);
+    return dayTotalKmRef.current.map[`${uid}__${d.toISOString().slice(0, 10)}`] ?? effKmOf(record);
+  }, []);
+
+  // Rate applies to EVERY SR (slab by the row's own KM). DA is PER-DAY: only the
+  // last SR of the engineer's day carries it, and its low/high slab is decided by
+  // the engineer's TOTAL KM for the whole day, not that single SR's KM.
   const getRateAndDAForRecord = useCallback((record, effectiveKM, recordsList) => {
     if (effectiveKM === null) return { rate: 0, da: 0 };
     const m = getBranchDARate(getEffectiveBranchForRecord(record, recordsList));
     if (!m) return { rate: 0, da: 0 };
-    const high = effectiveKM > m.km_threshold;   // km == threshold counts as LOW
     const multi = getSrCountForRecord(record, recordsList) > 1;
-    let rate, da;
-    if (multi && high) { rate = m.multi_high_rate; da = m.multi_high_da; }
-    else if (multi && !high) { rate = m.multi_low_rate; da = m.multi_low_da; }
-    else if (!multi && high) { rate = m.single_high_rate; da = m.single_high_da; }
-    else { rate = m.single_low_rate; da = m.single_low_da; }
-    // DA per day → only the last SR of the day carries DA
-    if (!isLastSrOfDay(record, recordsList)) da = 0;
+
+    // Rate → this SR's own KM (km == threshold counts as LOW)
+    const rateHigh = effectiveKM > m.km_threshold;
+    let rate;
+    if (multi && rateHigh) rate = m.multi_high_rate;
+    else if (multi && !rateHigh) rate = m.multi_low_rate;
+    else if (!multi && rateHigh) rate = m.single_high_rate;
+    else rate = m.single_low_rate;
+
+    // DA → whole-day total KM (live KM of this row swapped in so it updates while typing)
+    let da = 0;
+    if (isLastSrOfDay(record, recordsList)) {
+      const dayKM = getDayTotalKM(record, recordsList) - effKmOf(record) + effectiveKM;
+      const dayHigh = dayKM > m.km_threshold;
+      if (multi && dayHigh) da = m.multi_high_da;
+      else if (multi && !dayHigh) da = m.multi_low_da;
+      else if (!multi && dayHigh) da = m.single_high_da;
+      else da = m.single_low_da;
+    }
     return { rate, da };
-  }, [getBranchDARate, getEffectiveBranchForRecord, getSrCountForRecord, isLastSrOfDay]);
+  }, [getBranchDARate, getEffectiveBranchForRecord, getSrCountForRecord, isLastSrOfDay, getDayTotalKM]);
 
   const getKmRateForRecord = useCallback((record, effectiveKM, recordsList) =>
     getRateAndDAForRecord(record, effectiveKM, recordsList).rate, [getRateAndDAForRecord]);
@@ -7944,7 +8029,7 @@ const BranchAdminExpense = () => {
                                 <thead className="sticky top-0 z-10">
                                   <tr style={{ backgroundColor: '#f0f1ff' }}>
                                     {[
-                                      { label: 'Sr. No.', w: '60px' }, { label: 'Date Range', w: '240px' }, { label: 'Type', w: '70px' }, { label: 'Engineer / Customer', w: '180px' },
+                                      { label: 'Sr. No.', w: '60px' }, { label: 'Date Range', w: '240px' }, { label: 'Type', w: '70px' }, { label: 'Engineer Name', w: '180px' },
                                       { label: 'Number of Activity', w: '120px' }, { label: 'Total Amount', w: '150px' }, { label: 'Verified Amount', w: '150px' }, { label: 'Verify Data', w: '140px' },
                                     ].map((c, i) => (
                                       <th key={i} className="px-3 py-2 text-[10px] font-bold text-gray-700 uppercase tracking-wide border-b-2 border-r border-gray-200 last:border-r-0 text-center whitespace-nowrap" style={{ width: c.w, minWidth: c.w, backgroundColor: '#f0f1ff' }}>{c.label}</th>
@@ -8952,7 +9037,7 @@ const BranchAdminExpense = () => {
             // 2. SD Branch Code
             { key: 'SD Branch Code', type: 'text' },
             // 3. Installation Site Address
-            { key: 'Installation Site Address', type: 'text', wide: true, required: true },
+            { key: 'Installation Site Address', type: 'text', required: true },
             // 4. Instance ID
             { key: 'Instance ID', type: 'text' },
             // 5. Engine Application Code
@@ -8976,12 +9061,10 @@ const BranchAdminExpense = () => {
             // 14. Task Start Date  (conditional: required if Task Status = Completed)
             {
               key: 'Task Start Date', type: 'text', required: _taskCompletedRequired,
-              hint: 'Required when Task Status = Completed'
             },
             // 15. Task End Date  (conditional)
             {
               key: 'Task End Date', type: 'text', required: _taskCompletedRequired,
-              hint: 'Required when Task Status = Completed'
             },
             // 16. Task Status  (dropdown — always required)
             {
@@ -8991,7 +9074,6 @@ const BranchAdminExpense = () => {
             // 17. Task Assigned Date & Time  (conditional)
             {
               key: 'Task Assigned Date & Time', type: 'text', required: _taskCompletedRequired,
-              hint: 'Required when Task Status = Completed'
             },
             // 18. Task Assign v.s Trip Start
             { key: 'Task Assign v.s Trip Start', type: 'text' },
@@ -9008,7 +9090,6 @@ const BranchAdminExpense = () => {
             // 24. SR Closed Date  (conditional: required if SR Status = Closed)
             {
               key: 'SR Closed Date', type: 'date', required: _srClosedRequired,
-              hint: 'Required when SR Status = Closed'
             },
             // 25. SR Status  (dropdown — always required)
             {
@@ -9018,7 +9099,7 @@ const BranchAdminExpense = () => {
             // 26. Asset Primary Contact No.
             { key: 'Asset Primary Contact No.', type: 'text' },
             // 27. VOC
-            { key: 'VOC', type: 'text', wide: true },
+            { key: 'VOC', type: 'text' },
             // 28. Service Engineer Name
             { key: 'Service Engineer Name', type: 'text', required: true },
             // 29. Service Engineer UID
@@ -9028,17 +9109,17 @@ const BranchAdminExpense = () => {
             // 31. Customer contact number
             { key: 'Customer contact number', type: 'text' },
             // 32. Customer Remark
-            { key: 'Customer Remark', type: 'text', wide: true },
+            { key: 'Customer Remark', type: 'text' },
             // 33. Problem Summary
-            { key: 'Problem Summary', type: 'text', wide: true },
+            { key: 'Problem Summary', type: 'text' },
             // 34. Nature of Failure
-            { key: 'Nature of Failure', type: 'text', wide: true },
+            { key: 'Nature of Failure', type: 'text' },
             // 35. Action Taken
-            { key: 'Action Taken', type: 'text', wide: true },
+            { key: 'Action Taken', type: 'text' },
             // 36. Engineer Remark
-            { key: 'Engineer Remark', type: 'text', wide: true },
+            { key: 'Engineer Remark', type: 'text' },
             // 37. Exception Remark
-            { key: 'Exception Remark', type: 'text', wide: true },
+            { key: 'Exception Remark', type: 'text' },
             // 38. OTP Remark
             { key: 'OTP Remark', type: 'text' },
             // 39. PDF Generated
@@ -9047,35 +9128,35 @@ const BranchAdminExpense = () => {
 
           return (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/50 backdrop-blur-sm">
-              <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col">
+              <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[94vh] overflow-hidden flex flex-col">
 
                 {/* Header */}
-                <div className="px-5 py-3 flex justify-between items-center shrink-0"
+                <div className="px-4 py-2 flex justify-between items-center shrink-0"
                   style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeDark})` }}>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
-                    <h2 className="text-sm font-bold text-white">Customer Record — Sr.No. {srNo}</h2>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/20 text-white font-semibold">
+                    <h2 className="text-xs font-bold text-white">Customer Record — Sr.No. {srNo}</h2>
+                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-white/20 text-white font-semibold">
                       {r.appointment_number || '-'}
                     </span>
                   </div>
                   <button
                     onClick={handleCloseCustomerDetail}
-                    className="w-7 h-7 bg-white rounded-lg flex items-center justify-center hover:bg-gray-100 transition-colors"
+                    className="w-6 h-6 bg-white rounded-lg flex items-center justify-center hover:bg-gray-100 transition-colors"
                   >
-                    <svg className="h-4 w-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="h-3.5 w-3.5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
                 </div>
 
                 {/* Body */}
-                <div className="flex-1 overflow-y-auto p-5" style={{ scrollbarWidth: 'thin' }}>
+                <div className="flex-1 overflow-y-auto p-3" style={{ scrollbarWidth: 'thin' }}>
 
-                  {/* Read-only field grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {/* Read-only field grid — uniform 3 columns, plain-title boxes (no colored bar) */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                     {fields.map((f, i) => {
                       // Map form-style key (e.g. "Task Start Date") → record column (e.g. "task_start_date")
                       const recordKey = f.key
@@ -9098,15 +9179,22 @@ const BranchAdminExpense = () => {
                       const display = value !== null && value !== undefined && String(value).trim() !== ''
                         ? String(value) : '-';
                       return (
-                        <div key={i} className={f.wide ? 'md:col-span-2 lg:col-span-3' : ''}>
-                          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">
-                            {f.key} {f.required && <span className="text-red-500">*</span>}
-                          </label>
-                          <div className="w-full px-2.5 py-1.5 text-xs border border-gray-100 rounded-lg bg-gray-50 text-gray-700 min-h-[30px] break-words">
-                            {display}
+                        <div key={i}>
+                          <div className="rounded-lg border border-gray-200 bg-white shadow-sm h-full flex flex-col px-2 py-1.5">
+                            {/* Plain title (no background) */}
+                            <div className="flex items-start gap-1 mb-0.5">
+                              <span className="text-[9px] font-bold uppercase tracking-wide text-gray-500 leading-tight break-words">
+                                {f.key}
+                              </span>
+                              {f.required && <span className="text-[9px] text-red-500 font-bold leading-tight">*</span>}
+                            </div>
+                            {/* Value */}
+                            <div className="text-[11px] text-gray-800 break-words leading-snug flex-1 min-h-[16px]">
+                              {display}
+                            </div>
                           </div>
                           {f.hint && (
-                            <p className="text-[9px] text-gray-400 mt-0.5 italic">{f.hint}</p>
+                            <p className="text-[8px] text-gray-400 mt-0.5 italic">{f.hint}</p>
                           )}
                         </div>
                       );
@@ -9114,28 +9202,28 @@ const BranchAdminExpense = () => {
                   </div>
 
                   {/* Editable verification block */}
-                  <div className="mt-5 p-4 rounded-xl border-2" style={{ borderColor: themeColor, backgroundColor: themeLight }}>
-                    <div className="flex items-center gap-2 mb-3">
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke={themeColor}>
+                  <div className="mt-3 p-3 rounded-xl border-2" style={{ borderColor: themeColor, backgroundColor: themeLight }}>
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke={themeColor}>
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                      <h3 className="text-xs font-bold uppercase tracking-wide" style={{ color: themeColor }}>
+                      <h3 className="text-[11px] font-bold uppercase tracking-wide" style={{ color: themeColor }}>
                         Branch Verification
                       </h3>
                       {isVerified && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-semibold">
+                        <span className="text-[9px] px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-semibold">
                           Locked — already verified
                         </span>
                       )}
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                       <div>
-                        <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-wide mb-1">
+                        <label className="block text-[9px] font-bold text-gray-600 uppercase tracking-wide mb-0.5">
                           Branch Verified KM *
                         </label>
                         {isVerified ? (
-                          <div className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg bg-gray-100 text-gray-700 min-h-[30px]">
+                          <div className="w-full px-2 py-1 text-[11px] border border-gray-200 rounded-lg bg-gray-100 text-gray-700 min-h-[26px]">
                             {bvkDisplay || '-'}
                           </div>
                         ) : (
@@ -9151,7 +9239,7 @@ const BranchAdminExpense = () => {
                                 handleSaveValue(r.id, 'branch_verified_km', e.target.value);
                               }
                             }}
-                            className="w-full px-2.5 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-1 text-black bg-white"
+                            className="w-full px-2 py-1 text-[11px] border rounded-lg focus:outline-none focus:ring-1 text-black bg-white"
                             style={{ borderColor: themeColor }}
                             placeholder="Enter verified KM"
                           />
@@ -9159,11 +9247,11 @@ const BranchAdminExpense = () => {
                       </div>
 
                       <div>
-                        <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-wide mb-1">
+                        <label className="block text-[9px] font-bold text-gray-600 uppercase tracking-wide mb-0.5">
                           Branch Verification Remark *
                         </label>
                         {isVerified ? (
-                          <div className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg bg-gray-100 text-gray-700 min-h-[30px]">
+                          <div className="w-full px-2 py-1 text-[11px] border border-gray-200 rounded-lg bg-gray-100 text-gray-700 min-h-[26px]">
                             {bvrDisplay || '-'}
                           </div>
                         ) : (
@@ -9178,7 +9266,7 @@ const BranchAdminExpense = () => {
                                 handleSaveValue(r.id, 'km_verification_remark', e.target.value);
                               }
                             }}
-                            className="w-full px-2.5 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-1 text-black bg-white"
+                            className="w-full px-2 py-1 text-[11px] border rounded-lg focus:outline-none focus:ring-1 text-black bg-white"
                             style={{ borderColor: themeColor }}
                             placeholder="Enter verification remark"
                           />
@@ -9186,11 +9274,11 @@ const BranchAdminExpense = () => {
                       </div>
 
                       <div>
-                        <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-wide mb-1">
+                        <label className="block text-[9px] font-bold text-gray-600 uppercase tracking-wide mb-0.5">
                           Freight Charges (₹)
                         </label>
                         {isVerified ? (
-                          <div className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg bg-gray-100 text-gray-700 min-h-[30px]">
+                          <div className="w-full px-2 py-1 text-[11px] border border-gray-200 rounded-lg bg-gray-100 text-gray-700 min-h-[26px]">
                             {r.freight_charges ? `₹${parseFloat(r.freight_charges).toFixed(2)}` : '-'}
                           </div>
                         ) : (
@@ -9208,7 +9296,7 @@ const BranchAdminExpense = () => {
                                 handleSaveValue(r.id, 'freight_charges', e.target.value);
                               }
                             }}
-                            className="w-full px-2.5 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-1 text-black bg-white"
+                            className="w-full px-2 py-1 text-[11px] border rounded-lg focus:outline-none focus:ring-1 text-black bg-white"
                             style={{ borderColor: themeColor }}
                             placeholder="Enter freight charges"
                           />
@@ -9217,7 +9305,7 @@ const BranchAdminExpense = () => {
                     </div>
 
                     {!isVerified && (
-                      <p className="text-[10px] text-gray-500 mt-3 flex items-center gap-1">
+                      <p className="text-[9px] text-gray-500 mt-2 flex items-center gap-1">
                         <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
@@ -9228,13 +9316,13 @@ const BranchAdminExpense = () => {
                 </div>
 
                 {/* Footer with Actions */}
-                <div className="shrink-0 px-5 py-3 border-t bg-gray-50 flex justify-between items-center gap-2">
+                <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-between items-center gap-2">
                   <button
                     onClick={async () => {
                       await handleDeleteTadaRow(r.id);
                       handleCloseCustomerDetail();
                     }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-bold rounded-lg shadow-sm hover:shadow-md transition-all"
+                    className="inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-bold rounded-lg shadow-sm hover:shadow-md transition-all"
                     style={{ background: 'linear-gradient(135deg, #dc2626, #b91c1c)' }}
                   >
                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -9246,7 +9334,7 @@ const BranchAdminExpense = () => {
 
                   <button
                     onClick={handleCloseCustomerDetail}
-                    className="px-5 py-1.5 text-white text-xs font-bold rounded-lg shadow-sm"
+                    className="px-4 py-1 text-white text-[11px] font-bold rounded-lg shadow-sm"
                     style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeDark})` }}
                   >
                     Done

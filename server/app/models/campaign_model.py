@@ -75,3 +75,18 @@ class CampaignService(Base):
     
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+class CampaignLetterFormat(Base):
+    __tablename__ = "campaign_letter_formats"
+
+    id = Column(Integer, primary_key=True, index=True)
+    format_type_name = Column(String(255), nullable=False)
+    channels = Column(JSON, default=[])             # e.g. ["email", "whatsapp"]
+    default_attachments = Column(JSON, default=[])  # [{"name","content","type","size"}, ...]
+    letter_format = Column(Text, nullable=True)     # the letter body the user types
+
+    created_by_id = Column(String(100), nullable=True)
+    created_by_name = Column(String(255), nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)    

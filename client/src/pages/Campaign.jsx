@@ -17,7 +17,12 @@ import {
   DocumentArrowUpIcon,
   DocumentDuplicateIcon,
   DocumentIcon,
-  CloudArrowUpIcon
+  CloudArrowUpIcon,
+  DocumentTextIcon,
+  EnvelopeIcon,
+  ChatBubbleLeftRightIcon,
+  PaperClipIcon,
+  EyeIcon
 } from '@heroicons/react/24/outline';
 import CampaignCustomersFollowupModal from '../components/CampaignCustomersFollowupModal';
 
@@ -127,6 +132,24 @@ const Campaign = () => {
     description: ''
   });
   const [editServiceLoading, setEditServiceLoading] = useState(false);
+
+  // ==================== Letter Master states ====================
+  const LETTER_ATTACHMENT_EXTS = ['mp4', 'jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx'];
+
+  const [showLetterMaster, setShowLetterMaster] = useState(false);
+  const [showLetterFormatForm, setShowLetterFormatForm] = useState(false);
+  const [showLetterFormatView, setShowLetterFormatView] = useState(false);
+  const [letterFormats, setLetterFormats] = useState([]);
+  const [letterFormatsLoading, setLetterFormatsLoading] = useState(false);
+  const [letterFormatSaving, setLetterFormatSaving] = useState(false);
+  const [viewingLetterFormat, setViewingLetterFormat] = useState(null);
+  const [letterFormatData, setLetterFormatData] = useState({
+    id: null,
+    format_type_name: '',
+    channels: [],
+    default_attachments: [],
+    letter_format: ''
+  });
 
   const themeColor = '#2f3192';
   const themeShades = {
@@ -1293,6 +1316,173 @@ const Campaign = () => {
     }
   };
 
+  // ==================== Letter Master handlers ====================
+  const fetchLetterFormats = async () => {
+    setLetterFormatsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/v1/campaigns/letter-master/formats`);
+      if (!response.ok) throw new Error('Failed to fetch letter formats');
+      const data = await response.json();
+      setLetterFormats(data);
+    } catch (err) {
+      toast.error(err.message || 'Failed to load letter formats');
+    } finally {
+      setLetterFormatsLoading(false);
+    }
+  };
+
+  const openLetterMaster = () => {
+    setShowLetterMaster(true);
+    fetchLetterFormats();
+  };
+
+  const resetLetterFormatForm = () => {
+    setLetterFormatData({
+      id: null,
+      format_type_name: '',
+      channels: [],
+      default_attachments: [],
+      letter_format: ''
+    });
+  };
+
+  const openAddLetterFormat = () => {
+    resetLetterFormatForm();
+    setShowLetterFormatForm(true);
+  };
+
+  const openEditLetterFormat = (fmt) => {
+    setLetterFormatData({
+      id: fmt.id,
+      format_type_name: fmt.format_type_name || '',
+      channels: fmt.channels || [],
+      default_attachments: fmt.default_attachments || [],
+      letter_format: fmt.letter_format || ''
+    });
+    setShowLetterFormatForm(true);
+  };
+
+  const openViewLetterFormat = (fmt) => {
+    setViewingLetterFormat(fmt);
+    setShowLetterFormatView(true);
+  };
+
+  const toggleLetterChannel = (channel) => {
+    setLetterFormatData(prev => {
+      const has = prev.channels.includes(channel);
+      return {
+        ...prev,
+        channels: has ? prev.channels.filter(c => c !== channel) : [...prev.channels, channel]
+      };
+    });
+  };
+
+  const handleLetterAttachmentUpload = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const accepted = [];
+    for (const file of files) {
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (!LETTER_ATTACHMENT_EXTS.includes(ext)) {
+        toast.error(`"${file.name}" is not allowed. Use mp4, jpg, png, pdf or word files.`);
+        continue;
+      }
+      if (file.size > 25 * 1024 * 1024) {
+        toast.error(`"${file.name}" is larger than 25MB`);
+        continue;
+      }
+      accepted.push(file);
+    }
+    if (accepted.length === 0) {
+      e.target.value = '';
+      return;
+    }
+
+    let pending = accepted.length;
+    accepted.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64Content = reader.result.split(',')[1];
+        const attachmentObj = {
+          name: file.name,
+          content: base64Content,
+          type: file.type || 'application/octet-stream',
+          size: file.size,
+          uploaded_at: new Date().toISOString()
+        };
+        setLetterFormatData(prev => ({
+          ...prev,
+          default_attachments: [...prev.default_attachments, attachmentObj]
+        }));
+        pending -= 1;
+        if (pending === 0) {
+          toast.success(`Added ${accepted.length} attachment${accepted.length > 1 ? 's' : ''}`);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  };
+
+  const removeLetterAttachment = (index) => {
+    setLetterFormatData(prev => ({
+      ...prev,
+      default_attachments: prev.default_attachments.filter((_, i) => i !== index)
+    }));
+  };
+
+  const handleSaveLetterFormat = async (e) => {
+    e.preventDefault();
+    if (!letterFormatData.format_type_name.trim()) {
+      toast.error('Format Type Name is required');
+      return;
+    }
+
+    setLetterFormatSaving(true);
+    const isEdit = !!letterFormatData.id;
+    const saveToast = toast.loading(isEdit ? 'Updating format...' : 'Saving format...');
+
+    try {
+      const payload = {
+        format_type_name: letterFormatData.format_type_name.trim(),
+        channels: letterFormatData.channels,
+        default_attachments: letterFormatData.default_attachments,
+        letter_format: letterFormatData.letter_format || ''
+      };
+
+      const url = isEdit
+        ? `${API_BASE_URL}/v1/campaigns/letter-master/formats/${letterFormatData.id}`
+        : `${API_BASE_URL}/v1/campaigns/letter-master/formats`;
+
+      const response = await fetch(url, {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', ...getUserHeaders() },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to save format');
+      }
+
+      const data = await response.json();
+      setLetterFormats(prev =>
+        isEdit ? prev.map(f => (f.id === data.id ? data : f)) : [data, ...prev]
+      );
+
+      toast.dismiss(saveToast);
+      toast.success(isEdit ? 'Format updated successfully!' : 'Format saved successfully!');
+      setShowLetterFormatForm(false);
+      resetLetterFormatForm();
+    } catch (err) {
+      toast.dismiss(saveToast);
+      toast.error(err.message || 'Failed to save format');
+    } finally {
+      setLetterFormatSaving(false);
+    }
+  };
+
   const handleRefresh = async () => {
     if (refreshLoading) return;
 
@@ -1436,10 +1626,25 @@ const Campaign = () => {
         method: 'DELETE',
         headers: { ...getUserHeaders() }
       });
+
+      const data = await response.json().catch(() => ({}));
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to delete campaign');
+        throw new Error(data.detail || 'Failed to delete campaign');
       }
+
+      // Backend blocked the delete because the campaign is already in use
+      if (data.deleted === false) {
+        toast.dismiss(deleteToast);
+        toast(data.message || 'Campaign is already in use and cannot be removed', {
+          icon: '⚠️',
+          duration: 5000,
+        });
+        setShowDeleteCampaignConfirm(false);
+        setCampaignToDelete(null);
+        return;
+      }
+
       setCampaigns(prev => prev.filter(c => c.id !== campaignToDelete.id));
       setShowDeleteCampaignConfirm(false);
       setCampaignToDelete(null);
@@ -1557,6 +1762,15 @@ const Campaign = () => {
                   <PlusIcon className="h-3.5 w-3.5" />
                 )}
                 <span className="text-xs">Service/Product</span>
+              </button>
+
+              <button
+                onClick={openLetterMaster}
+                className="inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs text-white font-medium rounded-md transition-all shadow-sm hover:shadow-md whitespace-nowrap"
+                style={{ background: "#2f3192" }}
+              >
+                <DocumentTextIcon className="h-3.5 w-3.5" />
+                <span className="text-xs">Letter Master</span>
               </button>
 
               <button
@@ -2663,6 +2877,304 @@ const Campaign = () => {
                     ) : 'Delete'}
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Letter Master Modal (table) */}
+        {showLetterMaster && (
+          <div className="fixed inset-0 flex items-end lg:items-center justify-center z-50 p-3">
+            <div
+              className="absolute inset-0 backdrop-blur-sm bg-black/20"
+              onClick={() => setShowLetterMaster(false)}
+            />
+            <div className="relative bg-white rounded-xl shadow-xl w-full lg:max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+              <div className="sticky top-0 px-4 py-3 lg:px-5 lg:py-3.5 rounded-t-xl flex justify-between items-center z-10"
+                style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
+                <div className="flex items-center gap-2">
+                  <DocumentTextIcon className="h-4 w-4 text-white" />
+                  <h2 className="text-sm lg:text-base font-semibold text-white">Letter Master</h2>
+                </div>
+                <button
+                  onClick={() => setShowLetterMaster(false)}
+                  className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100"
+                >
+                  <XMarkIcon className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="p-4 lg:p-5 overflow-y-auto custom-scrollbar">
+                <div className="flex items-center justify-between mb-3 gap-2">
+                  <p className="text-xs text-gray-500">
+                    {letterFormats.length} format{letterFormats.length !== 1 ? 's' : ''} saved
+                  </p>
+                  <button
+                    onClick={openAddLetterFormat}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs text-white font-medium rounded-md transition-all shadow-sm hover:shadow-md whitespace-nowrap"
+                    style={{ background: "#2f3192" }}
+                  >
+                    <PlusIcon className="h-3.5 w-3.5" />
+                    Add Format Type
+                  </button>
+                </div>
+
+                {letterFormatsLoading ? (
+                  <div className="flex items-center justify-center py-10">
+                    <ArrowPathIcon className="h-5 w-5 animate-spin" style={{ color: themeColor }} />
+                    <span className="ml-2 text-sm text-black">Loading formats...</span>
+                  </div>
+                ) : letterFormats.length === 0 ? (
+                  <div className="text-center py-10">
+                    <DocumentTextIcon className="h-10 w-10 mx-auto mb-3" style={{ color: themeColor }} />
+                    <p className="text-sm text-black">No letter formats yet</p>
+                    <button onClick={openAddLetterFormat} className="mt-2 text-sm font-medium hover:underline" style={{ color: themeColor }}>
+                      Add your first format
+                    </button>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-black" style={{ backgroundColor: themeShades.light }}>
+                          <th className="px-3 py-2 font-semibold">Format Type</th>
+                          <th className="px-3 py-2 font-semibold">Channels</th>
+                          <th className="px-3 py-2 font-semibold">Default Attachment</th>
+                          <th className="px-3 py-2 font-semibold">Letter Format</th>
+                          <th className="px-3 py-2 font-semibold text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {letterFormats.map(fmt => (
+                          <tr key={fmt.id} className="border-t border-gray-100 hover:bg-gray-50 align-top">
+                            <td className="px-3 py-2 text-black font-medium whitespace-nowrap">{fmt.format_type_name}</td>
+                            <td className="px-3 py-2">
+                              <div className="flex flex-wrap gap-1">
+                                {(fmt.channels || []).length === 0 && <span className="text-gray-400">—</span>}
+                                {(fmt.channels || []).includes('email') && (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-100 text-blue-800 rounded">
+                                    <EnvelopeIcon className="h-3 w-3" /> Email
+                                  </span>
+                                )}
+                                {(fmt.channels || []).includes('whatsapp') && (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-green-100 text-green-800 rounded">
+                                    <ChatBubbleLeftRightIcon className="h-3 w-3" /> WhatsApp
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 text-black whitespace-nowrap">
+                              {(fmt.default_attachments || []).length > 0 ? (
+                                <span className="inline-flex items-center gap-1">
+                                  <PaperClipIcon className="h-3 w-3 text-gray-500" />
+                                  {fmt.default_attachments.length} file{fmt.default_attachments.length > 1 ? 's' : ''}
+                                </span>
+                              ) : <span className="text-gray-400">None</span>}
+                            </td>
+                            <td className="px-3 py-2 text-gray-600">
+                              <span className="block max-w-[220px] truncate">
+                                {fmt.letter_format ? fmt.letter_format.replace(/\n/g, ' ') : '—'}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center justify-end gap-1">
+                                <button onClick={() => openViewLetterFormat(fmt)}
+                                  className="p-1 text-black hover:text-[#2f3192] hover:bg-[#2f3192]/10 rounded-md transition-all" title="View format">
+                                  <EyeIcon className="h-3.5 w-3.5" />
+                                </button>
+                                <button onClick={() => openEditLetterFormat(fmt)}
+                                  className="p-1 text-black hover:text-blue-600 hover:bg-blue-50 rounded-md transition-all" title="Edit format">
+                                  <PencilIcon className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Add / Edit Letter Format Modal */}
+        {showLetterFormatForm && (
+          <div className="fixed inset-0 flex items-end lg:items-center justify-center z-[60] p-3">
+            <div
+              className="absolute inset-0 backdrop-blur-sm bg-black/30"
+              onClick={() => !letterFormatSaving && setShowLetterFormatForm(false)}
+            />
+            <div className="relative bg-white rounded-xl shadow-xl w-full lg:max-w-3xl max-h-[92vh] overflow-hidden flex flex-col">
+              <div className="sticky top-0 px-4 py-3 lg:px-5 lg:py-3.5 rounded-t-xl flex justify-between items-center z-10"
+                style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
+                <h2 className="text-sm lg:text-base font-semibold text-white">
+                  {letterFormatData.id ? 'Edit Format Type' : 'Add Format Type'}
+                </h2>
+                <button onClick={() => !letterFormatSaving && setShowLetterFormatForm(false)}
+                  className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100" disabled={letterFormatSaving}>
+                  <XMarkIcon className="h-4 w-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveLetterFormat} className="p-4 lg:p-5 overflow-y-auto custom-scrollbar space-y-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {/* RIGHT: Letter format editor */}
+                  <div className="order-2 lg:order-2">
+                    <label className="block text-xs font-semibold text-black mb-1">Letter Format</label>
+                    <textarea
+                      value={letterFormatData.letter_format}
+                      onChange={(e) => setLetterFormatData({ ...letterFormatData, letter_format: e.target.value })}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black font-mono leading-relaxed"
+                      style={{ '--tw-ring-color': themeColor, minHeight: '320px' }}
+                      placeholder={"Type the full letter format here...\n\nDear {customer_name},\n\n..."}
+                      disabled={letterFormatSaving}
+                    />
+                  </div>
+
+                  {/* LEFT: settings */}
+                  <div className="order-1 lg:order-1 space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-black mb-1">Format Type Name *</label>
+                      <input type="text" value={letterFormatData.format_type_name}
+                        onChange={(e) => setLetterFormatData({ ...letterFormatData, format_type_name: e.target.value })}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
+                        style={{ '--tw-ring-color': themeColor }} placeholder="e.g., Oil Change Reminder" disabled={letterFormatSaving} required />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-black mb-1.5">Channels</label>
+                      <div className="flex flex-wrap gap-2">
+                        <label className={`flex items-center gap-1.5 px-3 py-2 border rounded-md cursor-pointer transition-all text-sm ${letterFormatData.channels.includes('email') ? 'border-[#2f3192] bg-[#2f3192]/10 text-[#2f3192]' : 'border-gray-300 text-black hover:bg-gray-50'}`}>
+                          <input type="checkbox" className="hidden" checked={letterFormatData.channels.includes('email')} onChange={() => toggleLetterChannel('email')} />
+                          <EnvelopeIcon className="h-4 w-4" /> Email
+                        </label>
+                        <label className={`flex items-center gap-1.5 px-3 py-2 border rounded-md cursor-pointer transition-all text-sm ${letterFormatData.channels.includes('whatsapp') ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-300 text-black hover:bg-gray-50'}`}>
+                          <input type="checkbox" className="hidden" checked={letterFormatData.channels.includes('whatsapp')} onChange={() => toggleLetterChannel('whatsapp')} />
+                          <ChatBubbleLeftRightIcon className="h-4 w-4" /> WhatsApp
+                        </label>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-black mb-1.5">Default Attachment</label>
+                      <input type="file" multiple accept=".mp4,.jpg,.jpeg,.png,.pdf,.doc,.docx" onChange={handleLetterAttachmentUpload} className="hidden" id="letter-attach-upload" disabled={letterFormatSaving} />
+                      <label htmlFor="letter-attach-upload"
+                        className="flex items-center justify-center gap-1.5 px-3 py-2 border border-dashed rounded-md cursor-pointer transition-all hover:border-[#2f3192]"
+                        style={{ borderColor: themeColor }}>
+                        <PaperClipIcon className="h-4 w-4" style={{ color: themeColor }} />
+                        <span className="text-sm text-black">Attach files (optional)</span>
+                      </label>
+                      <p className="text-[11px] text-gray-500 mt-1">mp4, jpg, png, pdf, word — single, multiple or none.</p>
+
+                      {letterFormatData.default_attachments.length > 0 && (
+                        <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto p-2 bg-gray-50 rounded-md">
+                          {letterFormatData.default_attachments.map((att, index) => (
+                            <div key={index} className="flex items-center justify-between p-2 bg-white rounded-md border">
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <DocumentIcon className="h-3.5 w-3.5 text-[#2f3192] shrink-0" />
+                                <span className="text-xs text-black truncate">{att.name}</span>
+                                <span className="text-xs text-gray-500 shrink-0">({(att.size / 1024).toFixed(0)} KB)</span>
+                              </div>
+                              <button type="button" onClick={() => removeLetterAttachment(index)} className="text-red-500 hover:text-red-700 shrink-0 ml-1">
+                                <XMarkIcon className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-1">
+                  <button type="button" onClick={() => !letterFormatSaving && setShowLetterFormatForm(false)} disabled={letterFormatSaving}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-black hover:bg-gray-50 transition-all disabled:opacity-50">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={letterFormatSaving || !letterFormatData.format_type_name.trim()}
+                    className="flex-1 text-white font-medium rounded-md py-2 text-sm hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
+                    {letterFormatSaving ? (<><ArrowPathIcon className="h-4 w-4 animate-spin" /> Saving...</>) : 'Save Format'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* View Letter Format Modal */}
+        {showLetterFormatView && viewingLetterFormat && (
+          <div className="fixed inset-0 flex items-end lg:items-center justify-center z-[60] p-3">
+            <div
+              className="absolute inset-0 backdrop-blur-sm bg-black/30"
+              onClick={() => setShowLetterFormatView(false)}
+            />
+            <div className="relative bg-white rounded-xl shadow-xl w-full lg:max-w-3xl max-h-[92vh] overflow-hidden flex flex-col">
+              <div className="sticky top-0 px-4 py-3 lg:px-5 lg:py-3.5 rounded-t-xl flex justify-between items-center z-10"
+                style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
+                <div className="flex items-center gap-2 min-w-0">
+                  <EyeIcon className="h-4 w-4 text-white shrink-0" />
+                  <h2 className="text-sm lg:text-base font-semibold text-white truncate">{viewingLetterFormat.format_type_name}</h2>
+                </div>
+                <button onClick={() => setShowLetterFormatView(false)} className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100">
+                  <XMarkIcon className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="p-4 lg:p-5 overflow-y-auto custom-scrollbar space-y-4">
+                <div>
+                  <p className="text-xs font-semibold text-black mb-1.5">Channels</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(viewingLetterFormat.channels || []).length === 0 && <span className="text-sm text-gray-400">None</span>}
+                    {(viewingLetterFormat.channels || []).includes('email') && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs"><EnvelopeIcon className="h-3 w-3" /> Email</span>
+                    )}
+                    {(viewingLetterFormat.channels || []).includes('whatsapp') && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs"><ChatBubbleLeftRightIcon className="h-3 w-3" /> WhatsApp</span>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold text-black mb-1.5">Default Attachments</p>
+                  {(viewingLetterFormat.default_attachments || []).length === 0 ? (
+                    <span className="text-sm text-gray-400">None</span>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {viewingLetterFormat.default_attachments.map((att, idx) => (
+                        <a key={idx} href={`data:${att.type};base64,${att.content}`} download={att.name}
+                          className="flex items-center gap-2 p-2 bg-gray-50 rounded-md border hover:bg-gray-100 transition-all">
+                          <DocumentIcon className="h-3.5 w-3.5 text-[#2f3192] shrink-0" />
+                          <span className="text-xs text-black truncate flex-1">{att.name}</span>
+                          <span className="text-xs text-gray-500">({(att.size / 1024).toFixed(0)} KB)</span>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold text-black mb-1.5">Letter Format</p>
+                  <div className="border border-gray-200 rounded-md p-3 bg-gray-50 max-h-[40vh] overflow-y-auto">
+                    {viewingLetterFormat.letter_format ? (
+                      <pre className="text-sm text-black whitespace-pre-wrap break-words font-mono leading-relaxed">{viewingLetterFormat.letter_format}</pre>
+                    ) : <span className="text-sm text-gray-400">No letter format provided</span>}
+                  </div>
+                </div>
+              </div>
+
+              <div className="px-4 lg:px-5 py-3 border-t flex justify-end gap-2">
+                <button onClick={() => { setShowLetterFormatView(false); openEditLetterFormat(viewingLetterFormat); }}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs text-white font-medium rounded-md transition-all"
+                  style={{ background: "#2f3192" }}>
+                  <PencilIcon className="h-3.5 w-3.5" /> Edit
+                </button>
+                <button onClick={() => setShowLetterFormatView(false)}
+                  className="px-3 py-1.5 text-xs border border-gray-300 rounded-md text-black hover:bg-gray-50 transition-all">
+                  Close
+                </button>
               </div>
             </div>
           </div>

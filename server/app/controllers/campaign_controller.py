@@ -325,10 +325,43 @@ class CampaignController:
         return db_campaign
     
     def delete_campaign(self, campaign_id: int):
+        from app.models.engagement_model import FollowUp
+        from app.models.campaign_model import CampaignCSPInfo
+
         db_campaign = self.get_campaign(campaign_id)
-        self.db.delete(db_campaign)
-        self.db.commit()
-        return {"message": "Campaign deleted successfully"}
+
+        # Block deletion if this campaign is already used somewhere else:
+        # any follow-up activity OR any CSP SR rows that reference this campaign.
+        in_use = (
+            self.db.query(FollowUp).filter(FollowUp.campaign_id == campaign_id).first()
+            or self.db.query(CampaignCSPInfo).filter(CampaignCSPInfo.campaign_id == campaign_id).first()
+        )
+
+        if in_use:
+            # Return a warning (NOT an error) so the frontend can show a friendly message
+            return {
+                "deleted": False,
+                "warning": True,
+                "message": "Campaign is already in use and cannot be removed"
+            }
+
+        try:
+            self.db.delete(db_campaign)
+            self.db.commit()
+        except Exception:
+            # Safety net for any DB-level constraint we didn't catch above
+            self.db.rollback()
+            return {
+                "deleted": False,
+                "warning": True,
+                "message": "Campaign is already in use and cannot be removed"
+            }
+
+        return {
+            "deleted": True,
+            "warning": False,
+            "message": "Campaign deleted successfully"
+        }
     
     def update_campaign_status(self, campaign_id: int, status: str):
         if status not in ['active', 'inactive']:
@@ -745,3 +778,78 @@ class CampaignController:
             CampaignCSPInfo.created_by_id == str(user_id)
         ).count()        
 
+# ==================== Letter Master (Letter Format) ====================
+
+    def get_all_letter_formats(self):
+        from app.models.campaign_model import CampaignLetterFormat
+        return (
+            self.db.query(CampaignLetterFormat)
+            .order_by(CampaignLetterFormat.created_at.desc())
+            .all()
+        )
+
+    def get_letter_format(self, format_id: int):
+        from app.models.campaign_model import CampaignLetterFormat
+        fmt = self.db.query(CampaignLetterFormat).filter(
+            CampaignLetterFormat.id == format_id
+        ).first()
+        if not fmt:
+            raise HTTPException(status_code=404, detail="Letter format not found")
+        return fmt
+
+    def create_letter_format(self, data: campaign_schema.LetterFormatCreate,
+                             user_data: dict = None):
+        from app.models.campaign_model import CampaignLetterFormat
+
+        name = (data.format_type_name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Format Type Name is required")
+
+        existing = self.db.query(CampaignLetterFormat).filter(
+            CampaignLetterFormat.format_type_name == name
+        ).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="A format with this name already exists")
+
+        payload = data.model_dump()
+        payload["format_type_name"] = name
+        if user_data:
+            payload["created_by_id"] = user_data.get("user_id") or user_data.get("id")
+            payload["created_by_name"] = user_data.get("name")
+
+        db_fmt = CampaignLetterFormat(**payload)
+        self.db.add(db_fmt)
+        self.db.commit()
+        self.db.refresh(db_fmt)
+        return db_fmt
+
+    def update_letter_format(self, format_id: int, data: campaign_schema.LetterFormatUpdate,
+                             user_data: dict = None):
+        from app.models.campaign_model import CampaignLetterFormat
+
+        db_fmt = self.get_letter_format(format_id)
+        update_data = data.model_dump(exclude_unset=True)
+
+        new_name = update_data.get("format_type_name")
+        if new_name and new_name.strip() != db_fmt.format_type_name:
+            exists = self.db.query(CampaignLetterFormat).filter(
+                CampaignLetterFormat.format_type_name == new_name.strip(),
+                CampaignLetterFormat.id != format_id
+            ).first()
+            if exists:
+                raise HTTPException(status_code=400, detail="A format with this name already exists")
+            update_data["format_type_name"] = new_name.strip()
+
+        for key, value in update_data.items():
+            setattr(db_fmt, key, value)
+
+        db_fmt.updated_at = datetime.utcnow()
+        self.db.commit()
+        self.db.refresh(db_fmt)
+        return db_fmt
+
+    def delete_letter_format(self, format_id: int):
+        db_fmt = self.get_letter_format(format_id)
+        self.db.delete(db_fmt)
+        self.db.commit()
+        return {"deleted": True, "message": "Letter format deleted successfully"}

@@ -256,8 +256,22 @@ def delete_salesbm_record(db: Session, record_id: int) -> bool:
                 f"Existing temp ids: {existing_ids}"
             )
             return False
+        # Remember this row's day-group BEFORE deleting so we can rebalance DA after.
+        bc = rec.branch_code
+        eng_uid = rec.engineer_uid or ""
+        eng_name = rec.engineer_name or ""
+        day_value = rec.date
         db.delete(rec)
         db.commit()
+        # DA is per-day: after removing one SR the day's total KM (and the "last SR
+        # of the day") can change, so recompute rate/amount/da/total for every
+        # remaining same-day SR of this engineer (across temp + main). Best-effort —
+        # the delete is already committed, so a reapply failure must not 500.
+        try:
+            _reapply_day_da(db, bc, eng_uid, eng_name, day_value)
+        except Exception as re:
+            db.rollback()  # discard partial DA edits; the delete stays committed
+            logger.error(f"delete_salesbm_record: DA reapply failed for id={record_id}: {re}")
         logger.info(f"delete_salesbm_record: deleted SalesBMTemp id={record_id}")
         return True
     except Exception as e:

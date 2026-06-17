@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 from app.models.customer_model import Customer, AssetService, LMSData, AssetDetailed, AMCAgreement
 from app.models.campaign_model import Campaign
+from app.models.letter_model import LetterSendRecord
 from app.models.engagement_model import FollowUp, Activity, RR
 from app.schemas import engagement_schema
 from app.models.non_followup_model import NonFollowUp
@@ -2333,4 +2334,348 @@ class EngagementController:
             "total_instances": len(instance_ids),
             "total_rows": len(result_rows),
             "rows": result_rows,
-        }        
+        }      
+
+# ==================== Letter Sending ====================
+
+    def _get_financial_year(self, dt: Optional[datetime] = None) -> str:
+        dt = dt or datetime.utcnow()
+        year = dt.year
+        if dt.month >= 4:  # Apr–Mar Indian financial year
+            return f"{year}-{str(year + 1)[-2:]}"
+        return f"{year - 1}-{str(year)[-2:]}"
+
+    def get_next_letter_ref(self, instance_id: str) -> Dict[str, Any]:
+        """Preview the next Ref No (KC/FY/NN) for an instance — per instance per FY.
+        Also returns the 2 most recent letters already sent for this instance."""
+        norm = self._normalize_id(instance_id)
+        fy = self._get_financial_year()
+        count = self.db.query(LetterSendRecord).filter(
+            LetterSendRecord.instance_id == norm,
+            LetterSendRecord.financial_year == fy
+        ).count()
+        seq = count + 1
+
+        recent = self.db.query(LetterSendRecord).filter(
+            LetterSendRecord.instance_id == norm
+        ).order_by(desc(LetterSendRecord.created_at)).limit(2).all()
+
+        previous_letters = [{
+            "ref_no": r.ref_no,
+            "date": r.created_at.strftime('%d %b %Y') if r.created_at else None,
+            "subject": r.subject,
+        } for r in recent]
+
+        return {
+            "instance_id": norm,
+            "financial_year": fy,
+            "sequence": seq,
+            "ref_no": f"KC/{fy}/{str(seq).zfill(2)}",
+            "previous_letters": previous_letters
+        }
+
+    def get_letter_history(self, instance_id: str) -> List[Dict[str, Any]]:
+        norm = self._normalize_id(instance_id)
+        rows = self.db.query(LetterSendRecord).filter(
+            LetterSendRecord.instance_id == norm
+        ).order_by(desc(LetterSendRecord.created_at)).all()
+        return [{
+            "id": r.id, "ref_no": r.ref_no, "financial_year": r.financial_year,
+            "sequence_number": r.sequence_number, "format_type_name": r.format_type_name,
+            "subject": r.subject, "channels": r.channels,
+            "sent_email": r.sent_email, "sent_whatsapp": r.sent_whatsapp,
+            "email_to": r.email_to, "whatsapp_to": r.whatsapp_to,
+            "status": r.status, "sent_by_id": r.sent_by_id, "sent_by_name": r.sent_by_name,
+            "created_at": r.created_at,
+        } for r in rows]
+
+    def _send_letter_email(self, to_email, subject, html_body, attachments):
+        if not all([self.sender_email, self.sender_password]):
+            return False, "Company email is not configured"
+        try:
+            import base64
+            from email.mime.base import MIMEBase
+            from email import encoders
+
+            msg = MIMEMultipart('mixed')
+            msg['From'] = self.sender_email
+            msg['To'] = to_email
+            msg['Subject'] = subject or "Letter from KALA Care"
+            msg.attach(MIMEText(html_body or "", 'html'))
+
+            for att in (attachments or []):
+                content = att.get('content')
+                if not content:
+                    continue
+                name = att.get('name', 'attachment')
+                try:
+                    file_bytes = base64.b64decode(content)
+                except Exception:
+                    continue
+                part = MIMEBase('application', 'octet-stream')
+                part.set_payload(file_bytes)
+                encoders.encode_base64(part)
+                part.add_header('Content-Disposition', f'attachment; filename="{name}"')
+                msg.attach(part)
+
+            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.sender_email, self.sender_password)
+                server.send_message(msg)
+            return True, None
+        except Exception as e:
+            return False, str(e)
+
+    def _send_letter_whatsapp(self, to_number, message, attachments):
+        # WhatsApp Cloud API (Meta) — TEXT only here. Sending document/image
+        # attachments over WhatsApp needs media upload or public URLs, which
+        # depends on your provider; attachments still go out via email.
+        api_url = os.getenv("WHATSAPP_API_URL")
+        token = os.getenv("WHATSAPP_ACCESS_TOKEN")
+        phone_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+        if not all([api_url, token, phone_id]):
+            return False, "WhatsApp API is not configured"
+        try:
+            import json as _json
+            import urllib.request
+
+            digits = ''.join(ch for ch in str(to_number) if ch.isdigit())
+            if not digits:
+                return False, "Invalid WhatsApp number"
+
+            endpoint = f"{api_url.rstrip('/')}/{phone_id}/messages"
+            body = {
+                "messaging_product": "whatsapp",
+                "to": digits,
+                "type": "text",
+                "text": {"body": (message or "")[:4000]}
+            }
+            req = urllib.request.Request(
+                endpoint,
+                data=_json.dumps(body).encode('utf-8'),
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                resp.read()
+            return True, None
+        except Exception as e:
+            return False, str(e)
+
+    def send_letter(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        instance_id = self._normalize_id(payload.get('instance_id'))
+        if not instance_id:
+            raise HTTPException(status_code=400, detail="instance_id is required")
+
+        channels = payload.get('channels') or []
+        if not channels:
+            raise HTTPException(status_code=400, detail="Select at least one channel (email/whatsapp)")
+
+        subject = (payload.get('subject') or '').strip()
+        letter_html = payload.get('letter_html') or ''
+        letter_text = payload.get('letter_text') or ''
+        email_to = (payload.get('email_to') or '').strip()
+        whatsapp_to = (payload.get('whatsapp_to') or '').strip()
+        attachments = payload.get('attachments') or []
+
+        # If we're sending an existing DRAFT, reuse its row + Ref No (no new number).
+        existing = None
+        record_id = payload.get('record_id')
+        if record_id:
+            existing = self.db.query(LetterSendRecord).filter(
+                LetterSendRecord.id == record_id
+            ).first()
+
+        if existing:
+            fy = existing.financial_year or self._get_financial_year()
+            seq = existing.sequence_number
+            ref_no = existing.ref_no
+        else:
+            # Generate ref no fresh (per instance per FY) so it can't duplicate
+            fy = self._get_financial_year()
+            seq = self.db.query(LetterSendRecord).filter(
+                LetterSendRecord.instance_id == instance_id,
+                LetterSendRecord.financial_year == fy
+            ).count() + 1
+            ref_no = payload.get('ref_no') or f"KC/{fy}/{str(seq).zfill(2)}"
+
+        sent_email = False
+        sent_whatsapp = False
+        errors = []
+
+        if 'email' in channels:
+            if not email_to:
+                errors.append("No recipient email address")
+            else:
+                ok, err = self._send_letter_email(email_to, subject, letter_html, attachments)
+                sent_email = ok
+                if not ok:
+                    errors.append(f"Email: {err}")
+
+        if 'whatsapp' in channels:
+            if not whatsapp_to:
+                errors.append("No WhatsApp number")
+            else:
+                ok, err = self._send_letter_whatsapp(whatsapp_to, letter_text or subject, attachments)
+                sent_whatsapp = ok
+                if not ok:
+                    errors.append(f"WhatsApp: {err}")
+
+        if sent_email or sent_whatsapp:
+            status_val = 'partial' if errors else 'sent'
+        else:
+            status_val = 'failed'
+
+        letter_fields_store = payload.get('letter_fields') or {}
+
+        if existing:
+            existing.format_type_id = payload.get('format_type_id')
+            existing.format_type_name = payload.get('format_type_name')
+            existing.subject = subject
+            existing.letter_body = letter_text or letter_html
+            existing.letter_html = letter_html
+            existing.letter_fields = letter_fields_store
+            existing.attachments = attachments
+            existing.channels = channels
+            existing.sent_email = sent_email
+            existing.sent_whatsapp = sent_whatsapp
+            existing.email_to = email_to or None
+            existing.whatsapp_to = whatsapp_to or None
+            existing.status = status_val
+            existing.error_message = "; ".join(errors) or None
+            existing.sent_by_id = str(payload.get('sent_by_id')) if payload.get('sent_by_id') else existing.sent_by_id
+            existing.sent_by_name = payload.get('sent_by_name') or existing.sent_by_name
+            record = existing
+        else:
+            record = LetterSendRecord(
+                ref_no=ref_no,
+                financial_year=fy,
+                sequence_number=seq,
+                instance_id=instance_id,
+                customer_id=payload.get('customer_id'),
+                format_type_id=payload.get('format_type_id'),
+                format_type_name=payload.get('format_type_name'),
+                subject=subject,
+                letter_body=letter_text or letter_html,
+                letter_html=letter_html,
+                letter_fields=letter_fields_store,
+                attachments=attachments,
+                channels=channels,
+                sent_email=sent_email,
+                sent_whatsapp=sent_whatsapp,
+                email_to=email_to or None,
+                whatsapp_to=whatsapp_to or None,
+                status=status_val,
+                error_message="; ".join(errors) or None,
+                sent_by_id=str(payload.get('sent_by_id')) if payload.get('sent_by_id') else None,
+                sent_by_name=payload.get('sent_by_name'),
+            )
+            self.db.add(record)
+        self.db.commit()
+        self.db.refresh(record)
+
+        return {
+            "ref_no": ref_no,
+            "financial_year": fy,
+            "sequence": seq,
+            "status": status_val,
+            "sent_email": sent_email,
+            "sent_whatsapp": sent_whatsapp,
+            "errors": errors,
+            "record_id": record.id,
+        }
+
+    def save_letter_draft(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Create or update a DRAFT letter (status='draft'); sends nothing."""
+        instance_id = self._normalize_id(payload.get('instance_id'))
+        if not instance_id:
+            raise HTTPException(status_code=400, detail="instance_id is required")
+
+        subject = (payload.get('subject') or '').strip()
+        letter_html = payload.get('letter_html') or ''
+        letter_text = payload.get('letter_text') or ''
+        letter_fields_store = payload.get('letter_fields') or {}
+        attachments = payload.get('attachments') or []
+        channels = payload.get('channels') or []
+        email_to = (payload.get('email_to') or '').strip()
+        whatsapp_to = (payload.get('whatsapp_to') or '').strip()
+
+        existing = None
+        record_id = payload.get('record_id')
+        if record_id:
+            existing = self.db.query(LetterSendRecord).filter(
+                LetterSendRecord.id == record_id
+            ).first()
+
+        if existing:
+            fy = existing.financial_year or self._get_financial_year()
+            seq = existing.sequence_number
+            ref_no = existing.ref_no
+        else:
+            fy = self._get_financial_year()
+            seq = self.db.query(LetterSendRecord).filter(
+                LetterSendRecord.instance_id == instance_id,
+                LetterSendRecord.financial_year == fy
+            ).count() + 1
+            ref_no = payload.get('ref_no') or f"KC/{fy}/{str(seq).zfill(2)}"
+
+        if existing:
+            existing.format_type_id = payload.get('format_type_id')
+            existing.format_type_name = payload.get('format_type_name')
+            existing.subject = subject
+            existing.letter_body = letter_text or letter_html
+            existing.letter_html = letter_html
+            existing.letter_fields = letter_fields_store
+            existing.attachments = attachments
+            existing.channels = channels
+            existing.email_to = email_to or None
+            existing.whatsapp_to = whatsapp_to or None
+            existing.status = 'draft'
+            existing.sent_by_id = str(payload.get('sent_by_id')) if payload.get('sent_by_id') else existing.sent_by_id
+            existing.sent_by_name = payload.get('sent_by_name') or existing.sent_by_name
+            record = existing
+        else:
+            record = LetterSendRecord(
+                ref_no=ref_no, financial_year=fy, sequence_number=seq,
+                instance_id=instance_id, customer_id=payload.get('customer_id'),
+                format_type_id=payload.get('format_type_id'),
+                format_type_name=payload.get('format_type_name'),
+                subject=subject, letter_body=letter_text or letter_html,
+                letter_html=letter_html, letter_fields=letter_fields_store,
+                attachments=attachments, channels=channels,
+                sent_email=False, sent_whatsapp=False,
+                email_to=email_to or None, whatsapp_to=whatsapp_to or None,
+                status='draft',
+                sent_by_id=str(payload.get('sent_by_id')) if payload.get('sent_by_id') else None,
+                sent_by_name=payload.get('sent_by_name'),
+            )
+            self.db.add(record)
+        self.db.commit()
+        self.db.refresh(record)
+
+        return {
+            "record_id": record.id, "ref_no": record.ref_no,
+            "financial_year": record.financial_year, "sequence": record.sequence_number,
+            "status": record.status,
+        }
+
+    def get_letter_record(self, record_id: int) -> Dict[str, Any]:
+        r = self.db.query(LetterSendRecord).filter(LetterSendRecord.id == record_id).first()
+        if not r:
+            raise HTTPException(status_code=404, detail="Letter not found")
+        return {
+            "id": r.id, "ref_no": r.ref_no, "financial_year": r.financial_year,
+            "sequence_number": r.sequence_number, "instance_id": r.instance_id,
+            "customer_id": r.customer_id, "format_type_id": r.format_type_id,
+            "format_type_name": r.format_type_name, "subject": r.subject,
+            "letter_body": r.letter_body, "letter_html": r.letter_html,
+            "letter_fields": r.letter_fields or {}, "attachments": r.attachments or [],
+            "channels": r.channels or [], "sent_email": r.sent_email,
+            "sent_whatsapp": r.sent_whatsapp, "email_to": r.email_to,
+            "whatsapp_to": r.whatsapp_to, "status": r.status,
+            "sent_by_id": r.sent_by_id, "sent_by_name": r.sent_by_name,
+            "created_at": r.created_at,
+        }          
