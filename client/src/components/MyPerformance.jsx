@@ -89,6 +89,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const [showAllFollowupsModal, setShowAllFollowupsModal] = useState(false);
     const [allFollowupsData, setAllFollowupsData] = useState([]);
     const [loadingAllFollowups, setLoadingAllFollowups] = useState(false);
+    const [uniqueOnly, setUniqueOnly] = useState(false); // All-Follow-ups: collapse to latest per unique instance_id
     const [followupSearchTerm, setFollowupSearchTerm] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
@@ -145,6 +146,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         const t = setTimeout(() => setDebouncedSearch(followupSearchTerm), 250);
         return () => clearTimeout(t);
     }, [followupSearchTerm]);
+
+    // Reset the Unique toggle whenever the All-Follow-ups modal closes
+    useEffect(() => {
+        if (!showAllFollowupsModal) setUniqueOnly(false);
+    }, [showAllFollowupsModal]);
 
     // Format date for API — use LOCAL (IST) date parts so the chosen day isn't
     // shifted to the previous day by UTC conversion (toISOString shifts IST dates back).
@@ -444,6 +450,23 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 if (currentDate > existingDate) {
                     map.set(key, fu);
                 }
+            }
+        });
+        return Array.from(map.values());
+    };
+
+    // Latest follow-up per UNIQUE instance_id (campaign ignored) — for the "Unique" toggle
+    const getLatestFollowupsPerInstance = (followups) => {
+        const map = new Map();
+        followups.forEach((fu, i) => {
+            const key = fu.customer_instance_id ? String(fu.customer_instance_id) : `__no_id_${fu.id ?? i}`;
+            const existing = map.get(key);
+            if (!existing) {
+                map.set(key, fu);
+            } else {
+                const existingDate = new Date(existing.created_at || existing.followup_date || 0);
+                const currentDate = new Date(fu.created_at || fu.followup_date || 0);
+                if (currentDate > existingDate) map.set(key, fu);
             }
         });
         return Array.from(map.values());
@@ -756,9 +779,49 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         [allFollowupsData]
     );
 
+    // Non-campaign COMPLETED customers, reshaped as follow-up rows under campaign "other"
+    const otherCompletedFollowups = useMemo(() => {
+        return (nonCampaignData.customers || [])
+            .filter(c => (c.last_status || '').toLowerCase() === 'completed')
+            .map((c, i) => ({
+                id: `other_${c.instance_id || i}`,
+                followup_date: c.last_followup_date || null,
+                customer_instance_id: c.instance_id || '',
+                customer_id: null,
+                customer_name: c.customer_name || '',
+                phone_number: c.phone_number || '',
+                email: c.email || '',
+                branch_id: c.branch_id || '',
+                campaign_name: 'other',
+                campaign_service: c.service || '',
+                followup_by: c.followup_by || '',
+                followup_flag: (c.latest_flag && c.latest_flag !== 'N/A') ? c.latest_flag : '',
+                status: 'completed',
+                next_followup_date: c.next_followup_date || null,
+                activity_content: c.activity_content || c.latest_activity || c.activity || '',
+                rr_content: c.rr_content || '',
+                followup_remark: c.latest_remark || '',
+                quotation_sent: !!c.quotation_sent,
+                quotation_no: c.quotation_no || '',
+                quotation_value: c.quotation_value || 0,
+                created_at: c.last_followup_date || null,
+            }));
+    }, [nonCampaignData.customers]);
+
+    // Only the plain "All Follow-ups" view (opened from Total Calls and Follow-ups)
+    // gets the "other" completed rows appended. Quotation/CSP filtered views do not.
+    const isPlainAllView =
+        !quotationFilterActive && !quotationSentFilterActive &&
+        !cspQuotationFilterActive && !cspQuotationSentFilterActive;
+
+    const mergedFollowups = useMemo(
+        () => (isPlainAllView ? [...allFollowupsData, ...otherCompletedFollowups] : allFollowupsData),
+        [isPlainAllView, allFollowupsData, otherCompletedFollowups]
+    );
+
     // Memoized filtered follow-ups for the All-Follow-ups modal
     const visibleFollowups = useMemo(() => {
-        return allFollowupsData.filter(fu => {
+        return mergedFollowups.filter(fu => {
             if (quotationFilterActive && !quotationFollowupIds.has(fu.id)) return false;
             if (quotationSentFilterActive && !fu.quotation_sent) return false;
             if (cspQuotationFilterActive && !cspQuotationFollowupIds.has(fu.id)) return false;
@@ -795,10 +858,16 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             }
             return true;
         });
-    }, [allFollowupsData, quotationFilterActive, quotationSentFilterActive,
+    }, [mergedFollowups, quotationFilterActive, quotationSentFilterActive,
         cspQuotationFilterActive, cspQuotationSentFilterActive, statusFilter,
         debouncedSearch, createdFromDate, createdToDate,
         quotationFollowupIds, cspQuotationFollowupIds, isCspFollowup]);
+
+    // What the table actually renders: optionally collapsed to one latest row per unique instance_id
+    const displayedFollowups = useMemo(
+        () => (uniqueOnly ? getLatestFollowupsPerInstance(visibleFollowups) : visibleFollowups),
+        [uniqueOnly, visibleFollowups]
+    );
 
     // Quotation sent count grouped by local date (YYYY-MM-DD) — derived from allFollowupsData
     const quotationSentByDate = useMemo(() => {
@@ -1105,18 +1174,25 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         fetchNonCampaignCustomers();
     };
 
+    // Base list for the Non-Campaign modal — completed is hidden here (it now
+    // appears in the All-Follow-ups modal under campaign name "other")
+    const nonCampaignBase = useMemo(
+        () => (nonCampaignData.customers || []).filter(c => (c.last_status || '').toLowerCase() !== 'completed'),
+        [nonCampaignData.customers]
+    );
+
     // Service/product dropdown options
     const nonCampaignServiceOptions = useMemo(() => {
         const set = new Set();
-        (nonCampaignData.customers || []).forEach(c => {
+        nonCampaignBase.forEach(c => {
             if (c.service && c.service !== 'N/A') set.add(c.service);
         });
         return Array.from(set).sort();
-    }, [nonCampaignData.customers]);
+    }, [nonCampaignBase]);
 
-    // Search + status + service filtered rows
+    // Search + status + service filtered rows (completed already excluded by nonCampaignBase)
     const filteredNonCampaignCustomers = useMemo(() => {
-        return (nonCampaignData.customers || []).filter(c => {
+        return nonCampaignBase.filter(c => {
             if (nonCampaignStatusFilter !== 'all') {
                 if ((c.last_status || '').toLowerCase() !== nonCampaignStatusFilter) return false;
             }
@@ -1137,7 +1213,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             }
             return true;
         });
-    }, [nonCampaignData.customers, nonCampaignStatusFilter, nonCampaignServiceFilter, nonCampaignSearchTerm]);
+    }, [nonCampaignBase, nonCampaignStatusFilter, nonCampaignServiceFilter, nonCampaignSearchTerm]);
 
     const exportNonCampaignToExcel = () => {
         if (!filteredNonCampaignCustomers.length) return;
@@ -1171,6 +1247,57 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         XLSX.writeFile(wb, `non_campaign_customers_${new Date().toISOString().split('T')[0]}.xlsx`);
     };
 
+    // Export the All-Follow-ups modal — only the rows currently visible after filters
+    const exportFollowupsToExcel = () => {
+        if (!displayedFollowups.length) return;
+        const exportData = displayedFollowups.map((fu, idx) => ({
+            'S.No': idx + 1,
+            'Follow-up Date': fu.followup_date
+                ? new Date(fu.followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                : '-',
+            'Instance ID': fu.customer_instance_id || '-',
+            'Customer Name': fu.customer_name || '-',
+            'Phone': fu.phone_number || '-',
+            'Email': fu.email || '-',
+            'Branch': fu.branch_id || '-',
+            'Campaign': fu.campaign_name || '-',
+            'Service': fu.campaign_service || '-',
+            'Follow-up By': fu.followup_by || '-',
+            'Flag': fu.followup_flag || '-',
+            'Status': fu.status === 'rescheduled' ? 'FR' : (fu.status || '-'),
+            'Next Follow-up': fu.next_followup_date
+                ? new Date(fu.next_followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                : '-',
+            'Activity': fu.activity_content || '-',
+            'Reject Reason': fu.rr_content || '-',
+            'Remark': fu.followup_remark || '-',
+            'Quotation Sent': fu.quotation_sent ? 'Yes' : 'No',
+            'Quotation No': fu.quotation_no || '-',
+            'Quotation Value': fu.quotation_value || 0,
+            'Created At': fu.created_at
+                ? new Date(fu.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                : '-',
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Follow-ups');
+        ws['!cols'] = Object.keys(exportData[0]).map(() => ({ wch: 20 }));
+
+        // Filename reflects which box opened the modal
+        const labelPart = quotationFilterActive
+            ? 'quotation_required'
+            : quotationSentFilterActive
+                ? 'quotation_sent'
+                : cspQuotationFilterActive
+                    ? 'csp_quotation_required'
+                    : cspQuotationSentFilterActive
+                        ? 'csp_quotation_sent'
+                        : 'all_followups';
+
+        XLSX.writeFile(wb, `${labelPart}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    };
+
     const fetchNonFollowupCustomerStats = useCallback(async () => {
         if (!userData || !userData.user_id) return;
         try {
@@ -1198,6 +1325,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             fetchNonFollowupCount(),
             fetchBranchAssetCount(),
             fetchNonFollowupCustomerStats(),
+            fetchNonCampaignCustomers(),
             fetchExportPermission(),
             fetchCspStatus(),
             fetchUserCspSrCount(),
@@ -1245,32 +1373,32 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const dailyTotals = useMemo(() => {
         const sum = (fn) => filteredDailyPerformance.reduce((s, day) => s + fn(day), 0);
         return {
-            total_followups:      sum(d => d.total_followups || 0),
-            completed_all:        sum(d => (d.call_completed || 0) + (d.whatsapp_completed || 0) + (d.email_completed || 0) + (d.visit_completed || 0)),
-            wip_all:              sum(d => (d.call_wip || 0) + (d.whatsapp_wip || 0) + (d.email_wip || 0) + (d.visit_wip || 0)),
-            rejected_all:         sum(d => (d.call_rejected || 0) + (d.whatsapp_rejected || 0) + (d.email_rejected || 0) + (d.visit_rejected || 0)),
-            rescheduled_all:      sum(d => (d.call_rescheduled || 0) + (d.whatsapp_rescheduled || 0) + (d.email_rescheduled || 0) + (d.visit_rescheduled || 0)),
-            by_call:              sum(d => d.followup_by_call || 0),
-            call_completed:       sum(d => d.call_completed || 0),
-            call_wip:             sum(d => d.call_wip || 0),
-            call_rejected:        sum(d => d.call_rejected || 0),
-            call_rescheduled:     sum(d => d.call_rescheduled || 0),
-            by_whatsapp:          sum(d => d.followup_by_whatsapp || 0),
-            whatsapp_completed:   sum(d => d.whatsapp_completed || 0),
-            whatsapp_wip:         sum(d => d.whatsapp_wip || 0),
-            whatsapp_rejected:    sum(d => d.whatsapp_rejected || 0),
+            total_followups: sum(d => d.total_followups || 0),
+            completed_all: sum(d => (d.call_completed || 0) + (d.whatsapp_completed || 0) + (d.email_completed || 0) + (d.visit_completed || 0)),
+            wip_all: sum(d => (d.call_wip || 0) + (d.whatsapp_wip || 0) + (d.email_wip || 0) + (d.visit_wip || 0)),
+            rejected_all: sum(d => (d.call_rejected || 0) + (d.whatsapp_rejected || 0) + (d.email_rejected || 0) + (d.visit_rejected || 0)),
+            rescheduled_all: sum(d => (d.call_rescheduled || 0) + (d.whatsapp_rescheduled || 0) + (d.email_rescheduled || 0) + (d.visit_rescheduled || 0)),
+            by_call: sum(d => d.followup_by_call || 0),
+            call_completed: sum(d => d.call_completed || 0),
+            call_wip: sum(d => d.call_wip || 0),
+            call_rejected: sum(d => d.call_rejected || 0),
+            call_rescheduled: sum(d => d.call_rescheduled || 0),
+            by_whatsapp: sum(d => d.followup_by_whatsapp || 0),
+            whatsapp_completed: sum(d => d.whatsapp_completed || 0),
+            whatsapp_wip: sum(d => d.whatsapp_wip || 0),
+            whatsapp_rejected: sum(d => d.whatsapp_rejected || 0),
             whatsapp_rescheduled: sum(d => d.whatsapp_rescheduled || 0),
-            by_email:             sum(d => d.followup_by_email || 0),
-            email_completed:      sum(d => d.email_completed || 0),
-            email_wip:            sum(d => d.email_wip || 0),
-            email_rejected:       sum(d => d.email_rejected || 0),
-            email_rescheduled:    sum(d => d.email_rescheduled || 0),
-            by_visit:             sum(d => d.followup_by_visit || 0),
-            visit_completed:      sum(d => d.visit_completed || 0),
-            visit_wip:            sum(d => d.visit_wip || 0),
-            visit_rejected:       sum(d => d.visit_rejected || 0),
-            visit_rescheduled:    sum(d => d.visit_rescheduled || 0),
-            quotation_sent:       filteredDailyPerformance.reduce((s, day) => s + getQuotationSentForDay(day.date), 0),
+            by_email: sum(d => d.followup_by_email || 0),
+            email_completed: sum(d => d.email_completed || 0),
+            email_wip: sum(d => d.email_wip || 0),
+            email_rejected: sum(d => d.email_rejected || 0),
+            email_rescheduled: sum(d => d.email_rescheduled || 0),
+            by_visit: sum(d => d.followup_by_visit || 0),
+            visit_completed: sum(d => d.visit_completed || 0),
+            visit_wip: sum(d => d.visit_wip || 0),
+            visit_rejected: sum(d => d.visit_rejected || 0),
+            visit_rescheduled: sum(d => d.visit_rescheduled || 0),
+            quotation_sent: filteredDailyPerformance.reduce((s, day) => s + getQuotationSentForDay(day.date), 0),
         };
     }, [filteredDailyPerformance, getQuotationSentForDay]);
 
@@ -1311,6 +1439,12 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             }
         }
     }), []);
+
+    // Non-Drive "reached" total with completed removed (completed now rolls into the top Completed card)
+    const nonDriveReachedTotal = Math.max(
+        0,
+        (nonFollowupCustomerStats?.total_unique_customers || 0) - (nonFollowupCustomerStats?.completed || 0)
+    );
 
     // Loading state — show skeleton cards instead of full-page spinner
     if (loading) {
@@ -1388,7 +1522,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                         )}
                     </h3>
                     <p className="text-lg sm:text-xl font-bold text-black mt-1">
-                        <TimeValue>{performance.total_followups || 0}</TimeValue>
+                        <TimeValue>{(performance.total_followups || 0) + otherCompletedFollowups.length}</TimeValue>
                     </p>
 
                     {/* Hover Tooltip */}
@@ -1417,7 +1551,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
                 <div className="bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md transition-shadow text-center flex flex-col justify-between min-h-[90px]">
                     <h3 className="text-[11px] sm:text-[12px] font-semibold text-black leading-tight">Completed</h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1"><TimeValue>{performance.completed_count || 0}</TimeValue></p>
+                    <p className="text-lg sm:text-xl font-bold text-black mt-1">
+                        <TimeValue>{(performance.completed_count || 0) + (nonFollowupCustomerStats?.completed || 0)}</TimeValue>
+                    </p>
                 </div>
 
                 <div
@@ -1617,7 +1753,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 >
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
 
-                        {/* Title + Total */}
+                        {/* Title + Total (completed excluded — it now rolls into the top Completed card) */}
                         <div className="flex items-center gap-2 shrink-0">
                             <h3 className="text-[11px] sm:text-sm font-semibold whitespace-nowrap group-hover:font-bold transition-all" style={{ color: themeColor }}>
                                 Non-Drive Customers Reached Count
@@ -1626,11 +1762,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 className="text-sm sm:text-base font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
                                 style={{ backgroundColor: `${themeColor}15`, color: themeColor }}
                             >
-                                {nonFollowupCustomerStats.total_unique_customers}
+                                {nonDriveReachedTotal}
                             </span>
                         </div>
 
-                        {/* Status Breakdown Pills */}
+                        {/* Status Breakdown Pills (Completed removed) */}
                         <div className="flex flex-wrap items-center gap-1.5">
 
                             {/* WIP */}
@@ -1640,9 +1776,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 <span className="text-[10px] sm:text-[11px] font-bold text-yellow-800">
                                     {nonFollowupCustomerStats.wip}
                                 </span>
-                                {nonFollowupCustomerStats.total_unique_customers > 0 && (
+                                {nonDriveReachedTotal > 0 && (
                                     <span className="text-[9px] text-yellow-600">
-                                        ({((nonFollowupCustomerStats.wip / nonFollowupCustomerStats.total_unique_customers) * 100).toFixed(0)}%)
+                                        ({((nonFollowupCustomerStats.wip / nonDriveReachedTotal) * 100).toFixed(0)}%)
                                     </span>
                                 )}
                             </div>
@@ -1654,9 +1790,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 <span className="text-[10px] sm:text-[11px] font-bold text-red-800">
                                     {nonFollowupCustomerStats.rejected}
                                 </span>
-                                {nonFollowupCustomerStats.total_unique_customers > 0 && (
+                                {nonDriveReachedTotal > 0 && (
                                     <span className="text-[9px] text-red-600">
-                                        ({((nonFollowupCustomerStats.rejected / nonFollowupCustomerStats.total_unique_customers) * 100).toFixed(0)}%)
+                                        ({((nonFollowupCustomerStats.rejected / nonDriveReachedTotal) * 100).toFixed(0)}%)
                                     </span>
                                 )}
                             </div>
@@ -1668,23 +1804,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 <span className="text-[10px] sm:text-[11px] font-bold text-purple-800">
                                     {nonFollowupCustomerStats.rescheduled}
                                 </span>
-                                {nonFollowupCustomerStats.total_unique_customers > 0 && (
+                                {nonDriveReachedTotal > 0 && (
                                     <span className="text-[9px] text-purple-600">
-                                        ({((nonFollowupCustomerStats.rescheduled / nonFollowupCustomerStats.total_unique_customers) * 100).toFixed(0)}%)
-                                    </span>
-                                )}
-                            </div>
-
-                            {/* Completed */}
-                            <div className="flex items-center gap-1 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block"></span>
-                                <span className="text-[10px] sm:text-[11px] font-medium text-green-700">C</span>
-                                <span className="text-[10px] sm:text-[11px] font-bold text-green-800">
-                                    {nonFollowupCustomerStats.completed}
-                                </span>
-                                {nonFollowupCustomerStats.total_unique_customers > 0 && (
-                                    <span className="text-[9px] text-green-600">
-                                        ({((nonFollowupCustomerStats.completed / nonFollowupCustomerStats.total_unique_customers) * 100).toFixed(0)}%)
+                                        ({((nonFollowupCustomerStats.rescheduled / nonDriveReachedTotal) * 100).toFixed(0)}%)
                                     </span>
                                 )}
                             </div>
@@ -2510,15 +2632,17 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                         : 'All Follow-ups'} by {userData?.name || 'User'}
                                     </h3>
                                     <p className="text-[11px] text-white/80 mt-0.5">
-                                        {getDateRangeText()} • Total: {quotationFilterActive
-                                            ? quotationCount
-                                            : quotationSentFilterActive
-                                                ? quotationSentCount
-                                                : cspQuotationFilterActive
-                                                    ? cspQuotationCount
-                                                    : cspQuotationSentFilterActive
-                                                        ? cspQuotationSentCount
-                                                        : allFollowupsData.length} follow-up(s)
+                                        {getDateRangeText()} • Total: {uniqueOnly
+                                            ? displayedFollowups.length
+                                            : quotationFilterActive
+                                                ? quotationCount
+                                                : quotationSentFilterActive
+                                                    ? quotationSentCount
+                                                    : cspQuotationFilterActive
+                                                        ? cspQuotationCount
+                                                        : cspQuotationSentFilterActive
+                                                            ? cspQuotationSentCount
+                                                            : mergedFollowups.length} {uniqueOnly ? 'unique ' : ''}follow-up(s)
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -2556,27 +2680,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                             min={createdFromDate || undefined}
                                             className="border border-gray-300 rounded-md px-2 py-1 text-[11px] bg-white text-black"
                                         />
-                                    </div>
-
-                                    {/* Clear date filter */}
-                                    {(createdFromDate || createdToDate || statusFilter !== 'all') && (
-                                        <button
-                                            onClick={() => {
-                                                setCreatedFromDate('');
-                                                setCreatedToDate('');
-                                                setStatusFilter('all');
-                                            }}
-                                            className="px-2 py-1 text-[11px] text-white border border-white/40 rounded-md bg-white/10 hover:bg-white/20 flex items-center gap-1"
-                                            title="Clear filters"
-                                        >
-                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                            </svg>
-                                            Clear
-                                        </button>
-                                    )}
-
-                                    {/* Status filter */}
+                                    </div>                  
                                     <div className="flex items-center gap-1">
                                         <label className="text-[11px] text-white whitespace-nowrap">Status:</label>
                                         <div className="relative">
@@ -2600,6 +2704,19 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         </div>
                                     </div>
 
+                                    {/* Unique toggle — collapse to latest follow-up per unique Instance ID */}
+                                    <button
+                                        type="button"
+                                        onClick={() => setUniqueOnly(v => !v)}
+                                        title="Show only the latest follow-up per unique Instance ID"
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap border transition-colors ${uniqueOnly
+                                            ? 'bg-white text-[#2f3192] border-white'
+                                            : 'bg-white/10 text-white border-white/40 hover:bg-white/20'
+                                            }`}
+                                    >
+                                        {uniqueOnly ? `Unique (${displayedFollowups.length})` : 'Unique'}
+                                    </button>
+
                                     {/* Search */}
                                     <input
                                         type="text"
@@ -2608,6 +2725,38 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         onChange={(e) => setFollowupSearchTerm(e.target.value)}
                                         className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-64 bg-white focus:outline-none"
                                     />
+
+                                    {/* Clear filters — sits right after the search bar */}
+                                    {(createdFromDate || createdToDate || statusFilter !== 'all' || followupSearchTerm) && (
+                                        <button
+                                            onClick={() => {
+                                                setCreatedFromDate('');
+                                                setCreatedToDate('');
+                                                setStatusFilter('all');
+                                                setFollowupSearchTerm('');
+                                            }}
+                                            className="px-2 py-1 text-[11px] text-white border border-white/40 rounded-md bg-white/10 hover:bg-white/20 flex items-center gap-1"
+                                            title="Clear filters"
+                                        >
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                            Clear
+                                        </button>
+                                    )}
+
+                                    {/* Export — permission-gated, exports only the filtered rows */}
+                                    {canExport && (
+                                        <button
+                                            onClick={exportFollowupsToExcel}
+                                            className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-1.5 text-xs whitespace-nowrap"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                            </svg>
+                                            Export
+                                        </button>
+                                    )}
 
                                     {/* Close button — white square like BranchCustomersModal */}
                                     <button
@@ -2665,7 +2814,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
-                                                {visibleFollowups
+                                                {displayedFollowups
                                                     .map((fu, idx) => (
                                                         <tr
                                                             key={fu.id}
@@ -2923,7 +3072,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         Non-Campaign Customers by {userData?.name || 'User'}
                                     </h3>
                                     <p className="text-[11px] text-white/80 mt-0.5">
-                                        Showing {filteredNonCampaignCustomers.length} of {nonCampaignData.total_customers} customer(s)
+                                        Showing {filteredNonCampaignCustomers.length} of {nonCampaignBase.length} customer(s)
                                     </p>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
@@ -2957,7 +3106,6 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 className="border border-gray-300 rounded-md pl-2 pr-6 py-1 text-[11px] bg-white text-black appearance-none cursor-pointer focus:outline-none"
                                             >
                                                 <option value="all">All</option>
-                                                <option value="completed">Completed</option>
                                                 <option value="wip">WIP</option>
                                                 <option value="rejected">Rejected</option>
                                                 <option value="rescheduled">FR (Rescheduled)</option>

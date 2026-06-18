@@ -6493,12 +6493,122 @@ const BranchAdminExpense = () => {
                             <button
                               onClick={() => {
                                 setShowActionMenu(false);
-                                const exportCols = ALL_COLUMNS.filter(c => c.key !== 'sr_no' && c.key !== 'select' && c.key !== 'actions');
-                                exportToExcel(
-                                  activeRecords,
-                                  `tada_${userBranch}_${isSubmittedView ? 'submitted' : 'drafts'}.xlsx`,
-                                  exportCols.map(c => ({ key: c.key, label: c.label }))
-                                );
+
+                                if (isSubmittedView) {
+                                  // Submitted → Service Engineer leaf table: same columns/order as on screen,
+                                  // with computed DA / Total injected and a running Sr. No.
+                                  const headers = [
+                                    { key: 'sr_no', label: 'Sr. No.' },
+                                    { key: 'installation_site_address', label: 'Installation Site Address' },
+                                    { key: 'account', label: 'Account' },
+                                    { key: 'service_request_no', label: 'Service Request No.' },
+                                    { key: 'sr_sub_type', label: 'SR Sub Type' },
+                                    { key: 'sr_trip_start_datetime', label: 'SR Trip Start Date & Time' },
+                                    { key: 'sr_reach_at_site_datetime', label: 'SR Reach at Site Date & Time' },
+                                    { key: 'kms_travelled', label: 'KMs Travelled' },
+                                    { key: 'two_way_km', label: 'Two Way KM' },
+                                    { key: 'branch_verified_km', label: 'Branch Verified KM' },
+                                    { key: 'km_verification_remark', label: 'Branch Verification Remark' },
+                                    { key: 'ho_corrected_km', label: 'HO Corrected KM' },
+                                    { key: 'da_amount', label: 'DA Amount' },
+                                    { key: 'freight_charges', label: 'Freight Charges' },
+                                    { key: 'total_amount', label: 'Total Amount' },
+                                    { key: 'ho_remark', label: 'HO Remark' },
+                                    { key: 'voucher_no', label: 'Voucher No.' },
+                                    { key: 'appointment_number', label: 'Appointment No.' },
+                                    { key: 'sr_type', label: 'SR Type' },
+                                    { key: 'sr_due_date', label: 'SR Due Date' },
+                                    { key: 'task_start_date', label: 'Task Start Date' },
+                                    { key: 'task_end_date', label: 'Task End Date' },
+                                    { key: 'task_status', label: 'Task Status' },
+                                    { key: 'task_assigned_datetime', label: 'Task Assigned Date & Time' },
+                                    { key: 'task_assign_vs_trip_start', label: 'Task Assign vs Trip Start' },
+                                    { key: 'sr_trip_start_lat_long', label: 'SR Trip Start Lat Long' },
+                                    { key: 'sr_reach_at_site_lat_long', label: 'SR Reach at Site Lat Long' },
+                                    { key: 'sr_closed_date', label: 'SR Closed Date' },
+                                    { key: 'sr_status', label: 'SR Status' },
+                                    { key: 'service_engineer_name', label: 'Service Engineer Name' },
+                                    { key: 'service_engineer_uid', label: 'Service Engineer UID' },
+                                    { key: 'employee_id', label: 'Employee ID' },
+                                    { key: 'verification_status', label: 'Status' },
+                                    { key: 'uploaded_by', label: 'Uploaded By' },
+                                    { key: 'uploaded_at', label: 'Uploaded At' },
+                                  ];
+                                  const rows = activeRecords.map((r, idx) => ({
+                                    ...r,
+                                    sr_no: idx + 1,
+                                    da_amount: submittedDAAmounts[r.id] ?? r.da_amount ?? '',
+                                    total_amount: submittedTotalAmounts[r.id] ?? r.total_amount ?? '',
+                                    sr_due_date: fmtDate(r.sr_due_date),
+                                    sr_closed_date: fmtDate(r.sr_closed_date),
+                                    uploaded_at: r.uploaded_at
+                                      ? new Date(r.uploaded_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                                      : '',
+                                    verification_status: r.verification_status || 'Pending',
+                                  }));
+                                  exportToExcel(rows, `tada_${userBranch}_submitted.xlsx`, headers);
+                                } else {
+                                  // Drafts leaf table: same column order as on screen, with the frontend-only
+                                  // KM / DA / Total (same priority the cells use) and a running Sr. No.
+                                  const headers = [
+                                    { key: 'sr_no', label: 'Sr. No.' },
+                                    { key: 'installation_site_address', label: 'Installation Site Address' },
+                                    { key: 'account', label: 'Account' },
+                                    { key: 'service_request_no', label: 'Service Request No.' },
+                                    { key: 'sr_sub_type', label: 'SR Sub Type' },
+                                    { key: 'sr_trip_start_datetime', label: 'SR Trip Start Date & Time' },
+                                    { key: 'sr_reach_at_site_datetime', label: 'SR Reach at Site Date & Time' },
+                                    { key: 'kms_travelled', label: 'KMs Travelled' },
+                                    { key: 'two_way_km', label: 'Two Way KM' },
+                                    { key: 'branch_verified_km', label: 'Branch Verified KM' },
+                                    { key: 'km_verification_remark', label: 'Branch Verification Remark' },
+                                    { key: 'da_amount', label: 'DA Amount' },
+                                    { key: 'freight_charges', label: 'Freight Charges' },
+                                    { key: 'total_amount', label: 'Total Amount' },
+                                    { key: 'appointment_number', label: 'Appointment No.' },
+                                    { key: 'sr_type', label: 'SR Type' },
+                                    { key: 'sr_due_date', label: 'SR Due Date' },
+                                    { key: 'task_start_date', label: 'Task Start Date' },
+                                    { key: 'task_end_date', label: 'Task End Date' },
+                                    { key: 'task_status', label: 'Task Status' },
+                                    { key: 'task_assigned_datetime', label: 'Task Assigned Date & Time' },
+                                    { key: 'sr_trip_start_lat_long', label: 'SR Trip Start Lat Long' },
+                                    { key: 'sr_reach_at_site_lat_long', label: 'SR Reach at Site Lat Long' },
+                                    { key: 'sr_closed_date', label: 'SR Closed Date' },
+                                    { key: 'sr_status', label: 'SR Status' },
+                                    { key: 'service_engineer_name', label: 'Service Engineer Name' },
+                                    { key: 'service_engineer_uid', label: 'Service Engineer UID' },
+                                    { key: 'employee_id', label: 'Employee ID' },
+                                  ];
+                                  const rows = activeRecords.map((r, idx) => {
+                                    const typed = localValues[`${r.id}_branch_verified_km`];
+                                    const pending = pendingKM[r.id];
+                                    let km = null;
+                                    if (typed !== undefined && String(typed).trim() !== '') km = parseFloat(typed);
+                                    else if (pending !== undefined && String(pending).trim() !== '') km = parseFloat(pending);
+                                    else if (r.branch_verified_km && String(r.branch_verified_km).trim() !== '') km = parseFloat(r.branch_verified_km);
+                                    else if (r.two_way_km && String(r.two_way_km).trim() !== '') km = parseFloat(r.two_way_km);
+                                    if (km !== null && isNaN(km)) km = null;
+
+                                    const bvk = typed !== undefined ? typed : (pending !== undefined ? pending : (r.branch_verified_km || ''));
+                                    const freightRaw = localValues[`${r.id}_freight_charges`] !== undefined ? localValues[`${r.id}_freight_charges`] : (r.freight_charges || '');
+                                    const da = km !== null ? (calculateDAmount(r, km, allRecords) || 0) : null;
+                                    const total = km !== null ? calculateTotalAmountDynamic(r, km, da, allRecords, parseFloat(freightRaw) || 0) : null;
+
+                                    return {
+                                      ...r,
+                                      sr_no: idx + 1,
+                                      branch_verified_km: bvk,
+                                      km_verification_remark: localValues[`${r.id}_km_verification_remark`] !== undefined ? localValues[`${r.id}_km_verification_remark`] : (r.km_verification_remark || ''),
+                                      freight_charges: freightRaw,
+                                      da_amount: da !== null && da !== 0 ? da.toFixed(2) : '',
+                                      total_amount: total !== null && total !== 0 ? total.toFixed(2) : '',
+                                      sr_due_date: fmtDate(r.sr_due_date),
+                                      sr_closed_date: fmtDate(r.sr_closed_date),
+                                    };
+                                  });
+                                  exportToExcel(rows, `tada_${userBranch}_drafts.xlsx`, headers);
+                                }
                               }}
                               className="w-full px-3 py-2 text-left text-[11px] font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
                             >
@@ -6796,28 +6906,29 @@ const BranchAdminExpense = () => {
                         <div className="ml-auto flex items-center gap-2">
                           {canExport && salesBmDrafts.length > 0 && (
                             <button
-                              onClick={() => exportToExcel(
-                                salesBmDrafts,
-                                `sales_bm_verified_${userBranch}.xlsx`,
-                                [
+                              onClick={() => {
+                                const headers = [
+                                  { key: 'sr_no', label: 'Sr. No.' },
                                   { key: 'date', label: 'Date' },
                                   { key: 'sr_invoice_engine_no', label: 'SR/Invoice/Engine' },
-                                  { key: 'customer_name', label: 'Customer Name' },
+                                  { key: 'customer_name', label: 'Customer' },
                                   { key: 'location', label: 'Location' },
                                   { key: 'one_way_km', label: '1 Way KM' },
                                   { key: 'two_way_km', label: '2 Way KM' },
                                   { key: 'amount', label: 'Amount' },
                                   { key: 'da', label: 'DA' },
-                                  { key: 'total_amount', label: 'Total Amount' },
+                                  { key: 'total_amount', label: 'Total' },
                                   { key: 'work_description', label: 'Work Description' },
-                                  { key: 'labour_sale_expected', label: 'Labour Sale Expected' },
-                                  { key: 'part_sale_expected', label: 'Part Sale Expected' },
+                                  { key: 'labour_sale_expected', label: 'Labour Sale Exp.' },
+                                  { key: 'part_sale_expected', label: 'Part Sale Exp.' },
                                   { key: 'remark', label: 'Remark' },
-                                  { key: 'engineer_name', label: 'Engineer Name' },
+                                  { key: 'engineer_name', label: 'Engineer' },
                                   { key: 'engineer_uid', label: 'Engineer UID' },
                                   { key: 'employee_id', label: 'Employee ID' },
-                                ]
-                              )}
+                                ];
+                                const rows = salesBmDrafts.map((r, idx) => ({ ...r, sr_no: idx + 1 }));
+                                exportToExcel(rows, `sales_bm_verified_${userBranch}.xlsx`, headers);
+                              }}
                               className="inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-semibold rounded-md shadow-sm"
                               style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                             >
@@ -6842,10 +6953,9 @@ const BranchAdminExpense = () => {
                         <div className="ml-auto flex items-center gap-2">
                           {canExport && billWiseDrafts.length > 0 && (
                             <button
-                              onClick={() => exportToExcel(
-                                billWiseDrafts,
-                                `bill_wise_verified_${userBranch}.xlsx`,
-                                [
+                              onClick={() => {
+                                const headers = [
+                                  { key: 'sr_no', label: 'Sr. No.' },
                                   { key: 'entry_type', label: 'Type' },
                                   { key: 'date', label: 'Date' },
                                   { key: 'engineer_name', label: 'Engineer Name' },
@@ -6869,8 +6979,10 @@ const BranchAdminExpense = () => {
                                   { key: 'work_status', label: 'Work Status' },
                                   { key: 'employee_id', label: 'Employee ID' },
                                   { key: 'service_engineer_uid', label: 'Service Engineer UID' },
-                                ]
-                              )}
+                                ];
+                                const rows = billWiseDrafts.map((r, idx) => ({ ...r, sr_no: idx + 1 }));
+                                exportToExcel(rows, `bill_wise_verified_${userBranch}.xlsx`, headers);
+                              }}
                               className="inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-semibold rounded-md shadow-sm"
                               style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                             >
@@ -7413,34 +7525,39 @@ const BranchAdminExpense = () => {
                           </button>
                           {canExport && (
                             <button
-                              onClick={() => exportToExcel(
-                                salesSelectedPeriod.records
+                              onClick={() => {
+                                const rows = salesSelectedPeriod.records
                                   .filter(r => !salesHoKmFilter || (r.ho_corrected_km !== null && r.ho_corrected_km !== undefined && String(r.ho_corrected_km).trim() !== ''))
-                                  .filter(r => !salesVerifiedOnly || r.verification_status === 'Verified'),
-                                `sales_${salesSelectedPeriod.engineerName}_${userBranch}.xlsx`,
-                                [
-                                  { key: 'date', label: 'Date' },
-                                  { key: 'sr_invoice_engine_no', label: 'SR/Invoice/Engine' },
-                                  { key: 'customer_name', label: 'Customer Name' },
-                                  { key: 'location', label: 'Location' },
-                                  { key: 'one_way_km', label: '1 Way KM' },
-                                  { key: 'two_way_km', label: '2 Way KM' },
-                                  { key: 'amount', label: 'Amount' },
-                                  { key: 'da', label: 'DA' },
-                                  { key: 'total_amount', label: 'Total Amount' },
-                                  { key: 'work_description', label: 'Work Description' },
-                                  { key: 'labour_sale_expected', label: 'Labour Sale Expected' },
-                                  { key: 'part_sale_expected', label: 'Part Sale Expected' },
-                                  { key: 'remark', label: 'Remark' },
-                                  { key: 'engineer_name', label: 'Engineer Name' },
-                                  { key: 'engineer_uid', label: 'Engineer UID' },
-                                  { key: 'employee_id', label: 'Employee ID' },
-                                  { key: 'ho_corrected_km', label: 'HO Corrected KM' },
-                                  { key: 'ho_remark', label: 'HO Remark' },
-                                  { key: 'verification_status', label: 'Status' },
-                                  { key: 'created_by', label: 'Created By' },
-                                ]
-                              )}
+                                  .filter(r => !salesVerifiedOnly || r.verification_status === 'Verified')
+                                  .map((r, idx) => ({ ...r, sr_no: idx + 1 }));
+                                exportToExcel(
+                                  rows,
+                                  `sales_${salesSelectedPeriod.engineerName}_${userBranch}.xlsx`,
+                                  [
+                                    { key: 'sr_no', label: 'Sr.' },
+                                    { key: 'date', label: 'Date' },
+                                    { key: 'sr_invoice_engine_no', label: 'SR/Invoice/Engine' },
+                                    { key: 'customer_name', label: 'Customer Name' },
+                                    { key: 'location', label: 'Location' },
+                                    { key: 'one_way_km', label: '1 Way KM' },
+                                    { key: 'two_way_km', label: '2 Way KM' },
+                                    { key: 'amount', label: 'Amount' },
+                                    { key: 'da', label: 'DA' },
+                                    { key: 'total_amount', label: 'Total Amount' },
+                                    { key: 'work_description', label: 'Work Description' },
+                                    { key: 'labour_sale_expected', label: 'Labour Sale Exp.' },
+                                    { key: 'part_sale_expected', label: 'Part Sale Exp.' },
+                                    { key: 'remark', label: 'Remark' },
+                                    { key: 'engineer_name', label: 'Engineer Name' },
+                                    { key: 'engineer_uid', label: 'Engineer UID' },
+                                    { key: 'employee_id', label: 'Employee ID' },
+                                    { key: 'ho_corrected_km', label: 'HO Corrected KM' },
+                                    { key: 'ho_remark', label: 'HO Remark' },
+                                    { key: 'verification_status', label: 'Status' },
+                                    { key: 'created_by', label: 'Created By' },
+                                  ]
+                                );
+                              }}
                               className="inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md shadow-sm"
                               style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                             >
@@ -7756,30 +7873,35 @@ const BranchAdminExpense = () => {
                           </button>
                           {canExport && (
                             <button
-                              onClick={() => exportToExcel(
-                                kmWiseSelectedPeriod.records
+                              onClick={() => {
+                                const rows = kmWiseSelectedPeriod.records
                                   .filter(r => !kmWiseHoKmFilter || (r.ho_corrected_km !== null && r.ho_corrected_km !== undefined && String(r.ho_corrected_km).trim() !== ''))
-                                  .filter(r => !kmWiseVerifiedOnly || r.verification_status === 'Verified'),
-                                `km_wise_${userBranch}.xlsx`,
-                                [
-                                  { key: 'date', label: 'Date' },
-                                  { key: 'engineer_name', label: 'Engineer Name' },
-                                  { key: 'customer_name', label: 'Customer Name' },
-                                  { key: 'sr_invoice_engine_no', label: 'SR / Invoice / Engine No.' },
-                                  { key: 'work_description', label: 'Work Description' },
-                                  { key: 'km', label: 'KM' },
-                                  { key: 'rate', label: 'Rate' },
-                                  { key: 'da', label: 'DA' },
-                                  { key: 'amount', label: 'Amount' },
-                                  { key: 'work_status', label: 'Work Status' },
-                                  { key: 'asset_count', label: 'Asset Count' },
-                                  { key: 'kva_hp', label: 'KVA / HP' },
-                                  { key: 'ho_corrected_km', label: 'HO Corrected KM' },
-                                  { key: 'ho_remark', label: 'HO Remark' },
-                                  { key: 'verification_status', label: 'Status' },
-                                  { key: 'created_by', label: 'Created By' },
-                                ]
-                              )}
+                                  .filter(r => !kmWiseVerifiedOnly || r.verification_status === 'Verified')
+                                  .map((r, idx) => ({ ...r, sr_no: idx + 1 }));
+                                exportToExcel(
+                                  rows,
+                                  `km_wise_${userBranch}.xlsx`,
+                                  [
+                                    { key: 'sr_no', label: 'Sr.No' },
+                                    { key: 'date', label: 'Date' },
+                                    { key: 'engineer_name', label: 'Engineer Name' },
+                                    { key: 'customer_name', label: 'Customer Name' },
+                                    { key: 'sr_invoice_engine_no', label: 'SR / Invoice / Engine No.' },
+                                    { key: 'work_description', label: 'Work Description' },
+                                    { key: 'km', label: 'KM' },
+                                    { key: 'rate', label: 'Rate' },
+                                    { key: 'da', label: 'DA' },
+                                    { key: 'amount', label: 'Amount' },
+                                    { key: 'work_status', label: 'Work Status' },
+                                    { key: 'asset_count', label: 'Asset Count' },
+                                    { key: 'kva_hp', label: 'KVA / HP' },
+                                    { key: 'ho_corrected_km', label: 'HO Corrected KM' },
+                                    { key: 'ho_remark', label: 'HO Remark' },
+                                    { key: 'verification_status', label: 'Status' },
+                                    { key: 'created_by', label: 'Created By' },
+                                  ]
+                                );
+                              }}
                               className="inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md shadow-sm"
                               style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                             >
@@ -8107,8 +8229,11 @@ const BranchAdminExpense = () => {
                           </button>
                           {canExport && (() => {
                             const isBM = (billWiseSelectedPeriod.records[0]?.entry_type) === 'BM';
-                            const rows = billWiseSelectedPeriod.records.filter(r => !billWiseVerifiedOnly || r.verification_status === 'Verified');
+                            const rows = billWiseSelectedPeriod.records
+                              .filter(r => !billWiseVerifiedOnly || r.verification_status === 'Verified')
+                              .map((r, idx) => ({ ...r, sr_no: idx + 1 }));
                             const bmCols = [
+                              { key: 'sr_no', label: 'Sr.No.' },
                               { key: 'date', label: 'Date' },
                               { key: 'customer_name', label: 'Customer Name' },
                               { key: 'sr_invoice_engine_no', label: 'SR No. / Inv / Engine' },
@@ -8123,6 +8248,7 @@ const BranchAdminExpense = () => {
                               { key: 'verification_status', label: 'Status' },
                             ];
                             const seCols = [
+                              { key: 'sr_no', label: 'Sr.No.' },
                               { key: 'date', label: 'Date' },
                               { key: 'service_request_no', label: 'SR No.' },
                               { key: 'account', label: 'Account' },

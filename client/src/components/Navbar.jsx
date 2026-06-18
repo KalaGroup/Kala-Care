@@ -268,6 +268,13 @@ function Navbar({ children }) {
   useEffect(() => {
     if (!user) return;
 
+    // Users exempt from auto-logout (set in .env, comma-separated)
+    const noAutoLogoutIds = (import.meta.env.VITE_NO_AUTO_LOGOUT_USER_IDS || '')
+      .split(',')
+      .map(id => id.trim())
+      .filter(Boolean);
+    if (noAutoLogoutIds.includes(String(user.user_id))) return;
+
     const INACTIVITY_MS = 10 * 60 * 1000; // 10 minutes
     const CHECK_INTERVAL_MS = 30 * 1000;   // check every 30s
 
@@ -450,13 +457,6 @@ function Navbar({ children }) {
         allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
 
       },
-      // {
-      //   path: '/knowledge-bank',
-      //   name: 'Knowledge Bank',
-      //   icon: BookOpenIcon,
-      //   description: 'Knowledge base & resources',
-      //   allowedRoles: ['master_admin', 'it_admin']
-      // },
       // {
       //   path: '/sales-finance',
       //   name: 'Sales',

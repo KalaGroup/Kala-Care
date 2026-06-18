@@ -15,7 +15,6 @@ import Expense from './pages/Expense';
 import ExDashboard from './pages/ExDashboard';
 import MOMTracking from './pages/MOMTracking';
 import SalseANDFinance from './pages/SalseANDFinance';
-import KnowledgeBank from './pages/KnowledgeBank';
 import KnowledgeBook from './pages/KnowledgeBook';
 
 // Helper function to check if user is any type of admin
@@ -173,13 +172,6 @@ function Layout() {
         <ProtectedRoute allowedRoles={['master_admin', 'it_admin', 'branch_admin', 'employee']}
         >
           <KnowledgeBook />
-        </ProtectedRoute>
-      } />
-
-      {/* Knowledge Bank Page - ONLY master_admin and it_admin can access */}
-      <Route path="/knowledge-bank" element={
-        <ProtectedRoute allowedRoles={['master_admin', 'it_admin']}>
-          <KnowledgeBank />
         </ProtectedRoute>
       } />
 

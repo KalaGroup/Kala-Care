@@ -5574,20 +5574,68 @@ const HOExpense = () => {
                     {canExport && (
                       <button
                         onClick={() => {
+                          // 1) Columns exactly as shown on screen (same order),
+                          //    INCLUDING the editable ones: Verify, HO Corrected KM,
+                          //    HO Remark, DA, Freight, etc. — nothing stripped out.
                           const exportCols = columnOrder
                             .map(key => COL_MAP[key])
-                            .filter(Boolean)
-                            .filter(c => !['verification_status', 'ho_corrected_km', 'ho_remark'].includes(c.key));
-                          const enriched = engineerRecords.map(r => ({
-                            ...r,
-                            da_amount: dynamicDAAmounts[r.id] ?? r.da_amount,
-                            total_amount: dynamicTotalAmounts[r.id] ?? r.total_amount,
+                            .filter(Boolean);
+
+                          // 2) Only the rows the user is currently looking at:
+                          //    respects the active Pending/Verified tab AND every
+                          //    filter (SR Reach date, 2-Way KM, Task Status, SR Type,
+                          //    Manual Entries).
+                          const rowsToExport = tabFilteredEngineerRecords;
+
+                          // 3) Per-cell value that matches what's rendered in the table.
+                          const cellValue = (record, key, idx) => {
+                            switch (key) {
+                              case 'sr_no':
+                                return idx + 1; // running number, same as on screen
+                              case 'verification_status':
+                                return (verificationStatus[record.id] || record.verification_status === 'Verified')
+                                  ? 'Verified' : 'Pending';
+                              case 'ho_corrected_km':
+                                return localKMCorrections[record.id] !== undefined
+                                  ? localKMCorrections[record.id]
+                                  : (record.ho_corrected_km || '');
+                              case 'ho_remark':
+                                return localRemarks[record.id] !== undefined
+                                  ? localRemarks[record.id]
+                                  : (record.ho_remark || '');
+                              case 'freight_charges':
+                                return localFreightAmounts[record.id] !== undefined
+                                  ? localFreightAmounts[record.id]
+                                  : (record.freight_charges || '');
+                              case 'da_amount':
+                                return dynamicDAAmounts[record.id] ?? record.da_amount ?? '';
+                              case 'total_amount':
+                                return dynamicTotalAmounts[record.id] ?? record.total_amount ?? '';
+                              case 'km_rate_applied': {
+                                const effKM = getEffectiveKM(record);
+                                const rate = getKmRateForRecord(record, effKM);
+                                return rate > 0 ? rate : (record.km_rate_applied || '');
+                              }
+                              default:
+                                return record[key] ?? '';
+                            }
+                          };
+
+                          const enriched = rowsToExport.map((record, idx) => {
+                            const row = {};
+                            exportCols.forEach(col => { row[col.key] = cellValue(record, col.key, idx); });
+                            return row;
+                          });
+
+                          // Cleaner header for the verify column in the sheet.
+                          const headers = exportCols.map(c => ({
+                            key: c.key,
+                            label: c.key === 'verification_status' ? 'Status' : c.label,
                           }));
-                          exportToExcel(
-                            enriched,
-                            `tada_${selectedEngineerDetail?.name}_records.xlsx`,
-                            exportCols.map(c => ({ key: c.key, label: c.label }))
-                          );
+
+                          const tabLabel = engineerDetailTab === 'verified' ? 'Verified' : 'Pending';
+                          const safeName = (selectedEngineerDetail?.name || 'records').replace(/[\\/:*?"<>|]/g, '_');
+                          exportToExcel(enriched, `tada_${safeName}_${tabLabel}.xlsx`, headers);
                         }}
                         className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] sm:text-xs font-medium rounded-lg transition-all shadow-md hover:shadow-lg"
                         style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}

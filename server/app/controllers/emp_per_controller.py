@@ -2410,6 +2410,7 @@ class EmployeePerformanceController:
                     "location": customer.location if customer else "N/A",
                     "service": nfu.service or "N/A",
                     "remark_type": nfu.remark_type or "other",
+                    "activity_content": activity.content if activity else None,
                     "last_status": nfu.status,
                     "last_followup_user_name": nfu.user_name or "N/A",
                     "last_followup_user_id": nfu.user_id or "N/A",
@@ -2683,9 +2684,19 @@ class EmployeePerformanceController:
             ).all() if instance_ids else []
             customer_map = {c.instance_id: c for c in customers_db}
 
+            # Bulk-fetch Activity content for the latest non-followups so the
+            # All-Follow-ups modal can show an Activity for the "other" rows.
+            from app.models.engagement_model import Activity
+            activity_ids = list({nfu.activity_id for nfu in latest_map.values() if nfu.activity_id})
+            activity_map = {}
+            if activity_ids:
+                for a in db.query(Activity).filter(Activity.id.in_(activity_ids)).all():
+                    activity_map[a.id] = a
+
             customers_list = []
             for instance_id, nfu in latest_map.items():
                 customer = customer_map.get(instance_id)
+                activity = activity_map.get(nfu.activity_id) if nfu.activity_id else None
                 customers_list.append({
                     "s_no": 0,
                     "instance_id": instance_id,
@@ -2696,6 +2707,7 @@ class EmployeePerformanceController:
                     "location": customer.location if customer else "N/A",
                     "service": nfu.service or "N/A",
                     "remark_type": nfu.remark_type or "other",
+                    "activity_content": activity.content if activity else None,
                     "last_status": nfu.status,
                     "last_followup_user_name": nfu.user_name or "N/A",
                     "last_followup_user_id": nfu.user_id or "N/A",

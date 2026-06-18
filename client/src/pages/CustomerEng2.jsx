@@ -3262,7 +3262,6 @@ ${f.body}`;
         instance_id: customerDetails?.instance_id,
         format_type_id: selectedLetterFormat?.id,
         format_type_name: selectedLetterFormat?.format_type_name,
-        record_id: editingLetterRecordId,
         ref_no: letterFields.ref_no,
         financial_year: letterFy,
         sequence: letterSeq,
@@ -3270,7 +3269,6 @@ ${f.body}`;
         letter_fields: letterFields,
         letter_html: buildLetterHtml(),
         letter_text: buildLetterText(),
-        letter_fields: letterFields,
         channels: letterChannels.length ? letterChannels : (selectedLetterFormat?.channels || []),
         email_to: letterEmailTo || customerDetails?.email || '',
         whatsapp_to: letterWhatsappTo || String(customerDetails?.phone_number || ''),
@@ -7179,7 +7177,8 @@ ${f.body}`;
           </div>
         </div>
 
-        {/* Letter History */}
+        {/* Letter History — admin only */}
+        {isAdmin && (
         <div className="bg-white rounded-xl shadow-lg p-3 sm:p-4 mb-3 sm:mb-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm sm:text-base font-semibold flex items-center gap-2">
@@ -7279,6 +7278,7 @@ ${f.body}`;
             </table>
           </div>
         </div>
+        )}
 
         {/* PDF Chat Panel */}
         {showPdfViewer && pdfViewerCampaign && (
