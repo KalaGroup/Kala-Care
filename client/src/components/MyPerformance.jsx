@@ -33,6 +33,18 @@ const convertUTCToIST = (dateTimeString) => {
     return `${displayHours}:${formattedMinutes} ${period}`;
 };
 
+// Helper function - Convert decimal hours (e.g. 3.75) to "Xh Ym" (e.g. "3h 45m")
+const formatWorkingHours = (decimalHours) => {
+    const num = parseFloat(decimalHours);
+    if (!num || isNaN(num) || num <= 0) return '-';
+    const totalMinutes = Math.round(num * 60);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h`;
+    return `${minutes}m`;
+};
+
 const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, isBranchAdmin, isMasterAdmin, isITAdmin }) => {
     const navigate = useNavigate();
 
@@ -89,7 +101,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const [showAllFollowupsModal, setShowAllFollowupsModal] = useState(false);
     const [allFollowupsData, setAllFollowupsData] = useState([]);
     const [loadingAllFollowups, setLoadingAllFollowups] = useState(false);
-    const [uniqueOnly, setUniqueOnly] = useState(false); // All-Follow-ups: collapse to latest per unique instance_id
+    const [followupView, setFollowupView] = useState('all'); // All-Follow-ups view: 'all' | 'unique'
     const [followupSearchTerm, setFollowupSearchTerm] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
@@ -147,9 +159,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         return () => clearTimeout(t);
     }, [followupSearchTerm]);
 
-    // Reset the Unique toggle whenever the All-Follow-ups modal closes
+    // Reset the view dropdown whenever the All-Follow-ups modal closes
     useEffect(() => {
-        if (!showAllFollowupsModal) setUniqueOnly(false);
+        if (!showAllFollowupsModal) setFollowupView('all');
     }, [showAllFollowupsModal]);
 
     // Format date for API — use LOCAL (IST) date parts so the chosen day isn't
@@ -401,6 +413,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setFollowupSearchTerm('');
         setCreatedFromDate('');
         setCreatedToDate('');
+        setStatusFilter('all'); // status is locked to WIP for this view
         if (allFollowupsData.length === 0) {
             fetchAllFollowups();
         }
@@ -528,7 +541,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             setOpenCspCampaigns(list);
             if (list.length === 1) setSelectedCspCampaignId(String(list[0].id));
         } catch (e) {
-            console.error('Error fetching open CSP campaigns:', e);
+            console.error('Error fetching open CSP drives:', e);
             setOpenCspCampaigns([]);
         }
     };
@@ -562,7 +575,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
     const handleSubmitSr = async () => {
         if (!selectedCspCampaignId) {
-            alert('Please select which CSP campaign to add this SR into.');
+            alert('Please select which CSP drive to add this SR into.');
             return;
         }
         if (!srForm.asset_number.trim()) { alert('Asset Number is required.'); return; }
@@ -748,9 +761,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     // Count for the front box
     const quotationCount = quotationFollowupIds.size;
 
-    // Count of all rows where quotation_sent is true (Yes)
+    // Quotation Sent box: quotation sent AND still WIP
     const quotationSentCount = useMemo(
-        () => allFollowupsData.filter(fu => fu.quotation_sent).length,
+        () => allFollowupsData.filter(fu => fu.quotation_sent && (fu.status || '').toLowerCase() === 'wip').length,
         [allFollowupsData]
     );
 
@@ -794,6 +807,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 branch_id: c.branch_id || '',
                 campaign_name: 'other',
                 campaign_service: c.service || '',
+                csp_subtype: c.csp_subtype || '',
                 followup_by: c.followup_by || '',
                 followup_flag: (c.latest_flag && c.latest_flag !== 'N/A') ? c.latest_flag : '',
                 status: 'completed',
@@ -823,11 +837,21 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const visibleFollowups = useMemo(() => {
         return mergedFollowups.filter(fu => {
             if (quotationFilterActive && !quotationFollowupIds.has(fu.id)) return false;
-            if (quotationSentFilterActive && !fu.quotation_sent) return false;
+            // Quotation Sent view: keep only WIP rows that have a quotation sent
+            if (quotationSentFilterActive && !(fu.quotation_sent && (fu.status || '').toLowerCase() === 'wip')) return false;
             if (cspQuotationFilterActive && !cspQuotationFollowupIds.has(fu.id)) return false;
             if (cspQuotationSentFilterActive && !(fu.quotation_sent && isCspFollowup(fu))) return false;
             if (statusFilter !== 'all') {
-                if ((fu.status || '').toLowerCase() !== statusFilter) return false;
+                if (statusFilter === 'not_connected') {
+                    const status = (fu.status || '').trim().toLowerCase();
+                    const remark = (fu.followup_remark || '').toLowerCase();
+                    const flag = (fu.followup_flag || '').trim().toLowerCase();
+                    const isNC = status === 'not_connected' ||
+                        remark.includes('not connected') || flag === 'nc' || flag.includes('not connected');
+                    if (!isNC) return false;
+                } else if ((fu.status || '').toLowerCase() !== statusFilter) {
+                    return false;
+                }
             }
             if (debouncedSearch.trim()) {
                 const t = debouncedSearch.toLowerCase();
@@ -863,11 +887,10 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         debouncedSearch, createdFromDate, createdToDate,
         quotationFollowupIds, cspQuotationFollowupIds, isCspFollowup]);
 
-    // What the table actually renders: optionally collapsed to one latest row per unique instance_id
-    const displayedFollowups = useMemo(
-        () => (uniqueOnly ? getLatestFollowupsPerInstance(visibleFollowups) : visibleFollowups),
-        [uniqueOnly, visibleFollowups]
-    );
+    const displayedFollowups = useMemo(() => {
+        if (followupView === 'unique') return getLatestFollowupsPerInstance(visibleFollowups);
+        return visibleFollowups;
+    }, [followupView, visibleFollowups]);
 
     // Quotation sent count grouped by local date (YYYY-MM-DD) — derived from allFollowupsData
     const quotationSentByDate = useMemo(() => {
@@ -1073,10 +1096,10 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 month: 'short',
                 year: 'numeric'
             }),
-            'Campaign Name': day.campaign_name || 'N/A',
+            'Drive Name': day.campaign_name || 'N/A',
             'Start Time (IST)': day.first_followup_time ? convertUTCToIST(day.first_followup_time) : '-',
             'End Time (IST)': day.last_followup_time ? convertUTCToIST(day.last_followup_time) : '-',
-            'Working Hours': day.total_working_hours ? `${day.total_working_hours} hrs` : '-',
+            'Working Hours': formatWorkingHours(day.total_working_hours),
             'Toal Calls and Follow-ups': day.total_followups || 0,
             'By Call': day.followup_by_call || 0,
             'Call Completed': day.call_completed || 0,
@@ -1105,7 +1128,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         const totalRow = {
             'S.NO': '',
             'Date': 'TOTAL',
-            'Campaign Name': '',
+            'Drive Name': '',
             'Start Time (IST)': '',
             'End Time (IST)': '',
             'Working Hours': '',
@@ -1242,7 +1265,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         }));
         const ws = XLSX.utils.json_to_sheet(exportData);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Non-Campaign Customers');
+        XLSX.utils.book_append_sheet(wb, ws, 'Non-Drive Customers');
         ws['!cols'] = Object.keys(exportData[0]).map(() => ({ wch: 20 }));
         XLSX.writeFile(wb, `non_campaign_customers_${new Date().toISOString().split('T')[0]}.xlsx`);
     };
@@ -1260,8 +1283,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             'Phone': fu.phone_number || '-',
             'Email': fu.email || '-',
             'Branch': fu.branch_id || '-',
-            'Campaign': fu.campaign_name || '-',
+            'Drive': fu.campaign_name || '-',
             'Service': fu.campaign_service || '-',
+            'Subtype': fu.csp_subtype || '-',
             'Follow-up By': fu.followup_by || '-',
             'Flag': fu.followup_flag || '-',
             'Status': fu.status === 'rescheduled' ? 'FR' : (fu.status || '-'),
@@ -1607,7 +1631,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
                     <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
                         <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
-                            Click to manually add an SR to a CSP campaign
+                            Click to manually add an SR to a CSP Drive
                             <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-black"></div>
                         </div>
                     </div>
@@ -1749,7 +1773,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 <div
                     onClick={handleOpenNonCampaignModal}
                     className="group bg-white rounded-lg shadow-sm p-2.5 sm:p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all cursor-pointer col-span-1 sm:col-span-2 lg:col-span-5"
-                    title="Click to view all non-campaign customers"
+                    title="Click to view all non-drive customers"
                 >
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
 
@@ -1899,7 +1923,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[50px]">S.NO</th>
                                     <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[90px]">Date</th>
                                     <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[220px]">
-                                        <div>Campaign</div>
+                                        <div>Drive</div>
                                         <div>Name</div>
                                     </th>
                                     <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[100px]">
@@ -1959,7 +1983,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 {day.last_followup_time ? convertUTCToIST(day.last_followup_time) : '-'}
                                             </td>
                                             <td className="px-2 py-1 whitespace-nowrap text-[11px] border border-gray-200 text-center text-black">
-                                                {day.total_working_hours ? `${day.total_working_hours} hrs` : '-'}
+                                                {formatWorkingHours(day.total_working_hours)}
                                             </td>
                                             <td className="px-2 py-1 whitespace-nowrap border border-gray-200 text-center">
                                                 <div className="flex flex-col items-center gap-0.5">
@@ -2163,7 +2187,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
                 {performance.top_campaigns && performance.top_campaigns.length > 0 && (
                     <div className="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
-                        <h3 className="text-sm font-semibold text-black mb-3">Top Performing Campaigns</h3>
+                        <h3 className="text-sm font-semibold text-black mb-3">Top Performing Drives</h3>
                         <div className="space-y-2.5">
                             {performance.top_campaigns.map((campaign, index) => (
                                 <div key={index} className="flex items-center justify-between py-1.5 border-b border-gray-200">
@@ -2632,7 +2656,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                         : 'All Follow-ups'} by {userData?.name || 'User'}
                                     </h3>
                                     <p className="text-[11px] text-white/80 mt-0.5">
-                                        {getDateRangeText()} • Total: {uniqueOnly
+                                        {getDateRangeText()} • Total: {followupView !== 'all'
                                             ? displayedFollowups.length
                                             : quotationFilterActive
                                                 ? quotationCount
@@ -2642,7 +2666,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                         ? cspQuotationCount
                                                         : cspQuotationSentFilterActive
                                                             ? cspQuotationSentCount
-                                                            : mergedFollowups.length} {uniqueOnly ? 'unique ' : ''}follow-up(s)
+                                                            : mergedFollowups.length} {followupView === 'unique' ? 'unique ' : ''}follow-up(s)
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -2680,47 +2704,58 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                             min={createdFromDate || undefined}
                                             className="border border-gray-300 rounded-md px-2 py-1 text-[11px] bg-white text-black"
                                         />
-                                    </div>                  
+                                    </div>
+                                    {!quotationSentFilterActive && (
+                                        <div className="flex items-center gap-1">
+                                            <label className="text-[11px] text-white whitespace-nowrap">Status:</label>
+                                            <div className="relative">
+                                                <select
+                                                    value={statusFilter}
+                                                    onChange={(e) => setStatusFilter(e.target.value)}
+                                                    className="border border-gray-300 rounded-md pl-2 pr-6 py-1 text-[11px] bg-white text-black appearance-none cursor-pointer focus:outline-none"
+                                                >
+                                                    <option value="all">All</option>
+                                                    <option value="completed">Completed</option>
+                                                    <option value="wip">WIP</option>
+                                                    <option value="rejected">Rejected</option>
+                                                    <option value="rescheduled">FR (Rescheduled)</option>
+                                                    <option value="not_connected">NC (Not Connected)</option>
+                                                </select>
+                                                <svg
+                                                    className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-black pointer-events-none"
+                                                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                                >
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                </svg>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* View dropdown — All / Unique (latest per Instance ID) / NC (Not Connected remark) */}
                                     <div className="flex items-center gap-1">
-                                        <label className="text-[11px] text-white whitespace-nowrap">Status:</label>
+                                        <label className="text-[11px] text-white whitespace-nowrap">
+                                            View{followupView !== 'all' ? ` (${displayedFollowups.length})` : ''}:
+                                        </label>
                                         <div className="relative">
                                             <select
-                                                value={statusFilter}
-                                                onChange={(e) => setStatusFilter(e.target.value)}
+                                                value={followupView}
+                                                onChange={(e) => setFollowupView(e.target.value)}
+                                                title="All • Unique (latest per Instance ID) • NC (Not Connected)"
                                                 className="border border-gray-300 rounded-md pl-2 pr-6 py-1 text-[11px] bg-white text-black appearance-none cursor-pointer focus:outline-none"
                                             >
                                                 <option value="all">All</option>
-                                                <option value="completed">Completed</option>
-                                                <option value="wip">WIP</option>
-                                                <option value="rejected">Rejected</option>
-                                                <option value="rescheduled">FR (Rescheduled)</option>
+                                                <option value="unique">Unique</option>
                                             </select>
-                                            <svg
-                                                className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-black pointer-events-none"
-                                                fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                                            >
+                                            <svg className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-black pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                             </svg>
                                         </div>
                                     </div>
 
-                                    {/* Unique toggle — collapse to latest follow-up per unique Instance ID */}
-                                    <button
-                                        type="button"
-                                        onClick={() => setUniqueOnly(v => !v)}
-                                        title="Show only the latest follow-up per unique Instance ID"
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap border transition-colors ${uniqueOnly
-                                            ? 'bg-white text-[#2f3192] border-white'
-                                            : 'bg-white/10 text-white border-white/40 hover:bg-white/20'
-                                            }`}
-                                    >
-                                        {uniqueOnly ? `Unique (${displayedFollowups.length})` : 'Unique'}
-                                    </button>
-
                                     {/* Search */}
                                     <input
                                         type="text"
-                                        placeholder="Search customer, campaign, remark..."
+                                        placeholder="Search customer, drive, remark..."
                                         value={followupSearchTerm}
                                         onChange={(e) => setFollowupSearchTerm(e.target.value)}
                                         className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-64 bg-white focus:outline-none"
@@ -2798,8 +2833,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Phone</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Email</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Branch</th>
-                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Campaign</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Drive</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Service</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Subtype</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Follow-up By</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Flag</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Status</th>
@@ -2833,6 +2869,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{fu.branch_id || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-left">{fu.campaign_name || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-left">{fu.campaign_service || '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center">{fu.csp_subtype || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center capitalize">{fu.followup_by || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">
                                                                 {fu.followup_flag ? (
@@ -2950,14 +2987,14 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 <div>
 
                                     {openCspCampaigns.length === 0 ? (
-                                        <p className="text-[11px] text-red-600">No active CSP campaigns available.</p>
+                                        <p className="text-[11px] text-red-600">No active CSP drives available.</p>
                                     ) : (
                                         <select
                                             value={selectedCspCampaignId}
                                             onChange={(e) => setSelectedCspCampaignId(e.target.value)}
                                             className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm bg-white text-black"
                                         >
-                                            <option value="">Select a campaign…</option>
+                                            <option value="">Select a drive…</option>
                                             {openCspCampaigns.map(c => (
                                                 <option key={c.id} value={c.id}>
                                                     {c.name} - {c.asset_count} assets
@@ -3069,7 +3106,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                             >
                                 <div>
                                     <h3 className="text-base font-semibold text-white">
-                                        Non-Campaign Customers by {userData?.name || 'User'}
+                                        Non-Drive Customers by {userData?.name || 'User'}
                                     </h3>
                                     <p className="text-[11px] text-white/80 mt-0.5">
                                         Showing {filteredNonCampaignCustomers.length} of {nonCampaignBase.length} customer(s)
@@ -3176,7 +3213,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 ) : filteredNonCampaignCustomers.length === 0 ? (
                                     <div className="text-center py-10 text-xs text-gray-500">
                                         {nonCampaignData.customers.length === 0
-                                            ? 'No non-campaign customers found.'
+                                            ? 'No non-drive customers found.'
                                             : 'No customers match the current filters.'}
                                     </div>
                                 ) : (

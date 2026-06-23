@@ -160,7 +160,7 @@ const EmployeeActivityModal = ({
                         <p className="text-[11px] text-white/80 mt-0.5">
                             Branch: {employee?.branch_display || employee?.branch || 'N/A'} • Total: {filteredFollowups.length} follow-up(s)
                             {selectedCampaignNames && selectedCampaignNames.size > 0 && (
-                                <span className="ml-1">• Campaigns: {selectedCampaignNames.size}</span>
+                                <span className="ml-1">• Drives: {selectedCampaignNames.size}</span>
                             )}
                         </p>
                     </div>
@@ -208,7 +208,7 @@ const EmployeeActivityModal = ({
                         )}
                         <input
                             type="text"
-                            placeholder="Search customer, campaign, remark..."
+                            placeholder="Search customer, drive, remark..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-64 bg-white focus:outline-none"
@@ -248,7 +248,7 @@ const EmployeeActivityModal = ({
                                         <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">Phone</th>
                                         <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">Email</th>
                                         <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">Branch</th>
-                                        <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">Campaign</th>
+                                        <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">Drive</th>
                                         <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">Service</th>
                                         <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">Follow-up By</th>
                                         <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">Flag</th>

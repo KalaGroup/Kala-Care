@@ -33,13 +33,13 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                 })
             });
 
-            if (!response.ok) throw new Error('Failed to fetch non-campaign customers');
+            if (!response.ok) throw new Error('Failed to fetch non-drive customers');
 
             const data = await response.json();
             setTotalCustomers(data.total_customers || 0);
             setCustomers(data.customers || []);
         } catch (error) {
-            console.error('Error fetching non-campaign customers:', error);
+            console.error('Error fetching non-drive customers:', error);
         } finally {
             setLoading(false);
         }
@@ -50,12 +50,12 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
         setExportLoading(true);
 
         const wsData = [];
-        wsData.push(['NON-CAMPAIGN FOLLOWUP DATA']);
+        wsData.push(['NON-DRIVE FOLLOWUP DATA']);
         wsData.push(['Total Unique Customers:', totalCustomers]);
         wsData.push([]);
         wsData.push([
             'S.No', 'Instance ID', 'Customer Name', 'Phone Number', 'Email',
-            'Branch ID', 'Location', 'Service', 'Campaign Type', 'Followup By',
+            'Branch ID', 'Location', 'Service', 'Drive Type', 'Followup By',
             'Last Status', 'Last Follow-up User', 'Last Follow-up User ID',
             'Last Follow-up Date', 'Next Follow-up Date',
             'Latest Flag', 'Latest Remark', 'Quotation Sent', 'Quotation Value'
@@ -87,7 +87,7 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
 
         const ws = XLSX.utils.aoa_to_sheet(wsData);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Non Campaign Followups');
+        XLSX.utils.book_append_sheet(wb, ws, 'Non Drive Followups');
 
         ws['!cols'] = [
             { wch: 8 }, { wch: 18 }, { wch: 30 }, { wch: 15 }, { wch: 30 },
@@ -192,7 +192,7 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                                         </svg>
                                     </div>
                                     <h2 className="text-base sm:text-lg font-bold text-white tracking-tight truncate">
-                                        Non-Campaign Followup Data
+                                        Non-Drive Followup Data
                                     </h2>
                                 </div>
                                 <div className="flex flex-wrap gap-1.5 sm:gap-2 text-white/80 text-[10px] sm:text-xs">
@@ -294,7 +294,7 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Branch</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Location</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Service</th>
-                                            <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Campaign Type</th>
+                                            <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Drive Type</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Followup By</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Last Status</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Last User</th>

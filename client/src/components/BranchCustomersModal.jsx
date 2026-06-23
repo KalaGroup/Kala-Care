@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
 import {
     Chart as ChartJS,
@@ -25,6 +25,10 @@ ChartJS.register(
     Filler,
     ArcElement
 );
+
+// "Not Connected" is now its own status value (last_status === 'not_connected').
+const isNotConnected = (cust) =>
+    (cust?.last_status || '').trim().toLowerCase() === 'not_connected';
 
 const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
     preloadedEngaged, preloadedRemaining, preloadedAllocation, canExportProp }) => {
@@ -150,10 +154,22 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
         return status.charAt(0).toUpperCase() + status.slice(1);
     };
 
-    const openCampaignDetails = (campaign) => {
+    // Not-Connected customer count per campaign, computed ONCE per data load so
+    // re-renders (e.g. typing in the details search box) don't re-scan every list.
+    const ncCountByCampaign = useMemo(() => {
+        const map = {};
+        (branchData?.campaigns || []).forEach(c => {
+            map[c.campaign_id] = (c.customers || []).reduce(
+                (n, cust) => n + (isNotConnected(cust) ? 1 : 0), 0
+            );
+        });
+        return map;
+    }, [branchData]);
+
+    const openCampaignDetails = (campaign, initialStatus = 'all') => {
         setSelectedCampaign(campaign);
         setCampaignDetailsOpen(true);
-        setStatusFilter('all');
+        setStatusFilter(initialStatus);
         setSearchTerm('');
     };
 
@@ -190,11 +206,11 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
 
         const wsData = [];
 
-        wsData.push(['BRANCH CAMPAIGN REPORT']);
+        wsData.push(['BRANCH Drive REPORT']);
         wsData.push(['Generated Date:', new Date().toLocaleString()]);
         wsData.push(['Branch Name:', branchData.branch_name]);
         wsData.push(['Branch Code:', branchData.branch_code]);
-        wsData.push(['Total Campaigns:', campaignsWithAllocate.length]);
+        wsData.push(['Total Drives:', campaignsWithAllocate.length]);
 
         const totalBranchAssets = campaignsWithAllocate.reduce((sum, campaign) => {
             return sum + getCampaignTotalAllocate(campaign);
@@ -203,11 +219,11 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
         wsData.push(['Total Branch Assets:', totalBranchAssets]);
         wsData.push(['Completion Rate:', `${branchData.branch_completion_rate || 0}%`]);
         wsData.push([]);
-        wsData.push(['CAMPAIGN SUMMARY']);
+        wsData.push(['DRIVE SUMMARY']);
         wsData.push([]);
 
         wsData.push([
-            'Campaign Name',
+            'Drive Name',
             'Service/product',
             'Status',
             'Total Allocated Assets',
@@ -216,6 +232,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
             'WIP',
             'Follow-up Reschedule',
             'Rejected',
+            'Not Connected',
             'Completion Rate %'
         ]);
 
@@ -232,18 +249,19 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                 campaign.wip_followups,
                 campaign.rescheduled_followups || 0,
                 campaign.rejected_followups,
+                ncCountByCampaign[campaign.campaign_id] || 0,
                 campaign.completion_rate
             ]);
         });
 
         const ws = XLSX.utils.aoa_to_sheet(wsData);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Branch Campaign Report');
+        XLSX.utils.book_append_sheet(wb, ws, 'Branch Drive Report');
 
         ws['!cols'] = [
             { wch: 30 }, { wch: 20 }, { wch: 12 }, { wch: 15 },
             { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 12 },
-            { wch: 12 }, { wch: 15 }
+            { wch: 12 }, { wch: 14 }, { wch: 15 }
         ];
 
         const filename = `branch_${branchData.branch_code}_campaign_report_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
@@ -554,7 +572,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                                     </svg>
                                     <h3 className="text-sm sm:text-base font-bold text-white truncate">
-                                        {branchData?.branch_name} - Campaign Report ({campaignsWithAllocate.length})
+                                        {branchData?.branch_name} - Drive Report ({campaignsWithAllocate.length})
                                     </h3>
                                 </div>
                                 <p className="text-[10px] sm:text-xs text-white/80 mt-0.5 ml-6 sm:ml-7">
@@ -707,7 +725,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 mb-4">
                                 <div>
                                     <h3 className="text-base font-semibold text-gray-800">
-                                        Campaign-wise Customer Breakdown
+                                        Drive-wise Customer Breakdown
                                     </h3>
                                     <p className="text-[10px] text-gray-500 mt-0.5">Remaining vs WIP vs FR vs Rejected vs Completed</p>
                                 </div>
@@ -716,7 +734,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                         onClick={() => setActiveCampaignFilter('all')}
                                         className={`px-2.5 py-1 text-[11px] rounded-lg transition-colors ${activeCampaignFilter === 'all' ? 'bg-[#2f3192] text-white' : 'bg-gray-100 text-black hover:bg-gray-200'}`}
                                     >
-                                        All Campaigns
+                                        All Drives
                                     </button>
                                     <button
                                         onClick={() => setActiveCampaignFilter('active')}
@@ -732,7 +750,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                     <Bar data={getCampaignBreakdownData()} options={breakdownChartOptions} />
                                 ) : (
                                     <div className="h-64 flex items-center justify-center text-gray-500">
-                                        No campaign data available
+                                        No Drive data available
                                     </div>
                                 )}
                             </div>
@@ -782,7 +800,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                     {/* Campaign Table */}
                     <div className="px-4 sm:px-5 py-3.5 bg-white">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 mb-3.5">
-                            <h4 className="text-sm font-semibold text-black">All Campaigns</h4>
+                            <h4 className="text-sm font-semibold text-black">All Drives</h4>
                             {canExport && (
                                 <button
                                     onClick={exportToExcel}
@@ -816,7 +834,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                     <thead className="bg-gray-100">
                                         <tr>
                                             <th className="border border-gray-300 px-5 py-2 text-center text-[11px] font-semibold text-black">Sr. No.</th>
-                                            <th className="border border-gray-300 px-5 py-2 text-center text-[11px] font-semibold text-black">Campaign Name</th>
+                                            <th className="border border-gray-300 px-5 py-2 text-center text-[11px] font-semibold text-black">Drive Name</th>
                                             <th className="border border-gray-300 px-5 py-2 text-center text-[11px] font-semibold text-black">Service/Product</th>
                                             <th className="border border-gray-300 px-5 py-2 text-center text-[11px] font-semibold text-black">Status</th>
                                             <th className="border border-gray-300 px-0 py-2 text-center text-[11px] font-semibold text-black">Total Allocated Assets</th>
@@ -824,6 +842,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                             <th className="border border-gray-300 px-5 py-2 text-center text-[11px] font-semibold text-black">WIP</th>
                                             <th className="border border-gray-300 px-0 py-2 text-center text-[11px] font-semibold text-black">Follow-up Reschedule</th>
                                             <th className="border border-gray-300 px-5 py-2 text-center text-[11px] font-semibold text-black">Rejected</th>
+                                            <th className="border border-gray-300 px-3 py-2 text-center text-[11px] font-semibold text-black">Not Connected</th>
                                             <th className="border border-gray-300 px-5 py-2 text-center text-[11px] font-semibold text-black">Completed</th>
                                             <th className="border border-gray-300 px-0 py-2 text-center text-[11px] font-semibold text-black">Completion Rate</th>
                                         </tr>
@@ -835,7 +854,8 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                             return (
                                                 <tr key={campaign.campaign_id} className="hover:bg-gray-50 cursor-pointer" onClick={() => openCampaignDetails(campaign)}>
                                                     <td className="border border-gray-300 px-3 py-1 text-center text-[11px] text-black">{idx + 1}</td>
-                                                    <td className="border border-gray-300 px-3 py-1 text-[11px] font-medium text-blue-800 underline hover:font-bold cursor-pointer">                                                        {campaign.campaign_name}
+                                                    <td className="border border-gray-300 px-3 py-1 text-[11px] font-medium text-blue-800 underline hover:font-bold cursor-pointer">
+                                                        {campaign.campaign_name}
                                                     </td>
                                                     <td className="border border-gray-300 px-3 py-1 text-center text-[11px] text-black">{campaign.service}</td>
                                                     <td className="border border-gray-300 px-3 py-1 text-center">
@@ -848,6 +868,9 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                                     <td className="border border-gray-300 px-3 py-1 text-center text-[11px] font-semibold">{campaign.wip_followups?.toLocaleString() || 0}</td>
                                                     <td className="border border-gray-300 px-3 py-1 text-center text-[11px] font-semibold">{campaign.rescheduled_followups?.toLocaleString() || 0}</td>
                                                     <td className="border border-gray-300 px-3 py-1 text-center text-[11px] font-semibold">{campaign.rejected_followups?.toLocaleString() || 0}</td>
+                                                    <td className="border border-gray-300 px-3 py-1 text-center text-[11px] font-semibold text-black">
+                                                        {ncCountByCampaign[campaign.campaign_id] || 0}
+                                                    </td>
                                                     <td className="border border-gray-300 px-3 py-1 text-center text-[11px] font-semibold">{campaign.completed_followups?.toLocaleString() || 0}</td>
                                                     <td className="border border-gray-300 px-3 py-1 text-center text-[11px] font-semibold text-black">{campaign.completion_rate}%</td>
                                                 </tr>
@@ -857,7 +880,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                 </table>
                                 {(!campaignsWithAllocate.length) && (
                                     <div className="text-center py-8 text-gray-500 text-xs">
-                                        No campaigns found with allocated customers.
+                                        No Drives found with allocated customers.
                                     </div>
                                 )}
                             </div>
@@ -946,11 +969,18 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                             Rejected ({selectedCampaign.rejected_followups || 0})
                                         </button>
                                         <button
+                                            onClick={() => setStatusFilter('nc')}
+                                            className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${statusFilter === 'nc' ? 'bg-teal-600 text-white' : 'bg-teal-50 text-teal-700 hover:bg-teal-100'}`}
+                                        >
+                                            NC ({ncCountByCampaign[selectedCampaign.campaign_id] || 0})
+                                        </button>
+                                        <button
                                             onClick={() => setStatusFilter('completed')}
                                             className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${statusFilter === 'completed' ? 'bg-green-500 text-white' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}
                                         >
                                             Completed ({selectedCampaign.completed_followups || 0})
                                         </button>
+
                                         <button
                                             onClick={() => setStatusFilter('remaining')}
                                             className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${statusFilter === 'remaining' ? 'bg-gray-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
@@ -973,6 +1003,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                                 <th className="border border-gray-300 px-2.5 py-1.5 text-center text-[10px] font-medium text-black">Branch ID</th>
                                                 <th className="border border-gray-300 px-2.5 py-1.5 text-center text-[10px] font-medium text-black">Location</th>
                                                 <th className="border border-gray-300 px-2.5 py-1.5 text-center text-[10px] font-medium text-black">Status</th>
+                                                <th className="border border-gray-300 px-2.5 py-1.5 text-center text-[10px] font-medium text-black">Subtype</th>
                                                 <th className="border border-gray-300 px-2.5 py-1.5 text-center text-[10px] font-medium text-black">Last User</th>
                                                 <th className="border border-gray-300 px-2.5 py-1.5 text-center text-[10px] font-medium text-black">Last Follow-up Date</th>
                                                 <th className="border border-gray-300 px-2.5 py-1.5 text-center text-[10px] font-medium text-black">Next Follow-up Date</th>
@@ -991,6 +1022,9 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                                         filteredCustomers = filteredCustomers.filter(customer =>
                                                             !customer.last_status || customer.last_status?.toLowerCase() === 'pending'
                                                         );
+                                                    } else if (statusFilter === 'nc') {
+                                                        // "Not Connected" now keys off status (with a legacy remark/flag fallback)
+                                                        filteredCustomers = filteredCustomers.filter(customer => isNotConnected(customer));
                                                     } else {
                                                         filteredCustomers = filteredCustomers.filter(customer =>
                                                             customer.last_status?.toLowerCase() === statusFilter.toLowerCase()
@@ -1033,7 +1067,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                                 if (sortedCustomers.length === 0) {
                                                     return (
                                                         <tr>
-                                                            <td colSpan="14" className="text-center py-8 text-gray-500 text-xs">
+                                                            <td colSpan="15" className="text-center py-8 text-gray-500 text-xs">
                                                                 No customers found.
                                                             </td>
                                                         </tr>
@@ -1063,9 +1097,12 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                                         <td className="border border-gray-300 px-1 py-1.5 text-center">
                                                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-black">
                                                                 {customer.last_status
-                                                                    ? customer.last_status.charAt(0).toUpperCase() + customer.last_status.slice(1)
+                                                                    ? customer.last_status.replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase())
                                                                     : 'Pending'}
                                                             </span>
+                                                        </td>
+                                                        <td className="border border-gray-300 px-1 py-1.5 text-[10px] text-black text-center">
+                                                            {customer.csp_subtype || '—'}
                                                         </td>
                                                         <td className="border border-gray-300 px-1 py-1.5 text-[10px] text-black text-center">
                                                             <div>{customer.last_followup_user_name}</div>

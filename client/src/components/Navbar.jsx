@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { PiHandshakeDuotone } from "react-icons/pi";
 import Swal from 'sweetalert2';
@@ -26,9 +26,48 @@ import {
   ClipboardDocumentListIcon,
   BanknotesIcon,
   BookOpenIcon,
-  BuildingOffice2Icon
+  BuildingOffice2Icon,
+  EyeIcon,
+  PencilSquareIcon
 } from '@heroicons/react/24/outline';
 import { CiFlag1 } from "react-icons/ci";
+
+// 'YYYY-MM' for an <input type="month"> from an ISO date string.
+const isoToMonthInput = (iso) => (iso ? String(iso).slice(0, 7) : '');
+
+// "Apr 2025" from an ISO date string (or a 'YYYY-MM' month value).
+const formatMonthYear = (value) => {
+  if (!value) return '';
+  const iso = value.length === 7 ? `${value}-01` : value; // accept 'YYYY-MM'
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+};
+
+// Plain day number (e.g. 20250415) from 'YYYY-MM-DD' or an ISO datetime string.
+// Comparing these as numbers avoids ALL timezone off-by-one issues in filters.
+const toDayNum = (value) => {
+  if (!value) return null;
+  const digits = String(value).slice(0, 10).replace(/-/g, ''); // 'YYYYMMDD'
+  const n = parseInt(digits, 10);
+  return Number.isNaN(n) ? null : n;
+};
+
+// Product/service name for a drive (handles the different field names backends use).
+const productOf = (c) =>
+  ((c?.service || c?.product || c?.product_name || '').trim() || '—');
+
+// Short date for the drive list table, e.g. "Jan 5, 2026".
+const formatDriveDate = (dateString) => {
+  if (!dateString) return 'N/A';
+  try {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric', month: 'short', day: 'numeric',
+    });
+  } catch {
+    return 'Invalid Date';
+  }
+};
 
 function Navbar({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -39,6 +78,25 @@ function Navbar({ children }) {
   const [showTerminologyModal, setShowTerminologyModal] = useState(false);
   const [expenseDropdownOpen, setExpenseDropdownOpen] = useState(false);
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
+  // Drive List modal
+  const [showDriveNamesModal, setShowDriveNamesModal] = useState(false);
+  const [driveCampaigns, setDriveCampaigns] = useState([]);
+  const [driveNamesLoading, setDriveNamesLoading] = useState(false);
+  const [driveSearch, setDriveSearch] = useState('');
+  const [driveSort, setDriveSort] = useState({ key: null, dir: 'asc' }); // sort by 'name' | 'product'
+  const [driveDateFrom, setDriveDateFrom] = useState(''); // filter: drive active on/after this date
+  const [driveDateTo, setDriveDateTo] = useState('');     // filter: drive active on/before this date
+  // Editable fields live in a SEPARATE table — kept in local state here.
+  // Each entry: { display_name, data_start, data_end, remark } (data_* are 'YYYY-MM').
+  const [driveMeta, setDriveMeta] = useState({});
+  const [durationFrom, setDurationFrom] = useState(''); // 'YYYY-MM' filter
+  const [durationTo, setDurationTo] = useState('');     // 'YYYY-MM' filter
+  const [driveStatusFilter, setDriveStatusFilter] = useState('all'); // 'all' | 'active' | 'inactive'
+  // View / Edit detail modal (opened from the Actions column).
+  const [driveModalMode, setDriveModalMode] = useState(null); // 'view' | 'edit' | null
+  const [activeDrive, setActiveDrive] = useState(null);       // campaign row being viewed/edited
+  const [editForm, setEditForm] = useState({ display_name: '', data_start: '', data_end: '', remark: '' });
+  const [editSaving, setEditSaving] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -87,8 +145,8 @@ function Navbar({ children }) {
     statusIndicators: {
       title: "Status Indicators",
       items: [
-        { symbol: "✓", meaning: "In Campaign", description: "Customer is in campaign" },
-        { symbol: "T", meaning: "Transferred", description: "Customer tranferred from old campaign" },
+        { symbol: "✓", meaning: "In Drive", description: "Customer is in drive" },
+        { symbol: "T", meaning: "Transferred", description: "Customer tranferred from old drive" },
         { symbol: "W", meaning: "Work in Progress", description: "Ongoing" },
         { symbol: "C", meaning: "Completed", description: "Business converted" },
         { symbol: "R", meaning: "Rejected", description: "Rejected by customer" },
@@ -227,6 +285,199 @@ function Navbar({ children }) {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [branchDropdownOpen]);
+
+  // Fetch ALL drives (active + inactive) AND the separate drive-meta table when
+  // the modal opens, then seed the editable Duration/Remark from the meta rows.
+  useEffect(() => {
+    if (!showDriveNamesModal) return;
+    let cancelled = false;
+
+    (async () => {
+      if (driveCampaigns.length === 0) setDriveNamesLoading(true);
+      try {
+        const base = import.meta.env.VITE_BACKEND_URL;
+        const [campRes, metaRes] = await Promise.all([
+          fetch(`${base}/v1/campaigns/`),
+          fetch(`${base}/v1/campaigns/drive-meta/all`),
+        ]);
+
+        const campData = campRes.ok ? await campRes.json() : [];
+        const metaData = metaRes.ok ? await metaRes.json() : [];
+        const all = Array.isArray(campData) ? campData : [];
+        const metaList = Array.isArray(metaData) ? metaData : [];
+
+        // Map the separate meta rows by campaign_id.
+        const metaById = {};
+        metaList.forEach((m) => { metaById[m.campaign_id] = m; });
+
+        if (!cancelled) {
+          setDriveCampaigns(all);
+          const seed = {};
+          all.forEach((c) => {
+            const m = metaById[c.id];
+            seed[c.id] = {
+              display_name: m?.display_name || '',
+              data_start: isoToMonthInput(m?.data_start_date),
+              data_end: isoToMonthInput(m?.data_end_date),
+              remark: m?.drive_remark || '',
+            };
+          });
+          setDriveMeta(seed);
+        }
+      } catch {
+        if (!cancelled && driveCampaigns.length === 0) setDriveCampaigns([]);
+      } finally {
+        if (!cancelled) setDriveNamesLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDriveNamesModal]);
+
+  // Click a sortable column: 1st click → ascending, 2nd → descending,
+  // 3rd → off (back to original order).
+  const toggleDriveSort = (key) => {
+    setDriveSort((prev) => {
+      if (prev.key !== key) return { key, dir: 'asc' };
+      if (prev.dir === 'asc') return { key, dir: 'desc' };
+      return { key: null, dir: 'asc' };
+    });
+  };
+
+  // Effective drive name = override from the meta table if set, else the real name.
+  const driveDisplayName = (c) => (driveMeta[c.id]?.display_name || c.name || '').trim() || '—';
+
+  // Open the read-only View modal for a drive.
+  const openDriveView = (c) => {
+    setActiveDrive(c);
+    setDriveModalMode('view');
+  };
+
+  // Open the Edit modal, seeding the form from the current meta values.
+  const openDriveEdit = (c) => {
+    const m = driveMeta[c.id] || {};
+    setActiveDrive(c);
+    setEditForm({
+      display_name: m.display_name || '',
+      data_start: m.data_start || '',
+      data_end: m.data_end || '',
+      remark: m.remark || '',
+    });
+    setDriveModalMode('edit');
+  };
+
+  const closeDriveDetail = () => {
+    setDriveModalMode(null);
+    setActiveDrive(null);
+    setEditSaving(false);
+  };
+
+  // Save the Edit form to the SEPARATE table ONLY. The real campaign (its name,
+  // product, dates) is NEVER modified — only campaign_drive_meta changes.
+  const saveEditForm = async () => {
+    if (!activeDrive) return;
+    const id = activeDrive.id;
+    const name = (editForm.display_name || '').trim();
+
+    setEditSaving(true);
+    try {
+      const body = {
+        display_name: name || null,
+        data_start_date: editForm.data_start ? `${editForm.data_start}-01` : null,
+        data_end_date: editForm.data_end ? `${editForm.data_end}-01` : null,
+        drive_remark: editForm.remark ?? '',
+      };
+      await fetch(`${import.meta.env.VITE_BACKEND_URL}/v1/campaigns/${id}/drive-meta`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      // Reflect locally so the table updates without a refetch.
+      setDriveMeta((prev) => ({
+        ...prev,
+        [id]: {
+          display_name: name,
+          data_start: editForm.data_start || '',
+          data_end: editForm.data_end || '',
+          remark: editForm.remark || '',
+        },
+      }));
+      closeDriveDetail();
+    } catch (e) {
+      console.error('Failed to save drive meta:', e);
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  // Drives filtered by search (name + product), the Start/End date fields,
+  // AND the data-duration window, then sorted when a column is selected.
+  const visibleDrives = useMemo(() => {
+    // --- Start / End date filter (field-based, compared as plain day numbers
+    // so there are NO timezone off-by-one problems) ---
+    // "Start Date (from)": keep drives that start on/after this date.
+    // "End Date (to)":     keep drives that end on/before this date.
+    const fromNum = toDayNum(driveDateFrom);
+    const toNum = toDayNum(driveDateTo);
+    const inRange = (c) => {
+      if (fromNum == null && toNum == null) return true;
+      const startNum = toDayNum(c.start_date);
+      const endNum = toDayNum(c.end_date);
+      if (fromNum != null && startNum != null && startNum < fromNum) return false;
+      if (toNum != null && endNum != null && endNum > toNum) return false;
+      return true;
+    };
+
+    // --- Data-duration overlap filter (month numbers, e.g. 202504) ---
+    const monthNum = (ym) => (ym ? Number(ym.replace('-', '')) : null);
+    const dFrom = monthNum(durationFrom);
+    const dTo = monthNum(durationTo);
+    const inDuration = (c) => {
+      if (dFrom == null && dTo == null) return true;
+      const m = driveMeta[c.id] || {};
+      const ds = monthNum(m.data_start);
+      const de = monthNum(m.data_end);
+      if (ds == null && de == null) return false; // no duration set -> excluded while filtering
+      if (dFrom != null && de != null && de < dFrom) return false;
+      if (dTo != null && ds != null && ds > dTo) return false;
+      return true;
+    };
+
+    // --- Status filter (All / Active / Inactive) ---
+    const inStatus = (c) => {
+      if (driveStatusFilter === 'all') return true;
+      const isActive = (c.status || '').toLowerCase() === 'active';
+      return driveStatusFilter === 'active' ? isActive : !isActive;
+    };
+
+    // --- Search: campaign name (override + real) and product ONLY ---
+    const term = driveSearch.trim().toLowerCase();
+    let list = driveCampaigns.filter((c) => {
+      if (!inRange(c)) return false;
+      if (!inDuration(c)) return false;
+      if (!inStatus(c)) return false;
+      if (!term) return true;
+      const overrideName = (driveMeta[c.id]?.display_name || '').toLowerCase();
+      const realName = (c.name || '').toLowerCase();
+      const product = productOf(c).toLowerCase();
+      return overrideName.includes(term) || realName.includes(term) || product.includes(term);
+    });
+
+    if (driveSort.key) {
+      const valueOf = (c) => {
+        if (driveSort.key === 'product') return productOf(c).toLowerCase();
+        if (driveSort.key === 'description') return (driveMeta[c.id]?.display_name || '').toLowerCase();
+        // 'name' → sort by the real (original) drive name
+        return (c.name || '').toLowerCase();
+      };
+      list = [...list].sort((a, b) => {
+        const cmp = valueOf(a).localeCompare(valueOf(b));
+        return driveSort.dir === 'asc' ? cmp : -cmp;
+      });
+    }
+    return list;
+  }, [driveCampaigns, driveSearch, driveSort, driveDateFrom, driveDateTo, durationFrom, durationTo, driveStatusFilter, driveMeta]);
 
   // Send logout time to backend (manual or auto), then clear session.
   // Uses sendBeacon so the redirect is INSTANT and isn't blocked by the
@@ -389,7 +640,7 @@ function Navbar({ children }) {
         path: '/campaigns',
         name: 'Drive Creation',
         icon: CiFlag1,
-        description: 'Create & track campaigns',
+        description: 'Create & track drives',
         allowedRoles: ['master_admin', 'it_admin']
       }
     ];
@@ -413,13 +664,13 @@ function Navbar({ children }) {
     {
       path: '/customer-engagement',
       name: 'Drive Data',
-      description: 'Campaign-based customer interactions',
+      description: 'Drive-based customer interactions',
       allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
     },
     {
       path: '/customer-engagement-2',
       name: 'Non-Drive Data',
-      description: 'Non-campaign customer interactions',
+      description: 'Non-drive customer interactions',
       allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
     }
   ];
@@ -451,7 +702,7 @@ function Navbar({ children }) {
       },
       {
         path: '/knowledge-book',
-        name: 'Knowledge Book',
+        name: 'Knowledge Bank',
         icon: BookOpenIcon,
         description: 'Product brochures, photos, videos & documents',
         allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
@@ -610,6 +861,440 @@ function Navbar({ children }) {
       {/* Terminology Modal */}
       <TerminologyModal />
 
+      {/* Drive List Modal — ALL drives (active + inactive). Duration / Remark /
+          display name are editable via the Actions column (View / Edit) and
+          saved to the SEPARATE campaign_drive_meta table — the real drive is
+          never changed. */}
+      {showDriveNamesModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-lg shadow-2xl max-w-[95vw] w-full max-h-[95vh] overflow-hidden flex flex-col">
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-2 flex justify-between items-center">
+              <h2 className="text-base font-semibold text-gray-900">Drive List Information</h2>
+              <button
+                onClick={() => {
+                  setShowDriveNamesModal(false);
+                  setDriveSearch('');
+                  setDriveDateFrom(''); setDriveDateTo('');
+                  setDurationFrom(''); setDurationTo('');
+                  setDriveStatusFilter('all');
+                }}
+                className="p-1 rounded hover:bg-gray-100 transition-colors"
+              >
+                <XMarkIcon className="h-4 w-4 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Filters */}
+            <div className="px-4 py-2 border-b border-gray-100">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex flex-col flex-1 min-w-[180px]">
+                  <label className="text-[10px] font-medium text-gray-500 mb-0.5">Search</label>
+                  <input
+                    value={driveSearch}
+                    onChange={(e) => setDriveSearch(e.target.value)}
+                    placeholder="Search drive name / product…"
+                    className="w-full border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2"
+                    style={{ '--tw-ring-color': themeColor }}
+                  />
+                </div>
+                <div className="flex flex-col">
+                  <label className="text-[10px] font-medium text-gray-500 mb-0.5">Status</label>
+                  <select
+                    value={driveStatusFilter}
+                    onChange={(e) => setDriveStatusFilter(e.target.value)}
+                    className="border border-gray-300 rounded px-2 py-1 text-xs text-black bg-white focus:outline-none focus:ring-2"
+                    style={{ '--tw-ring-color': themeColor }}
+                  >
+                    <option value="all">All</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                </div>
+                <div className="flex flex-col">
+                  <label className="text-[10px] font-medium text-gray-500 mb-0.5">Start Date (from)</label>
+                  <input
+                    type="date"
+                    value={driveDateFrom}
+                    max={driveDateTo || undefined}
+                    onChange={(e) => setDriveDateFrom(e.target.value)}
+                    className="border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2"
+                    style={{ '--tw-ring-color': themeColor }}
+                  />
+                </div>
+                <div className="flex flex-col">
+                  <label className="text-[10px] font-medium text-gray-500 mb-0.5">End Date (to)</label>
+                  <input
+                    type="date"
+                    value={driveDateTo}
+                    min={driveDateFrom || undefined}
+                    onChange={(e) => setDriveDateTo(e.target.value)}
+                    className="border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2"
+                    style={{ '--tw-ring-color': themeColor }}
+                  />
+                </div>
+                <div className="flex flex-col">
+                  <label className="text-[10px] font-medium text-gray-500 mb-0.5">Data Duration (from)</label>
+                  <input
+                    type="month"
+                    value={durationFrom}
+                    max={durationTo || undefined}
+                    onChange={(e) => setDurationFrom(e.target.value)}
+                    className="border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2"
+                    style={{ '--tw-ring-color': themeColor }}
+                  />
+                </div>
+                <div className="flex flex-col">
+                  <label className="text-[10px] font-medium text-gray-500 mb-0.5">Data Duration (to)</label>
+                  <input
+                    type="month"
+                    value={durationTo}
+                    min={durationFrom || undefined}
+                    onChange={(e) => setDurationTo(e.target.value)}
+                    className="border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2"
+                    style={{ '--tw-ring-color': themeColor }}
+                  />
+                </div>
+                {(driveDateFrom || driveDateTo || durationFrom || durationTo || driveStatusFilter !== 'all') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDriveDateFrom(''); setDriveDateTo('');
+                      setDurationFrom(''); setDurationTo('');
+                      setDriveStatusFilter('all');
+                    }}
+                    className="px-2 py-1 text-[11px] font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50 transition-colors whitespace-nowrap"
+                  >
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="p-3 flex-1 min-h-0 flex flex-col overflow-hidden">
+              {driveNamesLoading ? (
+                <div className="text-center py-8 text-xs text-gray-500">Loading drives…</div>
+              ) : visibleDrives.length === 0 ? (
+                <div className="text-center py-8 text-xs text-gray-500">No drives found.</div>
+              ) : (
+                <div className="flex-1 min-h-0 overflow-auto border border-gray-200 rounded-lg">
+                  <table className="w-full text-xs border-collapse table-fixed">
+                    <colgroup>
+                      <col className="w-12" />{/* Sr. No. */}
+                      <col className="w-40" />{/* Drive Name (real/original) */}
+                      <col className="w-40" />{/* Drive Description (edited name) */}
+                      <col className="w-36" />{/* Drive Product */}
+                      <col className="w-44" />{/* Drive Data Duration */}
+                      <col className="w-24" />{/* Start Date */}
+                      <col className="w-24" />{/* End Date */}
+                      <col className="w-24" />{/* Drive Status */}
+                      <col className="w-64" />{/* Drive Remark — wraps, grows row height */}
+                      <col className="w-24" />{/* Actions */}
+                    </colgroup>
+                    <thead>
+                      <tr className="text-left text-gray-800" style={{ backgroundColor: themeShades.light }}>
+                        <th className="px-2 py-2 font-semibold text-center whitespace-nowrap border border-gray-300">Sr. No.</th>
+                        <th
+                          onClick={() => toggleDriveSort('name')}
+                          className="px-3 py-2 font-semibold whitespace-nowrap border border-gray-300 cursor-pointer select-none hover:bg-black/5"
+                          title="Sort by drive name"
+                        >
+                          <span className="inline-flex items-center gap-1">
+                            Drive Name
+                            <span className="flex flex-col -space-y-1">
+                              <ChevronUpIcon strokeWidth={3} className={`h-2.5 w-2.5 ${driveSort.key === 'name' && driveSort.dir === 'asc' ? 'text-[#2f3192]' : 'text-gray-400'}`} />
+                              <ChevronDownIcon strokeWidth={3} className={`h-2.5 w-2.5 ${driveSort.key === 'name' && driveSort.dir === 'desc' ? 'text-[#2f3192]' : 'text-gray-400'}`} />
+                            </span>
+                          </span>
+                        </th>
+                         <th
+                          onClick={() => toggleDriveSort('description')}
+                          className="px-3 py-2 font-semibold whitespace-nowrap border border-gray-300 cursor-pointer select-none hover:bg-black/5"
+                          title="Sort by drive description"
+                        >
+                          <span className="inline-flex items-center gap-1">
+                            Drive Description
+                            <span className="flex flex-col -space-y-1">
+                              <ChevronUpIcon strokeWidth={3} className={`h-2.5 w-2.5 ${driveSort.key === 'description' && driveSort.dir === 'asc' ? 'text-[#2f3192]' : 'text-gray-400'}`} />
+                              <ChevronDownIcon strokeWidth={3} className={`h-2.5 w-2.5 ${driveSort.key === 'description' && driveSort.dir === 'desc' ? 'text-[#2f3192]' : 'text-gray-400'}`} />
+                            </span>
+                          </span>
+                        </th>
+                        <th
+                          onClick={() => toggleDriveSort('product')}
+                          className="px-3 py-2 font-semibold whitespace-nowrap border border-gray-300 cursor-pointer select-none hover:bg-black/5"
+                          title="Sort by product"
+                        >
+                          <span className="inline-flex items-center gap-1">
+                            Drive Product
+                            <span className="flex flex-col -space-y-1">
+                              <ChevronUpIcon strokeWidth={3} className={`h-2.5 w-2.5 ${driveSort.key === 'product' && driveSort.dir === 'asc' ? 'text-[#2f3192]' : 'text-gray-400'}`} />
+                              <ChevronDownIcon strokeWidth={3} className={`h-2.5 w-2.5 ${driveSort.key === 'product' && driveSort.dir === 'desc' ? 'text-[#2f3192]' : 'text-gray-400'}`} />
+                            </span>
+                          </span>
+                        </th>
+                        <th className="px-3 py-2 font-semibold text-center whitespace-nowrap border border-gray-300">Drive Data Duration</th>
+                        <th className="px-3 py-2 font-semibold text-center whitespace-nowrap border border-gray-300">Start Date</th>
+                        <th className="px-3 py-2 font-semibold text-center whitespace-nowrap border border-gray-300">End Date</th>
+                        <th className="px-3 py-2 font-semibold text-center whitespace-nowrap border border-gray-300">Drive Status</th>
+                        <th className="px-3 py-2 font-semibold text-center border border-gray-300">Drive Remark</th>
+                        <th className="px-3 py-2 font-semibold text-center whitespace-nowrap border border-gray-300">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleDrives.map((c, i) => {
+                        const meta = driveMeta[c.id] || { display_name: '', data_start: '', data_end: '', remark: '' };
+                        const active = (c.status || '').toLowerCase() === 'active';
+                        const durationText =
+                          meta.data_start || meta.data_end
+                            ? `${formatMonthYear(meta.data_start) || '—'} to ${formatMonthYear(meta.data_end) || '—'}`
+                            : '—';
+                        return (
+                          <tr key={c.id} className="hover:bg-gray-50 align-top">
+                            <td className="px-3 py-2 text-center text-gray-500 border border-gray-200">{i + 1}</td>
+                            {/* Drive Name = real/original name only, truncated with full text in title */}
+                            <td className="px-3 py-2 font-medium text-black border border-gray-200">
+                              <span className="flex items-center gap-1.5 min-w-0">
+                                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: c.color || themeColor }} />
+                                <span className="truncate min-w-0" title={c.name || ''}>
+                                  {c.name || '—'}
+                                </span>
+                              </span>
+                            </td>
+                            {/* Drive Description = edited/display name, truncated with full text in title */}
+                            <td className="px-3 py-2 text-black border border-gray-200">
+                              <span className="block truncate" title={meta.display_name || ''}>
+                                {meta.display_name || '—'}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-black whitespace-nowrap border border-gray-200 text-center">{productOf(c)}</td>
+                            <td className="px-3 py-2 text-gray-600 whitespace-nowrap border border-gray-200 text-center">{durationText}</td>
+                            <td className="px-3 py-2 text-gray-600 whitespace-nowrap border border-gray-200 text-center">{formatDriveDate(c.start_date)}</td>
+                            <td className="px-3 py-2 text-gray-600 whitespace-nowrap border border-gray-200 text-center">
+                              {c.end_date ? formatDriveDate(c.end_date) : 'Ongoing'}
+                            </td>
+                            <td className="px-3 py-2 text-center border border-gray-200">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                                {active ? 'Active' : 'Inactive'}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-gray-600 border border-gray-200">
+                              <span className="block whitespace-pre-wrap break-words">
+                                {meta.remark || '—'}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 border border-gray-200">
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openDriveView(c)}
+                                  className="p-1 rounded hover:bg-gray-100 transition-colors"
+                                  title="View"
+                                >
+                                  <EyeIcon className="h-4 w-4" style={{ color: themeColor }} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openDriveEdit(c)}
+                                  className="p-1 rounded hover:bg-gray-100 transition-colors"
+                                  title="Edit"
+                                >
+                                  <PencilSquareIcon className="h-4 w-4 text-gray-600" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {!driveNamesLoading && driveCampaigns.length > 0 && (
+              <div className="sticky bottom-0 bg-white border-t border-gray-200 px-3 py-1.5 flex justify-between items-center">
+                <span className="text-[11px] text-gray-400">
+                  {visibleDrives.length} of {driveCampaigns.length} drive(s)
+                </span>
+                <button
+                  onClick={() => {
+                    setShowDriveNamesModal(false);
+                    setDriveSearch('');
+                    setDriveDateFrom(''); setDriveDateTo('');
+                    setDurationFrom(''); setDurationTo('');
+                    setDriveStatusFilter('all');
+                  }}
+                  className="px-3 py-1 text-xs font-medium rounded hover:opacity-90 transition-all"
+                  style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})`, color: 'white' }}
+                >
+                  Got it
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Drive View / Edit detail modal — edits write ONLY to campaign_drive_meta.
+          The real drive name / product / dates are never modified. */}
+      {driveModalMode && activeDrive && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-lg shadow-2xl max-w-lg w-full max-h-[88vh] overflow-hidden flex flex-col">
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-2 flex justify-between items-center">
+              <h2 className="text-base font-semibold text-gray-900">
+                {driveModalMode === 'edit' ? 'Edit Drive Info' : 'Drive Details'}
+              </h2>
+              <button onClick={closeDriveDetail} className="p-1 rounded hover:bg-gray-100 transition-colors">
+                <XMarkIcon className="h-4 w-4 text-gray-500" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto overflow-x-hidden space-y-3 text-xs">
+              {driveModalMode === 'view' ? (
+                <>
+                  <div className="grid grid-cols-3 gap-2">
+                    <span className="text-gray-500 font-medium">Drive Name</span>
+                    <span className="col-span-2 min-w-0 text-black font-medium break-words">{driveDisplayName(activeDrive)}</span>
+                  </div>
+                  {driveMeta[activeDrive.id]?.display_name && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <span className="text-gray-500 font-medium">Drive Discription</span>
+                      <span className="col-span-2 min-w-0 text-gray-600 break-words">{activeDrive.name}</span>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-3 gap-2">
+                    <span className="text-gray-500 font-medium">Product</span>
+                    <span className="col-span-2 min-w-0 text-black break-words">{productOf(activeDrive)}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <span className="text-gray-500 font-medium">Data Duration</span>
+                    <span className="col-span-2 min-w-0 text-black break-words">
+                      {(() => {
+                        const m = driveMeta[activeDrive.id] || {};
+                        return m.data_start || m.data_end
+                          ? `${formatMonthYear(m.data_start) || '—'} to ${formatMonthYear(m.data_end) || '—'}`
+                          : '—';
+                      })()}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <span className="text-gray-500 font-medium">Start Date</span>
+                    <span className="col-span-2 min-w-0 text-black break-words">{formatDriveDate(activeDrive.start_date)}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <span className="text-gray-500 font-medium">End Date</span>
+                    <span className="col-span-2 min-w-0 text-black break-words">
+                      {activeDrive.end_date ? formatDriveDate(activeDrive.end_date) : 'Ongoing'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <span className="text-gray-500 font-medium">Status</span>
+                    <span className="col-span-2 min-w-0">
+                      {(activeDrive.status || '').toLowerCase() === 'active'
+                        ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-700">Active</span>
+                        : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-600">Inactive</span>}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <span className="text-gray-500 font-medium">Created By</span>
+                    <span className="col-span-2 min-w-0 text-black break-words">{activeDrive.created_by_name || '—'}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <span className="text-gray-500 font-medium">Remark</span>
+                    <span className="col-span-2 min-w-0 text-black whitespace-pre-wrap break-words">{driveMeta[activeDrive.id]?.remark || '—'}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="rounded bg-gray-50 border border-gray-100 px-2 py-1.5 text-[11px] text-gray-500">
+                    Editing here updates this list only. The real drive
+                    (<span className="font-medium text-gray-700">{activeDrive.name}</span> · {productOf(activeDrive)}) is not changed.
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-medium text-gray-600">Drive Discription</label>
+                    <input
+                      type="text"
+                      value={editForm.display_name}
+                      placeholder={activeDrive.name || 'Drive name'}
+                      onChange={(e) => setEditForm((f) => ({ ...f, display_name: e.target.value }))}
+                      className="w-full border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2"
+                      style={{ '--tw-ring-color': themeColor }}
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-medium text-gray-600">Data Duration</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="month"
+                        value={editForm.data_start}
+                        max={editForm.data_end || undefined}
+                        onChange={(e) => setEditForm((f) => ({ ...f, data_start: e.target.value }))}
+                        className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2"
+                        style={{ '--tw-ring-color': themeColor }}
+                      />
+                      <span className="text-gray-400 text-[11px]">to</span>
+                      <input
+                        type="month"
+                        value={editForm.data_end}
+                        min={editForm.data_start || undefined}
+                        onChange={(e) => setEditForm((f) => ({ ...f, data_end: e.target.value }))}
+                        className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2"
+                        style={{ '--tw-ring-color': themeColor }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-medium text-gray-600">Remark</label>
+                    <textarea
+                      rows={3}
+                      value={editForm.remark}
+                      placeholder="Add remark…"
+                      onChange={(e) => setEditForm((f) => ({ ...f, remark: e.target.value }))}
+                      className="w-full border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2 resize-none"
+                      style={{ '--tw-ring-color': themeColor }}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-3 py-2 flex justify-end gap-2">
+              {driveModalMode === 'edit' ? (
+                <>
+                  <button
+                    onClick={closeDriveDetail}
+                    disabled={editSaving}
+                    className="px-3 py-1 text-xs font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={saveEditForm}
+                    disabled={editSaving}
+                    className="px-3 py-1 text-xs font-medium rounded hover:opacity-90 transition-all disabled:opacity-50"
+                    style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})`, color: 'white' }}
+                  >
+                    {editSaving ? 'Saving…' : 'Save changes'}
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => openDriveEdit(activeDrive)}
+                  className="px-3 py-1 text-xs font-medium rounded hover:opacity-90 transition-all"
+                  style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})`, color: 'white' }}
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sidebar */}
       <aside className={`
         fixed md:relative md:translate-x-0
@@ -706,6 +1391,19 @@ function Navbar({ children }) {
                   {/* Dropdown Items */}
                   {(engagementDropdownOpen || isEngagementActive()) && (
                     <div className="ml-5 mt-1 space-y-0.5 border-l border-gray-200 pl-1.5">
+                      {/* Drive List Info — opens the modal (not a route); shown first.
+                          Master Admin / IT Admin only. */}
+                      {isMasterOrITAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => { setShowDriveNamesModal(true); if (isMobile) setSidebarOpen(false); }}
+                          className="w-full group relative flex items-center gap-1 px-1 py-1 rounded-md transition-all duration-200 text-sm text-black hover:text-black hover:bg-gray-50"
+                        >
+                          <div className="w-1 h-1 rounded-full" style={{ backgroundColor: '#D1D5DB' }} />
+                          <span className="flex-1 truncate text-left">Drive List Info</span>
+                        </button>
+                      )}
+
                       {engagementItems.map((item) => (
                         <NavLink
                           key={item.path}
@@ -762,6 +1460,22 @@ function Navbar({ children }) {
 
                   {(engagementDropdownOpen || isEngagementActive()) && (
                     <div className="absolute left-full top-0 ml-2 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50">
+                      {/* Drive List Info — opens the modal (not a route); shown first.
+                          Master Admin / IT Admin only. */}
+                      {isMasterOrITAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowDriveNamesModal(true);
+                            setEngagementDropdownOpen(false);
+                            if (isMobile) setSidebarOpen(false);
+                          }}
+                          className="block w-full text-left px-2 py-1.5 text-sm text-black hover:bg-gray-50"
+                        >
+                          Drive List Info
+                        </button>
+                      )}
+
                       {engagementItems.map((item) => (
                         <NavLink
                           key={item.path}

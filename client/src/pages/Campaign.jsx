@@ -56,6 +56,17 @@ const colorOptions = [
   { value: '#660185', label: 'Red', class: 'bg-[#660185]' },
 ];
 
+// Financial-year string like "26-27" (Indian FY starts in April).
+// You can hardcode return '26-27' instead if you want it fixed.
+const getFinancialYear = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0 = Jan
+  const startYear = month >= 3 ? year : year - 1; // April or later -> current year
+  const yy = (n) => String(n).slice(-2);
+  return `${yy(startYear)}-${yy(startYear + 1)}`;
+};
+
 // Required columns and field mapping for the SP Info (CSP) file
 const SP_INFO_REQUIRED_COLUMNS = [
   'ZONE NAME', 'SD ID', 'SD NAME', 'BRANCH ID', 'BRANCH NAME', 'GOEM OEM',
@@ -103,6 +114,13 @@ const Campaign = () => {
   const [showFollowupModal, setShowFollowupModal] = useState(false);
   const [selectedCampaignForModal, setSelectedCampaignForModal] = useState(null);
 
+  // ⚡ Asset-transfer picker: when the chosen product already has active drives,
+  // the user picks which of them to pull assets from (and inactivate).
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferCandidates, setTransferCandidates] = useState([]); // active drives, same product
+  const [selectedTransferIds, setSelectedTransferIds] = useState([]); // checkbox selections
+  const [checkingTransfer, setCheckingTransfer] = useState(false);
+
   // Validation states
   const [validAssets, setValidAssets] = useState([]);
   const [invalidAssets, setInvalidAssets] = useState([]);
@@ -134,7 +152,7 @@ const Campaign = () => {
   const [editServiceLoading, setEditServiceLoading] = useState(false);
 
   // ==================== Letter Master states ====================
-  const LETTER_ATTACHMENT_EXTS = ['mp4', 'jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx'];
+  const LETTER_ATTACHMENT_EXTS = ['mp4', 'jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'xlsx', 'xls', 'csv'];
 
   const [showLetterMaster, setShowLetterMaster] = useState(false);
   const [showLetterFormatForm, setShowLetterFormatForm] = useState(false);
@@ -146,9 +164,11 @@ const Campaign = () => {
   const [letterFormatData, setLetterFormatData] = useState({
     id: null,
     format_type_name: '',
-    channels: [],
+    products: [],
+    reference_no: '',
     default_attachments: [],
-    letter_format: ''
+    start_para: '',
+    end_para: ''
   });
 
   const themeColor = '#2f3192';
@@ -384,7 +404,7 @@ const Campaign = () => {
   const fetchCampaignsLazy = async ({ background = false } = {}) => {
     // Prevent duplicate requests
     if (fetchingRef.current) {
-      console.log('Already fetching campaigns, skipping...');
+      console.log('Already fetching drives, skipping...');
       return;
     }
 
@@ -424,7 +444,7 @@ const Campaign = () => {
         signal: abortControllerRef.current.signal
       });
 
-      if (!response.ok) throw new Error('Failed to fetch campaigns');
+      if (!response.ok) throw new Error('Failed to fetch drives');
       const data = await response.json();
 
       const campaignsWithAssets = data.map(campaign => ({
@@ -445,7 +465,7 @@ const Campaign = () => {
 
     } catch (err) {
       if (err.name !== 'AbortError') {
-        toast.error(err.message || 'Failed to load campaigns');
+        toast.error(err.message || 'Failed to load drives');
       }
     } finally {
       setLoading(false);
@@ -469,7 +489,7 @@ const Campaign = () => {
         }));
       }
     } catch (err) {
-      console.error('Failed to fetch campaign counts:', err);
+      console.error('Failed to fetch drive counts:', err);
     }
   }, [campaignCounts]);
 
@@ -1076,11 +1096,14 @@ const Campaign = () => {
     toast.success(`Removed ${removedCount} invalid asset number${removedCount > 1 ? 's' : ''}`);
   };
 
+  // Clicking "Create Drive" no longer creates immediately. It first checks
+  // whether the chosen PRODUCT already has active drives. If it does, we open
+  // the transfer picker; otherwise we create straight away.
   const handleCreateCampaign = async (e) => {
     e.preventDefault();
 
     if (!newCampaign.name) {
-      toast.error('Campaign name is required');
+      toast.error('Drive name is required');
       return;
     }
     if (!newCampaign.service) {
@@ -1092,7 +1115,7 @@ const Campaign = () => {
       return;
     }
     if (invalidAssets.length > 0) {
-      toast.error('Please remove all invalid asset numbers before creating campaign');
+      toast.error('Please remove all invalid asset numbers before creating drive');
       return;
     }
     if (newCampaign.asset_numbers.length === 0) {
@@ -1100,8 +1123,42 @@ const Campaign = () => {
       return;
     }
 
+    // Ask the backend if this product already has active drives.
+    setCheckingTransfer(true);
+    const checkToast = toast.loading('Checking existing drives...');
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/v1/campaigns/active/by-service?service=${encodeURIComponent(newCampaign.service)}`,
+        { headers: { ...getUserHeaders() } }
+      );
+      toast.dismiss(checkToast);
+
+      if (response.ok) {
+        const activeCampaigns = await response.json();
+        if (Array.isArray(activeCampaigns) && activeCampaigns.length > 0) {
+          // Let the user choose which drives to transfer from.
+          setTransferCandidates(activeCampaigns);
+          setSelectedTransferIds([]);
+          setShowTransferModal(true);
+          setCheckingTransfer(false);
+          return; // wait for the user's choice in the modal
+        }
+      }
+    } catch (err) {
+      toast.dismiss(checkToast);
+      // If the check fails, just fall through and create without transfer.
+    }
+    setCheckingTransfer(false);
+
+    // No active drives for this product → create straight away.
+    await submitCampaign([]);
+  };
+
+  // Actually creates the drive. `transferIds` are the active same-product drives
+  // the user chose to pull assets from; the backend inactivates them.
+  const submitCampaign = async (transferIds = []) => {
     setCreateLoading(true);
-    const createToast = toast.loading('Creating campaign...');
+    const createToast = toast.loading('Creating drive...');
 
     try {
       const campaignData = {
@@ -1116,7 +1173,14 @@ const Campaign = () => {
         scripts: newCampaign.scripts
       };
 
-      const response = await fetch(`${API_BASE_URL}/v1/campaigns/`, {
+      // Pass the selected source drives as repeated query params.
+      let url = `${API_BASE_URL}/v1/campaigns/`;
+      if (transferIds.length > 0) {
+        const qs = transferIds.map(id => `transfer_from_campaign_ids=${id}`).join('&');
+        url += `?${qs}`;
+      }
+
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1127,7 +1191,7 @@ const Campaign = () => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to create campaign');
+        throw new Error(errorData.detail || 'Failed to create drive');
       }
 
       const data = await response.json();
@@ -1147,19 +1211,32 @@ const Campaign = () => {
         await uploadSpInfo(data.id);
       }
 
-      // Add new campaign to the list
+      // Show the new drive instantly.
       const newCampaignObj = { ...data, asset_numbers: data.asset_numbers || [] };
       setCampaigns(prev => [newCampaignObj, ...prev]);
 
+      // Close everything.
+      setShowTransferModal(false);
+      setTransferCandidates([]);
+      setSelectedTransferIds([]);
       setShowCampaignForm(false);
       resetForm();
       setPendingBranchUpdates([]);
       toast.dismiss(createToast);
-      toast.success('Campaign created successfully!');
+
+      if (transferIds.length > 0) {
+        toast.success(`Drive created — assets transferred from ${transferIds.length} drive${transferIds.length > 1 ? 's' : ''}`);
+      } else {
+        toast.success('Drive created successfully!');
+      }
+
+      // Transferred drives are now inactive — quietly resync so they drop out
+      // of the active list and counts stay correct.
+      fetchCampaignsLazy({ background: true });
       fetchStats();
     } catch (err) {
       toast.dismiss(createToast);
-      toast.error(err.message || 'Failed to create campaign');
+      toast.error(err.message || 'Failed to create drive');
     } finally {
       setCreateLoading(false);
     }
@@ -1169,7 +1246,7 @@ const Campaign = () => {
     e.preventDefault();
 
     if (!editCampaignData.name || !editCampaignData.service) {
-      toast.error('Campaign name and product are required');
+      toast.error('Drive name and product are required');
       return;
     }
     if (!editCampaignData.start_date) {
@@ -1177,12 +1254,12 @@ const Campaign = () => {
       return;
     }
     if (invalidAssets.length > 0) {
-      toast.error('Please remove all invalid asset numbers before updating campaign');
+      toast.error('Please remove all invalid asset numbers before updating drive');
       return;
     }
 
     setEditLoading(true);
-    const editToast = toast.loading('Updating campaign...');
+    const editToast = toast.loading('Updating drive...');
 
     try {
       const updateData = {
@@ -1209,7 +1286,7 @@ const Campaign = () => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to update campaign');
+        throw new Error(errorData.detail || 'Failed to update drive');
       }
 
       const data = await response.json();
@@ -1235,12 +1312,12 @@ const Campaign = () => {
       setSelectedCampaign(null);
       setPendingBranchUpdates([]);
       toast.dismiss(editToast);
-      toast.success('Campaign updated successfully!');
+      toast.success('Drive updated successfully!');
 
       await fetchStats();
     } catch (err) {
       toast.dismiss(editToast);
-      toast.error(err.message || 'Failed to update campaign');
+      toast.error(err.message || 'Failed to update drive');
     } finally {
       setEditLoading(false);
     }
@@ -1340,9 +1417,11 @@ const Campaign = () => {
     setLetterFormatData({
       id: null,
       format_type_name: '',
-      channels: [],
+      products: [],
+      reference_no: '',
       default_attachments: [],
-      letter_format: ''
+      start_para: '',
+      end_para: ''
     });
   };
 
@@ -1352,12 +1431,17 @@ const Campaign = () => {
   };
 
   const openEditLetterFormat = (fmt) => {
+    const product = (fmt.products || [])[0] || '';
     setLetterFormatData({
       id: fmt.id,
       format_type_name: fmt.format_type_name || '',
-      channels: fmt.channels || [],
+      products: product ? [product] : [],
+      // keep the stored reference number; only fall back to building one
+      // for older rows that don't have it saved yet
+      reference_no: fmt.reference_no || buildReferenceNo(product, fmt.id),
       default_attachments: fmt.default_attachments || [],
-      letter_format: fmt.letter_format || ''
+      start_para: fmt.start_para || '',
+      end_para: fmt.end_para || ''
     });
     setShowLetterFormatForm(true);
   };
@@ -1367,14 +1451,33 @@ const Campaign = () => {
     setShowLetterFormatView(true);
   };
 
-  const toggleLetterChannel = (channel) => {
-    setLetterFormatData(prev => {
-      const has = prev.channels.includes(channel);
-      return {
-        ...prev,
-        channels: has ? prev.channels.filter(c => c !== channel) : [...prev.channels, channel]
-      };
-    });
+  // Reference No: KCGL/<FY>/<product>[-N]/BranchCode/serial no
+  // N = how many OTHER letter formats already use this same product. So the
+  // first format with a product stays plain ("Battery"), the next becomes
+  // "Battery-1", the one after "Battery-2", and so on. The format currently
+  // being edited is excluded from the count via editingId.
+  // "BranchCode" and "serial no" remain literal words, filled per customer
+  // when the letter is actually generated.
+  const buildReferenceNo = (product, editingId = null) => {
+    if (!product) return '';
+    const count = letterFormats.filter(
+      f => (f.products || []).includes(product) && f.id !== editingId
+    ).length;
+    const suffix = count > 0 ? `-${count}` : '';
+    // Remove spaces from the product name in the reference number only,
+    // e.g. "Oil Change" -> "OilChange". The stored product name keeps its spaces.
+    const productPart = product.replace(/\s+/g, '');
+    return `KCGL/${getFinancialYear()}/${productPart}${suffix}/Branch_Code/Serial_No`;
+  };
+
+  // Only ONE product per letter format. Selecting a product (or "Select
+  // Product" to clear) rebuilds the reference number.
+  const selectLetterProduct = (productName) => {
+    setLetterFormatData(prev => ({
+      ...prev,
+      products: productName ? [productName] : [],
+      reference_no: buildReferenceNo(productName, prev.id)
+    }));
   };
 
   const handleLetterAttachmentUpload = (e) => {
@@ -1385,7 +1488,7 @@ const Campaign = () => {
     for (const file of files) {
       const ext = file.name.split('.').pop().toLowerCase();
       if (!LETTER_ATTACHMENT_EXTS.includes(ext)) {
-        toast.error(`"${file.name}" is not allowed. Use mp4, jpg, png, pdf or word files.`);
+        toast.error(`"${file.name}" is not allowed. Use mp4, jpg, png, pdf, word or excel files.`);
         continue;
       }
       if (file.size > 25 * 1024 * 1024) {
@@ -1444,11 +1547,16 @@ const Campaign = () => {
     const saveToast = toast.loading(isEdit ? 'Updating format...' : 'Saving format...');
 
     try {
+      const product = letterFormatData.products[0] || '';
       const payload = {
         format_type_name: letterFormatData.format_type_name.trim(),
-        channels: letterFormatData.channels,
+        products: product ? [product] : [],
+        reference_no: product
+          ? (letterFormatData.reference_no || buildReferenceNo(product, letterFormatData.id))
+          : '',
         default_attachments: letterFormatData.default_attachments,
-        letter_format: letterFormatData.letter_format || ''
+        start_para: letterFormatData.start_para || '',
+        end_para: letterFormatData.end_para || ''
       };
 
       const url = isEdit
@@ -1544,6 +1652,10 @@ const Campaign = () => {
     setPendingBranchUpdates([]);
     setSpInfoFile(null);
     setSpInfoData([]);
+    // clear the asset-transfer picker state too
+    setShowTransferModal(false);
+    setTransferCandidates([]);
+    setSelectedTransferIds([]);
   };
 
   const getStatusBadgeClass = (status) => {
@@ -1620,7 +1732,7 @@ const Campaign = () => {
   const handleDeleteCampaign = async () => {
     if (!campaignToDelete) return;
     setDeleteLoading(true);
-    const deleteToast = toast.loading('Deleting campaign...');
+    const deleteToast = toast.loading('Deleting drive...');
     try {
       const response = await fetch(`${API_BASE_URL}/v1/campaigns/${campaignToDelete.id}`, {
         method: 'DELETE',
@@ -1630,13 +1742,13 @@ const Campaign = () => {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw new Error(data.detail || 'Failed to delete campaign');
+        throw new Error(data.detail || 'Failed to delete drive');
       }
 
       // Backend blocked the delete because the campaign is already in use
       if (data.deleted === false) {
         toast.dismiss(deleteToast);
-        toast(data.message || 'Campaign is already in use and cannot be removed', {
+        toast(data.message || 'Drive is already in use and cannot be removed', {
           icon: '⚠️',
           duration: 5000,
         });
@@ -1649,11 +1761,11 @@ const Campaign = () => {
       setShowDeleteCampaignConfirm(false);
       setCampaignToDelete(null);
       toast.dismiss(deleteToast);
-      toast.success('Campaign deleted successfully!');
+      toast.success('Drive deleted successfully!');
       fetchStats();
     } catch (err) {
       toast.dismiss(deleteToast);
-      toast.error(err.message || 'Failed to delete campaign');
+      toast.error(err.message || 'Failed to delete drive');
     } finally {
       setDeleteLoading(false);
     }
@@ -1868,7 +1980,7 @@ const Campaign = () => {
               <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search campaigns..."
+                placeholder="Search drives..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-8 w-full border-2 border-black rounded-md px-2 py-1.5 text-xs focus:ring-2 transition-all text-black"
@@ -1902,7 +2014,7 @@ const Campaign = () => {
 
               <form onSubmit={handleCreateCampaign} className="p-4 lg:p-5 space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-black mb-1">Campaign Name *</label>
+                  <label className="block text-xs font-semibold text-black mb-1">Drive Name *</label>
                   <input
                     type="text"
                     value={newCampaign.name}
@@ -1940,7 +2052,7 @@ const Campaign = () => {
                     className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
                     style={{ '--tw-ring-color': themeColor }}
                     rows="2"
-                    placeholder="Campaign description..."
+                    placeholder="Drive description..."
                     disabled={createLoading}
                   />
                 </div>
@@ -2166,7 +2278,7 @@ const Campaign = () => {
                   </div>
 
                   <div className="border border-gray-300 rounded-lg p-4">
-                    <label className="block text-xs font-semibold text-black mb-1.5">Campaign Color</label>
+                    <label className="block text-xs font-semibold text-black mb-1.5">Drive Color</label>
                     <div className="flex flex-wrap gap-2">
                       {colorOptions.map((color) => (
                         <button
@@ -2236,7 +2348,7 @@ const Campaign = () => {
 
                 <button
                   type="submit"
-                  disabled={createLoading || !newCampaign.name || !newCampaign.service || !newCampaign.start_date || newCampaign.asset_numbers.length === 0 || invalidAssets.length > 0} className="w-full text-white font-medium rounded-md py-2.5 text-sm hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  disabled={createLoading || checkingTransfer || !newCampaign.name || !newCampaign.service || !newCampaign.start_date || newCampaign.asset_numbers.length === 0 || invalidAssets.length > 0} className="w-full text-white font-medium rounded-md py-2.5 text-sm hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}
                 >
                   {createLoading ? (
@@ -2244,14 +2356,140 @@ const Campaign = () => {
                       <ArrowPathIcon className="h-4 w-4 animate-spin" style={{ color: 'white' }} />
                       Creating...
                     </>
-                  ) : 'Create Campaign'}
+                  ) : checkingTransfer ? (
+                    <>
+                      <ArrowPathIcon className="h-4 w-4 animate-spin" style={{ color: 'white' }} />
+                      Checking...
+                    </>
+                  ) : 'Create Drive'}
                 </button>
                 {invalidAssets.length > 0 && (
                   <p className="text-xs text-red-600 text-center">
-                    Please remove all invalid assets before creating the campaign
+                    Please remove all invalid assets before creating the drive
                   </p>
                 )}
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Transfer Assets Modal — choose which active same-product drives to pull from */}
+        {showTransferModal && (
+          <div className="fixed inset-0 flex items-end lg:items-center justify-center z-[70] p-3">
+            <div
+              className="absolute inset-0 backdrop-blur-sm bg-black/30"
+              onClick={() => !createLoading && setShowTransferModal(false)}
+            />
+            <div className="relative bg-white rounded-xl shadow-xl w-full lg:max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+              <div className="sticky top-0 px-4 py-3 lg:px-5 lg:py-3.5 rounded-t-xl flex justify-between items-center z-10"
+                style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
+                <div className="flex items-center gap-2 min-w-0">
+                  <DocumentDuplicateIcon className="h-4 w-4 text-white shrink-0" />
+                  <h2 className="text-sm lg:text-base font-semibold text-white truncate">Transfer Assets</h2>
+                </div>
+                <button
+                  onClick={() => !createLoading && setShowTransferModal(false)}
+                  className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100"
+                  disabled={createLoading}
+                >
+                  <XMarkIcon className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="p-4 lg:p-5 overflow-y-auto custom-scrollbar">
+                <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-3">
+                  <p className="text-xs text-blue-800">
+                    The product <span className="font-semibold">"{newCampaign.service}"</span> already has{' '}
+                    <span className="font-semibold">{transferCandidates.length}</span> active drive
+                    {transferCandidates.length > 1 ? 's' : ''}. Select the drive(s) whose asset numbers
+                    you want to transfer into this new drive.{' '}
+                    <span className="font-semibold">Selected drives will be set to inactive.</span>
+                  </p>
+                </div>
+
+                {/* Select all */}
+                <div className="flex items-center justify-between mb-2 px-1">
+                  <label className="flex items-center gap-2 text-xs font-medium text-black cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedTransferIds.length === transferCandidates.length && transferCandidates.length > 0}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedTransferIds(transferCandidates.map(c => c.id));
+                        } else {
+                          setSelectedTransferIds([]);
+                        }
+                      }}
+                      className="rounded border-gray-300"
+                      style={{ accentColor: themeColor }}
+                    />
+                    Select all
+                  </label>
+                  <span className="text-xs text-gray-500">{selectedTransferIds.length} selected</span>
+                </div>
+
+                <div className="space-y-2 max-h-72 overflow-y-auto custom-scrollbar pr-1">
+                  {transferCandidates.map(c => {
+                    const checked = selectedTransferIds.includes(c.id);
+                    return (
+                      <label
+                        key={c.id}
+                        className={`flex items-start gap-2.5 p-3 rounded-lg border cursor-pointer transition-all ${checked ? 'border-[#2f3192] bg-[#2f3192]/5' : 'border-gray-200 hover:bg-gray-50'
+                          }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedTransferIds(prev => [...prev, c.id]);
+                            } else {
+                              setSelectedTransferIds(prev => prev.filter(id => id !== c.id));
+                            }
+                          }}
+                          className="mt-0.5 rounded border-gray-300"
+                          style={{ accentColor: themeColor }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-black truncate">{c.name}</p>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5 text-xs text-gray-500">
+                            <span className="inline-flex items-center gap-1">
+                              <UserGroupIcon className="h-3 w-3" style={{ color: themeColor }} />
+                              {c.asset_count} asset{c.asset_count !== 1 ? 's' : ''}
+                            </span>
+                            {c.start_date && <span>Start: {formatDate(c.start_date)}</span>}
+                            {c.created_by_name && <span>By: {c.created_by_name}</span>}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="px-4 lg:px-5 py-3 border-t flex gap-3">
+                <button
+                  onClick={() => !createLoading && setShowTransferModal(false)}
+                  disabled={createLoading}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-black hover:bg-gray-50 transition-all disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => submitCampaign(selectedTransferIds)}
+                  disabled={createLoading}
+                  className="flex-1 text-white font-medium rounded-md py-2 text-sm hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}
+                >
+                  {createLoading ? (
+                    <><ArrowPathIcon className="h-4 w-4 animate-spin" /> Creating...</>
+                  ) : (
+                    selectedTransferIds.length > 0
+                      ? `Transfer & Create (${selectedTransferIds.length})`
+                      : 'Create Without Transfer'
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -2267,7 +2505,7 @@ const Campaign = () => {
             <div className="relative bg-white rounded-xl shadow-xl w-full lg:max-w-2xl max-h-[90vh] overflow-y-auto">
               <div className="sticky top-0 px-4 py-3 lg:px-5 lg:py-3.5 rounded-t-xl flex justify-between items-center z-10"
                 style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
-                <h2 className="text-sm lg:text-base font-semibold text-white">Edit Campaign</h2>
+                <h2 className="text-sm lg:text-base font-semibold text-white">Edit Drive</h2>
                 <button
                   onClick={() => !editLoading && setShowEditCampaign(false)}
                   className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100"
@@ -2279,7 +2517,7 @@ const Campaign = () => {
 
               <form onSubmit={handleEditCampaign} className="p-4 lg:p-5 space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-black mb-1">Campaign Name *</label>
+                  <label className="block text-xs font-semibold text-black mb-1">Drive Name *</label>
                   <input
                     type="text"
                     value={editCampaignData.name}
@@ -2541,7 +2779,7 @@ const Campaign = () => {
                   </div>
 
                   <div className="border border-gray-300 rounded-lg p-4">
-                    <label className="block text-xs font-semibold text-black mb-1.5">Campaign Color</label>
+                    <label className="block text-xs font-semibold text-black mb-1.5">Drive Color</label>
                     <div className="flex flex-wrap gap-2">
                       {colorOptions.map((color) => (
                         <button
@@ -2659,11 +2897,11 @@ const Campaign = () => {
                       <ArrowPathIcon className="h-4 w-4 animate-spin" style={{ color: 'white' }} />
                       Updating...
                     </>
-                  ) : 'Update Campaign'}
+                  ) : 'Update Drive'}
                 </button>
                 {invalidAssets.length > 0 && (
                   <p className="text-xs text-red-600 text-center">
-                    Please remove all invalid assets before updating the campaign
+                    Please remove all invalid assets before updating the drive
                   </p>
                 )}
               </form>
@@ -2854,7 +3092,7 @@ const Campaign = () => {
               <div className="p-4 lg:p-5">
                 <p className="text-sm lg:text-sm text-black mb-4">
                   Are you sure you want to delete product <span className="font-semibold">{serviceToDelete.name}</span>?
-                  This action cannot be undone if the product is not used in any campaign.
+                  This action cannot be undone if the product is not used in any drive.
                 </p>
                 <div className="flex gap-3">
                   <button
@@ -2938,7 +3176,8 @@ const Campaign = () => {
                       <thead>
                         <tr className="text-left text-black" style={{ backgroundColor: themeShades.light }}>
                           <th className="px-3 py-2 font-semibold">Format Type</th>
-                          <th className="px-3 py-2 font-semibold">Channels</th>
+                          <th className="px-3 py-2 font-semibold">Products</th>
+                          <th className="px-3 py-2 font-semibold">Reference No</th>
                           <th className="px-3 py-2 font-semibold">Default Attachment</th>
                           <th className="px-3 py-2 font-semibold">Letter Format</th>
                           <th className="px-3 py-2 font-semibold text-right">Action</th>
@@ -2950,18 +3189,18 @@ const Campaign = () => {
                             <td className="px-3 py-2 text-black font-medium whitespace-nowrap">{fmt.format_type_name}</td>
                             <td className="px-3 py-2">
                               <div className="flex flex-wrap gap-1">
-                                {(fmt.channels || []).length === 0 && <span className="text-gray-400">—</span>}
-                                {(fmt.channels || []).includes('email') && (
-                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-100 text-blue-800 rounded">
-                                    <EnvelopeIcon className="h-3 w-3" /> Email
+                                {(fmt.products || []).length === 0 && <span className="text-gray-400">—</span>}
+                                {(fmt.products || []).map((p, i) => (
+                                  <span key={i} className="inline-flex items-center px-1.5 py-0.5 bg-[#2f3192]/10 text-[#2f3192] rounded">
+                                    {p}
                                   </span>
-                                )}
-                                {(fmt.channels || []).includes('whatsapp') && (
-                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-green-100 text-green-800 rounded">
-                                    <ChatBubbleLeftRightIcon className="h-3 w-3" /> WhatsApp
-                                  </span>
-                                )}
+                                ))}
                               </div>
+                            </td>
+                            <td className="px-3 py-2 text-gray-600">
+                              <span className="block max-w-[220px] truncate font-mono text-[11px]">
+                                {fmt.reference_no || '—'}
+                              </span>
                             </td>
                             <td className="px-3 py-2 text-black whitespace-nowrap">
                               {(fmt.default_attachments || []).length > 0 ? (
@@ -2973,7 +3212,9 @@ const Campaign = () => {
                             </td>
                             <td className="px-3 py-2 text-gray-600">
                               <span className="block max-w-[220px] truncate">
-                                {fmt.letter_format ? fmt.letter_format.replace(/\n/g, ' ') : '—'}
+                                {(fmt.start_para || fmt.end_para)
+                                  ? `${fmt.start_para || ''} ${fmt.end_para || ''}`.replace(/\n/g, ' ').trim()
+                                  : '—'}
                               </span>
                             </td>
                             <td className="px-3 py-2">
@@ -3019,75 +3260,131 @@ const Campaign = () => {
               </div>
 
               <form onSubmit={handleSaveLetterFormat} className="p-4 lg:p-5 overflow-y-auto custom-scrollbar space-y-4">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {/* RIGHT: Letter format editor */}
-                  <div className="order-2 lg:order-2">
-                    <label className="block text-xs font-semibold text-black mb-1">Letter Format</label>
-                    <textarea
-                      value={letterFormatData.letter_format}
-                      onChange={(e) => setLetterFormatData({ ...letterFormatData, letter_format: e.target.value })}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black font-mono leading-relaxed"
-                      style={{ '--tw-ring-color': themeColor, minHeight: '320px' }}
-                      placeholder={"Type the full letter format here...\n\nDear {customer_name},\n\n..."}
-                      disabled={letterFormatSaving}
-                    />
-                  </div>
 
-                  {/* LEFT: settings */}
-                  <div className="order-1 lg:order-1 space-y-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-black mb-1">Format Type Name *</label>
-                      <input type="text" value={letterFormatData.format_type_name}
-                        onChange={(e) => setLetterFormatData({ ...letterFormatData, format_type_name: e.target.value })}
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
-                        style={{ '--tw-ring-color': themeColor }} placeholder="e.g., Oil Change Reminder" disabled={letterFormatSaving} required />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-semibold text-black mb-1.5">Channels</label>
-                      <div className="flex flex-wrap gap-2">
-                        <label className={`flex items-center gap-1.5 px-3 py-2 border rounded-md cursor-pointer transition-all text-sm ${letterFormatData.channels.includes('email') ? 'border-[#2f3192] bg-[#2f3192]/10 text-[#2f3192]' : 'border-gray-300 text-black hover:bg-gray-50'}`}>
-                          <input type="checkbox" className="hidden" checked={letterFormatData.channels.includes('email')} onChange={() => toggleLetterChannel('email')} />
-                          <EnvelopeIcon className="h-4 w-4" /> Email
-                        </label>
-                        <label className={`flex items-center gap-1.5 px-3 py-2 border rounded-md cursor-pointer transition-all text-sm ${letterFormatData.channels.includes('whatsapp') ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-300 text-black hover:bg-gray-50'}`}>
-                          <input type="checkbox" className="hidden" checked={letterFormatData.channels.includes('whatsapp')} onChange={() => toggleLetterChannel('whatsapp')} />
-                          <ChatBubbleLeftRightIcon className="h-4 w-4" /> WhatsApp
-                        </label>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-semibold text-black mb-1.5">Default Attachment</label>
-                      <input type="file" multiple accept=".mp4,.jpg,.jpeg,.png,.pdf,.doc,.docx" onChange={handleLetterAttachmentUpload} className="hidden" id="letter-attach-upload" disabled={letterFormatSaving} />
-                      <label htmlFor="letter-attach-upload"
-                        className="flex items-center justify-center gap-1.5 px-3 py-2 border border-dashed rounded-md cursor-pointer transition-all hover:border-[#2f3192]"
-                        style={{ borderColor: themeColor }}>
-                        <PaperClipIcon className="h-4 w-4" style={{ color: themeColor }} />
-                        <span className="text-sm text-black">Attach files (optional)</span>
-                      </label>
-                      <p className="text-[11px] text-gray-500 mt-1">mp4, jpg, png, pdf, word — single, multiple or none.</p>
-
-                      {letterFormatData.default_attachments.length > 0 && (
-                        <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto p-2 bg-gray-50 rounded-md">
-                          {letterFormatData.default_attachments.map((att, index) => (
-                            <div key={index} className="flex items-center justify-between p-2 bg-white rounded-md border">
-                              <div className="flex items-center gap-2 flex-1 min-w-0">
-                                <DocumentIcon className="h-3.5 w-3.5 text-[#2f3192] shrink-0" />
-                                <span className="text-xs text-black truncate">{att.name}</span>
-                                <span className="text-xs text-gray-500 shrink-0">({(att.size / 1024).toFixed(0)} KB)</span>
-                              </div>
-                              <button type="button" onClick={() => removeLetterAttachment(index)} className="text-red-500 hover:text-red-700 shrink-0 ml-1">
-                                <XMarkIcon className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                {/* 1) Product — select first */}
+                <div>
+                  <label className="block text-xs font-semibold text-black mb-1.5">Product</label>
+                  <select
+                    value={letterFormatData.products[0] || ''}
+                    onChange={(e) => selectLetterProduct(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
+                    style={{ '--tw-ring-color': themeColor }}
+                    disabled={letterFormatSaving}
+                  >
+                    <option value="">Select Product</option>
+                    {services.map(service => (
+                      <option key={service.id} value={service.name}>{service.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    One product per letter format. If the same product is reused in another format, its reference number is numbered -1, -2, and so on.
+                  </p>
                 </div>
 
+                {/* 2) Reference No — split into 5 read-only boxes (shown after a product is picked) */}
+                {letterFormatData.products.length > 0 && (
+                  <div>
+                    <label className="block text-xs font-semibold text-black mb-1.5">Reference No</label>
+                    <div className="flex flex-wrap items-end gap-2">
+                      {(letterFormatData.reference_no || '').split('/').map((part, idx, arr) => (
+                        <React.Fragment key={idx}>
+                          <div className="flex flex-col">
+                            <span className="text-[10px] text-gray-500 mb-0.5">
+                              {['Prefix', 'FY', 'Product', 'Branch Code', 'Serial No'][idx] || `Part ${idx + 1}`}
+                            </span>
+                            <input
+                              type="text"
+                              value={part}
+                              readOnly
+                              title={part}
+                              className="border border-gray-300 rounded-md px-2 py-2 text-sm text-center bg-gray-50 text-black font-mono cursor-not-allowed"
+                              style={{ width: `${Math.max(part.length, 8) + 6}ch`, minWidth: '90px' }}
+                            />
+                          </div>
+                          {idx < arr.length - 1 && (
+                            <span className="text-gray-400 font-bold self-end mb-2.5">/</span>
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      <span className="font-semibold">Branch Code</span> and <span className="font-semibold">Serial No</span> are filled automatically for each customer.
+                    </p>
+                  </div>
+                )}
+
+                {/* 3) Format Type Name */}
+                <div>
+                  <label className="block text-xs font-semibold text-black mb-1">Format Type Name *</label>
+                  <input
+                    type="text"
+                    value={letterFormatData.format_type_name}
+                    onChange={(e) => setLetterFormatData({ ...letterFormatData, format_type_name: e.target.value })}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
+                    style={{ '--tw-ring-color': themeColor }}
+                    placeholder="e.g., Oil Change Reminder"
+                    disabled={letterFormatSaving}
+                    required
+                  />
+                </div>
+
+                {/* 4) Start Paragraph */}
+                <div>
+                  <label className="block text-xs font-semibold text-black mb-1">Start Paragraph:</label>
+                  <textarea
+                    value={letterFormatData.start_para}
+                    onChange={(e) => setLetterFormatData({ ...letterFormatData, start_para: e.target.value })}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black font-mono leading-relaxed"
+                    style={{ '--tw-ring-color': themeColor, minHeight: '150px' }}
+                    placeholder={"Opening paragraph..."}
+                    disabled={letterFormatSaving}
+                  />
+                </div>
+
+                {/* 5) End Paragraph */}
+                <div>
+                  <label className="block text-xs font-semibold text-black mb-1">End Paragraph:</label>
+                  <textarea
+                    value={letterFormatData.end_para}
+                    onChange={(e) => setLetterFormatData({ ...letterFormatData, end_para: e.target.value })}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black font-mono leading-relaxed"
+                    style={{ '--tw-ring-color': themeColor, minHeight: '150px' }}
+                    placeholder={"Closing paragraph..."}
+                    disabled={letterFormatSaving}
+                  />
+                </div>
+
+                {/* 6) Default Attachment */}
+                <div>
+                  <label className="block text-xs font-semibold text-black mb-1.5">Default Attachment</label>
+                  <input type="file" multiple accept=".mp4,.jpg,.jpeg,.png,.pdf,.doc,.docx,.xlsx,.xls,.csv" onChange={handleLetterAttachmentUpload} className="hidden" id="letter-attach-upload" disabled={letterFormatSaving} />
+                  <label htmlFor="letter-attach-upload"
+                    className="flex items-center justify-center gap-1.5 px-3 py-2 border border-dashed rounded-md cursor-pointer transition-all hover:border-[#2f3192]"
+                    style={{ borderColor: themeColor }}>
+                    <PaperClipIcon className="h-4 w-4" style={{ color: themeColor }} />
+                    <span className="text-sm text-black">Attach files (optional)</span>
+                  </label>
+                  <p className="text-[11px] text-gray-500 mt-1">mp4, jpg, png, pdf, word, excel — single, multiple or none.</p>
+
+                  {letterFormatData.default_attachments.length > 0 && (
+                    <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto p-2 bg-gray-50 rounded-md">
+                      {letterFormatData.default_attachments.map((att, index) => (
+                        <div key={index} className="flex items-center justify-between p-2 bg-white rounded-md border">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <DocumentIcon className="h-3.5 w-3.5 text-[#2f3192] shrink-0" />
+                            <span className="text-xs text-black truncate">{att.name}</span>
+                            <span className="text-xs text-gray-500 shrink-0">({(att.size / 1024).toFixed(0)} KB)</span>
+                          </div>
+                          <button type="button" onClick={() => removeLetterAttachment(index)} className="text-red-500 hover:text-red-700 shrink-0 ml-1">
+                            <XMarkIcon className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Actions */}
                 <div className="flex gap-3 pt-1">
                   <button type="button" onClick={() => !letterFormatSaving && setShowLetterFormatForm(false)} disabled={letterFormatSaving}
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-black hover:bg-gray-50 transition-all disabled:opacity-50">
@@ -3125,16 +3422,23 @@ const Campaign = () => {
 
               <div className="p-4 lg:p-5 overflow-y-auto custom-scrollbar space-y-4">
                 <div>
-                  <p className="text-xs font-semibold text-black mb-1.5">Channels</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(viewingLetterFormat.channels || []).length === 0 && <span className="text-sm text-gray-400">None</span>}
-                    {(viewingLetterFormat.channels || []).includes('email') && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs"><EnvelopeIcon className="h-3 w-3" /> Email</span>
-                    )}
-                    {(viewingLetterFormat.channels || []).includes('whatsapp') && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs"><ChatBubbleLeftRightIcon className="h-3 w-3" /> WhatsApp</span>
-                    )}
-                  </div>
+                  <p className="text-xs font-semibold text-black mb-1.5">Products</p>
+                  {(viewingLetterFormat.products || []).length === 0 ? (
+                    <span className="text-sm text-gray-400">None</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {viewingLetterFormat.products.map((p, idx) => (
+                        <span key={idx} className="inline-flex items-center px-2 py-0.5 bg-[#2f3192]/10 text-[#2f3192] rounded text-xs font-medium">{p}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold text-black mb-1.5">Reference No</p>
+                  {viewingLetterFormat.reference_no ? (
+                    <span className="text-sm text-black font-mono break-all">{viewingLetterFormat.reference_no}</span>
+                  ) : <span className="text-sm text-gray-400">—</span>}
                 </div>
 
                 <div>
@@ -3156,11 +3460,20 @@ const Campaign = () => {
                 </div>
 
                 <div>
-                  <p className="text-xs font-semibold text-black mb-1.5">Letter Format</p>
-                  <div className="border border-gray-200 rounded-md p-3 bg-gray-50 max-h-[40vh] overflow-y-auto">
-                    {viewingLetterFormat.letter_format ? (
-                      <pre className="text-sm text-black whitespace-pre-wrap break-words font-mono leading-relaxed">{viewingLetterFormat.letter_format}</pre>
-                    ) : <span className="text-sm text-gray-400">No letter format provided</span>}
+                  <p className="text-xs font-semibold text-black mb-1.5">Start Para</p>
+                  <div className="border border-gray-200 rounded-md p-3 bg-gray-50 max-h-[30vh] overflow-y-auto">
+                    {viewingLetterFormat.start_para ? (
+                      <pre className="text-sm text-black whitespace-pre-wrap break-words font-mono leading-relaxed">{viewingLetterFormat.start_para}</pre>
+                    ) : <span className="text-sm text-gray-400">No start paragraph provided</span>}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold text-black mb-1.5">End Para</p>
+                  <div className="border border-gray-200 rounded-md p-3 bg-gray-50 max-h-[30vh] overflow-y-auto">
+                    {viewingLetterFormat.end_para ? (
+                      <pre className="text-sm text-black whitespace-pre-wrap break-words font-mono leading-relaxed">{viewingLetterFormat.end_para}</pre>
+                    ) : <span className="text-sm text-gray-400">No end paragraph provided</span>}
                   </div>
                 </div>
               </div>
@@ -3212,7 +3525,7 @@ const Campaign = () => {
                   <button
                     onClick={(e) => openEditModal(campaign, e)}
                     className="p-1 text-white hover:bg-white/20 rounded-md transition-all"
-                    title="Edit campaign"
+                    title="Edit drive"
                   >
                     <PencilIcon className="h-3.5 w-3.5" />
                   </button>
@@ -3220,7 +3533,7 @@ const Campaign = () => {
                     <button
                       onClick={(e) => { e.stopPropagation(); openDeleteCampaignConfirm(campaign); }}
                       className="p-1 text-white hover:bg-white/20 rounded-md transition-all"
-                      title="Delete campaign"
+                      title="Delete drive"
                     >
                       <XMarkIcon className="h-3.5 w-3.5" />
                     </button>
@@ -3313,7 +3626,7 @@ const Campaign = () => {
           {!loading && filteredCampaigns.length === 0 && campaigns.length === 0 && (
             <div className="col-span-1 lg:col-span-2 text-center py-10 bg-white rounded-xl">
               <MegaphoneIcon className="h-10 w-10 mx-auto mb-3" style={{ color: themeColor }} />
-              <p className="text-sm text-black">No campaigns found</p>
+              <p className="text-sm text-black">No drives found</p>
               <button
                 onClick={() => {
                   resetForm();
@@ -3322,7 +3635,7 @@ const Campaign = () => {
                 className="mt-2 text-sm font-medium hover:underline"
                 style={{ color: themeColor }}
               >
-                Create your first campaign
+                Create your first drive
               </button>
             </div>
           )}
@@ -3330,7 +3643,7 @@ const Campaign = () => {
           {!loading && filteredCampaigns.length === 0 && campaigns.length > 0 && (
             <div className="col-span-1 lg:col-span-2 text-center py-10 bg-white rounded-xl">
               <MagnifyingGlassIcon className="h-10 w-10 mx-auto mb-3" style={{ color: themeColor }} />
-              <p className="text-sm text-black">No campaigns match your search criteria</p>
+              <p className="text-sm text-black">No Drives match your search criteria</p>
               <button
                 onClick={() => setSearchTerm('')}
                 className="mt-2 text-sm font-medium hover:underline"
@@ -3351,7 +3664,7 @@ const Campaign = () => {
                 <div className="flex items-center justify-center w-14 h-14 mx-auto mb-4 rounded-full bg-red-100">
                   <XMarkIcon className="h-7 w-7 text-red-500" />
                 </div>
-                <h2 className="text-base font-bold text-black mb-1">Delete Campaign?</h2>
+                <h2 className="text-base font-bold text-black mb-1">Delete Drive?</h2>
                 <p className="text-sm text-gray-500 mb-1">
                   Are you really sure you want to permanently delete
                 </p>

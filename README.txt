@@ -14,7 +14,7 @@ python -m venv venv
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install fastapi uvicorn sqlalchemy pyodbc python-dotenv pandas openpyxl
-uvicorn app.main:app --host 127.0.0.1 --port 5004
+uvicorn app.main:app --host 127.0.0.1 --port 5004 --reload
 
 
 

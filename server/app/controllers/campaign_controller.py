@@ -186,41 +186,38 @@ class CampaignController:
         
         return campaign
     
-    def create_campaign(self, campaign: campaign_schema.CampaignCreate, user_data: dict = None) -> Campaign:
+    def create_campaign(self, campaign: campaign_schema.CampaignCreate, user_data: dict = None,
+                        transfer_from_campaign_ids: Optional[List[int]] = None) -> Campaign:
         # Check if service exists
         service = self.db.query(CampaignService).filter(CampaignService.name == campaign.service).first()
         if not service:
             raise HTTPException(status_code=400, detail=f"Service '{campaign.service}' does not exist. Please add the service first.")
-        
-        # CHECK FOR EXISTING ACTIVE CAMPAIGN WITH SAME NAME AND SAME SERVICE
-        # Only look for ACTIVE campaigns to convert to inactive
-        existing_campaign = self.db.query(Campaign).filter(
-            Campaign.name == campaign.name,
-            Campaign.service == campaign.service,
-            Campaign.status == 'active'  # Only convert active campaigns
-        ).first()
-        
-        combined_assets = []
-        
-        if existing_campaign:
-            
-            # If existing campaign found, combine assets (no duplicates)
-            existing_assets = existing_campaign.asset_numbers or []
-            new_assets = campaign.asset_numbers or []
-            
-            # Combine and remove duplicates
-            combined_assets = list(set(existing_assets + new_assets))
-                        
-            # Set the OLD campaign status to inactive
-            existing_campaign.status = 'inactive'
-            existing_campaign.updated_at = datetime.utcnow()
-            self.db.add(existing_campaign)
-            self.db.flush()  # Flush to ensure it's saved before creating new campaign
-            
-        else:
-            # No existing active campaign, use the assets from the request
-            combined_assets = campaign.asset_numbers or []
-        
+
+        # Start with the assets the user added to the new campaign.
+        combined_assets = list(campaign.asset_numbers or [])
+
+        # TRANSFER ASSETS FROM USER-SELECTED CAMPAIGNS (SAME PRODUCT ONLY).
+        # Name is no longer used. The user picks which active same-product
+        # campaigns to pull assets from; each selected one is set to inactive.
+        if transfer_from_campaign_ids:
+            source_campaigns = self.db.query(Campaign).filter(
+                Campaign.id.in_(transfer_from_campaign_ids),
+                Campaign.service == campaign.service,   # safety: same product only
+                Campaign.status == 'active'             # only inactivate active ones
+            ).all()
+
+            for src in source_campaigns:
+                combined_assets.extend(src.asset_numbers or [])
+                src.status = 'inactive'
+                src.updated_at = datetime.utcnow()
+                self.db.add(src)
+
+            if source_campaigns:
+                self.db.flush()  # persist inactivation before creating the new campaign
+
+        # Remove duplicate asset numbers
+        combined_assets = list(set(combined_assets))
+
         # Set initial status for NEW campaign based on dates
         today = datetime.utcnow().date()
         if campaign.start_date and campaign.start_date.date() > today:
@@ -229,19 +226,19 @@ class CampaignController:
             new_status = 'inactive'  # Past campaign
         else:
             new_status = campaign.status or 'active'  # Current campaign
-        
+
         # Prepare campaign data
         campaign_data = campaign.model_dump()
-        
+
         # Add user tracking data - only id and name
         if user_data:
             campaign_data['created_by_id'] = user_data.get('user_id') or user_data.get('id')
             campaign_data['created_by_name'] = user_data.get('name')
-        
+
         # Use combined assets (scripts remain as they are from the new campaign only)
         campaign_data['asset_numbers'] = combined_assets
         campaign_data['status'] = new_status
-        
+
         # Validate ALL asset numbers against customers table
         if campaign_data.get('asset_numbers'):
             validation_result = self.validate_asset_numbers(campaign_data['asset_numbers'])
@@ -250,13 +247,13 @@ class CampaignController:
         else:
             campaign_data['asset_numbers'] = []
             campaign_data['invalid_asset_numbers'] = []
-        
+
         # Create new campaign
         db_campaign = Campaign(**campaign_data)
         self.db.add(db_campaign)
         self.db.commit()
         self.db.refresh(db_campaign)
-                
+
         return db_campaign
     
     def update_campaign(self, campaign_id: int, campaign: campaign_schema.CampaignUpdate, user_data: dict = None) -> Campaign:
@@ -323,6 +320,29 @@ class CampaignController:
         self.db.commit()
         self.db.refresh(db_campaign)
         return db_campaign
+
+    def get_active_campaigns_by_service(self, service: str) -> List[Dict[str, Any]]:
+            """
+            Active campaigns for a given product/service.
+            Used by the 'transfer assets' picker shown when creating a new campaign
+            for a product that already has active campaigns.
+            """
+            campaigns = self.db.query(Campaign).filter(
+                Campaign.service == service,
+                Campaign.status == 'active'
+            ).order_by(Campaign.created_at.desc()).all()
+    
+            return [
+                {
+                    "id": c.id,
+                    "name": c.name,
+                    "asset_count": len(c.asset_numbers or []),
+                    "start_date": c.start_date.isoformat() if c.start_date else None,
+                    "end_date": c.end_date.isoformat() if c.end_date else None,
+                    "created_by_name": c.created_by_name,
+                }
+                for c in campaigns
+            ]        
     
     def delete_campaign(self, campaign_id: int):
         from app.models.engagement_model import FollowUp
@@ -444,6 +464,44 @@ class CampaignController:
             "completed": completed_count,
             "total": pending_count + completed_count
         }        
+
+# ==================== Drive Meta (separate table) ====================
+
+    def get_all_drive_meta(self):
+        """All rows from the separate drive-meta table (one per drive)."""
+        from app.models.campaign_model import CampaignDriveMeta
+        return self.db.query(CampaignDriveMeta).all()
+
+    def upsert_drive_meta(self, campaign_id: int,
+                          data: campaign_schema.DriveMetaUpsert):
+        """
+        Create or update the drive-meta row for a campaign.
+        Writes ONLY to campaign_drive_meta — the campaigns table is untouched.
+        """
+        from app.models.campaign_model import CampaignDriveMeta
+
+        # Light existence check (no asset revalidation like get_campaign does)
+        exists = self.db.query(Campaign.id).filter(Campaign.id == campaign_id).first()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+
+        row = self.db.query(CampaignDriveMeta).filter(
+            CampaignDriveMeta.campaign_id == campaign_id
+        ).first()
+
+        update_data = data.model_dump(exclude_unset=True)
+
+        if row:
+            for key, value in update_data.items():
+                setattr(row, key, value)
+            row.updated_at = datetime.utcnow()
+        else:
+            row = CampaignDriveMeta(campaign_id=campaign_id, **update_data)
+            self.db.add(row)
+
+        self.db.commit()
+        self.db.refresh(row)
+        return row        
     
     # Add this new method to CampaignController class
     def update_branch_codes(self, branch_updates: List[Dict[str, str]], user_data: dict = None) -> Dict:
@@ -628,6 +686,7 @@ class CampaignController:
                 "branch_id": customer.branch_id,
                 "location": customer.location,
                 "last_status": fu.status if fu else default_status,
+                "csp_subtype": fu.csp_subtype if fu else None,
                 "last_followup_user_name": fu.user_name if fu else None,
                 "last_followup_user_id": fu.user_id if fu else None,
                 "last_followup_date": fu.followup_date.isoformat() if fu and fu.followup_date else None,

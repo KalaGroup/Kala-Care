@@ -1,0 +1,4 @@
+ALTER TABLE campaign_drive_meta
+  ADD display_name VARCHAR(255) NULL;
+
+ALTER TABLE followups ADD csp_subtype NVARCHAR(100) NULL;

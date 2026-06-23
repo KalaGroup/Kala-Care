@@ -19,8 +19,8 @@ const DeleteDataModal = ({ onClose, showToast }) => {
     const dataOptions = [
         {
             id: 'customerData',
-            label: 'Customer, Campaign and Followups Data',
-            description: 'Remove all customers, campaigns, and follow-up records',
+            label: 'Customer, Drive and Followups Data',
+            description: 'Remove all customers, drives, and follow-up records',
             icon: <FaDatabase className="text-blue-500" />
         },
         {
@@ -142,7 +142,7 @@ const DeleteDataModal = ({ onClose, showToast }) => {
                 <div class="text-left">
                     <p class="mb-2 font-bold text-red-600">You are about to permanently delete:</p>
                     <ul class="list-disc list-inside mb-2">
-                        ${selectedOptions.customerData ? '<li>✓ Customer, Campaign and Followups Data</li>' : ''}
+                        ${selectedOptions.customerData ? '<li>✓ Customer, Drive and Followups Data</li>' : ''}
                         ${selectedOptions.usersData ? '<li>✓ Users Data</li>' : ''}
                         ${selectedOptions.updateHistory ? '<li>✓ Customer Update Data</li>' : ''}
                         ${selectedOptions.employeeQueries ? '<li>✓ Employee Query Data</li>' : ''}
@@ -180,7 +180,7 @@ const DeleteDataModal = ({ onClose, showToast }) => {
                         <div class="text-left">
                             <p class="mb-1.5">The following data has been successfully deleted:</p>
                             <ul class="list-disc list-inside">
-                                ${response.data.deleted?.customerData ? '<li>✓ Customer, Campaign and Followups Data</li>' : ''}
+                                ${response.data.deleted?.customerData ? '<li>✓ Customer, Drive and Followups Data</li>' : ''}
                                 ${response.data.deleted?.usersData ? '<li>✓ Users Data</li>' : ''}
                                 ${response.data.deleted?.updateHistory ? '<li>✓ Customer Update Data</li>' : ''}
                                 ${response.data.deleted?.employeeQueries ? '<li>✓ Employee Query Data</li>' : ''}

@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator,field_validator
+
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -76,6 +77,27 @@ class CampaignUpdate(BaseModel):
     asset_numbers: Optional[List[str]] = None
     scripts: Optional[List[Dict[str, Any]]] = None
 
+class DriveMetaUpsert(BaseModel):
+    """Create/update payload for the separate drive-meta table (modal edits)."""
+    display_name: Optional[str] = None
+    data_start_date: Optional[datetime] = None
+    data_end_date: Optional[datetime] = None
+    drive_remark: Optional[str] = None
+
+
+class DriveMetaResponse(BaseModel):
+    id: int
+    campaign_id: int
+    display_name: Optional[str] = None
+    data_start_date: Optional[datetime] = None
+    data_end_date: Optional[datetime] = None
+    drive_remark: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
 class CampaignResponse(CampaignBase):
     id: int
     asset_numbers: List[str] = []
@@ -96,9 +118,16 @@ class AssetValidationResponse(BaseModel):
 
 class LetterFormatBase(BaseModel):
     format_type_name: str
-    channels: List[str] = []
+    products: List[str] = []
+    reference_no: Optional[str] = None
     default_attachments: List[Dict[str, Any]] = []
-    letter_format: Optional[str] = None
+    start_para: Optional[str] = None
+    end_para: Optional[str] = None
+
+    @field_validator("products", mode="before")
+    @classmethod
+    def _products_none_to_list(cls, v):
+        return v or []
 
 
 class LetterFormatCreate(LetterFormatBase):
@@ -107,9 +136,11 @@ class LetterFormatCreate(LetterFormatBase):
 
 class LetterFormatUpdate(BaseModel):
     format_type_name: Optional[str] = None
-    channels: Optional[List[str]] = None
+    products: Optional[List[str]] = None
+    reference_no: Optional[str] = None
     default_attachments: Optional[List[Dict[str, Any]]] = None
-    letter_format: Optional[str] = None
+    start_para: Optional[str] = None
+    end_para: Optional[str] = None
 
 
 class LetterFormatResponse(LetterFormatBase):

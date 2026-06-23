@@ -16,7 +16,7 @@ import {
 } from 'chart.js';
 import { Bar, Pie, Line } from 'react-chartjs-2';
 import MyPerformance from '../components/MyPerformance';
-import CampaignCustomersModal from '../components/CampaignCustomersModal';
+import CampaignCustomersFollowupModal from '../components/CampaignCustomersFollowupModal';
 import BranchCustomersModal from '../components/BranchCustomersModal';
 import OtherFollowupModal from '../components/OtherFollowupModal';
 import EmployeeCampaignProgress from '../components/EmployeeCampaignProgress';
@@ -436,6 +436,7 @@ const Dashboard = () => {
 
     const [selectedCampaign, setSelectedCampaign] = useState(null);
     const [showCustomersModal, setShowCustomersModal] = useState(false);
+    const [showAllCampaignReport, setShowAllCampaignReport] = useState(false);
 
     // Branch employee sort state
     const [branchEmployeeSortState, setBranchEmployeeSortState] = useState({
@@ -656,7 +657,7 @@ const Dashboard = () => {
         try {
             await fetchCampaignPerformance();
         } catch (error) {
-            console.error('Error loading campaign success tab data:', error);
+            console.error('Error loading drive success tab data:', error);
         } finally {
             isLoadingData.current = false;
         }
@@ -756,6 +757,10 @@ const Dashboard = () => {
                 case 'completed_count':
                     aValue = a.completed_count || 0;
                     bValue = b.completed_count || 0;
+                    break;
+                case 'not_connected_count':
+                    aValue = a.not_connected_count || 0;
+                    bValue = b.not_connected_count || 0;
                     break;
                 case 'wip_count':
                     aValue = a.wip_count || 0;
@@ -1044,6 +1049,10 @@ const Dashboard = () => {
                 case 'rejectedCount':
                     valueA = employeeA.rejected_count || 0;
                     valueB = employeeB.rejected_count || 0;
+                    break;
+                case 'notConnectedCount':
+                    valueA = employeeA.not_connected_count || 0;
+                    valueB = employeeB.not_connected_count || 0;
                     break;
                 case 'quotationValue':
                     valueA = employeeA.total_quotation_value || 0;
@@ -1577,7 +1586,7 @@ const Dashboard = () => {
 
         if (selectedCampaigns.length > 0) {
             exportData.push({
-                'A': 'SELECTED CAMPAIGNS REPORT',
+                'A': 'SELECTED DRIVES REPORT',
                 'B': '',
                 'C': '',
                 'D': '',
@@ -1589,7 +1598,7 @@ const Dashboard = () => {
             exportData.push({});
 
             exportData.push({
-                'A': 'Campaign Name',
+                'A': 'Drive Name',
                 'B': 'Service Type',
                 'C': '',
                 'D': '',
@@ -1616,8 +1625,8 @@ const Dashboard = () => {
 
             exportData.push({});
             exportData.push({
-                'A': `Total Selected Campaigns: ${selectedCampaigns.length}`,
-                'B': `Total Active Campaign Assets: ${campaignTotals?.total_customers || 0}`,
+                'A': `Total Selected Drives: ${selectedCampaigns.length}`,
+                'B': `Total Active Drive Assets: ${campaignTotals?.total_customers || 0}`,
                 'C': `Total Connected Calls: ${campaignTotals?.total_followups || 0}`,
                 'D': '',
                 'E': '',
@@ -1647,7 +1656,7 @@ const Dashboard = () => {
             exportData.push({
                 'A': 'Sr. No.',
                 'B': 'Activity',
-                'C': 'Total Active Campaign Assets',
+                'C': 'Total Active Drive Assets',
                 'D': 'Total Connected Calls',
                 'E': 'Activity Count',
                 'F': 'User Name',
@@ -1699,7 +1708,7 @@ const Dashboard = () => {
             exportData.push({
                 'A': 'Sr. No.',
                 'B': 'Activity',
-                'C': 'Total Active Campaign Assets',
+                'C': 'Total Active Drive Assets',
                 'D': 'Total Connected Calls',
                 'E': 'Total Count',
                 'F': 'Branch',
@@ -1777,9 +1786,9 @@ const Dashboard = () => {
             const cellAddress = XLSX.utils.encode_cell({ r: row, c: 0 });
             if (ws[cellAddress] && typeof ws[cellAddress].v === 'string') {
                 const cellValue = ws[cellAddress].v;
-                if (cellValue.includes('SELECTED CAMPAIGNS REPORT') ||
+                if (cellValue.includes('SELECTED DRIVES REPORT') ||
                     cellValue.includes('ACTIVITY STATISTICS') ||
-                    cellValue === 'Campaign Name' ||
+                    cellValue === 'Drive Name' ||
                     cellValue === 'Sr. No.') {
                     ws[cellAddress].s = {
                         font: { bold: true, sz: 12 }
@@ -1843,7 +1852,7 @@ const Dashboard = () => {
 
         if (selectedCampaigns.length > 0) {
             exportData.push({
-                'A': 'SELECTED CAMPAIGNS REPORT',
+                'A': 'SELECTED DRIVES REPORT',
                 'B': '',
                 'C': '',
                 'D': '',
@@ -1882,8 +1891,9 @@ const Dashboard = () => {
 
             exportData.push({});
             exportData.push({
-                'A': `Total Selected Campaigns: ${selectedCampaigns.length}`,
-                'B': `Total Active Campaign Assets: ${rrCampaignTotals?.total_customers || 0}`,
+                'A': `Total Selected Drive
+                s: ${selectedCampaigns.length}`,
+                'B': `Total Active Drive Assets: ${rrCampaignTotals?.total_customers || 0}`,
                 'C': `Total Connected Calls: ${rrCampaignTotals?.total_followups || 0}`,
                 'D': '',
                 'E': '',
@@ -1913,7 +1923,7 @@ const Dashboard = () => {
             exportData.push({
                 'A': 'Sr. No.',
                 'B': 'Rejected Reason',
-                'C': 'Total Active Campaign Assets',
+                'C': 'Total Active Drive Assets',
                 'D': 'Total Connected Calls',
                 'E': 'Total Count',
                 'F': 'User Name',
@@ -1965,7 +1975,7 @@ const Dashboard = () => {
             exportData.push({
                 'A': 'Sr. No.',
                 'B': 'Rejected Reason',
-                'C': 'Total Active Campaign Assets',
+                'C': 'Total Active Drive Assets',
                 'D': 'Total Connected Calls',
                 'E': 'Total Count',
                 'F': 'Branch',
@@ -2043,9 +2053,9 @@ const Dashboard = () => {
             const cellAddress = XLSX.utils.encode_cell({ r: row, c: 0 });
             if (ws[cellAddress] && typeof ws[cellAddress].v === 'string') {
                 const cellValue = ws[cellAddress].v;
-                if (cellValue.includes('SELECTED CAMPAIGNS REPORT') ||
+                if (cellValue.includes('SELECTED DRIVES REPORT') ||
                     cellValue.includes('REJECTED REASONS STATISTICS') ||
-                    cellValue === 'Campaign Name' ||
+                    cellValue === 'Drive Name' ||
                     cellValue === 'Sr. No.') {
                     ws[cellAddress].s = {
                         font: { bold: true, sz: 12 }
@@ -2066,7 +2076,7 @@ const Dashboard = () => {
 
     const exportCampaignPerformanceToExcel = () => {
         if (!campaignPerformance || campaignPerformance.length === 0) {
-            setError('No campaign data to export');
+            setError('No drive data to export');
             return;
         }
 
@@ -2089,6 +2099,7 @@ const Dashboard = () => {
                 'WIP': campaign.wip_count || 0,
                 'FR': campaign.rescheduled_count || 0,
                 'Rejected': campaign.rejected_count || 0,
+                'NC': campaign.not_connected_count || 0,
                 'Completed': campaign.completed_count || 0,
                 'Success %': campaign.success_percentage || 0
             };
@@ -2102,10 +2113,10 @@ const Dashboard = () => {
 
         const ws = XLSX.utils.json_to_sheet(exportData);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Campaign Performance');
+        XLSX.utils.book_append_sheet(wb, ws, 'Drive Performance');
 
         ws['!cols'] = [
-            { wch: 8 }, { wch: 30 }, { wch: 20 }, { wch: 35 }, { wch: 15 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 12 },
+            { wch: 8 }, { wch: 30 }, { wch: 20 }, { wch: 35 }, { wch: 15 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 8 },
             ...flagOrder.map(() => ({ wch: 10 }))
         ];
 
@@ -2177,7 +2188,7 @@ const Dashboard = () => {
         } catch (error) {
             if (axios.isCancel(error) || error.name === 'CanceledError') return;
             if (isMounted.current) {
-                console.error('Error fetching all employees with campaigns:', error);
+                console.error('Error fetching all employees with drives:', error);
             }
         }
     }, [userData, timePeriod, customStartDate, customEndDate]);
@@ -2303,7 +2314,7 @@ const Dashboard = () => {
     }, [userData, timePeriod, customStartDate, customEndDate]);
 
     const fetchCampaignPerformance = useCallback(async () => {
-        
+
         const signal = abortControllerRef.current?.signal;
         try {
             if (isMounted.current) setCampaignLoading(true);
@@ -2316,7 +2327,7 @@ const Dashboard = () => {
             if (isMounted.current) setCampaignPerformance(response.data.campaigns || []);
         } catch (error) {
             if (axios.isCancel(error) || error.name === 'CanceledError') return;
-            if (isMounted.current) console.error('Error fetching campaign performance:', error);
+            if (isMounted.current) console.error('Error fetching drive performance:', error);
         } finally {
             if (isMounted.current) setCampaignLoading(false);
         }
@@ -2490,25 +2501,27 @@ const Dashboard = () => {
                 totalWip: 0,
                 totalRescheduled: 0,
                 totalRejected: 0,
+                totalNotConnected: 0,
                 totalQuotationValue: 0
             };
         }
 
         // Single loop instead of 6 reduce calls
         let totalFollowups = 0, totalCompleted = 0, totalWip = 0;
-        let totalRescheduled = 0, totalRejected = 0, totalQuotationValue = 0;
+        let totalRescheduled = 0, totalRejected = 0, totalQuotationValue = 0, totalNotConnected = 0;
         for (const emp of employees) {
             totalFollowups += emp.total_followups || 0;
             totalCompleted += emp.completed_count || 0;
             totalWip += emp.wip_count || 0;
             totalRescheduled += emp.rescheduled_count || 0;
             totalRejected += emp.rejected_count || 0;
+            totalNotConnected += emp.not_connected_count || 0;
             totalQuotationValue += emp.total_quotation_value || 0;
         }
 
         return {
             totalEmployees: employees.length,
-            totalFollowups, totalCompleted, totalWip, totalRescheduled, totalRejected, totalQuotationValue
+            totalFollowups, totalCompleted, totalWip, totalRescheduled, totalRejected, totalNotConnected, totalQuotationValue
         };
     }, [sortedBranchEmployees]);
 
@@ -2665,6 +2678,7 @@ const Dashboard = () => {
                 'Work in Progress': emp.wip_count || 0,
                 'Rescheduled': emp.rescheduled_count || 0,
                 'Rejected': emp.rejected_count || 0,
+                'Not Connected': emp.not_connected_count || 0,
                 'Completed': completed,
             };
         });
@@ -2679,6 +2693,7 @@ const Dashboard = () => {
             'Work in Progress': totals.totalWip,
             'Rescheduled': totals.totalRescheduled,
             'Rejected': totals.totalRejected,
+            'Not Connected': totals.totalNotConnected,
             'Completed': totals.totalCompleted,
         });
 
@@ -2691,7 +2706,7 @@ const Dashboard = () => {
         for (let row = range.s.r; row <= range.e.r; row++) {
             const cellAddress = XLSX.utils.encode_cell({ r: row, c: 0 });
             if (ws[cellAddress] && ws[cellAddress].v === 'TOTAL') {
-                for (let col = 0; col <= 7; col++) {
+                for (let col = 0; col <= 8; col++) {
                     const totalCellAddress = XLSX.utils.encode_cell({ r: row, c: col });
                     if (ws[totalCellAddress]) {
                         ws[totalCellAddress].s = {
@@ -2705,7 +2720,7 @@ const Dashboard = () => {
 
         ws['!cols'] = [
             { wch: 8 }, { wch: 25 }, { wch: 25 }, { wch: 22 },
-            { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 14 }
+            { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 14 }
         ];
 
         const periodText = {
@@ -2992,7 +3007,7 @@ const Dashboard = () => {
                 <div className="h-[420px] bg-gray-100 rounded-lg animate-pulse flex items-center justify-center">
                     <div className="text-center">
                         <div className="w-12 h-12 border-4 border-t-4 border-t-[#2f3192] border-gray-200 rounded-full animate-spin mx-auto mb-3"></div>
-                        <p className="text-gray-500 text-sm">Loading campaign data...</p>
+                        <p className="text-gray-500 text-sm">Loading drive data...</p>
                     </div>
                 </div>
             </div>
@@ -3342,9 +3357,9 @@ const Dashboard = () => {
                         >
                             <span className="font-medium text-gray-700">
                                 {activeTab === 'overall' ? getPerformanceTitle() :
-                                    activeTab === 'branches' ? 'Branch Overview & Campaign Reports' :
+                                    activeTab === 'branches' ? 'Branch Overview & Drive Reports' :
                                         activeTab === 'branch-report' ? 'Employee Progress' :
-                                            activeTab === 'campaign-success' ? 'Campaign Overview' :
+                                            activeTab === 'campaign-success' ? 'Drive Overview' :
                                                 activeTab === 'activity' ? 'Activity Frequency' :
                                                     activeTab === 'rejected-reason' ? 'Rejected Reasons Reports' : 'Status Stats'}
                             </span>
@@ -3385,7 +3400,7 @@ const Dashboard = () => {
                                             }`}
                                         style={activeTab === 'branches' ? { backgroundColor: "#2f3192" } : {}}
                                     >
-                                        Branch Overview & Campaign Reports
+                                        Branch Overview & Drive Reports
                                     </button>
                                 )}
 
@@ -3422,7 +3437,7 @@ const Dashboard = () => {
                                                 }`}
                                             style={activeTab === 'campaign-success' ? { backgroundColor: "#2f3192" } : {}}
                                         >
-                                            Campaign Overview
+                                            Drive Overview
                                         </button>
                                     </>
                                 )}
@@ -3571,14 +3586,14 @@ const Dashboard = () => {
                                     {/* Campaign-wise Customer Breakdown - 65% width */}
                                     <div className="lg:col-span-8 bg-white rounded-xl shadow-sm p-3 border border-gray-100">
                                         <h3 className="text-base font-semibold text-gray-800 mb-4">
-                                            Campaign-wise Customer Breakdown
+                                            Drive-wise Customer Breakdown
                                         </h3>
                                         <div className="h-[420px] w-full overflow-x-auto">
                                             {campaignBreakdownChartData ? (
                                                 <Bar data={campaignBreakdownChartData} options={campaignBreakdownChartOptions} />
                                             ) : (
                                                 <div className="h-64 flex items-center justify-center text-gray-500">
-                                                    No campaign data available
+                                                    No drive data available
                                                 </div>
                                             )}
                                         </div>
@@ -3957,7 +3972,7 @@ const Dashboard = () => {
                                                             {getBranchDisplayName(branch.branch)}
                                                         </h3>
                                                         <p className="text-xs text-blackgray-500 mt-1">
-                                                            {totalCampaigns} Active Campaigns
+                                                            {totalCampaigns} Active Drives
                                                         </p>
                                                     </div>
                                                     <div className="text-center">
@@ -4311,6 +4326,15 @@ const Dashboard = () => {
                                                     </div>
                                                 </th>
                                                 <th
+                                                    onClick={() => handleBranchEmployeeTableSort('notConnectedCount')}
+                                                    className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                                >
+                                                    <div className="flex items-center justify-center gap-1">
+                                                        NC
+                                                        {renderBranchEmployeeSortIcon('notConnectedCount')}
+                                                    </div>
+                                                </th>
+                                                <th
                                                     onClick={() => handleBranchEmployeeTableSort('completedCount')}
                                                     className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
                                                 >
@@ -4320,7 +4344,7 @@ const Dashboard = () => {
                                                     </div>
                                                 </th>
                                                 <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300">
-                                                    Campaign Progress
+                                                    Drive Progress
                                                 </th>
                                             </tr>
                                         </thead>
@@ -4345,6 +4369,7 @@ const Dashboard = () => {
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.wip_count || 0}</TimeValue></td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.rescheduled_count || 0}</TimeValue></td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.rejected_count || 0}</TimeValue></td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.not_connected_count || 0}</TimeValue></td>
                                                         <td className="px-3 py-2 text-xs font-medium text-center border border-gray-300 text-black"><TimeValue>{completedFollowups}</TimeValue></td>
                                                         <td className="px-3 py-2 text-center border border-gray-300">
                                                             <button
@@ -4373,6 +4398,7 @@ const Dashboard = () => {
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{totals.totalWip.toLocaleString()}</td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{totals.totalRescheduled.toLocaleString()}</td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{totals.totalRejected.toLocaleString()}</td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{totals.totalNotConnected.toLocaleString()}</td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{totals.totalCompleted.toLocaleString()}</td>
                                                         <td className="px-3 py-2 text-center border border-gray-300">—</td>
                                                     </tr>
@@ -4408,7 +4434,7 @@ const Dashboard = () => {
                             {/* 1st Card */}
                             <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3">
                                 <h3 className="text-[11px] font-semibold text-gray-600 uppercase mb-2">
-                                    Total Campaigns
+                                    Total Drives
                                 </h3>
 
                                 <div className="flex items-center justify-between">
@@ -4461,7 +4487,7 @@ const Dashboard = () => {
                                     {/* RIGHT */}
                                     <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
                                         <div className="flex flex-row justify-between items-baseline">
-                                            <span>Active Camp:</span>
+                                            <span>Active Drive:</span>
                                             <span className="font-bold text-lg whitespace-nowrap">
                                                 <TimeValue>{campaignPerformance
                                                     .filter(c => c.status === 'active')
@@ -4469,7 +4495,7 @@ const Dashboard = () => {
                                             </span>
                                         </div>
                                         <div className="flex flex-row justify-between items-baseline">
-                                            <span>Inactive Camp:</span>
+                                            <span>Inactive Drive:</span>
                                             <span className="font-bold text-lg whitespace-nowrap">
                                                 <TimeValue>{campaignPerformance
                                                     .filter(c => c.status === 'inactive')
@@ -4503,7 +4529,7 @@ const Dashboard = () => {
                                     {/* RIGHT */}
                                     <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
                                         <div className="flex flex-row justify-between items-baseline">
-                                            <span>Active Camp:</span>
+                                            <span>Active Drive:</span>
                                             <span className="font-bold text-lg whitespace-nowrap">
                                                 <TimeValue>{campaignPerformance
                                                     .filter(c => c.status === 'active')
@@ -4514,7 +4540,7 @@ const Dashboard = () => {
                                             </span>
                                         </div>
                                         <div className="flex flex-row justify-between items-baseline">
-                                            <span>Inactive Camp:</span>
+                                            <span>Inactive Drive:</span>
                                             <span className="font-bold text-lg whitespace-nowrap">
                                                 <TimeValue>{campaignPerformance
                                                     .filter(c => c.status === 'inactive')
@@ -4579,10 +4605,19 @@ const Dashboard = () => {
                             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                                 <div className="p-2 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                                     <div>
-                                        <h3 className="text-base font-semibold text-black">Campaign Performance</h3>
-                                        <p className="text-sm text-black mt-1">Campaign-wise success metrics and flag breakdown</p>
+                                        <h3 className="text-base font-semibold text-black">Drive Performance</h3>
+                                        <p className="text-sm text-black mt-1">Drive-wise success metrics and flag breakdown</p>
                                     </div>
                                     <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                                        <button
+                                            onClick={() => setShowAllCampaignReport(true)}
+                                            className="w-full sm:w-auto px-3 py-1.5 bg-[#2f3192] text-white text-sm rounded-lg hover:bg-[#252780] transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                            </svg>
+                                            All Drive Report
+                                        </button>
                                         <button
                                             onClick={() => setShowOtherFollowupModal(true)}
                                             className="w-full sm:w-auto px-3 py-1.5 bg-[#2f3192] text-white text-sm rounded-lg hover:bg-[#252780] transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
@@ -4590,7 +4625,7 @@ const Dashboard = () => {
                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                                             </svg>
-                                            Non Campaign Followup Data
+                                            Non Drive Followup Data
                                         </button>
                                         {canExport && (
                                             <button
@@ -4637,7 +4672,7 @@ const Dashboard = () => {
                                                     <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('campaign_name')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
-                                                            Campaign
+                                                            Drive
                                                             <span className="text-blue-600 font-bold">
                                                                 {campaignSortConfig.key === 'campaign_name' ? (campaignSortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
                                                             </span>
@@ -4725,6 +4760,15 @@ const Dashboard = () => {
                                                         </div>
                                                     </th>
                                                     <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
+                                                        onClick={() => handleCampaignSort('not_connected_count')}>
+                                                        <div className="flex items-center justify-center gap-2 font-bold">
+                                                            NC
+                                                            <span className="text-blue-600 font-bold">
+                                                                {campaignSortConfig.key === 'not_connected_count' ? (campaignSortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
+                                                            </span>
+                                                        </div>
+                                                    </th>
+                                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('completed_count')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
                                                             Completed
@@ -4764,6 +4808,7 @@ const Dashboard = () => {
                                                     const wip = campaign.wip_count || 0;
                                                     const rescheduled = campaign.rescheduled_count || 0;
                                                     const rejected = campaign.rejected_count || 0;
+                                                    const notConnected = campaign.not_connected_count || 0;
                                                     const totalCustomers = (remaining + completed);
                                                     const remaining2 = (totalCustomers - attended);
                                                     const successPercentage = campaign.success_percentage || 0;
@@ -4795,6 +4840,7 @@ const Dashboard = () => {
                                                             <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{wip}</TimeValue></td>
                                                             <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{rescheduled}</TimeValue></td>
                                                             <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{rejected}</TimeValue></td>
+                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{notConnected}</TimeValue></td>
                                                             <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{completed}</TimeValue></td>
                                                             <td className="px-2 py-1 text-center border-r border-gray-200">
                                                                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium inline-block ${successPercentage >= 70 ? 'bg-green-100 text-black' :
@@ -4821,8 +4867,8 @@ const Dashboard = () => {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
                                 </svg>
-                                <h3 className="text-lg font-medium text-black mb-2">No Campaign Data</h3>
-                                <p className="text-black">There are no campaigns with follow-up data yet.</p>
+                                <h3 className="text-lg font-medium text-black mb-2">No Drive Data</h3>
+                                <p className="text-black">There are no drives with follow-up data yet.</p>
                             </div>
                         )}
                     </div>
@@ -4835,9 +4881,9 @@ const Dashboard = () => {
                         <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-3 p-4 sm:p-3">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
                                 <div>
-                                    <h3 className="text-base font-semibold text-black">Campaign Filter</h3>
+                                    <h3 className="text-base font-semibold text-black">Drive Filter</h3>
                                     <p className="text-xs text-black mt-1">
-                                        Select campaigns to filter activity statistics
+                                        Select drives to filter activity statistics
                                     </p>
                                 </div>
                                 <div className="flex gap-2">
@@ -4857,7 +4903,7 @@ const Dashboard = () => {
                                         onClick={() => setShowCampaignFilter(!showCampaignFilter)}
                                         className="px-3 py-1.5 text-xs bg-[#2f3192] text-white rounded-lg hover:bg-[#335478] transition-colors"
                                     >
-                                        {showCampaignFilter ? 'Hide Campaigns' : 'Show Campaigns'}
+                                        {showCampaignFilter ? 'Hide Drives' : 'Show Drives'}
                                     </button>
                                 </div>
                             </div>
@@ -4883,7 +4929,7 @@ const Dashboard = () => {
                                     ))}
                                     {allCampaigns.length === 0 && (
                                         <p className="text-sm text-black col-span-full text-center py-4">
-                                            No campaigns available
+                                            No drives available
                                         </p>
                                     )}
                                 </div>
@@ -4894,7 +4940,7 @@ const Dashboard = () => {
                                     <span className="text-xs text-black">Selected:</span>
                                     {selectedCampaigns.length > 3 ? (
                                         <span className="text-xs font-medium text-[#2f3192] bg-[#2f3192]/10 px-2 py-0.5 rounded">
-                                            {selectedCampaigns.length} campaigns selected
+                                            {selectedCampaigns.length} drives selected
                                         </span>
                                     ) : (
                                         allCampaigns
@@ -5010,7 +5056,7 @@ const Dashboard = () => {
                                                                     </span>
                                                                 </div>
                                                             </th>
-                                                            <th style={{ width: '20%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', backgroundColor: '#F9FAFB' }}><span>Assets From</span> <br /><span>Active Campaigns</span></th>
+                                                            <th style={{ width: '20%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', backgroundColor: '#F9FAFB' }}><span>Assets From</span> <br /><span>Active Drives</span></th>
                                                             <th style={{ width: '10%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', backgroundColor: '#F9FAFB' }}><span>Connected</span><br /><span>Calls</span></th>
                                                             <th
                                                                 style={{ width: '10%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', cursor: 'pointer', backgroundColor: sortConfig.key === 'total_count' ? '#E5E7EB' : '#F9FAFB' }}
@@ -5196,7 +5242,7 @@ const Dashboard = () => {
                                                                     </span>
                                                                 </div>
                                                             </th>
-                                                            <th style={{ width: '20%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', backgroundColor: '#F9FAFB' }}><span>Assets From</span><br /><span>Active Campaigns</span></th>
+                                                            <th style={{ width: '20%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', backgroundColor: '#F9FAFB' }}><span>Assets From</span><br /><span>Active Drives</span></th>
                                                             <th style={{ width: '12%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', backgroundColor: '#F9FAFB' }}><span>Connected</span><br /><span>Calls</span></th>
                                                             <th
                                                                 style={{ width: '12%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', cursor: 'pointer', backgroundColor: sortConfig.key === 'total_count' ? '#E5E7EB' : '#F9FAFB' }}
@@ -5390,8 +5436,8 @@ const Dashboard = () => {
                                             </svg>
                                             <p className="text-black text-sm">
                                                 {selectedCampaigns.length > 0
-                                                    ? 'No activity data available for selected campaigns.'
-                                                    : 'No activity data available for this time period. Select campaigns to filter data.'}
+                                                    ? 'No activity data available for selected drives.'
+                                                    : 'No activity data available for this time period. Select drives to filter data.'}
                                             </p>
                                             {selectedCampaigns.length > 0 && (
                                                 <button
@@ -5415,9 +5461,9 @@ const Dashboard = () => {
                         <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-3 p-4 sm:p-3">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                                 <div>
-                                    <h3 className="text-base font-semibold text-black">Campaign Filter</h3>
+                                    <h3 className="text-base font-semibold text-black">Drive Filter</h3>
                                     <p className="text-xs text-black mt-1">
-                                        Select campaigns to filter rejected reason statistics
+                                        Select drives to filter rejected reason statistics
                                     </p>
                                 </div>
                                 <div className="flex gap-2">
@@ -5437,7 +5483,7 @@ const Dashboard = () => {
                                         onClick={() => setShowCampaignFilter(!showCampaignFilter)}
                                         className="px-3 py-1.5 text-xs bg-[#2f3192] text-white rounded-lg hover:bg-[#335478] transition-colors"
                                     >
-                                        {showCampaignFilter ? 'Hide Campaigns' : 'Show Campaigns'}
+                                        {showCampaignFilter ? 'Hide Drives' : 'Show Drives'}
                                     </button>
                                 </div>
                             </div>
@@ -5463,7 +5509,7 @@ const Dashboard = () => {
                                     ))}
                                     {allCampaigns.length === 0 && (
                                         <p className="text-sm text-black col-span-full text-center py-4">
-                                            No campaigns available
+                                            No drives available
                                         </p>
                                     )}
                                 </div>
@@ -5474,7 +5520,7 @@ const Dashboard = () => {
                                     <span className="text-xs text-black">Selected:</span>
                                     {selectedCampaigns.length > 3 ? (
                                         <span className="text-xs font-medium text-[#2f3192] bg-[#2f3192]/10 px-2 py-0.5 rounded">
-                                            {selectedCampaigns.length} campaigns selected
+                                            {selectedCampaigns.length} drives selected
                                         </span>
                                     ) : (
                                         allCampaigns
@@ -5589,7 +5635,7 @@ const Dashboard = () => {
                                                                     </span>
                                                                 </div>
                                                             </th>
-                                                            <th style={{ width: '15%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', backgroundColor: '#F9FAFB' }}><span>Assets From</span> <br /><span>Active Campaigns </span></th>
+                                                            <th style={{ width: '15%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', backgroundColor: '#F9FAFB' }}><span>Assets From</span> <br /><span>Active Drives </span></th>
                                                             <th style={{ width: '10%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', backgroundColor: '#F9FAFB' }}><span>Connected</span><br /><span>Calls</span></th>
                                                             <th
                                                                 style={{ width: '10%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', cursor: 'pointer', backgroundColor: rrSortConfig.key === 'total_count' ? '#E5E7EB' : '#F9FAFB' }}
@@ -5775,7 +5821,7 @@ const Dashboard = () => {
                                                                     </span>
                                                                 </div>
                                                             </th>
-                                                            <th style={{ width: '20%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', backgroundColor: '#F9FAFB' }}><span>Assets From</span><br /><span>Active Campaigns</span></th>
+                                                            <th style={{ width: '20%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', backgroundColor: '#F9FAFB' }}><span>Assets From</span><br /><span>Active Drives</span></th>
                                                             <th style={{ width: '12%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', backgroundColor: '#F9FAFB' }}><span>Connected</span><br /><span>Calls</span></th>
                                                             <th
                                                                 style={{ width: '12%', padding: '4px 8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: 'black', textTransform: 'uppercase', border: '1px solid #E5E7EB', cursor: 'pointer', backgroundColor: rrSortConfig.key === 'total_count' ? '#E5E7EB' : '#F9FAFB' }}
@@ -5969,8 +6015,8 @@ const Dashboard = () => {
                                             </svg>
                                             <p className="text-black text-sm">
                                                 {selectedCampaigns.length > 0
-                                                    ? 'No rejected reasons data available for selected campaigns.'
-                                                    : 'No rejected reasons data available for this time period. Select campaigns to filter data.'}
+                                                    ? 'No rejected reasons data available for selected drives.'
+                                                    : 'No rejected reasons data available for this time period. Select drives to filter data.'}
                                             </p>
                                             {selectedCampaigns.length > 0 && (
                                                 <button
@@ -5989,15 +6035,16 @@ const Dashboard = () => {
                 )}
             </div>
 
-            <CampaignCustomersModal
-                isOpen={showCustomersModal}
+            <CampaignCustomersFollowupModal
+                isOpen={showCustomersModal || showAllCampaignReport}
                 onClose={() => {
                     setShowCustomersModal(false);
+                    setShowAllCampaignReport(false);
                     setSelectedCampaign(null);
                 }}
-                campaign={selectedCampaign}
+                campaign={showAllCampaignReport ? null : selectedCampaign}
                 apiBaseUrl={API_BASE_URL}
-                userData={userData}
+                allReportCampaigns={showAllCampaignReport ? getSortedCampaignPerformance() : null}
             />
 
             <EmployeePerformanceModal

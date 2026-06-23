@@ -378,6 +378,8 @@ class EmployeePerformanceController:
                 func.sum(case((FollowUp.status == 'rejected', 1), else_=0)).label('rejected'),
                 func.sum(case((FollowUp.status == 'rescheduled', 1), else_=0)).label('rescheduled'),
                 func.sum(case((FollowUp.status == 'pending', 1), else_=0)).label('pending'),
+                # "Not Connected" is now its own status value.
+                func.sum(case((FollowUp.status == 'not_connected', 1), else_=0)).label('not_connected'),
                 func.sum(case((and_(FollowUp.quotation_sent == True, FollowUp.status == 'completed'), FollowUp.quotation_value), else_=0)).label('total_quotation'),
                 func.sum(case((and_(FollowUp.quotation_sent == True, FollowUp.status == 'completed'), 1), else_=0)).label('quotations_sent'),
             ).group_by(FollowUp.user_id).all()
@@ -397,6 +399,7 @@ class EmployeePerformanceController:
                     'rejected_count': int(stats.rejected or 0) if stats else 0,
                     'rescheduled_count': int(stats.rescheduled or 0) if stats else 0,
                     'pending_count': int(stats.pending or 0) if stats else 0,
+                    'not_connected_count': int(stats.not_connected or 0) if stats else 0,
                     'total_quotation_value': float(stats.total_quotation or 0) if stats else 0,
                     'quotations_sent_count': int(stats.quotations_sent or 0) if stats else 0,
                     'followup_type_breakdown': {},
@@ -547,6 +550,8 @@ class EmployeePerformanceController:
                 func.sum(case((FollowUp.status == 'rejected', 1), else_=0)).label('rejected'),
                 func.sum(case((FollowUp.status == 'rescheduled', 1), else_=0)).label('rescheduled'),
                 func.sum(case((FollowUp.status == 'pending', 1), else_=0)).label('pending'),
+                # "Not Connected" is now its own status value.
+                func.sum(case((FollowUp.status == 'not_connected', 1), else_=0)).label('not_connected'),
                 func.sum(case((and_(FollowUp.quotation_sent == True, FollowUp.status == 'completed'), FollowUp.quotation_value), else_=0)).label('total_quotation'),
                 func.sum(case((and_(FollowUp.quotation_sent == True, FollowUp.status == 'completed'), 1), else_=0)).label('quotations_sent'),
             ).group_by(FollowUp.user_id).all()
@@ -567,6 +572,7 @@ class EmployeePerformanceController:
                     'rejected_count': int(stats.rejected or 0) if stats else 0,
                     'rescheduled_count': int(stats.rescheduled or 0) if stats else 0,
                     'pending_count': int(stats.pending or 0) if stats else 0,
+                    'not_connected_count': int(stats.not_connected or 0) if stats else 0,
                     'total_quotation_value': float(stats.total_quotation or 0) if stats else 0,
                     'quotations_sent_count': int(stats.quotations_sent or 0) if stats else 0,
                     'followup_type_breakdown': {},
@@ -1019,6 +1025,7 @@ class EmployeePerformanceController:
                 rejected_count = 0
                 rescheduled_count = 0
                 pending_count = 0
+                not_connected_count = 0  # Customers whose latest status is not_connected
                 completed_in_latest = 0  # Customers whose latest status is completed
                 
                 # Flag breakdown based on latest follow-up
@@ -1034,6 +1041,8 @@ class EmployeePerformanceController:
                         rejected_count += 1
                     elif status == 'rescheduled':
                         rescheduled_count += 1
+                    elif status == 'not_connected':
+                        not_connected_count += 1
                     elif status == 'pending':
                         pending_count += 1
                     
@@ -1087,6 +1096,7 @@ class EmployeePerformanceController:
                     'wip_count': wip_count,  # Customers with latest status = wip
                     'rejected_count': rejected_count,  # Customers with latest status = rejected
                     'rescheduled_count': rescheduled_count,  # Customers with latest status = rescheduled
+                    'not_connected_count': not_connected_count,  # Customers with latest status = not_connected
                     'pending_count': pending_count,  # Customers with latest status = pending
                     'total_followups': total_followups,  # Total follow-up records in time period
                     'total_customers': total_customers,
@@ -2034,6 +2044,7 @@ class EmployeePerformanceController:
                         'branch_id': customer.branch_id or 'N/A',
                         'location': customer.location or 'N/A',
                         'last_status': latest_followup.status if latest_followup else '-',
+                        'csp_subtype': latest_followup.csp_subtype if latest_followup else None,
                         'last_followup_user_name': latest_followup.user_name if latest_followup else 'N/A',
                         'last_followup_user_id': latest_followup.user_id if latest_followup else 'N/A',
                         'last_followup_date': latest_followup.created_at.isoformat() if latest_followup and latest_followup.created_at else None,
@@ -2069,6 +2080,7 @@ class EmployeePerformanceController:
                         'branch_id': customer.branch_id or 'N/A',
                         'location': customer.location or 'N/A',
                         'last_status': '-',
+                        'csp_subtype': None,
                         'last_followup_user_name': 'N/A',
                         'last_followup_user_id': 'N/A',
                         'last_followup_date': None,
@@ -2594,6 +2606,7 @@ class EmployeePerformanceController:
                     "user_name": fu.user_name,
                     "followup_date": fu.followup_date.isoformat() if fu.followup_date else None,
                     "followup_by": fu.followup_by,
+                    "csp_subtype": fu.csp_subtype,
                     "followup_flag": fu.followup_flag,
                     "followup_remark": fu.followup_remark,
                     "status": fu.status,

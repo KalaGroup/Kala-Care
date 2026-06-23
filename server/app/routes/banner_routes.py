@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Header
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Header, Response
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.database import SessionLocal
@@ -26,7 +26,7 @@ async def get_banners(db: Session = Depends(get_db)):
                 {
                     "id": b.id,
                     "position": b.position,
-                    "image_url": b.image_url,
+                    "image_url": f"/banners/{b.position}/image",
                     "created_at": b.created_at,
                     "updated_at": b.updated_at
                 }
@@ -35,6 +35,18 @@ async def get_banners(db: Session = Depends(get_db)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{position}/image")
+def get_banner_image(position: int, db: Session = Depends(get_db)):
+    """Serve a banner image's bytes straight from the database."""
+    banner = banner_controller.get_banner_by_position(db, position)
+    if not banner or not banner.image_data:
+        raise HTTPException(status_code=404, detail="Banner not found")
+    return Response(
+        content=banner.image_data,
+        media_type=banner.content_type or "image/jpeg",
+    )
+
 
 @router.post("/upload")
 async def upload_banners(
@@ -80,21 +92,21 @@ async def upload_banners(
     
     # Process banner1 if provided
     if banner1:
-        image_url = await banner_controller.save_banner_image(banner1, 1)
-        banner = banner_controller.create_or_update_banner(db, 1, image_url)
-        uploaded_banners.append({"position": 1, "image_url": image_url})
+        image_data, content_type = await banner_controller.read_banner_image(banner1)
+        banner_controller.create_or_update_banner(db, 1, image_data, content_type)
+        uploaded_banners.append({"position": 1, "image_url": "/banners/1/image"})
     
     # Process banner2 if provided
     if banner2:
-        image_url = await banner_controller.save_banner_image(banner2, 2)
-        banner = banner_controller.create_or_update_banner(db, 2, image_url)
-        uploaded_banners.append({"position": 2, "image_url": image_url})
+        image_data, content_type = await banner_controller.read_banner_image(banner2)
+        banner_controller.create_or_update_banner(db, 2, image_data, content_type)
+        uploaded_banners.append({"position": 2, "image_url": "/banners/2/image"})
     
     # Process banner3 if provided
     if banner3:
-        image_url = await banner_controller.save_banner_image(banner3, 3)
-        banner = banner_controller.create_or_update_banner(db, 3, image_url)
-        uploaded_banners.append({"position": 3, "image_url": image_url})
+        image_data, content_type = await banner_controller.read_banner_image(banner3)
+        banner_controller.create_or_update_banner(db, 3, image_data, content_type)
+        uploaded_banners.append({"position": 3, "image_url": "/banners/3/image"})
     
     return {
         "success": True,

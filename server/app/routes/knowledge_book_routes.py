@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Header, Form
-from fastapi.responses import FileResponse
+import mimetypes
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -156,20 +157,42 @@ async def delete_file(
 
 @router.get("/files/{file_id}/view")
 async def view_file(file_id: int, db: Session = Depends(get_db)):
-    """Serve the file inline (for image/video/pdf previews). No attachment header,
-    so the browser displays it instead of downloading. Content-Type is guessed
-    from the file extension."""
+    """Serve the file inline from the database (for image/video/pdf previews)."""
     row = kb.get_file(db, file_id)
-    path = kb.KB_DIR / row.stored_name
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="File is missing on the server")
-    return FileResponse(path=str(path))
+    if row.data is None:
+        raise HTTPException(status_code=404, detail="File data is missing")
+    media_type = row.content_type or mimetypes.guess_type(row.original_name or "")[0] or "application/octet-stream"
+    return Response(content=row.data, media_type=media_type)
 
 
 @router.get("/files/{file_id}/download")
 async def download_file(file_id: int, db: Session = Depends(get_db)):
     row = kb.get_file(db, file_id)
-    path = kb.KB_DIR / row.stored_name
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="File is missing on the server")
-    return FileResponse(path=str(path), filename=row.original_name)
+    if row.data is None:
+        raise HTTPException(status_code=404, detail="File data is missing")
+    media_type = row.content_type or mimetypes.guess_type(row.original_name or "")[0] or "application/octet-stream"
+    filename = (row.original_name or "download").replace('"', "")
+    return Response(
+        content=row.data,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/folders/{folder_id}/download")
+async def download_folder(
+    folder_id: int,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Download a whole folder (and its subtree) as one .zip.
+    Any logged-in user can use it; non-admins won't get hidden subfolders."""
+    is_admin = _is_master_admin(db, user_id, user_role)
+    name, buffer = kb.build_folder_zip(db, folder_id, is_admin)
+    safe = (name or "folder").replace('"', "").strip() or "folder"
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe}.zip"'},
+    )

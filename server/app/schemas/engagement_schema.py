@@ -15,6 +15,7 @@ class FollowUpBase(BaseModel):
     quotation_sent: Optional[bool] = False
     quotation_no: Optional[str] = None
     quotation_value: Optional[float] = None
+    csp_subtype: Optional[str] = None  # SR subtype — stored only for CSP-product follow-ups
     activity_id: Optional[int] = None
     rr_id: Optional[int] = None
 

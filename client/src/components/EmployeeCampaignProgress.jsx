@@ -383,10 +383,10 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                 >
                     <div className="min-w-0">
                         <h2 className="text-base font-bold text-white truncate">
-                            Campaign Progress — {employee?.user_name}
+                            Drive Progress — {employee?.user_name}
                         </h2>
                         <p className="text-xs text-blue-200 mt-0.5">
-                            Active campaigns · {periodLabel()}
+                            Active drives · {periodLabel()}
                         </p>
                     </div>
                     <button
@@ -450,7 +450,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                         <div className="ml-auto flex items-center gap-2">
                             <input
                                 type="text"
-                                placeholder="Search campaign…"
+                                placeholder="Search Drive…"
                                 value={search}
                                 onChange={e => setSearch(e.target.value)}
                                 className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#2f3192] w-64 bg-white"
@@ -472,7 +472,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                 {!loading && campaigns.length > 0 && (
                     <div className="px-5 py-3 border-b border-gray-100 grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2 flex-shrink-0">
                         {[
-                            { label: 'Campaigns', value: campaigns.length, color: 'black' },
+                            { label: 'Drives', value: campaigns.length, color: 'black' },
                             { label: 'Attended Assets', value: totals.unique, color: 'black', clickable: true },
                             { label: 'Followups', value: totals.followups, color: '#000000' },
                             { label: 'Completed', value: totals.completed, color: '#000000' },
@@ -542,7 +542,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                                     d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                             </svg>
-                            <p className="text-sm font-medium">No campaign data found</p>
+                            <p className="text-sm font-medium">No drive data found</p>
                             <p className="text-xs mt-1 text-gray-400">
                                 {employee?.user_name} had no follow-ups in the selected period.
                             </p>
@@ -558,7 +558,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                                         className="px-3 py-2 text-left font-bold text-black border border-gray-200 cursor-pointer hover:bg-gray-100 select-none"
                                         onClick={() => handleSort('campaign_name')}
                                     >
-                                        Campaign <SortIcon col="campaign_name" />
+                                        Drive <SortIcon col="campaign_name" />
                                     </th>
                                     <th className="px-3 py-2 text-center font-bold text-black border border-gray-200">
                                         Service
@@ -615,7 +615,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                                         <td
                                             className="px-3 py-2 text-center border border-gray-200 cursor-pointer hover:bg-blue-50 transition-colors group"
                                             onClick={() => handleOpenAssets(c.campaign_name)}
-                                            title="Click to view assets for this campaign"
+                                            title="Click to view assets for this drive"
                                         >
                                             <span
                                                 className="font-semibold underline underline-offset-2 group-hover:font-extrabold transition-all"
@@ -645,7 +645,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                                 <tr className="bg-gray-100 font-bold border-t-2 border-gray-400">
                                     <td className="px-3 py-2 text-center border border-gray-300 text-gray-500">—</td>
                                     <td className="px-3 py-2 border border-gray-300 text-black">
-                                        TOTAL ({campaigns.length} campaigns)
+                                        TOTAL ({campaigns.length} drives)
                                     </td>
                                     <td className="px-3 py-2 text-center border border-gray-300 text-gray-500">—</td>
                                     <td
@@ -708,7 +708,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                                 <p className="text-[11px] text-white/80 mt-0.5">
                                     {periodLabel()} • {filteredAssets.length} asset{filteredAssets.length === 1 ? '' : 's'}
                                     {latestAssets.length !== filteredAssets.length && ` (of ${latestAssets.length})`}
-                                    {' • Latest follow-up per customer per campaign'}
+                                    {' • Latest follow-up per customer per drive'}
                                 </p>
                             </div>
 
@@ -717,14 +717,14 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                                 {/* Campaign filter dropdown (only if multiple campaigns present) */}
                                 {uniqueCampaignsInAssets.length > 1 && (
                                     <div className="flex items-center gap-1">
-                                        <label className="text-[11px] text-white whitespace-nowrap">Campaign:</label>
+                                        <label className="text-[11px] text-white whitespace-nowrap">Drive:</label>
                                         <div className="relative">
                                             <select
                                                 value={assetsCampaignFilter}
                                                 onChange={(e) => setAssetsCampaignFilter(e.target.value)}
                                                 className="border border-gray-300 rounded-md pl-2 pr-6 py-1 text-[11px] bg-white text-black appearance-none cursor-pointer focus:outline-none max-w-[200px] truncate"
                                             >
-                                                <option value="">All Campaigns</option>
+                                                <option value="">All Drives</option>
                                                 {uniqueCampaignsInAssets.map(c => (
                                                     <option key={c} value={c}>{c}</option>
                                                 ))}
@@ -831,7 +831,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                                                 <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">Phone</th>
                                                 <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">Email</th>
                                                 <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">Branch</th>
-                                                <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">Campaign</th>
+                                                <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">Drive</th>
                                                 <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">Service</th>
                                                 <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">Latest F/U Date</th>
                                                 <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap">F/U By</th>
@@ -892,7 +892,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                         {/* Footer */}
                         <div className="px-4 py-2 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
                             <p className="text-[11px] text-gray-500">
-                                Showing the most recent follow-up per customer per campaign in the selected period.
+                                Showing the most recent follow-up per customer per drive in the selected period.
                             </p>
                             <button
                                 onClick={() => setShowAssetsModal(false)}

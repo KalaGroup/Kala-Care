@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 
-const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl }) => {
+const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl, allReportCampaigns = null }) => {
     const [customers, setCustomers] = useState([]);
     const [campaignInfo, setCampaignInfo] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -9,6 +9,10 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [flagFilter, setFlagFilter] = useState('all');
+    const [campaignFilter, setCampaignFilter] = useState('all');
+    const [userFilter, setUserFilter] = useState('all');
+    const [dateFrom, setDateFrom] = useState('');
+    const [dateTo, setDateTo] = useState('');
 
     // Refs for scroll synchronization
     const tableContainerRef = useRef(null);
@@ -16,10 +20,23 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
 
     const themeColor = '#2f3192';
 
+    // All-campaigns report mode
+    const loadRunRef = useRef(0);
+    const [loadedCount, setLoadedCount] = useState(0);
+    const [totalToLoad, setTotalToLoad] = useState(0);
+    const isAllReport = Array.isArray(allReportCampaigns);
+
     useEffect(() => {
-        if (isOpen && campaign) {
+        if (!isOpen) return;
+        const myRun = ++loadRunRef.current;
+        if (isAllReport) {
+            fetchAllCampaignsCustomers(myRun);
+        } else if (campaign) {
             fetchCampaignCustomers();
         }
+        // Stop any in-flight all-report loop when the modal closes/reopens
+        return () => { loadRunRef.current++; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen, campaign]);
 
     const getUserHeaders = () => {
@@ -44,6 +61,18 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
         [customers]
     );
 
+    // Unique campaign names (all-report mode) for the campaign dropdown
+    const uniqueCampaigns = useMemo(
+        () => [...new Set(customers.map(c => c.campaign_name).filter(Boolean))].sort(),
+        [customers]
+    );
+
+    // Unique last follow-up users for the user dropdown (recompute only when data changes)
+    const uniqueUsers = useMemo(
+        () => [...new Set(customers.map(c => c.last_followup_user_name).filter(Boolean))].sort(),
+        [customers]
+    );
+
     // Filter customers — recompute only when data or a filter actually changes
     const filteredCustomers = useMemo(() => {
         const term = searchTerm.toLowerCase();
@@ -52,21 +81,46 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
                 customer.customer_name?.toLowerCase().includes(term) ||
                 customer.instance_id?.toLowerCase().includes(term) ||
                 customer.phone_number?.includes(searchTerm) ||
-                customer.email?.toLowerCase().includes(term);
+                customer.email?.toLowerCase().includes(term) ||
+                customer.last_followup_user_name?.toLowerCase().includes(term) ||
+                customer.last_followup_user_id?.toLowerCase().includes(term);
 
             const status = (customer.last_status || 'pending').toLowerCase();
             const matchesStatus = statusFilter === 'all' || status === statusFilter;
             const matchesFlag = flagFilter === 'all' || customer.latest_flag === flagFilter;
+            const matchesCampaign = campaignFilter === 'all' || customer.campaign_name === campaignFilter;
+            const matchesUser = userFilter === 'all' || customer.last_followup_user_name === userFilter;
 
-            return matchesSearch && matchesStatus && matchesFlag;
+            // Last Follow-up date range filter (compared on local calendar date)
+            let matchesDate = true;
+            if (dateFrom || dateTo) {
+                if (!customer.last_followup_date) {
+                    matchesDate = false;
+                } else {
+                    const followup = new Date(customer.last_followup_date);
+                    followup.setHours(0, 0, 0, 0);
+                    if (dateFrom) {
+                        const [fy, fm, fd] = dateFrom.split('-').map(Number);
+                        if (followup < new Date(fy, fm - 1, fd)) matchesDate = false;
+                    }
+                    if (dateTo) {
+                        const [ty, tm, td] = dateTo.split('-').map(Number);
+                        if (followup > new Date(ty, tm - 1, td)) matchesDate = false;
+                    }
+                }
+            }
+
+            return matchesSearch && matchesStatus && matchesFlag && matchesCampaign && matchesUser && matchesDate;
         });
-    }, [customers, searchTerm, statusFilter, flagFilter]);
+    }, [customers, searchTerm, statusFilter, flagFilter, campaignFilter, userFilter, dateFrom, dateTo]);
 
     const fetchCampaignCustomers = async () => {
         try {
             setLoading(true);
 
-            const response = await fetch(`${apiBaseUrl}/v1/campaigns/${campaign.id}/customers-with-followups`, {
+            // Dashboard passes campaign_id; Campaign page passes id — accept either
+            const campaignId = campaign.id ?? campaign.campaign_id;
+            const response = await fetch(`${apiBaseUrl}/v1/campaigns/${campaignId}/customers-with-followups`, {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
@@ -75,7 +129,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
             });
 
             if (!response.ok) {
-                throw new Error('Failed to fetch campaign customers');
+                throw new Error('Failed to fetch drive customers');
             }
 
             const data = await response.json();
@@ -97,11 +151,12 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
                 const statusPriority = {
                     'wip': 1,
                     'rescheduled': 2,
-                    'rejected': 3,
-                    'completed': 4,
-                    'pending': 5,
-                    null: 5,
-                    undefined: 5
+                    'not_connected': 3,
+                    'rejected': 4,
+                    'completed': 5,
+                    'pending': 6,
+                    null: 6,
+                    undefined: 6
                 };
 
                 // Sort customers by status priority
@@ -122,40 +177,110 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
                 setCustomers([]);
             }
         } catch (error) {
-            console.error('Error fetching campaign customers:', error);
+            console.error('Error fetching drive customers:', error);
         } finally {
             setLoading(false);
         }
     };
 
+    // Fetch every campaign's customers one-by-one and append progressively (lazy load).
+    // Each row is tagged with its own campaign name so all campaigns can share one table.
+    const fetchAllCampaignsCustomers = async (myRun) => {
+        setLoading(true);
+        setCustomers([]);
+        setCampaignInfo(null);
+        setLoadedCount(0);
+        setTotalToLoad(allReportCampaigns.length);
+
+        let accumulated = [];
+        let sno = 0;
+
+        for (let i = 0; i < allReportCampaigns.length; i++) {
+            if (loadRunRef.current !== myRun) return; // modal closed/reopened — stop
+
+            const c = allReportCampaigns[i];
+            const cid = c.campaign_id ?? c.id;
+            const cname = c.campaign_name ?? c.name ?? '—';
+
+            try {
+                const response = await fetch(`${apiBaseUrl}/v1/campaigns/${cid}/customers-with-followups`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json', ...getUserHeaders() }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    let part = [];
+                    if (data.customers) {
+                        if (data.customers.remaining?.length) part = [...part, ...data.customers.remaining];
+                        if (data.customers.completed?.length) part = [...part, ...data.customers.completed];
+                    }
+                    const tagged = part.map(cust => ({ ...cust, campaign_name: cname }));
+                    accumulated = [...accumulated, ...tagged];
+
+                    // Sort by Last Follow-up Date (most recent first); nulls go to the bottom
+                    accumulated.sort((a, b) => {
+                        const dateA = a.last_followup_date ? new Date(a.last_followup_date) : null;
+                        const dateB = b.last_followup_date ? new Date(b.last_followup_date) : null;
+                        if (!dateA && !dateB) return 0;
+                        if (!dateA) return 1;
+                        if (!dateB) return -1;
+                        return dateB - dateA;
+                    });
+
+                    // Re-number after sorting
+                    accumulated = accumulated.map((cust, idx) => ({ ...cust, s_no: idx + 1 }));
+
+                    if (loadRunRef.current === myRun) setCustomers([...accumulated]); // progressive render
+                }
+            } catch (error) {
+                console.error(`Error fetching customers for drive ${cid}:`, error);
+            }
+
+            if (loadRunRef.current === myRun) setLoadedCount(i + 1);
+        }
+
+        if (loadRunRef.current === myRun) setLoading(false);
+    };
+
     const exportToExcel = () => {
-        if (!customers.length) return;
+        // Only export what's visible in the table (respects search/status/flag/user filters)
+        if (!filteredCustomers.length) return;
 
         setExportLoading(true);
 
         const wsData = [];
 
-        wsData.push(['CAMPAIGN SUMMARY']);
-        wsData.push(['Campaign Name:', campaignInfo?.name || 'N/A']);
-        wsData.push(['Service:', campaignInfo?.service || 'N/A']);
-        wsData.push(['Status:', campaignInfo?.status || 'N/A']);
-        wsData.push(['Total Customers:', campaignInfo?.total_customers || 0]);
-        wsData.push(['Remaining:', campaignInfo?.remaining_count || 0]);
-        wsData.push(['Completed:', campaignInfo?.completed_count || 0]);
-        wsData.push([]);
-        wsData.push(['ALL CUSTOMERS WITH LAST FOLLOW-UP']);
-        wsData.push([]);
+        if (isAllReport) {
+            wsData.push(['ALL Drives Report']);
+            wsData.push(['Total Drives:', allReportCampaigns.length]);
+            wsData.push(['Rows Exported (after filters):', filteredCustomers.length]);
+            wsData.push([]);
+            wsData.push(['ALL CUSTOMERS WITH LAST FOLLOW-UP']);
+            wsData.push([]);
+        } else {
+            wsData.push(['DRIVE SUMMARY']);
+            wsData.push(['Drive Name:', campaignInfo?.name || 'N/A']);
+            wsData.push(['Service:', campaignInfo?.service || 'N/A']);
+            wsData.push(['Status:', campaignInfo?.status || 'N/A']);
+            wsData.push(['Total Customers:', campaignInfo?.total_customers || 0]);
+            wsData.push(['Remaining:', campaignInfo?.remaining_count || 0]);
+            wsData.push(['Completed:', campaignInfo?.completed_count || 0]);
+            wsData.push([]);
+            wsData.push(['ALL CUSTOMERS WITH LAST FOLLOW-UP']);
+            wsData.push([]);
+        }
 
         wsData.push([
             'S.No', 'Instance ID', 'Customer Name', 'Phone Number', 'Email',
-            'Branch ID', 'Location', 'Last Status', 'Last Follow-up User',
+            'Branch ID', 'Location', 'Last Status', 'Subtype', 'Last Follow-up User',
             'Last Follow-up User ID', 'Last Follow-up Date', 'Next Follow-up Date',
-            'Latest Flag', 'Latest Remark', 'Quotation Sent', 'Quotation Value'
+            'Latest Flag', 'Latest Remark', 'Quotation Sent', 'Quotation Value', 'Drive Name'
         ]);
 
-        customers.forEach(customer => {
+        filteredCustomers.forEach((customer, idx) => {
             wsData.push([
-                customer.s_no,
+                idx + 1,
                 customer.instance_id,
                 customer.customer_name,
                 customer.phone_number,
@@ -163,6 +288,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
                 customer.branch_id,
                 customer.location,
                 customer.last_status || 'Pending',
+                customer.csp_subtype || '—',
                 customer.last_followup_user_name,
                 customer.last_followup_user_id,
                 customer.last_followup_date ? new Date(customer.last_followup_date).toLocaleDateString() : 'N/A',
@@ -170,21 +296,23 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
                 customer.latest_flag,
                 customer.latest_remark || '—',
                 customer.quotation_sent ? 'Yes' : 'No',
-                customer.quotation_value || 0
+                customer.quotation_value || 0,
+                customer.campaign_name || campaignInfo?.name || 'N/A'
             ]);
         });
 
         const ws = XLSX.utils.aoa_to_sheet(wsData);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'All Campaign Customers');
+        XLSX.utils.book_append_sheet(wb, ws, isAllReport ? 'All Drives' : 'All Drive Customers');
 
         ws['!cols'] = [
             { wch: 8 }, { wch: 18 }, { wch: 30 }, { wch: 15 }, { wch: 30 },
-            { wch: 12 }, { wch: 30 }, { wch: 15 }, { wch: 20 }, { wch: 20 },
-            { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 40 }, { wch: 15 }, { wch: 15 }
+            { wch: 12 }, { wch: 30 }, { wch: 15 }, { wch: 18 }, { wch: 20 }, { wch: 20 },
+            { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 40 }, { wch: 15 }, { wch: 15 }, { wch: 30 }
         ];
 
-        const filename = `campaign_${campaignInfo?.name?.replace(/\s/g, '_')}_all_customers_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
+        const baseName = isAllReport ? 'all_campaigns' : (campaignInfo?.name?.replace(/\s/g, '_') || 'drive');
+        const filename = `${baseName}_customers_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
         XLSX.writeFile(wb, filename);
         setExportLoading(false);
     };
@@ -284,10 +412,13 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
             wip: { text: '#000000' },
             rejected: { text: '#000000' },
             rescheduled: { text: '#000000' },
+            not_connected: { text: '#000000' },
             pending: { text: '#000000' }
         };
         const style = styles[status?.toLowerCase()] || styles.pending;
-        const formattedStatus = status ? status.charAt(0).toUpperCase() + status.slice(1).toLowerCase() : status;
+        const formattedStatus = status?.toLowerCase() === 'not_connected'
+            ? 'Not Connected'
+            : (status ? status.charAt(0).toUpperCase() + status.slice(1).toLowerCase() : status);
 
         return (
             <span className="inline-flex items-center justify-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium" style={{ backgroundColor: style.bg, color: style.text }}>
@@ -311,7 +442,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
                         <div className="absolute top-0 right-0 w-48 sm:w-64 h-48 sm:h-64 bg-white/5 rounded-full -mr-24 sm:-mr-32 -mt-24 sm:-mt-32"></div>
                         <div className="absolute bottom-0 left-0 w-36 sm:w-48 h-36 sm:h-48 bg-white/5 rounded-full -ml-18 sm:-ml-24 -mb-18 sm:-mb-24"></div>
 
-                        <div className="relative flex items-center gap-3 flex-wrap">
+                        <div className="relative flex items-center gap-2 flex-wrap">
                             <div className="min-w-0">
                                 <div className="flex items-center gap-1.5 sm:gap-2 mb-0.5">
                                     <div className="w-6 h-6 sm:w-7 sm:h-7 bg-white/20 rounded-lg flex items-center justify-center backdrop-blur-sm flex-shrink-0">
@@ -319,35 +450,60 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                         </svg>
                                     </div>
-                                    <h2 className="text-base sm:text-lg font-bold text-white tracking-tight truncate">{campaignInfo?.name}</h2>
+                                    <h2 className="text-base sm:text-lg font-bold text-white tracking-tight truncate">{isAllReport ? 'All Drives Report' : campaignInfo?.name}</h2>
                                 </div>
                                 <div className="flex flex-wrap gap-1.5 sm:gap-2 text-white/80 text-[10px] sm:text-xs">
-                                    <span className="flex items-center gap-0.5">
-                                        <svg className="w-2 h-2 sm:w-2.5 sm:h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                                        </svg>
-                                        {campaignInfo?.service}
-                                    </span>
-                                    <span className="flex items-center gap-0.5">
-                                        <svg className="w-2 h-2 sm:w-2.5 sm:h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                        </svg>
-                                        {campaignInfo?.status === 'active' ? 'Active' : 'Inactive'}
-                                    </span>
-                                    <span className="flex items-center gap-0.5">
-                                        <svg className="w-2 h-2 sm:w-2.5 sm:h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                                        </svg>
-                                        Total: {campaignInfo?.remaining_count + campaignInfo?.completed_count} | Remaining: {campaignInfo?.remaining_count || 0} | Completed: {campaignInfo?.completed_count || 0}
-                                    </span>
+                                    {isAllReport ? (
+                                        <>
+                                            <span className="flex items-center gap-0.5">
+                                                <svg className="w-2 h-2 sm:w-2.5 sm:h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                                                </svg>
+                                                {totalToLoad} Drives
+                                            </span>
+                                            <span className="flex items-center gap-0.5">
+                                                <svg className="w-2 h-2 sm:w-2.5 sm:h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                </svg>
+                                                {customers.length} Customers Loaded
+                                            </span>
+                                            {loading && (
+                                                <span className="flex items-center gap-1">
+                                                    <span className="w-2.5 h-2.5 border-2 border-white/60 border-t-transparent rounded-full animate-spin"></span>
+                                                    Loading {loadedCount}/{totalToLoad} drives...
+                                                </span>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span className="flex items-center gap-0.5">
+                                                <svg className="w-2 h-2 sm:w-2.5 sm:h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                                </svg>
+                                                {campaignInfo?.service}
+                                            </span>
+                                            <span className="flex items-center gap-0.5">
+                                                <svg className="w-2 h-2 sm:w-2.5 sm:h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                                {campaignInfo?.status === 'active' ? 'Active' : 'Inactive'}
+                                            </span>
+                                            <span className="flex items-center gap-0.5">
+                                                <svg className="w-2 h-2 sm:w-2.5 sm:h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                </svg>
+                                                Total: {campaignInfo?.remaining_count + campaignInfo?.completed_count} | Remaining: {campaignInfo?.remaining_count || 0} | Completed: {campaignInfo?.completed_count || 0}
+                                            </span>
+                                        </>
+                                    )}
                                 </div>
                             </div>
 
                             {/* Search */}
-                            <div className="relative w-full sm:w-72 md:w-80 sm:ml-auto">
+                            <div className="relative w-full sm:w-40 sm:ml-auto">
                                 <input
                                     type="text"
-                                    placeholder="Search customers..."
+                                    placeholder="Search customers, users..."
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                     className="w-full pl-8 pr-7 py-1.5 text-xs border border-white/30 rounded-lg bg-white/95 focus:outline-none focus:ring-2 focus:ring-white/40 transition-all text-black"
@@ -372,11 +528,12 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
                             <select
                                 value={statusFilter}
                                 onChange={(e) => setStatusFilter(e.target.value)}
-                                className="w-full sm:w-40 py-1.5 px-2 text-xs border border-white/30 rounded-lg bg-white/95 focus:outline-none focus:ring-2 focus:ring-white/40 transition-all text-black cursor-pointer"
+                                className="w-full sm:w-24 py-1.5 px-2 text-xs border border-white/30 rounded-lg bg-white/95 focus:outline-none focus:ring-2 focus:ring-white/40 transition-all text-black cursor-pointer"
                             >
                                 <option value="all">All Statuses</option>
                                 <option value="wip">WIP</option>
                                 <option value="rescheduled">Rescheduled</option>
+                                <option value="not_connected">Not Connected</option>
                                 <option value="rejected">Rejected</option>
                                 <option value="completed">Completed</option>
                                 <option value="pending">Pending</option>
@@ -386,7 +543,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
                             <select
                                 value={flagFilter}
                                 onChange={(e) => setFlagFilter(e.target.value)}
-                                className="w-full sm:w-40 py-1.5 px-2 text-xs border border-white/30 rounded-lg bg-white/95 focus:outline-none focus:ring-2 focus:ring-white/40 transition-all text-black cursor-pointer"
+                                className="w-full sm:w-24 py-1.5 px-2 text-xs border border-white/30 rounded-lg bg-white/95 focus:outline-none focus:ring-2 focus:ring-white/40 transition-all text-black cursor-pointer"
                             >
                                 <option value="all">All Flags</option>
                                 {uniqueFlags.map(flag => (
@@ -394,11 +551,71 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
                                 ))}
                             </select>
 
+                            {/* Last User filter */}
+                            <select
+                                value={userFilter}
+                                onChange={(e) => setUserFilter(e.target.value)}
+                                className="w-full sm:w-28 py-1.5 px-2 text-xs border border-white/30 rounded-lg bg-white/95 focus:outline-none focus:ring-2 focus:ring-white/40 transition-all text-black cursor-pointer"
+                                title="Filter by last follow-up user"
+                            >
+                                <option value="all">All Users</option>
+                                {uniqueUsers.map(name => (
+                                    <option key={name} value={name}>{name}</option>
+                                ))}
+                            </select>
+
+                            {/* Campaign filter — only in all-campaigns report mode */}
+                            {isAllReport && (
+                                <select
+                                    value={campaignFilter}
+                                    onChange={(e) => setCampaignFilter(e.target.value)}
+                                    className="w-full sm:w-28 py-1.5 px-2 text-xs border border-white/30 rounded-lg bg-white/95 focus:outline-none focus:ring-2 focus:ring-white/40 transition-all text-black cursor-pointer"
+                                    title="Filter by drive"
+                                >
+                                    <option value="all">All Drives</option>
+                                    {uniqueCampaigns.map(name => (
+                                        <option key={name} value={name}>{name}</option>
+                                    ))}
+                                </select>
+                            )}
+
+                            {/* Last Follow-up date range filter */}
+                            <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                                <span className="text-white/80 text-[11px] sm:text-xs flex-shrink-0 whitespace-nowrap">Last F/U:</span>
+                                <input
+                                    type="date"
+                                    value={dateFrom}
+                                    onChange={(e) => setDateFrom(e.target.value)}
+                                    className="w-full sm:w-28 py-1.5 px-2 text-xs border border-white/30 rounded-lg bg-white/95 focus:outline-none focus:ring-2 focus:ring-white/40 transition-all text-black cursor-pointer"
+                                    title="Last Follow-up from date"
+                                />
+                                <span className="text-white/80 text-[11px] sm:text-xs flex-shrink-0">to</span>
+                                <input
+                                    type="date"
+                                    value={dateTo}
+                                    onChange={(e) => setDateTo(e.target.value)}
+                                    className="w-full sm:w-28 py-1.5 px-2 text-xs border border-white/30 rounded-lg bg-white/95 focus:outline-none focus:ring-2 focus:ring-white/40 transition-all text-black cursor-pointer"
+                                    title="Last Follow-up to date"
+                                />
+                                {(dateFrom || dateTo) && (
+                                    <button
+                                        onClick={() => { setDateFrom(''); setDateTo(''); }}
+                                        className="text-white/80 hover:text-white focus:outline-none flex-shrink-0"
+                                        type="button"
+                                        title="Clear date range"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                )}
+                            </div>
+
                             {/* Export button */}
                             <button
                                 onClick={exportToExcel}
                                 disabled={exportLoading || customers.length === 0}
-                                className="px-3 py-1.5 bg-white text-[#2f3192] text-[11px] sm:text-xs font-semibold rounded-lg hover:bg-white/90 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-full sm:w-auto sm:ml-auto"
+                                className="px-3 py-1.5 bg-white text-[#2f3192] text-[11px] sm:text-xs font-semibold rounded-lg hover:bg-white/90 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-full sm:w-auto"
                             >
                                 {exportLoading ? (
                                     <>
@@ -436,7 +653,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
                             style={{
                                 scrollbarWidth: 'thin',
                                 overflowY: 'hidden',
-                                height: '8px',
+                                height: '10px',
                                 cursor: 'pointer'
                             }}
                         >
@@ -447,15 +664,17 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
                         <div
                             ref={tableContainerRef}
                             className="overflow-x-auto"
-                            style={{ maxHeight: 'calc(120vh - 300px)', minHeight: '450px', overflowX: 'auto' }}
+                            style={{ maxHeight: 'calc(135vh - 300px)', minHeight: '450px', overflowX: 'auto' }}
                         >
-                            {loading ? (
+                            {loading && customers.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center py-16">
                                     <div className="w-8 h-8 border-3 border-t-3 border-t-[#2f3192] border-gray-200 rounded-full animate-spin"></div>
-                                    <p className="mt-2 text-xs text-gray-600 font-medium">Loading customers...</p>
+                                    <p className="mt-2 text-xs text-gray-600 font-medium">
+                                        {isAllReport ? `Loading drives... (${loadedCount}/${totalToLoad})` : 'Loading customers...'}
+                                    </p>
                                 </div>
                             ) : filteredCustomers.length > 0 ? (
-                                <table className="w-full border-collapse" style={{ minWidth: '1450px' }}>
+                                <table className="w-full border-collapse" style={{ minWidth: '1600px' }}>
                                     <thead className="bg-gray-100 sticky top-0">
                                         <tr>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">S.No</th>
@@ -466,17 +685,19 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Branch</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Location</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Last Status</th>
+                                            <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Subtype</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Last User</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Last Follow-up</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Next Follow-up</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Flag</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Remark</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Quotation</th>
+                                            <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Drive Name</th>
                                         </tr>
                                     </thead>
                                     <tbody className="bg-white">
                                         {filteredCustomers.map((customer, idx) => (
-                                            <tr key={customer.instance_id || idx} className="hover:bg-gray-50 transition-colors duration-150">
+                                            <tr key={`${customer.campaign_name || 'c'}-${customer.instance_id || 'x'}-${idx}`} className="hover:bg-gray-50 transition-colors duration-150">
                                                 <td className="px-2 py-1.5 text-center text-[11px] text-gray-700 font-medium border border-gray-200">{idx + 1}</td>
                                                 <td className="px-2 py-1.5 text-center text-[11px] font-mono text-gray-700 border border-gray-200">
                                                     {highlightText(customer.instance_id, searchTerm)}
@@ -503,6 +724,9 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
                                                 </td>
                                                 <td className="px-2 py-1.5 text-center border border-gray-200">
                                                     <div className="flex justify-center">{getStatusBadge(customer.last_status)}</div>
+                                                </td>
+                                                <td className="px-2 py-1.5 text-center text-[11px] text-gray-700 border border-gray-200">
+                                                    {customer.csp_subtype || '—'}
                                                 </td>
                                                 <td className="px-2 py-1.5 text-center border border-gray-200">
                                                     <div
@@ -543,6 +767,9 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl 
                                                     ) : (
                                                         <span className="text-gray-500">Not Sent</span>
                                                     )}
+                                                </td>
+                                                <td className="px-2 py-1.5 text-center text-[11px] text-gray-700 border border-gray-200" title={customer.campaign_name || campaignInfo?.name}>
+                                                    {customer.campaign_name || campaignInfo?.name || '—'}
                                                 </td>
                                             </tr>
                                         ))}

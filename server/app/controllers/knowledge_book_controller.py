@@ -1,6 +1,8 @@
 import os
+import io
 import uuid
 import shutil
+import zipfile
 from pathlib import Path
 from fastapi import UploadFile, HTTPException
 from sqlalchemy.orm import Session
@@ -9,16 +11,12 @@ from sqlalchemy import func
 from app.models.knowledge_book_model import KBFolder, KBFile
 
 # ---------------- STORAGE ---------------- #
-# Mirrors the banner controller: files live under uploads/knowledge_book/
-# and are served by the existing /api/uploads static mount.
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
-UPLOAD_DIR = BASE_DIR / "uploads"
-KB_DIR = UPLOAD_DIR / "knowledge_book"
+# Files are now stored directly in the database (KBFile.data), so there is no
+# upload directory to manage.
 
-try:
-    KB_DIR.mkdir(parents=True, exist_ok=True)
-except Exception as e:
-    print(f"Error creating Knowledge Book directory: {e}")
+# Maximum size for a single uploaded file. Keep this in sync with the frontend.
+MAX_FILE_SIZE_MB = 25
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
 # Allowed upload types -> kind
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
@@ -127,6 +125,7 @@ def list_contents(db: Session, parent_id, is_admin: bool):
     for f in folders:
         # Admins see true counts; users see only what they can reach.
         sub_f, sub_fl = _counts(db, f.id) if is_admin else _visible_counts(db, f.id)
+        _fdate = f.updated_at or f.created_at
         folder_dtos.append({
             "id": f.id,
             "name": f.name,
@@ -134,6 +133,7 @@ def list_contents(db: Session, parent_id, is_admin: bool):
             "is_product": (parent_id is None and (f.name or "").strip().lower() in product_names),
             "folder_count": sub_f,
             "file_count": sub_fl,
+            "modified_at": _fdate.isoformat() if _fdate else None,
         })
 
     file_dtos = [{
@@ -141,7 +141,8 @@ def list_contents(db: Session, parent_id, is_admin: bool):
         "name": fl.original_name,
         "kind": fl.kind,
         "size_bytes": fl.size_bytes,
-        "url": f"/api/uploads/knowledge_book/{fl.stored_name}",
+        "url": f"/api/knowledge-book/files/{fl.id}/view",
+        "modified_at": fl.created_at.isoformat() if fl.created_at else None,
     } for fl in files]
 
     return folder_dtos, file_dtos
@@ -229,13 +230,7 @@ def toggle_hide_folder(db: Session, folder_id: int):
 
 
 def _delete_file_row(db: Session, file_row: KBFile):
-    """Remove one file's bytes from disk and its DB row."""
-    try:
-        path = KB_DIR / file_row.stored_name
-        if path.exists():
-            path.unlink()
-    except Exception as e:
-        print(f"Error removing file {file_row.stored_name}: {e}")
+    """Remove a file's DB row. The bytes live in the row, so nothing else to do."""
     db.delete(file_row)
 
 
@@ -277,27 +272,29 @@ async def save_file(db: Session, folder_id: int, upload: UploadFile, uploaded_by
             detail=f"File type {ext or '(unknown)'} not allowed. Upload an image, video, or PDF.",
         )
 
-    stored_name = f"{uuid.uuid4().hex}{ext}"
-    dest = KB_DIR / stored_name
-
+    # Read the whole file into memory and store it in the database.
     try:
-        with open(dest, "wb") as buffer:
-            shutil.copyfileobj(upload.file, buffer)
+        contents = await upload.read()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error saving file: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reading file: {e}")
     finally:
         await upload.close()
 
-    size_bytes = None
-    try:
-        size_bytes = dest.stat().st_size
-    except Exception:
-        pass
+    size_bytes = len(contents)
+
+    # Server-side size guard. The frontend checks too, but never trust the client.
+    if size_bytes > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f'"{upload.filename}" is too large. Maximum allowed size is {MAX_FILE_SIZE_MB} MB.',
+        )
 
     row = KBFile(
         folder_id=folder_id,
         original_name=upload.filename,
-        stored_name=stored_name,
+        stored_name=None,
+        content_type=upload.content_type,
+        data=contents,
         kind=kind_from_ext(ext),
         size_bytes=size_bytes,
         uploaded_by=uploaded_by,
@@ -313,6 +310,54 @@ def get_file(db: Session, file_id: int):
     if not row:
         raise HTTPException(status_code=404, detail="File not found")
     return row
+
+
+def build_folder_zip(db: Session, folder_id: int, is_admin: bool):
+    """Zip a folder and its entire subtree into memory -> (folder_name, BytesIO).
+    Non-admins don't get hidden subfolders and can't download a hidden folder."""
+    folder = db.query(KBFolder).filter(KBFolder.id == folder_id).first()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    if folder.is_hidden and not is_admin:
+        raise HTTPException(status_code=404, detail="Folder not found")
+
+    total_rows = 0   # files we expected to add
+    written = 0      # files whose bytes were actually found on disk
+    missing = []
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        def recurse(fid, rel):
+            nonlocal total_rows, written
+            for fl in db.query(KBFile).filter(KBFile.folder_id == fid).all():
+                total_rows += 1
+                # ZIP entries MUST use forward slashes, even on Windows.
+                arcname = f"{rel}/{fl.original_name}"
+                if fl.data is not None:
+                    zf.writestr(arcname, fl.data)
+                    written += 1
+                else:
+                    missing.append(fl.original_name)
+
+            subq = db.query(KBFolder).filter(KBFolder.parent_id == fid)
+            if not is_admin:
+                subq = subq.filter(KBFolder.is_hidden == False)  # noqa: E712
+            for sub in subq.all():
+                recurse(sub.id, f"{rel}/{sub.name}")
+
+        recurse(folder.id, folder.name)
+
+    if missing:
+        print(f"⚠️ Knowledge Book ZIP for '{folder.name}': "
+              f"{written}/{total_rows} files written, {len(missing)} had no data.")
+
+    if written == 0:
+        if total_rows == 0:
+            raise HTTPException(status_code=404, detail="This folder has no files to download.")
+        raise HTTPException(status_code=404, detail="The file records exist but their data is empty.")
+
+    buffer.seek(0)
+    return folder.name, buffer
 
 
 def delete_file(db: Session, file_id: int):

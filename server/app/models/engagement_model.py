@@ -18,13 +18,16 @@ class FollowUp(Base):
     followup_by = Column(String(50))  # call, message, email, visit
     followup_flag = Column(String(20))  # C1, C2, C3, C4, C5
     followup_remark = Column(Text)
-    status = Column(String(50), default='pending')  # rescheduled, wip, completed, rejected
+    status = Column(String(50), default='pending')  # rescheduled, wip, completed, rejected, not_connected
     next_followup_date = Column(DateTime, nullable=True)
     
     # Quotation Info
     quotation_sent = Column(Boolean, default=False)
     quotation_no = Column(String(100), nullable=True)
     quotation_value = Column(Float, nullable=True)
+
+    # CSP subtype — set only for CSP-product follow-ups (sourced from CSP Info)
+    csp_subtype = Column(String(100), nullable=True)
     
     # Activity and RR references
     activity_id = Column(Integer, ForeignKey("activities.id"), nullable=True)

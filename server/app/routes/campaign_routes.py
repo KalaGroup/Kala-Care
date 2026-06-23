@@ -69,13 +69,26 @@ def get_campaign(campaign_id: int, db: Session = Depends(get_db)):
 @router.post("/", response_model=campaign_schema.CampaignResponse, status_code=status.HTTP_201_CREATED)
 def create_campaign(
     request: Request,
-    campaign: campaign_schema.CampaignCreate, 
+    campaign: campaign_schema.CampaignCreate,
+    transfer_from_campaign_ids: Optional[List[int]] = Query(
+        None,
+        description="IDs of active same-product campaigns to transfer assets from (these get set to inactive)"
+    ),
     db: Session = Depends(get_db)
 ):
     controller = CampaignController(db)
     user_data = get_user_from_request(request)
-    return controller.create_campaign(campaign, user_data)
+    return controller.create_campaign(campaign, user_data, transfer_from_campaign_ids)
 
+@router.get("/active/by-service")
+def get_active_campaigns_by_service(
+    service: str = Query(..., description="Product/service name"),
+    db: Session = Depends(get_db)
+):
+    """Active campaigns for a product — used by the asset-transfer picker."""
+    controller = CampaignController(db)
+    return controller.get_active_campaigns_by_service(service)
+    
 @router.put("/{campaign_id}", response_model=campaign_schema.CampaignResponse)
 def update_campaign(
     request: Request,
@@ -128,6 +141,22 @@ def get_campaign_counts(campaign_id: int, db: Session = Depends(get_db)):
     controller = CampaignController(db)
     return controller.get_campaign_counts(campaign_id)
 
+@router.get("/drive-meta/all", response_model=List[campaign_schema.DriveMetaResponse])
+def get_all_drive_meta(db: Session = Depends(get_db)):
+    """All drive-meta rows (Data Duration + Remark), keyed by campaign_id."""
+    controller = CampaignController(db)
+    return controller.get_all_drive_meta()
+
+@router.put("/{campaign_id}/drive-meta", response_model=campaign_schema.DriveMetaResponse)
+def upsert_drive_meta(
+    campaign_id: int,
+    data: campaign_schema.DriveMetaUpsert,
+    db: Session = Depends(get_db)
+):
+    """Create/update Data Duration + Remark for a drive (separate table)."""
+    controller = CampaignController(db)
+    return controller.upsert_drive_meta(campaign_id, data)
+    
 # Add this new endpoint after your existing routes
 @router.post("/update-branch-codes")
 def update_branch_codes(

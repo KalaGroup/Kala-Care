@@ -94,7 +94,7 @@ class EngagementController:
             return 0
         
         # Skip if completed or rejected
-        if followup.status in ['completed']:
+        if followup.status in ['completed', 'not_connected']:
             return 0
         
         old_flag = followup.followup_flag
@@ -561,38 +561,31 @@ class EngagementController:
         for f in all_followups_for_customers:
             followups_by_customer.setdefault(f.customer_id, []).append(f)
             
-        #added by nik
-        # ========== OPTIMIZATION: Fetch ALL "transfer-source" campaigns in ONE query ==========
-        # For each active campaign, find OLDER campaigns with same name+service
-        # Note: MSSQL doesn't support tuple IN syntax, so use or_(and_(...)) instead
-        name_service_pairs = {(c.name, c.service) for c in active_campaigns}
+        # ========== Transfer-source campaigns: SAME PRODUCT (service) + INACTIVE ==========
+        # New rule: a customer gets the "T" tag on an active campaign if their
+        # instance_id ALSO appears in an INACTIVE campaign of the SAME PRODUCT
+        # (service). Campaign NAME is no longer used — only the product matters.
+        # (Matches the new create flow: transferred-from campaigns become inactive
+        #  but keep their asset_numbers, so the instance lives in both.)
+        active_services = {c.service for c in active_campaigns if c.service}
         transfer_candidate_campaigns = []
-        if name_service_pairs:
-            pair_filters = [
-                and_(Campaign.name == name, Campaign.service == service)
-                for name, service in name_service_pairs
-            ]
+        if active_services:
             transfer_candidate_campaigns = self.db.query(Campaign).filter(
-                or_(*pair_filters)
+                Campaign.service.in_(list(active_services)),
+                Campaign.status == 'inactive'   # only inactive campaigns are transfer sources
             ).all()
-        
-        # Group transfer-candidate campaigns by (name, service); exclude active ones for each pair
-        transfer_campaigns_by_pair: Dict[tuple, List[Campaign]] = {}
-        active_campaign_ids = {c.id for c in active_campaigns}
+
+        # Group inactive transfer-source campaigns by service (product)
+        transfer_campaigns_by_service: Dict[str, List[Campaign]] = {}
         for c in transfer_candidate_campaigns:
-            key = (c.name, c.service)
-            # Don't include the active campaign itself in its own transfer-source list
-            if c.id in active_campaign_ids:
-                pass
-            transfer_campaigns_by_pair.setdefault(key, []).append(c)
-        
-        # Pre-compute, per active campaign, the list of OLDER campaign IDs to check for transfers
+            transfer_campaigns_by_service.setdefault(c.service, []).append(c)
+
+        # Pre-compute, per active campaign, the inactive same-product campaigns to check
         transfer_sources_per_active_campaign: Dict[int, List[Campaign]] = {}
         for ac in active_campaigns:
-            same_pair = transfer_campaigns_by_pair.get((ac.name, ac.service), [])
-            transfer_sources_per_active_campaign[ac.id] = [c for c in same_pair if c.id != ac.id]
-        
-        # Pre-parse asset_numbers for ALL transfer-candidate campaigns once
+            transfer_sources_per_active_campaign[ac.id] = transfer_campaigns_by_service.get(ac.service, [])
+
+        # Pre-parse asset_numbers for ALL transfer-source campaigns once
         parsed_assets_by_campaign_id: Dict[int, List] = {
             c.id: self._parse_asset_numbers(c.asset_numbers)
             for c in transfer_candidate_campaigns
@@ -688,7 +681,8 @@ class EngagementController:
                 current_campaign_followup = latest_followup_per_campaign.get(campaign_obj.id)
                 status = current_campaign_followup.status if current_campaign_followup else None
                 
-                # Transfer detection: check OLD campaigns with same (name, service)
+                # Transfer detection: customer is "transferred" (T) if their
+                # instance_id appears in an INACTIVE campaign of the SAME PRODUCT
                 is_transferred = False
                 old_campaign_status = None
                 
@@ -904,6 +898,7 @@ class EngagementController:
                 "quotation_sent": f.quotation_sent,
                 "quotation_no": f.quotation_no,
                 "quotation_value": f.quotation_value,
+                "csp_subtype": f.csp_subtype,
                 "activity_id": f.activity_id,
                 "activity_content": activity_content,
                 "rr_id": f.rr_id,
@@ -1163,6 +1158,7 @@ class EngagementController:
                 "quotation_sent": f.quotation_sent,
                 "quotation_no": f.quotation_no,
                 "quotation_value": f.quotation_value,
+                "csp_subtype": f.csp_subtype,
                 "activity_id": f.activity_id,
                 "rr_id": f.rr_id,
                 "created_at": f.created_at,
@@ -1207,6 +1203,7 @@ class EngagementController:
             "quotation_sent": followup.quotation_sent,
             "quotation_no": followup.quotation_no,
             "quotation_value": followup.quotation_value,
+            "csp_subtype": followup.csp_subtype,
             "activity_id": followup.activity_id,
             "rr_id": followup.rr_id,
             "created_at": followup.created_at,
@@ -1308,6 +1305,7 @@ class EngagementController:
             "quotation_sent": db_followup.quotation_sent,
             "quotation_no": db_followup.quotation_no,
             "quotation_value": db_followup.quotation_value,
+            "csp_subtype": db_followup.csp_subtype,
             "activity_id": db_followup.activity_id,
             "rr_id": db_followup.rr_id,
             "created_at": db_followup.created_at,
@@ -1386,6 +1384,7 @@ class EngagementController:
             "quotation_sent": db_followup.quotation_sent,
             "quotation_no": db_followup.quotation_no,
             "quotation_value": db_followup.quotation_value,
+            "csp_subtype": db_followup.csp_subtype,
             "activity_id": db_followup.activity_id,
             "rr_id": db_followup.rr_id,
             "created_at": db_followup.created_at,
@@ -2389,7 +2388,7 @@ class EngagementController:
             "created_at": r.created_at,
         } for r in rows]
 
-    def _send_letter_email(self, to_email, subject, html_body, attachments):
+    def _send_letter_email(self, to_email, subject, html_body, attachments, cc_emails=None):
         if not all([self.sender_email, self.sender_password]):
             return False, "Company email is not configured"
         try:
@@ -2397,9 +2396,18 @@ class EngagementController:
             from email.mime.base import MIMEBase
             from email import encoders
 
+            # Clean CC list (drop blanks / duplicates / the primary recipient)
+            cc_clean = []
+            for e in (cc_emails or []):
+                e = (e or '').strip()
+                if e and e != to_email and e not in cc_clean:
+                    cc_clean.append(e)
+
             msg = MIMEMultipart('mixed')
             msg['From'] = self.sender_email
             msg['To'] = to_email
+            if cc_clean:
+                msg['Cc'] = ", ".join(cc_clean)
             msg['Subject'] = subject or "Letter from KALA Care"
             msg.attach(MIMEText(html_body or "", 'html'))
 
@@ -2418,10 +2426,11 @@ class EngagementController:
                 part.add_header('Content-Disposition', f'attachment; filename="{name}"')
                 msg.attach(part)
 
+            recipients = [to_email] + cc_clean
             with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
                 server.starttls()
                 server.login(self.sender_email, self.sender_password)
-                server.send_message(msg)
+                server.send_message(msg, to_addrs=recipients)
             return True, None
         except Exception as e:
             return False, str(e)
@@ -2506,23 +2515,36 @@ class EngagementController:
         sent_whatsapp = False
         errors = []
 
+        cc_emails = payload.get('cc_emails') or []          # additional emails -> CC
+        whatsapp_extra = payload.get('whatsapp_numbers') or []  # additional WhatsApp numbers
+
         if 'email' in channels:
             if not email_to:
                 errors.append("No recipient email address")
             else:
-                ok, err = self._send_letter_email(email_to, subject, letter_html, attachments)
+                email_body_html = payload.get('email_body_html') or letter_html
+                ok, err = self._send_letter_email(email_to, subject, email_body_html, attachments, cc_emails)
                 sent_email = ok
                 if not ok:
                     errors.append(f"Email: {err}")
 
         if 'whatsapp' in channels:
-            if not whatsapp_to:
+            all_numbers = [whatsapp_to] + list(whatsapp_extra)
+            all_numbers = [str(n).strip() for n in all_numbers if n and str(n).strip()]
+            # de-dup preserving order
+            seen = set()
+            all_numbers = [n for n in all_numbers if not (n in seen or seen.add(n))]
+            if not all_numbers:
                 errors.append("No WhatsApp number")
             else:
-                ok, err = self._send_letter_whatsapp(whatsapp_to, letter_text or subject, attachments)
-                sent_whatsapp = ok
-                if not ok:
-                    errors.append(f"WhatsApp: {err}")
+                any_ok = False
+                for num in all_numbers:
+                    ok, err = self._send_letter_whatsapp(num, letter_text or subject, attachments)
+                    if ok:
+                        any_ok = True
+                    else:
+                        errors.append(f"WhatsApp ({num}): {err}")
+                sent_whatsapp = any_ok
 
         if sent_email or sent_whatsapp:
             status_val = 'partial' if errors else 'sent'

@@ -81,12 +81,35 @@ class CampaignLetterFormat(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     format_type_name = Column(String(255), nullable=False)
-    channels = Column(JSON, default=[])             # e.g. ["email", "whatsapp"]
-    default_attachments = Column(JSON, default=[])  # [{"name","content","type","size"}, ...]
-    letter_format = Column(Text, nullable=True)     # the letter body the user types
+
+    products = Column(JSON, default=[])                 # e.g. ["Battery", "Oil"] - one or more products for this letter type
+    reference_no = Column(String(255), nullable=True)   # e.g. "KCGL/26-27/Battery,Oil/BranchCode/serial no"
+
+    default_attachments = Column(JSON, default=[])      # [{"name","content","type","size"}, ...]
+
+    start_para = Column(Text, nullable=True)            # opening paragraph of the letter
+    end_para = Column(Text, nullable=True)              # closing paragraph of the letter
 
     created_by_id = Column(String(100), nullable=True)
     created_by_name = Column(String(255), nullable=True)
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)    
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+class CampaignDriveMeta(Base):
+    """
+    Editable Drive-List-Info fields kept SEPARATE from the campaigns table.
+    Editing these NEVER touches the real Campaign record. One row per drive.
+    """
+    __tablename__ = "campaign_drive_meta"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(Integer, nullable=False, unique=True, index=True)  # one row per drive
+
+    display_name = Column(String(255), nullable=True)   # display-only name override (NOT the real drive name)
+    data_start_date = Column(DateTime, nullable=True)   # Drive Data Duration — start
+    data_end_date = Column(DateTime, nullable=True)     # Drive Data Duration — end
+    drive_remark = Column(Text, nullable=True)          # free-text remark
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)        

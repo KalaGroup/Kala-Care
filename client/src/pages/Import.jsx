@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
-import { useNavigate } from 'react-router-dom';
 import {
     DocumentArrowUpIcon,
     CheckCircleIcon,
@@ -197,7 +196,6 @@ const Import = () => {
     const [previewLoading, setPreviewLoading] = useState(false);
     const [showPreview, setShowPreview] = useState(false);
     const [formatError, setFormatError] = useState(null);
-    const navigate = useNavigate();
 
     const themeColor = '#2f3192';
     const themeShades = {
@@ -465,7 +463,6 @@ const Import = () => {
                             updated_count: job.updated_count,
                             total_processed: job.total_processed,
                         }]);
-                        setTimeout(() => { toast.success('Redirecting...'); navigate('/customers'); }, 2000);
                         setFiles([]); setSelectedFileType(''); setFilePreview(null);
                         setShowPreview(false); setFormatError(null);
                         return;
@@ -906,16 +903,6 @@ const Import = () => {
                         </div>
                     </div>
                 </div>
-
-                {results.length > 0 && results[0].status === 'success' && (
-                    <div className="mt-3 sm:mt-4 p-3 sm:p-4 border rounded-lg"
-                        style={{ backgroundColor: themeShades.light, borderColor: themeColor }}>
-                        <p className="text-xs sm:text-sm flex items-center gap-2" style={{ color: themeColor }}>
-                            <ArrowPathIcon className="animate-spin h-3 w-3 sm:h-4 sm:w-4" />
-                            Redirecting to customers page in 2 seconds...
-                        </p>
-                    </div>
-                )}
             </div>
         </div>
     );

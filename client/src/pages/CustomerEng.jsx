@@ -52,6 +52,51 @@ import { FaCheck } from "react-icons/fa";
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
 
+// True when a drive is still active. Checks the common flags; if your backend
+// uses a different field name for this, adjust it here.
+const isCampaignActive = (c) => {
+    if (!c) return false;
+    if (typeof c.is_active === 'boolean') return c.is_active;
+    if (typeof c.active === 'boolean') return c.active;
+    if (typeof c.archived === 'boolean') return !c.archived;
+    if (typeof c.is_archived === 'boolean') return !c.is_archived;
+    if (typeof c.status === 'string') return c.status.toLowerCase() === 'active';
+    return true; // no active flag on the record -> treat as active
+};
+
+// Builds short, space-saving drive labels grouped by product:
+//   two drives of the same product -> "Product (1)", "Product (2)", ...
+// DETERMINISTIC (sorted by product, then drive id) so the navbar guide and these
+// filter chips / table columns always show the EXACT same name.
+// NOTE: an identical copy lives in Navbar.jsx — keep both in sync.
+const buildCampaignShortNames = (campaigns) => {
+    if (!Array.isArray(campaigns) || campaigns.length === 0) return {};
+    const productOf = (c) =>
+        ((c.service || c.product || c.product_name || '').trim() || c.name || '');
+    const sorted = [...campaigns].sort((a, b) => {
+        const pa = productOf(a).toLowerCase();
+        const pb = productOf(b).toLowerCase();
+        if (pa !== pb) return pa.localeCompare(pb);
+        return (a.id || 0) - (b.id || 0);
+    });
+    const counters = {};
+    const map = {};
+    sorted.forEach((c) => {
+        if (!c || !c.name) return;
+        const product = productOf(c);
+        const key = product.toLowerCase();
+        counters[key] = (counters[key] || 0) + 1;
+        map[c.name] = {
+            product,
+            index: counters[key],
+            shortName: `${product} (${counters[key]})`,
+            color: c.color || '#406093',
+            id: c.id
+        };
+    });
+    return map;
+};
+
 const CustomerEng = () => {
     const navigate = useNavigate();
     const location = useLocation();
@@ -114,6 +159,8 @@ const CustomerEng = () => {
 
     // Campaign colors mapping
     const [campaignColors, setCampaignColors] = useState({});
+    // Full drive catalog (name, service, color, id) — drives the short "Product - N" labels
+    const [campaignsCatalog, setCampaignsCatalog] = useState([]);
     const [selectedBranches, setSelectedBranches] = useState([]);
     const [showBranchFilter, setShowBranchFilter] = useState(false);
     const branchFilterRef = useRef(null);
@@ -150,11 +197,22 @@ const CustomerEng = () => {
     // ==================== Send Letter wizard states ====================
     const COMPANY_NAME = 'KALA Care';
     const COMPANY_FULL = 'KALA Care Global LLP';
-    const COMPANY_LOGO = '/logo.png'; // place the file in the public/ folder
-    const LETTER_ATTACH_EXTS = ['mp4', 'jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx'];
+    // Header is two images side by side: logo.png on the LEFT, letter-header.png on the RIGHT.
+    // letter-footer.png is the footer band. All three live in the public/ folder.
+    const LETTER_LOGO_IMG = '/logo.png';
+    const LETTER_HEADER_IMG = '/letter-header.png';
+    const LETTER_FOOTER_IMG = '/letter-footer.png';
+    const LETTER_ATTACH_EXTS = ['mp4', 'jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'xlsx', 'xls', 'csv'];
+    // Common signature shown at the bottom of EVERY letter (after the editable end-para)
+    const LETTER_SIGNATURE = 'Best regards,\nKALA Care Global LLP\n\nAuthorized Signatory';
+    // Default (editable) intro lines shown above the follow-up / quotation tables.
+    // Re-applied whenever the letter is (re)generated so the boxes are never blank.
+    const DEFAULT_FOLLOWUP_INTRO = 'As part of our ongoing service engagement, our team has been in regular touch with you regarding the above. A summary of our recent follow-up(s) is provided below for your kind reference:';
+    const DEFAULT_QUOTATION_INTRO = 'In line with your requirement, we have prepared and submitted the following quotation(s) for your kind consideration and approval:';
+    const DEFAULT_LETTERREF_INTRO = 'For your kind reference, please find below the details of the letter(s) previously issued to you in connection with the above:';
 
     const [showLetterWizard, setShowLetterWizard] = useState(false);
-    const [letterStep, setLetterStep] = useState(1);
+    const [letterStep, setLetterStep] = useState(1);   // 1=Format, 2=Letter, 3=Review & Send
     const [wizardLetterFormats, setWizardLetterFormats] = useState([]);
     const [letterFormatsLoading, setLetterFormatsLoading] = useState(false);
     const [selectedLetterFormat, setSelectedLetterFormat] = useState(null);
@@ -163,14 +221,41 @@ const CustomerEng = () => {
     const [letterFy, setLetterFy] = useState('');
     const [letterSeq, setLetterSeq] = useState(1);
     const [previousLetters, setPreviousLetters] = useState([]);
-    const [logoDataUrl, setLogoDataUrl] = useState('');
+    const [logoImgDataUrl, setLogoImgDataUrl] = useState('');
+    const [headerImgDataUrl, setHeaderImgDataUrl] = useState('');
+    const [footerImgDataUrl, setFooterImgDataUrl] = useState('');
     const [letterSending, setLetterSending] = useState(false);
+
+    // Follow-up / Quotation inclusion (middle of the letter)
+    const [includeFollowups, setIncludeFollowups] = useState(false);
+    const [includeQuotations, setIncludeQuotations] = useState(false);
+    const [showFollowupPicker, setShowFollowupPicker] = useState(false);
+    const [showQuotationPicker, setShowQuotationPicker] = useState(false);
+    const [selectedFollowupIds, setSelectedFollowupIds] = useState([]);
+    const [selectedQuotationIds, setSelectedQuotationIds] = useState([]);
+
+    // Previous-letter (Letter Ref) inclusion — pulls rows from this customer's letter history
+    const [includeLetterRefs, setIncludeLetterRefs] = useState(false);
+    const [showLetterRefPicker, setShowLetterRefPicker] = useState(false);
+    const [selectedLetterRefIds, setSelectedLetterRefIds] = useState([]);
+
+    // Send channels + multi-recipient (extra emails go to CC, extra numbers each get the message)
     const [letterChannels, setLetterChannels] = useState([]);
     const [letterEmailTo, setLetterEmailTo] = useState('');
+    const [letterCcList, setLetterCcList] = useState([]);
+    const [letterCcInput, setLetterCcInput] = useState('');
     const [letterWhatsappTo, setLetterWhatsappTo] = useState('');
+    const [letterWhatsappList, setLetterWhatsappList] = useState([]);
+    const [letterWhatsappInput, setLetterWhatsappInput] = useState('');
+
     const [letterFields, setLetterFields] = useState({
         ref_no: '', date: '', to_name: '', to_address: '', instance_id: '',
-        engine_model: '', agreement_no: '', contact: '', email: '', subject: '', body: ''
+        engine_model: '', agreement_no: '', contact: '', email: '',
+        subject: '', start_para: '', end_para: '',
+        // editable intro lines shown above the follow-up / quotation / letter-ref tables
+        followup_intro: DEFAULT_FOLLOWUP_INTRO,
+        quotation_intro: DEFAULT_QUOTATION_INTRO,
+        letterref_intro: DEFAULT_LETTERREF_INTRO
     });
 
     // Data states
@@ -352,6 +437,7 @@ const CustomerEng = () => {
             case 'completed': return 'C';
             case 'rejected': return 'R';
             case 'rescheduled': return 'FR';
+            case 'not_connected': return 'NC';
             default: return '';
         }
     };
@@ -381,6 +467,22 @@ const CustomerEng = () => {
     const showRejectReasonGlobal = selectedCampaignsForFollowup.some(
         campaignId => campaignFollowupData[campaignId]?.status === 'rejected'
     );
+
+    // Next Follow-up Date is disabled + shown empty when EVERY selected drive is a
+    // status that doesn't use a next date (Completed / Rejected).
+    const allSelectedNoNextDate = selectedCampaignsForFollowup.length > 0 &&
+        selectedCampaignsForFollowup.every(id => {
+            const s = campaignFollowupData[id]?.status;
+            return s === 'completed' || s === 'rejected';
+        });
+
+    // Follow-up Flag is shown empty when EVERY selected drive is a status that
+    // doesn't use a flag (Completed / Rejected / Not Connected).
+    const allSelectedNoFlag = selectedCampaignsForFollowup.length > 0 &&
+        selectedCampaignsForFollowup.every(id => {
+            const s = campaignFollowupData[id]?.status;
+            return s === 'completed' || s === 'rejected' || s === 'not_connected';
+        });
 
     useEffect(() => {
         const userStr = sessionStorage.getItem('user');
@@ -574,17 +676,26 @@ const CustomerEng = () => {
         }
     }, [showCustomerDetails]);
 
-    // Close remark suggestions dropdown when clicking outside
+    // Close remark suggestions dropdown when clicking outside OR on scroll
     useEffect(() => {
         const handleClickOutside = (e) => {
             if (remarkDropdownRef.current && !remarkDropdownRef.current.contains(e.target)) {
                 setActiveRemarkDropdown(null);
             }
         };
+        // The dropdown is fixed-positioned, so any scroll (page or a nested
+        // scroll container) would leave it floating away from its input.
+        // Close it the moment the user scrolls anywhere.
+        const handleScroll = () => setActiveRemarkDropdown(null);
         if (activeRemarkDropdown !== null) {
             document.addEventListener('mousedown', handleClickOutside);
+            // capture: true so scrolls inside inner containers are caught too
+            window.addEventListener('scroll', handleScroll, true);
         }
-        return () => document.removeEventListener('mousedown', handleClickOutside);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+            window.removeEventListener('scroll', handleScroll, true);
+        };
     }, [activeRemarkDropdown]);
 
     // Filter and sort customers based on search, campaigns, flag, and sort config
@@ -662,6 +773,7 @@ const CustomerEng = () => {
                         if (status === 'transferred') return !!customer.campaign_transferred?.[campaignName];
                         if (status === 'wip') return customer.campaign_status?.[campaignName] === 'wip';
                         if (status === 'completed') return customer.campaign_status?.[campaignName] === 'completed';
+                        if (status === 'not_connected') return customer.campaign_status?.[campaignName] === 'not_connected';
                         if (status === 'rejected') return customer.campaign_status?.[campaignName] === 'rejected';
                         if (status === 'rescheduled') return customer.campaign_status?.[campaignName] === 'rescheduled';
                         return false;
@@ -867,8 +979,31 @@ const CustomerEng = () => {
             filtered = [...tempWithinRange, ...tempOutsideRange, ...tempNoDate];
         }
 
-        // ========== STEP 4: FLAG FILTER ==========
+        // ========== STEP 4: FLAG FILTER (also handles NC = Not connected, R = Rejected) ==========
         if (selectedFlag !== 'all') {
+            // One predicate for whichever chip is active.
+            const matchesSelectedFlag = (customer) => {
+                if (selectedFlag === 'NC') {
+                    // "Not connected" — any matching drive status is 'not_connected'
+                    // (respects selected drives + branch, mirrors the Rejected filter)
+                    const status = customer.campaign_status || {};
+                    if (selectedCampaigns.length > 0) {
+                        return selectedCampaigns.some(camp => status[camp] === 'not_connected');
+                    }
+                    return Object.values(status).some(s => s === 'not_connected');
+                }
+                if (selectedFlag === 'R') {
+                    // Rejected — any matching drive status is 'rejected' (respects selected drives + branch)
+                    const status = customer.campaign_status || {};
+                    if (selectedCampaigns.length > 0) {
+                        return selectedCampaigns.some(camp => status[camp] === 'rejected');
+                    }
+                    return Object.values(status).some(s => s === 'rejected');
+                }
+                // C1..C7 flags
+                return !!customer.followup_flags?.[selectedFlag];
+            };
+
             let tempWithinRange = [];
             let tempOutsideRange = [];
             let tempNoDate = [];
@@ -889,17 +1024,9 @@ const CustomerEng = () => {
                 }
             });
 
-            tempWithinRange = tempWithinRange.filter(customer =>
-                customer.followup_flags?.[selectedFlag]
-            );
-
-            tempOutsideRange = tempOutsideRange.filter(customer =>
-                customer.followup_flags?.[selectedFlag]
-            );
-
-            tempNoDate = tempNoDate.filter(customer =>
-                customer.followup_flags?.[selectedFlag]
-            );
+            tempWithinRange = tempWithinRange.filter(matchesSelectedFlag);
+            tempOutsideRange = tempOutsideRange.filter(matchesSelectedFlag);
+            tempNoDate = tempNoDate.filter(matchesSelectedFlag);
 
             filtered = [...tempWithinRange, ...tempOutsideRange, ...tempNoDate];
         }
@@ -1128,6 +1255,36 @@ const CustomerEng = () => {
         return count;
     }, [customers, selectedCampaigns, selectedBranches, isAdmin, userBranch]);
 
+    // NC (Not connected) count — loaded customers whose latest drive status is "not_connected"
+    // (respects branch + selected-drive filters, mirrors the Rejected count)
+    const notConnectedCount = useMemo(() => {
+        let visible = [...customers];
+        if (!isAdmin && userBranch && userBranch !== 'HO') {
+            visible = visible.filter(c => !c.branch_id || String(c.branch_id) === String(userBranch));
+        }
+        if (selectedBranches.length > 0) {
+            visible = visible.filter(c => selectedBranches.includes(String(c.branch_id || '')));
+        }
+
+        let count = 0;
+        visible.forEach(customer => {
+            const status = customer.campaign_status || {};
+            if (selectedCampaigns.length > 0) {
+                // Only count not-connected status from selected drives
+                selectedCampaigns.forEach(camp => {
+                    if (status[camp] === 'not_connected') count++;
+                });
+            } else {
+                // All drives → count every not-connected status
+                Object.values(status).forEach(s => {
+                    if (s === 'not_connected') count++;
+                });
+            }
+        });
+
+        return count;
+    }, [customers, selectedCampaigns, selectedBranches, isAdmin, userBranch]);
+
     const relatedAssets = useMemo(() => {
         if (!customerDetails) return [];
         let assets = serverRelatedAssets || [];
@@ -1157,6 +1314,28 @@ const CustomerEng = () => {
         [customerCampaigns, notEnrolledCampaigns]
     );
 
+    // True when a drive is a CSP product (the Subtype column applies to these only).
+    // Adjust the match if your CSP drive is named/serviced differently.
+    const isCspCampaign = (campaign) =>
+        `${campaign?.service || ''} ${campaign?.name || ''}`.toUpperCase().includes('CSP');
+
+    // Auto subtype for this customer:
+    //   1) CSP Info box → "SR Subtype" column (first non-blank)
+    //   2) else SR Details box → "Last Oil Change SR Sub Type" (first non-blank)
+    const getCspAutoSubtype = () => {
+        const fromCsp = (cspInfo || []).map(r => (r.sr_subtype || '').trim()).find(Boolean);
+        if (fromCsp) return fromCsp;
+        const fromService = (customerServices || []).map(s => (s.last_oil_change_sr_sub_type || '').trim()).find(Boolean);
+        return fromService || '';
+    };
+
+    // Subtype column shows when at least one selected drive is a CSP product
+    const showCspSubtypeGlobal = selectedCampaignsForFollowup.some(campaignId => {
+        if (campaignId === 'other') return false;
+        const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
+        return isCspCampaign(campaign);
+    });
+
     // Services available for "Other" (non-campaign) follow-ups — derived from all campaigns
     const campaignServices = useMemo(() => {
         const seen = new Set();
@@ -1170,6 +1349,16 @@ const CustomerEng = () => {
         });
         return list;
     }, [allCampaigns]);
+
+    // Short "Product - N" display names — built once, O(1) lookups (never slows the table).
+    const campaignShortNameMap = useMemo(
+        () => buildCampaignShortNames(campaignsCatalog),
+        [campaignsCatalog]
+    );
+    const getCampaignShortName = useCallback(
+        (name) => campaignShortNameMap[name]?.shortName || name,
+        [campaignShortNameMap]
+    );
 
     const fetchEngagementData = async () => {
         setLoading(true);
@@ -1290,8 +1479,11 @@ const CustomerEng = () => {
                 colors[campaign.name] = campaign.color || '#406093';
             });
             setCampaignColors(colors);
+            // Only ACTIVE drives feed the short "Product (N)" names — keeps the
+            // numbering identical to the navbar Drive List (which is active-only too).
+            setCampaignsCatalog(Array.isArray(campaigns) ? campaigns.filter(isCampaignActive) : []);
         } catch (err) {
-            console.error('Error fetching campaign colors:', err);
+            console.error('Error fetching drive colors:', err);
         }
     };
 
@@ -1564,6 +1756,45 @@ const CustomerEng = () => {
         }
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [openCampaignFilter]);
+
+    // Close Branch filter when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (branchFilterRef.current && !branchFilterRef.current.contains(e.target)) {
+                setShowBranchFilter(false);
+            }
+        };
+        if (showBranchFilter) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showBranchFilter]);
+
+    // Close Warranty Expiry filter when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (warrantyFilterRef.current && !warrantyFilterRef.current.contains(e.target)) {
+                setShowWarrantyFilter(false);
+            }
+        };
+        if (showWarrantyFilter) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showWarrantyFilter]);
+
+    // Close Agreement End filter when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (agreementFilterRef.current && !agreementFilterRef.current.contains(e.target)) {
+                setShowAgreementFilter(false);
+            }
+        };
+        if (showAgreementFilter) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showAgreementFilter]);
 
     // Function to remove customer from a campaign
     const removeCustomerFromCampaign = async (campaignId, customerId) => {
@@ -2005,6 +2236,7 @@ const CustomerEng = () => {
                         activity_id: '',
                         rr_id: '',
                         remark: '',
+                        csp_subtype: '',
                         followup_by: commonFollowupBy,
                         followup_flag: commonFollowupFlag,
                         next_followup_date: commonNextFollowupDate
@@ -2041,6 +2273,7 @@ const CustomerEng = () => {
                     activity_id: '',
                     rr_id: '',
                     remark: '',
+                    csp_subtype: '',
                     service: '',
                     followup_by: commonFollowupBy,
                     followup_flag: commonFollowupFlag,
@@ -2160,6 +2393,7 @@ const CustomerEng = () => {
                 activity_id: followup.activity_id || '',
                 rr_id: followup.rr_id || '',
                 remark: followup.followup_remark || '',
+                csp_subtype: followup.csp_subtype || '',
                 followup_by: followup.followup_by || 'call',
                 followup_flag: followup.followup_flag || '',
                 next_followup_date: followup.next_followup_date ? followup.next_followup_date.split('T')[0] : ''
@@ -2244,7 +2478,7 @@ const CustomerEng = () => {
         }
 
         if (selectedCampaignsForFollowup.length === 0) {
-            toast.error('Please select at least one campaign');
+            toast.error('Please select at least one drive');
             return;
         }
 
@@ -2325,7 +2559,7 @@ const CustomerEng = () => {
             const campaignData = campaignFollowupData[campaignId];
 
             if (!campaignData) {
-                toast.error(`Please fill data for all selected campaigns`);
+                toast.error(`Please fill data for all selected drives`);
                 return;
             }
 
@@ -2334,7 +2568,7 @@ const CustomerEng = () => {
                     toast.error(`Please select an activity for Other follow-up`);
                 } else {
                     const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
-                    toast.error(`Please select an activity for campaign: ${campaign?.name}`);
+                    toast.error(`Please select an activity for drive: ${campaign?.name}`);
                 }
                 return;
             }
@@ -2345,32 +2579,37 @@ const CustomerEng = () => {
                     toast.error(`Please enter a remark for Other follow-up`);
                 } else {
                     const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
-                    toast.error(`Please enter a remark for campaign: ${campaign?.name}`);
+                    toast.error(`Please enter a remark for drive: ${campaign?.name}`);
                 }
                 return;
             }
 
-            // Next follow-up date and flag are mandatory for 'rescheduled' and 'wip' statuses
-            if (campaignData.status === 'rescheduled' || campaignData.status === 'wip') {
+            // Next follow-up date and flag are mandatory for 'rescheduled', 'wip' and 'not_connected' statuses
+            if (campaignData.status === 'rescheduled' || campaignData.status === 'wip' || campaignData.status === 'not_connected') {
                 const nextDate = campaignData.next_followup_date || commonNextFollowupDate;
                 const flag = campaignData.followup_flag || commonFollowupFlag;
+                const statusLabel = campaignData.status === 'wip'
+                    ? 'WIP'
+                    : campaignData.status === 'not_connected'
+                        ? 'Not Connected'
+                        : 'Follow-up Reschedule';
 
                 if (!nextDate) {
                     if (isOtherType) {
-                        toast.error(`Please select Next Follow-up Date for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in Other follow-up`);
+                        toast.error(`Please select Next Follow-up Date for "${statusLabel}" status in Other follow-up`);
                     } else {
                         const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
-                        toast.error(`Please select Next Follow-up Date for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in campaign: ${campaign?.name}`);
+                        toast.error(`Please select Next Follow-up Date for "${statusLabel}" status in drive: ${campaign?.name}`);
                     }
                     return;
                 }
 
-                if (!flag) {
+                if (!flag && campaignData.status !== 'not_connected') {
                     if (isOtherType) {
-                        toast.error(`Please select Follow-up Flag for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in Other follow-up`);
+                        toast.error(`Please select Follow-up Flag for "${statusLabel}" status in Other follow-up`);
                     } else {
                         const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
-                        toast.error(`Please select Follow-up Flag for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in campaign: ${campaign?.name}`);
+                        toast.error(`Please select Follow-up Flag for "${statusLabel}" status in drive: ${campaign?.name}`);
                     }
                     return;
                 }
@@ -2382,7 +2621,7 @@ const CustomerEng = () => {
                     toast.error(`Please select a reject reason for Other follow-up`);
                 } else {
                     const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
-                    toast.error(`Please select a reject reason for campaign: ${campaign?.name}`);
+                    toast.error(`Please select a reject reason for drive: ${campaign?.name}`);
                 }
                 return;
             }
@@ -2391,17 +2630,17 @@ const CustomerEng = () => {
             if (!isOtherType && (campaignData.status === 'completed' || campaignData.status === 'wip')) {
                 if (!campaignData.quotation_sent) {
                     const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
-                    toast.error(`For "${campaignData.status === 'completed' ? 'Completed' : 'WIP'}" status in campaign "${campaign?.name}", please check "Quote Sent" checkbox first`);
+                    toast.error(`For "${campaignData.status === 'completed' ? 'Completed' : 'WIP'}" status in drive "${campaign?.name}", please check "Quote Sent" checkbox first`);
                     return;
                 }
                 if (!campaignData.quotation_no || campaignData.quotation_no.trim() === '') {
                     const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
-                    toast.error(`For "${campaignData.status === 'completed' ? 'Completed' : 'WIP'}" status in campaign "${campaign?.name}", please enter Quotation Number`);
+                    toast.error(`For "${campaignData.status === 'completed' ? 'Completed' : 'WIP'}" status in drive "${campaign?.name}", please enter Quotation Number`);
                     return;
                 }
                 if (!campaignData.quotation_value || campaignData.quotation_value <= 0) {
                     const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
-                    toast.error(`For "${campaignData.status === 'completed' ? 'Completed' : 'WIP'}" status in campaign "${campaign?.name}", please enter valid Quotation Value`);
+                    toast.error(`For "${campaignData.status === 'completed' ? 'Completed' : 'WIP'}" status in drive "${campaign?.name}", please enter valid Quotation Value`);
                     return;
                 }
             }
@@ -2413,7 +2652,7 @@ const CustomerEng = () => {
                 if (nextDate && flag && !validateNextFollowupDate(nextDate, flag)) {
                     const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
                     const days = followupFlags[flag];
-                    toast.error(`Next follow-up date must be within ${days} days from today for ${flag} flag in campaign: ${campaign?.name}`);
+                    toast.error(`Next follow-up date must be within ${days} days from today for ${flag} flag in drive: ${campaign?.name}`);
                     return;
                 }
             }
@@ -2423,23 +2662,24 @@ const CustomerEng = () => {
                 if (!canCreateWipQuotation(campaignId)) {
                     const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
                     // toast.error(`Cannot send quotation with WIP status for campaign "${campaign?.name}". Last WIP quotation was sent within the last 90 days. Please wait until 90 days have passed or use a different status.`);
-                    toast.error(`Cannot send quotation with WIP status for campaign "${campaign?.name}". Last WIP quotation was sent within the last 90 days. Please wait until 90 days have passed or use a different status.`);
+                    toast.error(`Cannot send quotation with WIP status for drive "${campaign?.name}". Last WIP quotation was sent within the last 90 days. Please wait until 90 days have passed or use a different status.`);
                     return;
                 }
             }
 
-            // If status is 'rescheduled', quotation_sent must be false
-            if (campaignData.status === 'rescheduled') {
+            // If status is 'rescheduled' or 'not_connected', quotation_sent must be false
+            if (campaignData.status === 'rescheduled' || campaignData.status === 'not_connected') {
+                const statusLabel = campaignData.status === 'not_connected' ? 'Not Connected' : 'Follow-up Reschedule';
                 if (campaignData.quotation_sent) {
                     if (isOtherType) {
-                        toast.error(`Cannot save: Status is "Follow-up Reschedule" but quotation is sent for Other follow-up. Please uncheck "Quote Sent" or change status.`);
+                        toast.error(`Cannot save: Status is "${statusLabel}" but quotation is sent for Other follow-up. Please uncheck "Quote Sent" or change status.`);
                     } else {
                         const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
-                        toast.error(`Cannot save: Status is "Follow-up Reschedule" but quotation is sent for campaign "${campaign?.name}". Please uncheck "Quote Sent" or change status.`);
+                        toast.error(`Cannot save: Status is "${statusLabel}" but quotation is sent for drive "${campaign?.name}". Please uncheck "Quote Sent" or change status.`);
                     }
                     return;
                 }
-                // Clear quotation data if rescheduled
+                // Clear quotation data for these statuses
                 campaignData.quotation_sent = false;
                 campaignData.quotation_no = '';
                 campaignData.quotation_value = '';
@@ -2492,8 +2732,8 @@ const CustomerEng = () => {
                 }).join('');
 
                 const result = await Swal.fire({
-                    title: 'Same product — apply to other campaign too?',
-                    html: `This customer is also enrolled in the following campaign(s) with the same product:<ul style="text-align:left;margin-top:8px;">${listHtml}</ul>Do you want to record the same follow-up there as well?`,
+                    title: 'Same product — apply to other drive too?',
+                    html: `This customer is also enrolled in the following drive(s) with the same product:<ul style="text-align:left;margin-top:8px;">${listHtml}</ul>Do you want to record the same follow-up there as well?`,
                     icon: 'question',
                     showCancelButton: true,
                     showCloseButton: true,
@@ -2559,6 +2799,11 @@ const CustomerEng = () => {
                     if (campaignData.status === 'rejected' || campaignData.status === 'completed') {
                         formData.followup_flag = null;
                         formData.next_followup_date = null;
+                    } else if (campaignData.status === 'not_connected') {
+                        // Not Connected → keep next follow-up date, but DO NOT store a flag
+                        formData.followup_flag = null;
+                        formData.next_followup_date = (campaignData.next_followup_date || commonNextFollowupDate) ?
+                            new Date(campaignData.next_followup_date || commonNextFollowupDate).toISOString() : null;
                     } else {
                         formData.followup_flag = campaignData.followup_flag || commonFollowupFlag || null;
                         formData.next_followup_date = (campaignData.next_followup_date || commonNextFollowupDate) ?
@@ -2597,6 +2842,8 @@ const CustomerEng = () => {
                         quotation_value: campaignData.quotation_sent ? parseFloat(campaignData.quotation_value) : null,
                         activity_id: parseInt(campaignData.activity_id),
                         rr_id: campaignData.rr_id ? parseInt(campaignData.rr_id) : null,
+                        // Stored only for CSP drives — non-CSP rows never set this, so it stays null
+                        csp_subtype: isCspCampaign(selectableCampaigns.find(c => c.id === parseInt(campaignId))) ? (getCspAutoSubtype() || null) : null,
                         user_id: currentUser.user_id || currentUser.id,
                         user_name: currentUser.name
                     };
@@ -2604,6 +2851,11 @@ const CustomerEng = () => {
                     if (campaignData.status === 'rejected' || campaignData.status === 'completed') {
                         formData.followup_flag = null;
                         formData.next_followup_date = null;
+                    } else if (campaignData.status === 'not_connected') {
+                        // Not Connected → keep next follow-up date, but DO NOT store a flag
+                        formData.followup_flag = null;
+                        formData.next_followup_date = (campaignData.next_followup_date || commonNextFollowupDate) ?
+                            new Date(campaignData.next_followup_date || commonNextFollowupDate).toISOString() : null;
                     } else {
                         formData.followup_flag = campaignData.followup_flag || commonFollowupFlag || null;
                         formData.next_followup_date = (campaignData.next_followup_date || commonNextFollowupDate) ?
@@ -3221,6 +3473,7 @@ const CustomerEng = () => {
     };
 
     // ==================== Send Letter wizard helpers ====================
+    // ==================== Send Letter wizard helpers ====================
     const getBranchNameForLetter = (branchId) => {
         const branchMap = {
             'HO': 'Pune Office', '420435_1': 'Ch.Sambhaji Nagar', '420435_2': 'Ahilyanagar',
@@ -3230,6 +3483,24 @@ const CustomerEng = () => {
             '420435_12': 'Bagalkot', '420435_13': 'Gulbarga', '420435_14': 'Bijapur'
         };
         return branchMap[branchId] || branchId || '';
+    };
+
+    const fmtDisplayDate = (val) =>
+        val ? new Date(val).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+
+    // Load a public image as a base64 data URI (so it renders in preview, print AND email)
+    const loadImageAsDataUrl = async (path) => {
+        try {
+            const res = await fetch(path);
+            if (!res.ok) return '';
+            const blob = await res.blob();
+            return await new Promise((resolve, reject) => {
+                const r = new FileReader();
+                r.onloadend = () => resolve(r.result);
+                r.onerror = reject;
+                r.readAsDataURL(blob);
+            });
+        } catch (e) { return ''; }
     };
 
     // Reuses already-fetched customerDetails + customerCompleteData — no extra fetch
@@ -3255,8 +3526,121 @@ const CustomerEng = () => {
             email: customerDetails?.email || '',
             contact: customerDetails?.phone_number || '',
             location: customerDetails?.location || '',
-            date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+            date: new Date().toISOString().split('T')[0]
         };
+    };
+
+    // --- Letter-as-PDF helpers -------------------------------------------------
+    // Load an external script once (used to pull in html2canvas + jsPDF on demand).
+    const loadScriptOnce = (src) => new Promise((resolve, reject) => {
+        if (Array.from(document.scripts).some(s => s.src === src)) return resolve();
+        const el = document.createElement('script');
+        el.src = src;
+        el.onload = () => resolve();
+        el.onerror = () => reject(new Error('Failed to load ' + src));
+        document.head.appendChild(el);
+    });
+
+    // Loads an image and resolves with the element (used to read natural dimensions).
+    const loadHtmlImage = (src) => new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+    });
+
+    // Renders the CURRENT letter HTML to a real multi-page A4 PDF and returns it
+    // as base64 (no data: prefix) — ready to attach to the email.
+    // The footer band is NOT part of the flowed content; it is stamped at the
+    // BOTTOM of the LAST page only (so on a 2-page letter it appears once, on the
+    // page where the letter ends — never repeated on every page).
+    const generateLetterPdfBase64 = async () => {
+        if (!window.html2canvas) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+        if (!window.jspdf) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+
+        // Footer image height (in px at our 780px render width) — reserved as bottom
+        // padding so the flowed content never overlaps the stamped footer.
+        let footerPxHeight = 0;
+        if (footerImgDataUrl) {
+            try {
+                const fImg = await loadHtmlImage(footerImgDataUrl);
+                if (fImg.width) footerPxHeight = Math.round(780 * (fImg.height / fImg.width));
+            } catch (e) { footerPxHeight = 0; }
+        }
+
+        const holder = document.createElement('div');
+        holder.style.position = 'fixed';
+        holder.style.left = '-10000px';
+        holder.style.top = '0';
+        holder.style.width = '780px';
+        holder.style.background = '#ffffff';
+        // omitFooter=true → render body only; reserve space at the bottom for the footer
+        holder.innerHTML = buildLetterHtml(false, true);
+        if (footerPxHeight) holder.style.paddingBottom = `${footerPxHeight + 12}px`;
+        document.body.appendChild(holder);
+
+        const imgs = Array.from(holder.querySelectorAll('img'));
+        await Promise.all(imgs.map(im => im.complete ? Promise.resolve()
+            : new Promise(res => { im.onload = res; im.onerror = res; })));
+
+        try {
+            const canvas = await window.html2canvas(holder, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const pageW = pdf.internal.pageSize.getWidth();
+            const pageH = pdf.internal.pageSize.getHeight();
+            const imgW = pageW;
+            const imgH = (canvas.height * imgW) / canvas.width;
+            const imgData = canvas.toDataURL('image/jpeg', 0.92);
+
+            // Lay out the body across as many pages as needed.
+            let heightLeft = imgH;
+            let position = 0;
+            pdf.addImage(imgData, 'JPEG', 0, position, imgW, imgH);
+            heightLeft -= pageH;
+            while (heightLeft > 0) {
+                position -= pageH;
+                pdf.addPage();
+                pdf.addImage(imgData, 'JPEG', 0, position, imgW, imgH);
+                heightLeft -= pageH;
+            }
+
+            // Stamp the footer once, at the bottom of the CURRENT (last) page.
+            if (footerImgDataUrl) {
+                try {
+                    const fImg = await loadHtmlImage(footerImgDataUrl);
+                    const fW = pageW;
+                    const fH = fImg.width ? (fImg.height * fW) / fImg.width : 0;
+                    if (fH > 0) pdf.addImage(footerImgDataUrl, 'PNG', 0, pageH - fH, fW, fH);
+                } catch (e) { /* footer is optional */ }
+            }
+
+            return pdf.output('datauristring').split(',')[1];
+        } finally {
+            document.body.removeChild(holder);
+        }
+    };
+
+    // Short cover note used as the EMAIL BODY (the full letter rides along as the PDF).
+    const buildLetterCoverHtml = () => {
+        const f = letterFields;
+        return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111;line-height:1.6;">
+  <p>Dear Sir/Madam,</p>
+  <p>Please find attached the letter${f.subject ? ` regarding <strong>${escapeLetterHtml(f.subject)}</strong>` : ''}${f.ref_no ? ` (Ref No: ${escapeLetterHtml(f.ref_no)})` : ''}.</p>
+  <p>Best regards,<br/>${escapeLetterHtml(COMPANY_FULL)}</p>
+</div>`;
+    };
+
+    // True when the selected format's product is CSP (subtype then shows right after Instance ID)
+    const isCspLetter = () =>
+        (selectedLetterFormat?.products || []).some(p => (p || '').trim().toUpperCase() === 'CSP');
+
+    // Unique SR subtype(s) for this customer, taken from the CSP Info box.
+    // Shown after the Instance ID in CSP letters only.
+    const getCspSubtypes = () => {
+        if (!cspInfo || cspInfo.length === 0) return '';
+        const subs = [...new Set(cspInfo.map(r => (r.sr_subtype || '').trim()).filter(Boolean))];
+        return subs.join(', ');
     };
 
     const applyLetterPlaceholders = (tpl, v) =>
@@ -3271,18 +3655,24 @@ const CustomerEng = () => {
             .replace(/{branch}/gi, v.branch_name || v.branch_id || '')
             .replace(/{date}/gi, v.date || '');
 
-    const buildDefaultLetterBody = (v) =>
-        `Dear Sir/Madam,
+    const buildDefaultStartPara = (v) =>
+        `This is to bring to your kind attention that the AMC / warranty for your DG Set (Engine Model ${v.engine_model || '-'}) is due to expire on ${v.warranty_expiry || v.agreement_end || '-'}.
 
-This is to bring to your kind attention that the AMC / warranty for your DG Set (Engine Model ${v.engine_model || '-'}) is due to expire on ${v.warranty_expiry || v.agreement_end || '-'}.
+To ensure uninterrupted service and optimal performance of your equipment, we request you to renew your maintenance contract before the due date.`;
 
-To ensure uninterrupted service and optimal performance of your equipment, we request you to renew your maintenance contract before the due date.
+    const buildDefaultEndPara = (v) =>
+        `Our representative from the ${v.branch_name || 'nearest'} branch will get in touch with you shortly. For any queries, please contact your nearest ${COMPANY_NAME} branch.`;
 
-Our representative from the ${v.branch_name || 'nearest'} branch will get in touch with you shortly. For any queries, please contact your nearest ${COMPANY_NAME} branch.
-
-Thanking you,
-For ${COMPANY_NAME}
-${COMPANY_FULL}${v.branch_name ? ' - ' + v.branch_name : ''}`;
+    // Reference No from the format template: KCGL/26-27/<product>/BranchCode/serial no
+    // -> "BranchCode" filled with the customer's branch, "serial no" with the FY sequence.
+    const buildLetterReference = (fmt, v, seq) => {
+        if (fmt && fmt.reference_no && fmt.reference_no.trim()) {
+            return fmt.reference_no
+                .replace(/BranchCode/gi, v.branch_id || '-')
+                .replace(/serial\s*no/gi, String(seq).padStart(2, '0'));
+        }
+        return letterRefNo || `KC/${letterFy || ''}/${String(seq).padStart(2, '0')}`;
+    };
 
     const fetchLetterFormatsForWizard = async () => {
         setLetterFormatsLoading(true);
@@ -3298,39 +3688,40 @@ ${COMPANY_FULL}${v.branch_name ? ' - ' + v.branch_name : ''}`;
         }
     };
 
-    const openLetterWizard = async () => {
-        if (!customerDetails) {
-            toast.error('Customer details are still loading. Please wait.');
-            return;
-        }
+    const resetLetterWizardState = () => {
         setLetterStep(1);
         setSelectedLetterFormat(null);
         setLetterAttachments([]);
         setLetterChannels([]);
         setEditingLetterRecordId(null);
+        setIncludeFollowups(false);
+        setIncludeQuotations(false);
+        setSelectedFollowupIds([]);
+        setSelectedQuotationIds([]);
+        setShowFollowupPicker(false);
+        setShowQuotationPicker(false);
+        setIncludeLetterRefs(false);
+        setSelectedLetterRefIds([]);
+        setShowLetterRefPicker(false);
+        setLetterCcList([]);
+        setLetterCcInput('');
+        setLetterWhatsappList([]);
+        setLetterWhatsappInput('');
+    };
+
+    const openLetterWizard = async () => {
+        if (!customerDetails) {
+            toast.error('Customer details are still loading. Please wait.');
+            return;
+        }
+        resetLetterWizardState();
         setShowLetterWizard(true);
         fetchLetterFormatsForWizard();
 
-        // Load the public logo once and cache it as a base64 data URI so it
-        // renders in the preview, the print window, AND the emailed HTML
-        // (email clients can't load a relative path or browser-origin URL).
-        if (!logoDataUrl) {
-            try {
-                const logoRes = await fetch(COMPANY_LOGO);
-                if (logoRes.ok) {
-                    const blob = await logoRes.blob();
-                    const dataUrl = await new Promise((resolve, reject) => {
-                        const reader = new FileReader();
-                        reader.onloadend = () => resolve(reader.result);
-                        reader.onerror = reject;
-                        reader.readAsDataURL(blob);
-                    });
-                    setLogoDataUrl(dataUrl);
-                }
-            } catch (e) {
-                // non-blocking — falls back to text-only header
-            }
-        }
+        if (!logoImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_LOGO_IMG); if (d) setLogoImgDataUrl(d); }
+        if (!headerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_HEADER_IMG); if (d) setHeaderImgDataUrl(d); }
+        if (!footerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_FOOTER_IMG); if (d) setFooterImgDataUrl(d); }
+
         try {
             const res = await fetch(`${API_BASE_URL}/v1/engagement/letter/next-ref?instance_id=${encodeURIComponent(customerDetails.instance_id || '')}`);
             if (res.ok) {
@@ -3340,9 +3731,7 @@ ${COMPANY_FULL}${v.branch_name ? ' - ' + v.branch_name : ''}`;
                 setLetterSeq(d.sequence);
                 setPreviousLetters(d.previous_letters || []);
             }
-        } catch (e) {
-            // non-blocking
-        }
+        } catch (e) { /* non-blocking */ }
     };
 
     const selectLetterFormat = (fmt) => {
@@ -3353,22 +3742,35 @@ ${COMPANY_FULL}${v.branch_name ? ' - ' + v.branch_name : ''}`;
     const prepareLetterFields = () => {
         const v = getLetterValues();
         const fmt = selectedLetterFormat;
-        const body = (fmt && fmt.letter_format && fmt.letter_format.trim())
-            ? applyLetterPlaceholders(fmt.letter_format, v)
-            : buildDefaultLetterBody(v);
-        setLetterFields({
-            ref_no: letterRefNo || `KC/${letterFy || ''}/01`,
-            date: v.date,
-            to_name: v.customer_name,
+        const seq = letterSeq || 1;
+        const refNo = buildLetterReference(fmt, v, seq);
+        setLetterRefNo(refNo);
+
+        const startPara = (fmt && fmt.start_para && fmt.start_para.trim())
+            ? applyLetterPlaceholders(fmt.start_para, v)
+            : buildDefaultStartPara(v);
+        const endPara = (fmt && fmt.end_para && fmt.end_para.trim())
+            ? applyLetterPlaceholders(fmt.end_para, v)
+            : buildDefaultEndPara(v);
+
+        setLetterFields(prev => ({
+            ref_no: refNo,
+            date: v.date,                          // ISO (for the date input)
+            to_name: v.customer_name,              // locked
             to_address: v.location || v.branch_name || '',
-            instance_id: v.instance_id,
+            instance_id: v.instance_id,            // locked
             engine_model: v.engine_with_kva,
             agreement_no: v.agreement_no,
             contact: v.contact,
             email: v.email,
-            subject: 'Renewal of Annual Maintenance Contract (AMC)',
-            body
-        });
+            subject: fmt?.format_type_name || '',  // subject = format type name (editable)
+            start_para: startPara,
+            end_para: endPara,
+            // Keep any wording the user already edited; otherwise fall back to the defaults
+            followup_intro: (prev.followup_intro && prev.followup_intro.trim()) ? prev.followup_intro : DEFAULT_FOLLOWUP_INTRO,
+            quotation_intro: (prev.quotation_intro && prev.quotation_intro.trim()) ? prev.quotation_intro : DEFAULT_QUOTATION_INTRO,
+            letterref_intro: (prev.letterref_intro && prev.letterref_intro.trim()) ? prev.letterref_intro : DEFAULT_LETTERREF_INTRO
+        }));
     };
 
     const goToLetterStep = (step) => {
@@ -3376,15 +3778,356 @@ ${COMPANY_FULL}${v.branch_name ? ' - ' + v.branch_name : ''}`;
             toast.error('Please select a Format Type first');
             return;
         }
-        if (step === 3) prepareLetterFields();
-        if (step === 4) {
-            if (!letterFields.body) prepareLetterFields();
-            setLetterChannels(selectedLetterFormat?.channels || []);
+        if (step === 2) prepareLetterFields();
+        if (step === 3) {
+            if (!letterFields.subject && !letterFields.start_para) prepareLetterFields();
             setLetterEmailTo(customerDetails?.email || '');
             setLetterWhatsappTo(String(customerDetails?.phone_number || ''));
         }
         setLetterStep(step);
     };
+
+    // Follow-ups relevant to this format's products (falls back to all when no match)
+    const formatFollowups = () => {
+        const products = (selectedLetterFormat?.products || []).map(p => (p || '').toLowerCase());
+        const list = customerFollowups || [];
+        if (products.length === 0) return list;
+        const matched = list.filter(f => {
+            const svc = (f.campaign_service || f.campaign_name || '').toLowerCase();
+            return products.some(p => p && (svc.includes(p) || p.includes(svc)));
+        });
+        return matched.length > 0 ? matched : list;
+    };
+    const quotationFollowups = () => formatFollowups().filter(f => f.quotation_sent);
+
+    const toggleSelectedFollowup = (id) =>
+        setSelectedFollowupIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    const toggleSelectedQuotation = (id) =>
+        setSelectedQuotationIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    const toggleSelectedLetterRef = (id) =>
+        setSelectedLetterRefIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+    // Previous letters available to attach as references (this customer's history).
+    // When editing a saved letter, exclude that same record from the list.
+    const letterRefOptions = () =>
+        (letterHistory || []).filter(l => !editingLetterRecordId || l.id !== editingLetterRecordId);
+
+    const addCcEmail = () => {
+        const e = letterCcInput.trim();
+        if (!e) return;
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) { toast.error('Enter a valid email'); return; }
+        if (e === letterEmailTo || letterCcList.includes(e)) { toast.error('Email already added'); return; }
+        setLetterCcList(prev => [...prev, e]);
+        setLetterCcInput('');
+    };
+    const removeCcEmail = (i) => setLetterCcList(prev => prev.filter((_, idx) => idx !== i));
+
+    const addWhatsappNumber = () => {
+        const n = letterWhatsappInput.replace(/[^\d]/g, '');
+        if (!n) return;
+        if (n === letterWhatsappTo || letterWhatsappList.includes(n)) { toast.error('Number already added'); return; }
+        setLetterWhatsappList(prev => [...prev, n]);
+        setLetterWhatsappInput('');
+    };
+    const removeWhatsappNumber = (i) => setLetterWhatsappList(prev => prev.filter((_, idx) => idx !== i));
+
+    const escapeLetterHtml = (s) =>
+        String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    const buildFollowupLetterHtml = () => {
+        const items = (customerFollowups || []).filter(f => selectedFollowupIds.includes(f.id));
+        if (items.length === 0) return '';
+        const fd = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+        const rows = items.map(fu => `<tr>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(fd(fu.followup_date))}</td>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(fu.campaign_service || fu.campaign_name || '-')}</td>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;text-transform:capitalize;">${escapeLetterHtml(fu.followup_by || '-')}</td>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(fu.user_name || '-')}</td>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(fu.followup_remark || '-')}</td>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(fd(fu.next_followup_date))}</td>
+      </tr>`).join('');
+        return `<div style="margin-top:12px;font-size:13px;line-height:1.7;">${escapeLetterHtml(letterFields.followup_intro)}</div>
+      <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:11px;">
+        <thead><tr style="background:#f3f4f6;">
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Date</th>
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Product</th>
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Mode</th>
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Employee</th>
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Remark</th>
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Next Follow-up</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    };
+
+    const buildQuotationLetterHtml = () => {
+        const items = (customerFollowups || []).filter(f => selectedQuotationIds.includes(f.id) && f.quotation_sent);
+        if (items.length === 0) return '';
+        const fd = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+        const rows = items.map(q => `<tr>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(q.quotation_no || '-')}</td>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(fd(q.followup_date))}</td>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(q.campaign_service || q.campaign_name || '-')}</td>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(q.user_name || '-')}</td>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;text-align:right;">${q.quotation_value ? '₹' + Number(q.quotation_value).toLocaleString('en-IN') : '-'}</td>
+      </tr>`).join('');
+        return `<div style="margin-top:12px;font-size:13px;line-height:1.7;">${escapeLetterHtml(letterFields.quotation_intro)}</div>
+      <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:11px;">
+        <thead><tr style="background:#f3f4f6;">
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Quotation No.</th>
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Date</th>
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Product</th>
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Employee</th>
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:right;">Value</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    };
+
+    const buildFollowupLetterText = () => {
+        const items = (customerFollowups || []).filter(f => selectedFollowupIds.includes(f.id));
+        if (items.length === 0) return '';
+        const fd = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+        let out = `\n\n${letterFields.followup_intro}`;
+        items.forEach((fu, i) => {
+            out += `\n${i + 1}. ${fd(fu.followup_date)} | ${fu.campaign_service || fu.campaign_name || '-'} | ${fu.followup_by || '-'} | ${fu.user_name || '-'} | ${fu.followup_remark || '-'} | Next: ${fd(fu.next_followup_date)}`;
+        });
+        return out;
+    };
+    const buildQuotationLetterText = () => {
+        const items = (customerFollowups || []).filter(f => selectedQuotationIds.includes(f.id) && f.quotation_sent);
+        if (items.length === 0) return '';
+        const fd = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+        let out = `\n\n${letterFields.quotation_intro}`;
+        items.forEach((q, i) => {
+            out += `\n${i + 1}. ${q.quotation_no || '-'} dated ${fd(q.followup_date)} | ${q.campaign_service || q.campaign_name || '-'} | ${q.user_name || '-'} | ${q.quotation_value ? '₹' + Number(q.quotation_value).toLocaleString('en-IN') : '-'}`;
+        });
+        return out;
+    };
+
+    // Channels of a stored letter -> readable text ("Email, WhatsApp")
+    const letterRefChannelText = (l) => {
+        const chs = l.channels || [];
+        if (chs.length === 0) return '-';
+        return chs.map(c => (c === 'email' ? 'Email' : c === 'whatsapp' ? 'WhatsApp' : c)).join(', ');
+    };
+
+    // Table: Ref No | Format Type | Channels | Date | Sent By (wording is the editable intro above)
+    const buildLetterRefHtml = () => {
+        const items = letterRefOptions().filter(l => selectedLetterRefIds.includes(l.id));
+        if (items.length === 0) return '';
+        const fd = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+        const rows = items.map(l => `<tr>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(l.ref_no || '-')}</td>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(l.format_type_name || '-')}</td>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(letterRefChannelText(l))}</td>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(fd(l.created_at))}</td>
+        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(l.sent_by_name || '-')}</td>
+      </tr>`).join('');
+        return `<div style="margin-top:12px;font-size:13px;line-height:1.7;">${escapeLetterHtml(letterFields.letterref_intro)}</div>
+      <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:11px;">
+        <thead><tr style="background:#f3f4f6;">
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Ref No</th>
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Format Type</th>
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Channels</th>
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Date</th>
+          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Sent By</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    };
+
+    const buildLetterRefText = () => {
+        const items = letterRefOptions().filter(l => selectedLetterRefIds.includes(l.id));
+        if (items.length === 0) return '';
+        const fd = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+        let out = `\n\n${letterFields.letterref_intro}`;
+        items.forEach((l, i) => {
+            out += `\n${i + 1}. ${l.ref_no || '-'} | ${l.format_type_name || '-'} | ${letterRefChannelText(l)} | ${fd(l.created_at)} | ${l.sent_by_name || '-'}`;
+        });
+        return out;
+    };
+
+    const buildLetterHtml = (pinFooter = false, omitFooter = false) => {
+        const f = letterFields;
+        const followupBlock = includeFollowups ? buildFollowupLetterHtml() : '';
+        const quotationBlock = includeQuotations ? buildQuotationLetterHtml() : '';
+        const letterrefBlock = includeLetterRefs ? buildLetterRefHtml() : '';
+        const cspSub = isCspLetter() ? getCspSubtypes() : '';
+
+        // Header: logo.png (left) + letter-header.png (right). Table layout = email-client safe.
+        const headerBlock = (logoImgDataUrl || headerImgDataUrl)
+            ? `<table style="width:100%;border-collapse:collapse;border-bottom:2px solid ${themeColor};">
+                 <tr>
+                   <td style="padding:12px 24px;text-align:left;vertical-align:middle;width:50%;">
+                     ${logoImgDataUrl ? `<img src="${logoImgDataUrl}" alt="${escapeLetterHtml(COMPANY_NAME)}" style="height:80px;width:auto;display:inline-block;" />` : ''}
+                   </td>
+                   <td style="padding:12px 24px;text-align:right;vertical-align:middle;width:50%;">
+                     ${headerImgDataUrl ? `<img src="${headerImgDataUrl}" alt="${escapeLetterHtml(COMPANY_FULL)}" style="height:80px;width:auto;display:inline-block;" />` : ''}
+                   </td>
+                 </tr>
+               </table>`
+            : `<div style="border-bottom:2px solid ${themeColor};padding:0 28px 10px;font-size:18px;font-weight:700;color:${themeColor};">${escapeLetterHtml(COMPANY_NAME)}</div>`;
+
+        return `
+<div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:780px;margin:0 auto;${pinFooter ? 'min-height:1040px;display:flex;flex-direction:column;' : ''}">
+  ${headerBlock}
+
+  <div style="padding:18px 28px 24px;">
+    <div style="font-size:12px;line-height:1.7;margin-bottom:14px;">
+      <div><strong>Ref No:</strong> ${escapeLetterHtml(f.ref_no)}</div>
+      <div><strong>Date:</strong> ${escapeLetterHtml(fmtDisplayDate(f.date))}</div>
+    </div>
+
+    <div style="font-size:13px;line-height:1.6;margin-bottom:12px;">
+      <div><strong>To,</strong></div>
+      <div>${escapeLetterHtml(f.to_name)}</div>
+      <div style="white-space:pre-wrap;">${escapeLetterHtml(f.to_address)}</div>
+      <div style="margin-top:6px;color:#333;font-size:12px;">
+        Instance ID: ${escapeLetterHtml(f.instance_id)}${cspSub ? ` &nbsp;|&nbsp; SR Subtype: ${escapeLetterHtml(cspSub)}` : ''}${f.engine_model ? ` &nbsp;|&nbsp; Engine Model: ${escapeLetterHtml(f.engine_model)}` : ''}${f.agreement_no ? `<br/>Agreement No: ${escapeLetterHtml(f.agreement_no)}` : ''}
+      </div>
+    </div>
+
+    <div style="font-size:13px;margin-bottom:12px;"><strong>Subject:</strong> ${escapeLetterHtml(f.subject)}</div>
+
+    <div style="font-size:13px;line-height:1.7;">Dear Sir/Madam,</div>
+
+    <div style="margin-top:10px;font-size:13px;line-height:1.7;white-space:pre-wrap;">${escapeLetterHtml(f.start_para)}</div>
+
+    ${followupBlock}
+    ${quotationBlock}
+    ${letterrefBlock}
+
+    <div style="margin-top:14px;font-size:13px;line-height:1.7;white-space:pre-wrap;">${escapeLetterHtml(f.end_para)}</div>
+
+    <div style="margin-top:26px;font-size:13px;line-height:1.7;white-space:pre-wrap;">${escapeLetterHtml(LETTER_SIGNATURE)}</div>
+  </div>
+
+  ${(!omitFooter && footerImgDataUrl) ? `<img src="${footerImgDataUrl}" alt="${escapeLetterHtml(COMPANY_FULL)}" style="display:block;width:100%;max-width:780px;height:auto;margin:${pinFooter ? 'auto auto 0' : '14px auto 0'};" />` : ''}
+</div>`;
+    };
+
+    const buildLetterText = () => {
+        const f = letterFields;
+        let out = `${COMPANY_NAME}
+Ref No: ${f.ref_no}   Date: ${fmtDisplayDate(f.date)}
+
+To,
+${f.to_name}
+${f.to_address}
+Instance ID: ${f.instance_id}${f.engine_model ? ` | Engine Model: ${f.engine_model}` : ''}
+
+Subject: ${f.subject}
+
+Dear Sir/Madam,
+
+${f.start_para}`;
+        if (includeFollowups) out += buildFollowupLetterText();
+        if (includeQuotations) out += buildQuotationLetterText();
+        if (includeLetterRefs) out += buildLetterRefText();
+        out += `\n\n${f.end_para}\n\n${LETTER_SIGNATURE}`;
+        return out;
+    };
+
+    const handlePrintLetter = async () => {
+        const w = openPrintWindow();
+        if (!w) return;
+        const t = toast.loading('Preparing letter…');
+        let holder = null;
+        try {
+            if (!window.html2canvas) {
+                await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+            }
+
+            // Footer height (px at the 780px letter width) so we reserve space and never overlap it.
+            let footerPx = 0;
+            if (footerImgDataUrl) {
+                try {
+                    const f = await loadHtmlImage(footerImgDataUrl);
+                    if (f.width) footerPx = Math.round(780 * (f.height / f.width));
+                } catch (e) { footerPx = 0; }
+            }
+
+            // Render the letter BODY only (footer omitted from the flow).
+            holder = document.createElement('div');
+            holder.style.position = 'fixed';
+            holder.style.left = '-10000px';
+            holder.style.top = '0';
+            holder.style.width = '780px';
+            holder.style.background = '#ffffff';
+            holder.innerHTML = buildLetterHtml(false, true);
+            if (footerPx) holder.style.paddingBottom = `${footerPx + 16}px`;
+            document.body.appendChild(holder);
+
+            const innerImgs = Array.from(holder.querySelectorAll('img'));
+            await Promise.all(innerImgs.map(im => im.complete ? Promise.resolve()
+                : new Promise(res => { im.onload = res; im.onerror = res; })));
+
+            const canvas = await window.html2canvas(holder, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+            document.body.removeChild(holder);
+            holder = null;
+
+            // Slice the body into A4-sized page images.
+            const pageWpx = canvas.width;
+            const pageHpx = Math.round(pageWpx * (297 / 210)); // A4 aspect
+            const totalPages = Math.max(1, Math.ceil(canvas.height / pageHpx));
+            const pageImgs = [];
+            for (let p = 0; p < totalPages; p++) {
+                const sliceH = Math.min(pageHpx, canvas.height - p * pageHpx);
+                const c = document.createElement('canvas');
+                c.width = pageWpx;
+                c.height = pageHpx;
+                const ctx = c.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, c.width, c.height);
+                ctx.drawImage(canvas, 0, p * pageHpx, pageWpx, sliceH, 0, 0, pageWpx, sliceH);
+                pageImgs.push(c.toDataURL('image/jpeg', 0.92));
+            }
+
+            // Footer image -> bottom of the LAST page only.
+            const footerOnLast = footerImgDataUrl
+                ? `<img src="${footerImgDataUrl}" style="position:absolute;left:0;bottom:0;width:100%;display:block;" />`
+                : '';
+
+            const pagesHtml = pageImgs.map((src, i) => `
+          <div style="position:relative;width:100%;page-break-after:${i < pageImgs.length - 1 ? 'always' : 'auto'};">
+            <img src="${src}" style="display:block;width:100%;" />
+            ${i === pageImgs.length - 1 ? footerOnLast : ''}
+          </div>`).join('');
+
+            // Attachment pages after the letter (image full-width, PDF page-by-page).
+            let attHtml = '';
+            try { attHtml = await buildAttachmentPrintHtmlAsync(letterAttachments); } catch (e) { attHtml = ''; }
+
+            toast.dismiss(t);
+            if (!w || w.closed) return;
+            try { w.document.title = escapeLetterHtml(letterFields.ref_no || 'Letter'); } catch (e) { }
+            w.document.body.style.margin = '0';
+            w.document.body.innerHTML =
+                `<style>@page{size:A4;margin:0;}body{margin:0;}</style>
+             <div style="max-width:780px;margin:0 auto;">${pagesHtml}</div>${attHtml}`;
+
+            const doPrint = () => { try { w.focus(); w.print(); } catch (e) { } };
+            const imgs = w.document.images;
+            const total = imgs.length;
+            if (total === 0) { setTimeout(doPrint, 250); return; }
+            let done = 0;
+            const check = () => { done++; if (done >= total) setTimeout(doPrint, 300); };
+            for (let i = 0; i < total; i++) {
+                const im = imgs[i];
+                if (im.complete) check(); else { im.onload = check; im.onerror = check; }
+            }
+        } catch (e) {
+            toast.dismiss(t);
+            try { if (holder) document.body.removeChild(holder); } catch (err) { }
+            try { if (w && !w.closed) w.close(); } catch (err) { }
+            toast.error('Could not prepare the letter for printing');
+            console.error('Print letter error:', e);
+        }
+    };
+    const toggleLetterSendChannel = (ch) =>
+        setLetterChannels(prev => prev.includes(ch) ? prev.filter(c => c !== ch) : [...prev, ch]);
 
     const handleLetterAddAttachment = (e) => {
         const files = Array.from(e.target.files || []);
@@ -3392,14 +4135,8 @@ ${COMPANY_FULL}${v.branch_name ? ' - ' + v.branch_name : ''}`;
         const accepted = [];
         for (const file of files) {
             const ext = file.name.split('.').pop().toLowerCase();
-            if (!LETTER_ATTACH_EXTS.includes(ext)) {
-                toast.error(`"${file.name}" type not allowed`);
-                continue;
-            }
-            if (file.size > 25 * 1024 * 1024) {
-                toast.error(`"${file.name}" exceeds 25MB`);
-                continue;
-            }
+            if (!LETTER_ATTACH_EXTS.includes(ext)) { toast.error(`"${file.name}" type not allowed`); continue; }
+            if (file.size > 25 * 1024 * 1024) { toast.error(`"${file.name}" exceeds 25MB`); continue; }
             accepted.push(file);
         }
         accepted.forEach(file => {
@@ -3419,74 +4156,6 @@ ${COMPANY_FULL}${v.branch_name ? ' - ' + v.branch_name : ''}`;
     const removeLetterWizardAttachment = (i) =>
         setLetterAttachments(prev => prev.filter((_, idx) => idx !== i));
 
-    const escapeLetterHtml = (s) =>
-        String(s == null ? '' : s)
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-    const buildLetterHtml = () => {
-        const f = letterFields;
-        return `
-<div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:780px;margin:0 auto;padding:28px;">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid ${themeColor};padding-bottom:12px;">
-    <div style="display:flex;align-items:center;gap:12px;">
-      ${logoDataUrl ? `<img src="${logoDataUrl}" alt="${escapeLetterHtml(COMPANY_NAME)}" style="height:52px;width:auto;object-fit:contain;" />` : ''}
-      <div>
-        <div style="font-size:18px;font-weight:700;color:${themeColor};">${escapeLetterHtml(COMPANY_NAME)}</div>
-        <div style="font-size:11px;color:#555;">${escapeLetterHtml(COMPANY_FULL)}</div>
-      </div>
-    </div>
-    <div style="text-align:right;font-size:12px;line-height:1.6;">
-      <div><strong>Ref No:</strong> ${escapeLetterHtml(f.ref_no)}</div>
-      <div><strong>Date:</strong> ${escapeLetterHtml(f.date)}</div>
-    </div>
-  </div>
-  <div style="margin-top:18px;font-size:13px;line-height:1.6;">
-    <div><strong>To,</strong></div>
-    <div>${escapeLetterHtml(f.to_name)}</div>
-    <div style="white-space:pre-wrap;">${escapeLetterHtml(f.to_address)}</div>
-    <div style="margin-top:6px;color:#333;font-size:12px;">
-      Instance ID: ${escapeLetterHtml(f.instance_id)} &nbsp;|&nbsp; Engine Model: ${escapeLetterHtml(f.engine_model)}<br/>
-      Agreement No: ${escapeLetterHtml(f.agreement_no)} &nbsp;|&nbsp; Contact: ${escapeLetterHtml(f.contact)}<br/>
-      Email: ${escapeLetterHtml(f.email)}
-    </div>
-  </div>
-  <div style="margin-top:16px;font-size:13px;"><strong>Subject:</strong> ${escapeLetterHtml(f.subject)}</div>
-  ${previousLetters.length > 0 ? `
-  <div style="margin-top:10px;font-size:11px;color:#555;border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;background:#fafafa;">
-    <strong style="color:#333;">Ref. previous correspondence:</strong>
-    ${previousLetters.map(pl => `${escapeLetterHtml(pl.ref_no)}${pl.date ? ' dated ' + escapeLetterHtml(pl.date) : ''}`).join(' &nbsp;•&nbsp; ')}
-  </div>` : ''}
-  <div style="margin-top:12px;font-size:13px;line-height:1.7;white-space:pre-wrap;">${escapeLetterHtml(f.body)}</div>
-</div>`;
-    };
-
-    const buildLetterText = () => {
-        const f = letterFields;
-        return `${COMPANY_NAME}
-Ref No: ${f.ref_no}   Date: ${f.date}
-
-To,
-${f.to_name}
-${f.to_address}
-Instance ID: ${f.instance_id} | Engine Model: ${f.engine_model}
-Agreement No: ${f.agreement_no} | Contact: ${f.contact}
-Email: ${f.email}
-
-Subject: ${f.subject}
-
-${f.body}`;
-    };
-
-    const handlePrintLetter = async () => {
-        // Letter first; then images full-width and each PDF page rendered page-wise; videos name-only.
-        const w = openPrintWindow();
-        if (!w) return;
-        await renderAndPrint(w, buildLetterHtml(), letterAttachments, escapeLetterHtml(letterFields.ref_no || 'Letter'));
-    };
-
-    const toggleLetterSendChannel = (ch) =>
-        setLetterChannels(prev => prev.includes(ch) ? prev.filter(c => c !== ch) : [...prev, ch]);
-
     const handleSendLetter = async () => {
         if (letterChannels.length === 0) { toast.error('Select at least one channel to send'); return; }
         if (letterChannels.includes('email') && !letterEmailTo.trim()) { toast.error('Enter a recipient email address'); return; }
@@ -3495,6 +4164,25 @@ ${f.body}`;
         setLetterSending(true);
         const t = toast.loading('Sending letter...');
         try {
+            // Render the letter to a PDF and attach it (only when emailing). The email
+            // body becomes a short cover note (email_body_html below).
+            let letterPdfAttachment = null;
+            if (letterChannels.includes('email')) {
+                try {
+                    const pdfB64 = await generateLetterPdfBase64();
+                    if (pdfB64) {
+                        const safeRef = (letterFields.ref_no || 'Letter').replace(/[^\w.-]+/g, '_');
+                        letterPdfAttachment = { name: `Letter_${safeRef}.pdf`, content: pdfB64, type: 'application/pdf' };
+                    }
+                } catch (pdfErr) {
+                    console.error('Letter PDF generation failed:', pdfErr);
+                }
+            }
+            const outgoingAttachments = [
+                ...(letterPdfAttachment ? [letterPdfAttachment] : []),
+                ...letterAttachments
+            ];
+
             const payload = {
                 customer_id: selectedCustomer,
                 instance_id: customerDetails?.instance_id,
@@ -3505,13 +4193,26 @@ ${f.body}`;
                 financial_year: letterFy,
                 sequence: letterSeq,
                 subject: letterFields.subject,
-                letter_fields: letterFields,
+                letter_fields: {
+                    ...letterFields,
+                    include_followups: includeFollowups,
+                    include_quotations: includeQuotations,
+                    include_letter_refs: includeLetterRefs,
+                    selected_followup_ids: selectedFollowupIds,
+                    selected_quotation_ids: selectedQuotationIds,
+                    selected_letter_ref_ids: selectedLetterRefIds,
+                    cc_emails: letterCcList,
+                    whatsapp_numbers: letterWhatsappList
+                },
                 letter_html: buildLetterHtml(),
                 letter_text: buildLetterText(),
                 channels: letterChannels,
                 email_to: letterEmailTo,
+                cc_emails: letterCcList,
                 whatsapp_to: letterWhatsappTo,
-                attachments: letterAttachments.map(a => ({ name: a.name, content: a.content, type: a.type })),
+                whatsapp_numbers: letterWhatsappList,
+                email_body_html: buildLetterCoverHtml(),
+                attachments: outgoingAttachments.map(a => ({ name: a.name, content: a.content, type: a.type })),
                 sent_by_id: currentUser?.user_id || currentUser?.id,
                 sent_by_name: currentUser?.name
             };
@@ -3560,6 +4261,7 @@ ${f.body}`;
     };
 
     // Click a Ref No → reopen that letter in the wizard (drafts to edit & send, sent to re-send)
+    // Click a Ref No → reopen that letter in the wizard (drafts to edit & send, sent to re-send)
     const openLetterDraft = async (recordId) => {
         const t = toast.loading('Loading letter...');
         try {
@@ -3571,9 +4273,11 @@ ${f.body}`;
             const fmt = {
                 id: r.format_type_id,
                 format_type_name: r.format_type_name || 'Saved Letter',
-                channels: r.channels || [],
+                products: [],
+                reference_no: '',
                 default_attachments: [],
-                letter_format: ''
+                start_para: '',
+                end_para: ''
             };
             setSelectedLetterFormat(fmt);
             setEditingLetterRecordId(r.id);
@@ -3585,32 +4289,44 @@ ${f.body}`;
             setLetterEmailTo(r.email_to || '');
             setLetterWhatsappTo(r.whatsapp_to || '');
             setPreviousLetters([]);
-            setLetterFields((r.letter_fields && Object.keys(r.letter_fields).length)
-                ? r.letter_fields
+
+            const lf = r.letter_fields || {};
+            setIncludeFollowups(!!lf.include_followups);
+            setIncludeQuotations(!!lf.include_quotations);
+            setIncludeLetterRefs(!!lf.include_letter_refs);
+            setSelectedFollowupIds(lf.selected_followup_ids || []);
+            setSelectedQuotationIds(lf.selected_quotation_ids || []);
+            setSelectedLetterRefIds(lf.selected_letter_ref_ids || []);
+            setLetterCcList(lf.cc_emails || []);
+            setLetterWhatsappList(lf.whatsapp_numbers || []);
+
+            setLetterFields(Object.keys(lf).length
+                ? {
+                    ref_no: lf.ref_no || r.ref_no, date: lf.date || new Date().toISOString().split('T')[0],
+                    to_name: lf.to_name || '', to_address: lf.to_address || '',
+                    instance_id: lf.instance_id || r.instance_id, engine_model: lf.engine_model || '',
+                    agreement_no: lf.agreement_no || '', contact: lf.contact || '',
+                    email: lf.email || r.email_to || '', subject: lf.subject || r.subject || '',
+                    start_para: lf.start_para || r.letter_body || '', end_para: lf.end_para || '',
+                    followup_intro: lf.followup_intro || DEFAULT_FOLLOWUP_INTRO,
+                    quotation_intro: lf.quotation_intro || DEFAULT_QUOTATION_INTRO,
+                    letterref_intro: lf.letterref_intro || DEFAULT_LETTERREF_INTRO
+                }
                 : {
-                    ref_no: r.ref_no, date: '', to_name: '', to_address: '',
+                    ref_no: r.ref_no, date: new Date().toISOString().split('T')[0], to_name: '', to_address: '',
                     instance_id: r.instance_id, engine_model: '', agreement_no: '',
                     contact: '', email: r.email_to || '', subject: r.subject || '',
-                    body: r.letter_body || ''
+                    start_para: r.letter_body || '', end_para: '',
+                    followup_intro: DEFAULT_FOLLOWUP_INTRO,
+                    quotation_intro: DEFAULT_QUOTATION_INTRO,
+                    letterref_intro: DEFAULT_LETTERREF_INTRO
                 });
 
-            if (!logoDataUrl) {
-                try {
-                    const lr = await fetch(COMPANY_LOGO);
-                    if (lr.ok) {
-                        const blob = await lr.blob();
-                        const dataUrl = await new Promise((resolve, reject) => {
-                            const fr = new FileReader();
-                            fr.onloadend = () => resolve(fr.result);
-                            fr.onerror = reject;
-                            fr.readAsDataURL(blob);
-                        });
-                        setLogoDataUrl(dataUrl);
-                    }
-                } catch (e) { /* ignore */ }
-            }
+            if (!logoImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_LOGO_IMG); if (d) setLogoImgDataUrl(d); }
+            if (!headerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_HEADER_IMG); if (d) setHeaderImgDataUrl(d); }
+            if (!footerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_FOOTER_IMG); if (d) setFooterImgDataUrl(d); }
 
-            setLetterStep(3);
+            setLetterStep(2);
             setShowLetterWizard(true);
         } catch (e) {
             toast.dismiss(t);
@@ -3781,7 +4497,17 @@ ${f.body}`;
                 financial_year: letterFy,
                 sequence: letterSeq,
                 subject: letterFields.subject,
-                letter_fields: letterFields,
+                letter_fields: {
+                    ...letterFields,
+                    include_followups: includeFollowups,
+                    include_quotations: includeQuotations,
+                    include_letter_refs: includeLetterRefs,
+                    selected_followup_ids: selectedFollowupIds,
+                    selected_quotation_ids: selectedQuotationIds,
+                    selected_letter_ref_ids: selectedLetterRefIds,
+                    cc_emails: letterCcList,
+                    whatsapp_numbers: letterWhatsappList
+                },
                 letter_html: buildLetterHtml(),
                 letter_text: buildLetterText(),
                 channels: letterChannels.length ? letterChannels : (selectedLetterFormat?.channels || []),
@@ -4242,7 +4968,7 @@ ${f.body}`;
                                             <div key={followup.id} className={`border rounded-lg p-3 ${isExpired ? 'bg-orange-50' : 'bg-green-50'}`}>
                                                 <div className="space-y-2">
                                                     <div className="flex justify-between items-start">
-                                                        <span className="text-[11px] font-bold text-black">Campaign:</span>
+                                                        <span className="text-[11px] font-bold text-black">Drive:</span>
                                                         <span className="text-xs text-black font-normal text-right flex-1 ml-2">{followup.campaign_name || '-'}</span>
                                                     </div>
                                                     <div className="flex justify-between items-start">
@@ -4281,7 +5007,7 @@ ${f.body}`;
                                         <thead className="bg-gray-100">
                                             <tr className="border-b border-gray-200">
                                                 <th className="px-2 py-1.5 text-center text-[10px] font-bold text-black border-r border-gray-200 whitespace-nowrap">
-                                                    Campaign Name
+                                                    Drive Name
                                                 </th>
                                                 <th className="px-2 py-1.5 text-center text-[10px] font-bold text-black border-r border-gray-200 whitespace-nowrap">
                                                     Service/Product
@@ -4635,7 +5361,7 @@ ${f.body}`;
                     <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3 mb-2">
                         <div className="flex items-center gap-2">
                             <h1 className="text-lg sm:text-base lg:text-xl font-bold text-black mb-1">
-                                Campaign Progress
+                                Drive Progress
                             </h1>
                         </div>
 
@@ -4743,99 +5469,95 @@ ${f.body}`;
                         </div>
                     </div>
 
-                    {/* Row 2 : Flag + Campaign */}
-                    <div className="bg-white rounded-xl shadow-sm px-2 py-0.5 mb-2">
-                        <div className="flex flex-wrap items-center gap-3">
-                            <div className="flex-1 min-w-[300px]">
-                                <div className="flex gap-2 items-center">
-                                    {/* Fixed "All" button with shadow */}
-                                    <div className="flex items-center gap-2 flex-shrink-0 sticky left-0 z-10 rounded-full">
+                    {/* Row 2 : Flag + Campaign (compact: drives wrap, flags 3-row grid) */}
+                    <div className="bg-white rounded-xl shadow-sm px-3 py-1 mb-2">
+                        <div className="flex flex-wrap items-stretch gap-2">
+                            {/* ===== Drive filter — Customers/Assets + campaign chips inline, wrapping ===== */}
+                            <div
+                                className="flex-1 min-w-[300px] flex flex-wrap items-center gap-1.5 content-start overflow-y-auto"
+                                style={{ scrollbarWidth: "thin", maxHeight: "52px" }}
+                            >
+                                {/* Customers summary */}
+                                <button
+                                    onClick={handleAllCampaigns}
+                                    className={`px-2 py-0.5 rounded-md text-sm font-bold whitespace-nowrap flex items-center gap-1 ${selectedCampaigns.length === 0
+                                        ? 'bg-[#2f3192] text-white'
+                                        : 'bg-transparent text-black hover:bg-gray-50'
+                                        }`}
+                                >
+                                    Customers - {customers.filter(c => {
+                                        if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
+                                            return String(c.branch_id) === String(userBranch);
+                                        }
+                                        return true;
+                                    }).length}
+                                </button>
 
-                                        <button
-                                            onClick={handleAllCampaigns}
-                                            className={`p-1 rounded-md text-sm font-bold whitespace-nowrap flex items-center gap-1 ${selectedCampaigns.length === 0
-                                                ? 'bg-[#2f3192] text-white'
-                                                : 'bg-transparent text-black hover:bg-gray-50'
-                                                }`}
-                                        >
-                                            Customers - {customers.filter(c => {
+                                {/* Assets summary */}
+                                <button
+                                    onClick={handleAllCampaigns}
+                                    className={`px-2 py-0.5 rounded-md text-sm font-bold whitespace-nowrap flex items-center gap-1 ${selectedCampaigns.length === 0
+                                        ? 'bg-[#2f3192] text-white'
+                                        : 'bg-transparent text-black hover:bg-gray-50'
+                                        }`}
+                                >
+                                    Assets - {
+                                        activeCampaigns.reduce((sum, campaign) => {
+                                            return sum + customers.filter(c => {
                                                 if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
-                                                    return String(c.branch_id) === String(userBranch);
+                                                    if (String(c.branch_id) !== String(userBranch)) return false;
                                                 }
-                                                return true;
-                                            }).length}                                        </button>
+                                                return c.campaigns?.includes(campaign);
+                                            }).length;
+                                        }, 0)
+                                    }
+                                </button>
 
+                                {/* Campaign chips flow right after Assets, wrap to second row if needed */}
+                                {activeCampaigns.map((campaign, idx) => {
+                                    const campaignCount = customers.filter(c => {
+                                        if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
+                                            if (String(c.branch_id) !== String(userBranch)) return false;
+                                        }
+                                        return c.campaigns?.includes(campaign);
+                                    }).length;
+                                    const color = campaignColors[campaign] || '#406093';
+
+                                    return (
                                         <button
-                                            onClick={handleAllCampaigns}
-                                            className={`p-1 rounded-md text-sm font-bold whitespace-nowrap flex items-center gap-1 ${selectedCampaigns.length === 0
-                                                ? 'bg-[#2f3192] text-white'
-                                                : 'bg-transparent text-black hover:bg-gray-50'
+                                            key={idx}
+                                            onClick={() => handleCampaignToggle(campaign)}
+                                            title={campaign}
+                                            className={`px-2 py-0.5 rounded-full text-sm whitespace-nowrap flex items-center gap-1 font-bold ${selectedCampaigns.includes(campaign)
+                                                ? 'text-white'
+                                                : 'text-gray-700 hover:bg-gray-50'
                                                 }`}
-                                        >
-                                            Assets - {
-                                                activeCampaigns.reduce((sum, campaign) => {
-                                                    return sum + customers.filter(c => {
-                                                        if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
-                                                            if (String(c.branch_id) !== String(userBranch)) return false;
-                                                        }
-                                                        return c.campaigns?.includes(campaign);
-                                                    }).length;
-                                                }, 0)
+                                            style={
+                                                selectedCampaigns.includes(campaign)
+                                                    ? { backgroundColor: color }
+                                                    : {}
                                             }
+                                        >
+                                            {campaign} - {campaignCount}
                                         </button>
-
-                                    </div>
-
-                                    {/* Scrollable campaigns container */}
-                                    <div
-                                        className="overflow-x-auto flex-1"
-                                        style={{ scrollbarWidth: "thin" }}
-                                    >
-                                        <div className="flex gap-2 min-w-max">
-                                            {activeCampaigns.map((campaign, idx) => {
-                                                const campaignCount = customers.filter(c => {
-                                                    if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
-                                                        if (String(c.branch_id) !== String(userBranch)) return false;
-                                                    }
-                                                    return c.campaigns?.includes(campaign);
-                                                }).length;
-                                                const color = campaignColors[campaign] || '#406093';
-
-                                                return (
-                                                    <button
-                                                        key={idx}
-                                                        onClick={() => handleCampaignToggle(campaign)}
-                                                        className={`px-2 py-1 rounded-full text-sm whitespace-nowrap flex items-center gap-1 font-bold ${selectedCampaigns.includes(campaign)
-                                                            ? 'text-white'
-                                                            : 'text-gray-700 hover:bg-gray-50'
-                                                            }`}
-                                                        style={
-                                                            selectedCampaigns.includes(campaign)
-                                                                ? { backgroundColor: color }
-                                                                : {}
-                                                        }
-                                                    >
-                                                        {campaign} - {campaignCount}
-
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                </div>
+                                    );
+                                })}
                             </div>
 
-                            {/* Flag Filter */}
-                            <div className="flex items-center gap-2">
-
-                                {/* All button */}
+                            {/* ===== Flag filter — 3 rows: C1–C4 / C5–C7 / NC,R,C — All centered on first two rows ===== */}
+                            <div
+                                className="border-l border-gray-100 pl-3 grid gap-0.5 content-center"
+                                style={{ gridTemplateColumns: 'repeat(5, auto)' }}
+                            >
+                                {/* All button — spans & centers across the first two rows only (left side) */}
                                 <button
                                     onClick={() => setSelectedFlag("all")}
                                     title="Show all customers regardless of follow-up flag"
-                                    className={`px-2.5 py-1 text-sm rounded-md whitespace-nowrap font-bold transition-colors ${selectedFlag === "all"
+                                    className={`mr-1 self-center flex items-center justify-center px-2.5 py-0.5 text-sm rounded-md whitespace-nowrap font-bold transition-colors ${selectedFlag === "all"
                                         ? "bg-[#2f3192] text-white shadow-sm"
                                         : "text-black"
                                         }`}
+                                    style={{ gridColumn: 1, gridRow: '1 / span 2' }}
                                 >
                                     All - {
                                         ["C1", "C2", "C3", "C4", "C5", "C6", "C7"]
@@ -4843,70 +5565,95 @@ ${f.body}`;
                                     }
                                 </button>
 
-                                {/* Grid for flags — 4 cols × 2 rows, equal-width chips */}
-                                <div className="grid grid-cols-4 grid-rows-2 gap-1">
-
-                                    {/* Row 1 — C1, C3, C5, C7 */}
-                                    {["C1", "C3", "C5", "C7"].map((key) => (
+                                {/* Row 1 — C1, C2, C3, C4 */}
+                                {["C1", "C2", "C3", "C4"].map((key, i) => {
+                                    const titles = {
+                                        C1: 'Follow-up required within 15 days',
+                                        C2: 'Follow-up required within 30 days',
+                                        C3: 'Follow-up required within 45 days',
+                                        C4: 'Follow-up required within 60 days',
+                                    };
+                                    return (
                                         <button
                                             key={key}
                                             onClick={() => setSelectedFlag(key)}
-                                            title={
-                                                key === 'C1' ? 'Follow-up required within 15 days' :
-                                                    key === 'C3' ? 'Follow-up required within 45 days' :
-                                                        key === 'C5' ? 'Follow-up required within 75 days' :
-                                                            'Follow-up required after 90+ days'
-                                            }
-                                            className={`w-full px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === key
+                                            title={titles[key]}
+                                            style={{ gridColumn: i + 2, gridRow: 1 }}
+                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === key
                                                 ? "bg-[#2f3192] text-white shadow-sm"
-                                                : "text-black"
+                                                : "text-black hover:bg-gray-50"
                                                 }`}
                                         >
                                             {key} · {flagCounts[key] || 0}
                                         </button>
-                                    ))}
+                                    );
+                                })}
 
-                                    {/* Row 2 — C2, C4, C6, then R/C in 4th column */}
-                                    {["C2", "C4", "C6"].map((key) => (
+                                {/* Row 2 — C5, C6, C7 */}
+                                {["C5", "C6", "C7"].map((key, i) => {
+                                    const titles = {
+                                        C5: 'Follow-up required within 75 days',
+                                        C6: 'Follow-up required within 90 days',
+                                        C7: 'Follow-up required after 90+ days',
+                                    };
+                                    return (
                                         <button
                                             key={key}
                                             onClick={() => setSelectedFlag(key)}
-                                            title={
-                                                key === 'C2' ? 'Follow-up required within 30 days' :
-                                                    key === 'C4' ? 'Follow-up required within 60 days' :
-                                                        'Follow-up required within 90 days'
-                                            }
-                                            className={`w-full px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === key
+                                            title={titles[key]}
+                                            style={{ gridColumn: i + 2, gridRow: 2 }}
+                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === key
                                                 ? "bg-[#2f3192] text-white shadow-sm"
-                                                : "text-black"
+                                                : "text-black hover:bg-gray-50"
                                                 }`}
                                         >
                                             {key} · {flagCounts[key] || 0}
                                         </button>
-                                    ))}
+                                    );
+                                })}
 
-                                    {/* R and C — small, side-by-side in the 4th column of Row 2 */}
-                                    <div className="flex items-center justify-center gap-1">
-                                        <span
-                                            className="text-[10px] font-bold text-red-600 whitespace-nowrap"
-                                            title="Rejected count (respects campaign & branch filters)"
-                                        >
-                                            R·{rejectedCount}
-                                        </span>
-                                        <span
-                                            className="text-[10px] font-bold text-green-600 whitespace-nowrap"
-                                            title={
-                                                (currentUser?.role === 'master_admin' || currentUser?.role === 'it_admin')
-                                                    ? 'Overall company completed (from Dashboard)'
-                                                    : 'Your completed count (from My Performance)'
-                                            }
-                                        >
-                                            C·{completedCountFromAPI}
-                                        </span>
-                                    </div>
+                                {/* Row 3 — NC (Not connected), R (Rejected), C (Completed, not clickable) */}
+                                <button
+                                    onClick={() => setSelectedFlag('NC')}
+                                    title="Not connected — drives with 'Not Connected' status (respects drive & branch filters)"
+                                    style={{ gridColumn: 2, gridRow: 3 }}
+                                    className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === 'NC'
+                                        ? "bg-[#2f3192] text-white shadow-sm"
+                                        : "text-black hover:bg-gray-50"
+                                        }`}
+                                >
+                                    NC · {notConnectedCount}
+                                </button>
 
-                                </div>
+                                <button
+                                    onClick={() => setSelectedFlag('R')}
+                                    title="Rejected — show rejected records (respects drive & branch filters)"
+                                    style={{
+                                        gridColumn: 3,
+                                        gridRow: 3,
+                                        ...(selectedFlag === 'R'
+                                            ? { backgroundColor: '#e34019' }
+                                            : { color: '#e34019' })
+                                    }}
+                                    className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === 'R'
+                                        ? "text-white shadow-sm"
+                                        : "hover:bg-orange-50"
+                                        }`}
+                                >
+                                    R · {rejectedCount}
+                                </button>
 
+                                <span
+                                    style={{ gridColumn: 4, gridRow: 3 }}
+                                    className="px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md text-center text-green-600 cursor-default flex items-center justify-center"
+                                    title={
+                                        (currentUser?.role === 'master_admin' || currentUser?.role === 'it_admin')
+                                            ? 'Overall company completed (from Dashboard)'
+                                            : 'Your completed count (from My Performance)'
+                                    }
+                                >
+                                    C · {completedCountFromAPI}
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -5413,12 +6160,6 @@ ${f.body}`;
                                                     if (colId.startsWith('campaign_')) {
                                                         const campaignName = colId.replace('campaign_', '');
 
-                                                        const words = campaignName.split(' ');
-                                                        const mid = Math.ceil(words.length / 2);
-
-                                                        const firstLine = words.slice(0, mid).join(' ');
-                                                        const secondLine = words.slice(mid).join(' ');
-
                                                         const activeFilters = campaignColumnFilters[campaignName] || [];
                                                         const hasActiveFilter = activeFilters.length > 0;
                                                         const isThisFilterOpen = openCampaignFilter === campaignName;
@@ -5426,6 +6167,7 @@ ${f.body}`;
                                                         const statusOptions = [
                                                             { value: 'transferred', label: 'T - Transferred' },
                                                             { value: 'wip', label: 'W - Work in Progress' },
+                                                            { value: 'not_connected', label: 'NC - Not Connected' },
                                                             { value: 'rejected', label: 'R - Rejected' },
                                                             { value: 'rescheduled', label: 'FR - Rescheduled' }
                                                         ];
@@ -5442,9 +6184,8 @@ ${f.body}`;
                                                                     className="flex items-center justify-center gap-1 relative"
                                                                     ref={isThisFilterOpen ? campaignFilterRef : null}
                                                                 >
-                                                                    <div className="flex flex-col items-center leading-[12px]">
-                                                                        <span className="whitespace-nowrap">{firstLine}</span>
-                                                                        <span className="whitespace-nowrap">{secondLine}</span>
+                                                                    <div className="flex flex-col items-center leading-[12px]" title={campaignName}>
+                                                                        <span className="break-words text-center">{campaignName}</span>
                                                                     </div>
 
                                                                     <button
@@ -5458,7 +6199,7 @@ ${f.body}`;
                                                                             setOpenCampaignFilter(isThisFilterOpen ? null : campaignName);
                                                                         }}
                                                                         className={`p-0.5 rounded hover:bg-gray-200 transition-colors ${hasActiveFilter ? 'text-blue-600' : 'text-gray-400'}`}
-                                                                        title="Filter campaign status"
+                                                                        title="Filter drive status"
                                                                     >
                                                                         <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                                                                             <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V17a1 1 0 01-.553.894l-4 2A1 1 0 017 19v-8.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd" />
@@ -5789,6 +6530,9 @@ ${f.body}`;
                                                         } else if (currentStatus === 'rescheduled') {
                                                             statusLetter = 'FR';
                                                             statusTitle = 'Follow-up Reschedule';
+                                                        } else if (currentStatus === 'not_connected') {
+                                                            statusLetter = 'NC';
+                                                            statusTitle = 'Not Connected';
                                                         }
 
                                                         return (
@@ -5796,7 +6540,7 @@ ${f.body}`;
                                                                 <div className="flex gap-0.5 justify-center items-center">
                                                                     <span
                                                                         className="text-black text-[12px] font-medium w-4 text-center"
-                                                                        title={hasCheckmark ? 'In Campaign' : ''}
+                                                                        title={hasCheckmark ? 'In Drive' : ''}
                                                                     >
                                                                         {hasCheckmark ? '✓' : ''}
                                                                     </span>
@@ -6193,7 +6937,7 @@ ${f.body}`;
                                                 <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">Branch</th>
                                                 <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">Segment</th>
                                                 <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">Engine Model</th>
-                                                <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">Applicable Campaigns</th>
+                                                <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">Applicable Drives</th>
                                                 <th className="px-2 py-1 text-center text-[11px] font-bold text-black">Action</th>
                                             </tr>
                                         </thead>
@@ -6579,12 +7323,12 @@ ${f.body}`;
 
                     {/* Campaign Selection */}
                     <div className="mb-3">
-                        <label className="block text-[11px] font-semibold text-black mb-1.5">Select Campaigns for Follow-up *</label>
+                        <label className="block text-[11px] font-semibold text-black mb-1.5">Select Drives for Follow-up *</label>
 
                         <div className="grid grid-cols-[7fr_3fr] gap-2">
                             {/* Enrolled campaigns */}
                             <div className="border border-gray-200 rounded-lg p-2 min-w-0">
-                                <p className="text-[10px] font-bold text-black uppercase mb-1.5">Enrolled Campaigns</p>
+                                <p className="text-[10px] font-bold text-black uppercase mb-1.5">Enrolled Drives</p>
                                 <div className="flex gap-1.5 overflow-x-auto pb-1 custom-scrollbar" style={{ scrollbarWidth: 'thin' }}>
                                     {customerCampaigns.map(campaign => (
                                         <button
@@ -6670,7 +7414,7 @@ ${f.body}`;
                         </div>
 
                         {selectedCampaignsForFollowup.length === 0 && (
-                            <p className="text-[11px] text-red-500 mt-1">Please select at least one campaign</p>
+                            <p className="text-[11px] text-red-500 mt-1">Please select at least one drive</p>
                         )}
                     </div>
 
@@ -6710,7 +7454,8 @@ ${f.body}`;
                                 <label className="block text-[11px] font-semibold text-black mb-0.5 text-center">Next Follow-up Date <span className="text-red-500">*</span></label>
                                 <input
                                     type="date"
-                                    value={commonNextFollowupDate}
+                                    value={allSelectedNoNextDate ? '' : commonNextFollowupDate}
+                                    disabled={allSelectedNoNextDate}
                                     onChange={(e) => {
                                         const selectedDateValue = e.target.value;
                                         setCommonNextFollowupDate(selectedDateValue);
@@ -6731,14 +7476,16 @@ ${f.body}`;
                                         }
                                     }}
                                     min={new Date().toISOString().split('T')[0]}
-                                    className="w-full border border-gray-300 rounded-lg px-2 py-1 text-[11px] focus:ring-2 focus:ring-opacity-50 text-black"
+                                    className={`w-full border border-gray-300 rounded-lg px-2 py-1 text-[11px] focus:ring-2 focus:ring-opacity-50 text-black ${allSelectedNoNextDate ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                                     style={{ '--tw-ring-color': themeColor }}
                                 />
                             </div>
                             <div>
                                 <label className="block text-[11px] font-semibold text-black mb-0.5 text-center">Follow-up Flag <span className="text-red-500">*</span></label>
                                 <div className="w-full border border-gray-200 rounded-lg px-2 py-1 text-[11px] bg-gray-50 text-center min-h-[28px] flex items-center justify-center">
-                                    {commonFollowupFlag ? (
+                                    {allSelectedNoFlag ? (
+                                        <span className="text-gray-400">—</span>
+                                    ) : commonFollowupFlag ? (
                                         <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-700">
                                             {commonFollowupFlag}
                                         </span>
@@ -6756,8 +7503,11 @@ ${f.body}`;
                             <table className="w-full min-w-[1500px] border-collapse">
                                 <thead className="bg-gradient-to-r from-gray-100 to-gray-50 sticky top-0">
                                     <tr className="border-b border-gray-300">
-                                        <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border border-gray-300 whitespace-nowrap w-[120px] bg-gray-100">Campaign Name & Script</th>
+                                        <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border border-gray-300 whitespace-nowrap w-[120px] bg-gray-100">Drive Name & Script</th>
                                         <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border border-gray-300 whitespace-nowrap w-[120px] bg-gray-100">Service or Product</th>
+                                        {showCspSubtypeGlobal && (
+                                            <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border border-gray-300 whitespace-nowrap w-[140px] bg-gray-100">Subtype</th>
+                                        )}
                                         <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border border-gray-300 whitespace-nowrap w-[150px] bg-gray-100">Activity <span className="text-red-500">*</span></th>
                                         <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border border-gray-300 whitespace-nowrap w-[100px] bg-gray-100">Status <span className="text-red-500">*</span></th>
 
@@ -6816,7 +7566,7 @@ ${f.body}`;
                                                             </span>
                                                         </div>
                                                     ) : (
-                                                        <span className="text-[11px] text-green-600 font-semibold">Completed Campaign</span>
+                                                        <span className="text-[11px] text-green-600 font-semibold">Completed Drive</span>
                                                     )}
                                                 </td>
                                                 <td className="px-2 py-1.5 border border-gray-300 text-center align-middle">
@@ -6842,6 +7592,15 @@ ${f.body}`;
                                                         <span className="text-[11px] text-black">-</span>
                                                     )}
                                                 </td>
+                                                {showCspSubtypeGlobal && (
+                                                    <td className="px-2 py-1.5 border border-gray-300 text-center align-middle">
+                                                        {!isOther && campaign && isCspCampaign(campaign) ? (
+                                                            <span className="text-[11px] text-black">{getCspAutoSubtype() || '-'}</span>
+                                                        ) : (
+                                                            <span className="text-[11px] text-black">-</span>
+                                                        )}
+                                                    </td>
+                                                )}
                                                 <td className="px-2 py-1.5 border border-gray-300 text-center align-middle">
                                                     <select
                                                         value={campaignData.activity_id || ''}
@@ -6859,7 +7618,7 @@ ${f.body}`;
                                                                 const currentStatus = campaignData.status || 'rescheduled';
 
                                                                 const isNowBlocked =
-                                                                    (content.includes('quotation send') && currentStatus === 'rescheduled') ||
+                                                                    (content.includes('quotation send') && (currentStatus === 'rescheduled' || currentStatus === 'not_connected')) ||
                                                                     (content.includes('quotation required') && (currentStatus === 'wip' || currentStatus === 'completed'));
 
                                                                 if (isNowBlocked) {
@@ -6954,10 +7713,11 @@ ${f.body}`;
                                                         onChange={(e) => {
                                                             const newStatus = e.target.value;
 
-                                                            // If quotation is sent, prevent changing status to "rescheduled"
-                                                            if (campaignData.quotation_sent && newStatus === 'rescheduled') {
+                                                            // If quotation is sent, block switching to a status that forbids quotations
+                                                            if (campaignData.quotation_sent && (newStatus === 'rescheduled' || newStatus === 'not_connected')) {
                                                                 const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
-                                                                toast.error(`Cannot change status to "Follow-up Reschedule" because quotation has already been sent for campaign "${campaign?.name}".`);
+                                                                const label = newStatus === 'not_connected' ? 'Not Connected' : 'Follow-up Reschedule';
+                                                                toast.error(`Cannot change status to "${label}" because quotation has already been sent for drive "${campaign?.name}".`);
                                                                 return;
                                                             }
 
@@ -6980,6 +7740,7 @@ ${f.body}`;
 
                                                             const options = [
                                                                 { value: 'rescheduled', label: 'Follow-up Reschedule' },
+                                                                { value: 'not_connected', label: 'Not Connected' },
                                                                 { value: 'wip', label: 'Work in Progress' },
                                                                 { value: 'completed', label: 'Completed' },
                                                                 { value: 'rejected', label: 'Rejected' },
@@ -6987,6 +7748,7 @@ ${f.body}`;
 
                                                             return options.map(opt => {
                                                                 if (isQuotationSendActivity && opt.value === 'rescheduled') return null;
+                                                                if (isQuotationSendActivity && opt.value === 'not_connected') return null;
                                                                 if (isQuotationRequiredActivity && opt.value === 'wip') return null;
                                                                 if (isQuotationRequiredActivity && opt.value === 'completed') return null;
 
@@ -7029,11 +7791,12 @@ ${f.body}`;
                                                         <input
                                                             type="checkbox"
                                                             checked={campaignData.quotation_sent || false}
-                                                            disabled={campaignData.status === 'rescheduled'}
+                                                            disabled={campaignData.status === 'rescheduled' || campaignData.status === 'not_connected'}
                                                             onChange={(e) => {
-                                                                // If status is rescheduled, cannot send quotation
-                                                                if (campaignData.status === 'rescheduled') {
-                                                                    toast.error('Cannot send quotation when status is "Follow-up Reschedule"');
+                                                                // Statuses that forbid quotations
+                                                                if (campaignData.status === 'rescheduled' || campaignData.status === 'not_connected') {
+                                                                    const label = campaignData.status === 'not_connected' ? 'Not Connected' : 'Follow-up Reschedule';
+                                                                    toast.error(`Cannot send quotation when status is "${label}"`);
                                                                     return;
                                                                 }
 
@@ -7052,7 +7815,7 @@ ${f.body}`;
                                                                     updateCampaignFollowupData(campaignId, 'quotation_value', '');
                                                                 }
                                                             }}
-                                                            className={`rounded border border-gray-400 h-3.5 w-3.5 focus:ring-2 ${campaignData.status === 'rescheduled' ? 'opacity-50 cursor-not-allowed' : ''
+                                                            className={`rounded border border-gray-400 h-3.5 w-3.5 focus:ring-2 ${(campaignData.status === 'rescheduled' || campaignData.status === 'not_connected') ? 'opacity-50 cursor-not-allowed' : ''
                                                                 }`}
                                                             style={{ accentColor: themeColor }}
                                                         />
@@ -7122,6 +7885,7 @@ ${f.body}`;
                                                                 style={{ '--tw-ring-color': themeColor }}
                                                                 placeholder="Add detailed remark here..."
                                                             />
+                                                            
                                                             {selectedCampaignsForFollowup.length > 1 && (
                                                                 <button
                                                                     type="button"
@@ -7140,7 +7904,7 @@ ${f.body}`;
                                                                         toast.success(`Remark applied to all ${selectedCampaignsForFollowup.length} campaigns`);
                                                                     }}
                                                                     className="px-1.5 border border-gray-300 rounded-lg bg-blue-50 hover:bg-blue-100 transition-colors flex items-center"
-                                                                    title="Apply this remark to all selected campaigns"
+                                                                    title="Apply this remark to all selected drives"
                                                                 >
                                                                     <DocumentDuplicateIcon className="h-3 w-3 text-blue-600" />
                                                                 </button>
@@ -7173,6 +7937,7 @@ ${f.body}`;
                                                                     />
                                                                 </button>
                                                             )}
+                                                            
                                                         </div>
 
                                                         {/* Recent remarks dropdown */}
@@ -7305,14 +8070,14 @@ ${f.body}`;
                                 />
                             </div>
                             <div>
-                                <label className="block text-[11px] font-semibold text-black mb-0.5 text-center">Campaign</label>
+                                <label className="block text-[11px] font-semibold text-black mb-0.5 text-center">Drive</label>
                                 <select
                                     value={followupFilters.campaign}
                                     onChange={(e) => setFollowupFilters({ ...followupFilters, campaign: e.target.value })}
                                     className="w-full border border-gray-300 rounded-lg px-2 py-1 text-[11px] focus:ring-2 focus:ring-opacity-50 text-black"
                                     style={{ '--tw-ring-color': themeColor }}
                                 >
-                                    <option value="">All Campaigns</option>
+                                    <option value="">All Drives</option>
                                     {[...new Set(customerFollowups
                                         .filter(followup => followup.campaign_name)
                                         .map(followup => followup.campaign_name)
@@ -7407,11 +8172,17 @@ ${f.body}`;
                                             <p className="font-medium text-[11px] text-black">{formatDateTime(selectedFollowup.followup_date)}</p>
                                         </div>
                                         <div>
-                                            <label className="text-[11px] text-black">Campaign</label>
+                                            <label className="text-[11px] text-black">Drive</label>
                                             <p className="font-medium text-[11px]" style={{ color: "black" }}>
                                                 {selectedFollowup.campaign_name || '-'}
                                             </p>
                                         </div>
+                                        {selectedFollowup.csp_subtype && (
+                                            <div>
+                                                <label className="text-[11px] text-black">Subtype</label>
+                                                <p className="font-medium text-[11px] text-black">{selectedFollowup.csp_subtype}</p>
+                                            </div>
+                                        )}
                                         <div>
                                             <label className="text-[11px] text-black">Follow-up By</label>
                                             <p className="font-medium text-[11px] capitalize text-black">{selectedFollowup.followup_by || '-'}</p>
@@ -7422,7 +8193,7 @@ ${f.body}`;
                                         </div>
                                         <div>
                                             <label className="text-[11px] text-black">Status</label>
-                                            <p className="font-medium text-[11px] capitalize text-black">{selectedFollowup.status === 'rescheduled' ? 'Rescheduled (FR)' : selectedFollowup.status || '-'}</p>
+                                            <p className="font-medium text-[11px] capitalize text-black">{selectedFollowup.status === 'rescheduled' ? 'Rescheduled (FR)' : selectedFollowup.status === 'not_connected' ? 'Not Connected (NC)' : selectedFollowup.status || '-'}</p>
                                         </div>
                                         <div>
                                             <label className="text-[11px] text-black">Next Follow-up</label>
@@ -7501,9 +8272,10 @@ ${f.body}`;
                             <thead className="bg-gray-50 sticky top-0">
                                 <tr className="border-b border-gray-200">
                                     <th className="px-2 py-1.5 text-center text-[11px] font-medium text-black border-r border-gray-200 whitespace-nowrap">Date</th>
-                                    <th className="px-2 py-1.5 text-center text-[11px] font-medium text-black border-r border-gray-200 whitespace-nowrap">Campaign</th>
-                                    <th className="px-2 py-1.5 text-center text-[11px] font-medium text-black border-r border-gray-200 whitespace-nowrap">Camp. Status</th>
+                                    <th className="px-2 py-1.5 text-center text-[11px] font-medium text-black border-r border-gray-200 whitespace-nowrap">Drive</th>
+                                    <th className="px-2 py-1.5 text-center text-[11px] font-medium text-black border-r border-gray-200 whitespace-nowrap">Drive Status</th>
                                     <th className="px-2 py-1.5 text-center text-[11px] font-medium text-black border-r border-gray-200 whitespace-nowrap">Service/Product</th>
+                                    <th className="px-2 py-1.5 text-center text-[11px] font-medium text-black border-r border-gray-200 whitespace-nowrap">Subtype</th>
                                     <th className="px-2 py-1.5 text-center text-[11px] font-medium text-black border-r border-gray-200 whitespace-nowrap">Employee</th>
                                     <th className="px-2 py-1.5 text-center text-[11px] font-medium text-black border-r border-gray-200 whitespace-nowrap">Follow-up By</th>
                                     <th className="px-2 py-1.5 text-center text-[11px] font-medium text-black border-r border-gray-200 whitespace-nowrap">Flag</th>
@@ -7562,6 +8334,9 @@ ${f.body}`;
                                                 <td className="px-2 py-1.5 text-center text-[11px] whitespace-nowrap text-black border-r border-gray-100">
                                                     {highlightText(followup.campaign_service || followup.campaign_name || '-', followupFilters.service)}
                                                 </td>
+                                                <td className="px-2 py-1.5 text-center text-[11px] whitespace-nowrap text-black border-r border-gray-100">
+                                                    {followup.csp_subtype || '-'}
+                                                </td>
                                                 <td className="px-2 py-1.5 text-center text-[11px] whitespace-nowrap text-black border-r border-gray-100">{followup.user_name ? highlightText(followup.user_name, followupFilters.user) : '-'}</td>
                                                 <td className="px-2 py-1.5 text-center text-[11px] whitespace-nowrap capitalize text-black border-r border-gray-100">{followup.followup_by || '-'}</td>
                                                 <td className="px-2 py-1.5 text-center text-[11px] whitespace-nowrap border-r border-gray-100">
@@ -7586,7 +8361,7 @@ ${f.body}`;
                                                 </td>
                                                 <td className="px-2 py-1.5 text-center whitespace-nowrap border-r border-gray-100">
                                                     <span className={`px-1.5 py-0.5 rounded-full text-[11px] capitalize ${getStatusBadgeClass(followup.status)}`}>
-                                                        {followup.status}
+                                                        {followup.status === 'not_connected' ? 'Not Connected' : followup.status}
                                                     </span>
                                                 </td>
                                                 <td className="px-2 py-1.5 text-center text-[11px] whitespace-nowrap text-black border-r border-gray-100">{formatDate(followup.next_followup_date)}</td>
@@ -7652,14 +8427,14 @@ ${f.body}`;
                                         return true;
                                     }).length === 0 && (
                                         <tr>
-                                            <td colSpan="14" className="px-2 py-3 text-center text-[11px] text-black">
+                                            <td colSpan="15" className="px-2 py-3 text-center text-[11px] text-black">
                                                 No follow-ups match the selected filters
                                             </td>
                                         </tr>
                                     )
                                 ) : customerFollowups.length === 0 && (
                                     <tr>
-                                        <td colSpan="14" className="px-2 py-3 text-center text-[11px] text-black">
+                                        <td colSpan="15" className="px-2 py-3 text-center text-[11px] text-black">
                                             No follow-ups found
                                         </td>
                                     </tr>
@@ -7671,105 +8446,105 @@ ${f.body}`;
 
                 {/* Letter History — admin only */}
                 {isAdmin && (
-                <div className="bg-white rounded-xl shadow-lg p-3 sm:p-4 mb-3 sm:mb-4">
-                    <div className="flex items-center justify-between mb-3">
-                        <h2 className="text-sm sm:text-base font-semibold flex items-center gap-2">
-                            <PaperAirplaneIcon className="h-3 w-3 sm:h-4 sm:w-4" style={{ color: themeColor }} />
-                            Letter History
-                        </h2>
-                        {letterHistoryLoading && (
-                            <span className="text-[11px] text-gray-400 flex items-center gap-1">
-                                <ArrowPathIcon className="h-3 w-3 animate-spin" /> Loading…
-                            </span>
-                        )}
-                    </div>
+                    <div className="bg-white rounded-xl shadow-lg p-3 sm:p-4 mb-3 sm:mb-4">
+                        <div className="flex items-center justify-between mb-3">
+                            <h2 className="text-sm sm:text-base font-semibold flex items-center gap-2">
+                                <PaperAirplaneIcon className="h-3 w-3 sm:h-4 sm:w-4" style={{ color: themeColor }} />
+                                Letter History
+                            </h2>
+                            {letterHistoryLoading && (
+                                <span className="text-[11px] text-gray-400 flex items-center gap-1">
+                                    <ArrowPathIcon className="h-3 w-3 animate-spin" /> Loading…
+                                </span>
+                            )}
+                        </div>
 
-                    <div className="overflow-x-auto overflow-y-auto max-h-[360px] custom-scrollbar">
-                        <table className="w-full min-w-[800px] border-collapse">
-                            <thead className="bg-gray-50 sticky top-0">
-                                <tr className="border-b border-gray-200">
-                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Ref No</th>
-                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Format Type</th>
-                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Channels</th>
-                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Date</th>
-                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Sent By</th>
-                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Status</th>
-                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black whitespace-nowrap">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {letterHistory.map((lt) => {
-                                    const isDraft = lt.status === 'draft';
-                                    const statusStyle =
-                                        lt.status === 'sent' ? 'bg-green-100 text-green-700'
-                                            : lt.status === 'draft' ? 'bg-amber-100 text-amber-700'
-                                                : lt.status === 'partial' ? 'bg-orange-100 text-orange-700'
-                                                    : 'bg-red-100 text-red-700';
-                                    const chs = lt.channels || [];
-                                    return (
-                                        <tr key={lt.id} className="hover:bg-gray-50 border-b border-gray-100">
-                                            <td className="px-2 py-1.5 text-center text-[11px] whitespace-nowrap border-r border-gray-100">
-                                                {isDraft ? (
+                        <div className="overflow-x-auto overflow-y-auto max-h-[360px] custom-scrollbar">
+                            <table className="w-full min-w-[800px] border-collapse">
+                                <thead className="bg-gray-50 sticky top-0">
+                                    <tr className="border-b border-gray-200">
+                                        <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Ref No</th>
+                                        <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Format Type</th>
+                                        <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Channels</th>
+                                        <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Date</th>
+                                        <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Sent By</th>
+                                        <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Status</th>
+                                        <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black whitespace-nowrap">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {letterHistory.map((lt) => {
+                                        const isDraft = lt.status === 'draft';
+                                        const statusStyle =
+                                            lt.status === 'sent' ? 'bg-green-100 text-green-700'
+                                                : lt.status === 'draft' ? 'bg-amber-100 text-amber-700'
+                                                    : lt.status === 'partial' ? 'bg-orange-100 text-orange-700'
+                                                        : 'bg-red-100 text-red-700';
+                                        const chs = lt.channels || [];
+                                        return (
+                                            <tr key={lt.id} className="hover:bg-gray-50 border-b border-gray-100">
+                                                <td className="px-2 py-1.5 text-center text-[11px] whitespace-nowrap border-r border-gray-100">
+                                                    {isDraft ? (
+                                                        <button
+                                                            onClick={() => openLetterDraft(lt.id)}
+                                                            className="font-semibold underline hover:opacity-80"
+                                                            style={{ color: themeColor }}
+                                                            title="Open draft to edit & send"
+                                                        >
+                                                            {lt.ref_no}
+                                                        </button>
+                                                    ) : (
+                                                        <span className="font-semibold text-black" title="Already sent">{lt.ref_no}</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{lt.format_type_name || '-'}</td>
+                                                <td className="px-2 py-1.5 text-center text-[11px] border-r border-gray-100">
+                                                    <div className="flex gap-1 justify-center flex-wrap">
+                                                        {chs.length === 0 && <span className="text-gray-400">-</span>}
+                                                        {chs.includes('email') && (
+                                                            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] ${lt.sent_email ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                                                                <EnvelopeIcon className="h-2.5 w-2.5" /> Email
+                                                            </span>
+                                                        )}
+                                                        {chs.includes('whatsapp') && (
+                                                            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] ${lt.sent_whatsapp ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                                                                <ChatBubbleLeftRightIcon className="h-2.5 w-2.5" /> WhatsApp
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100 whitespace-nowrap">{formatDateTime(lt.created_at)}</td>
+                                                <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100 whitespace-nowrap">
+                                                    {lt.sent_by_name || '-'}{lt.sent_by_id ? ` (${lt.sent_by_id})` : ''}
+                                                </td>
+                                                <td className="px-2 py-1.5 text-center text-[11px] border-r border-gray-100">
+                                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${statusStyle}`}>
+                                                        {lt.status || '-'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-2 py-1.5 text-center whitespace-nowrap">
                                                     <button
-                                                        onClick={() => openLetterDraft(lt.id)}
-                                                        className="font-semibold underline hover:opacity-80"
-                                                        style={{ color: themeColor }}
-                                                        title="Open draft to edit & send"
+                                                        onClick={() => viewLetterRecord(lt.id)}
+                                                        className="p-0.5 hover:bg-gray-100 rounded-lg"
+                                                        title="View letter PDF"
                                                     >
-                                                        {lt.ref_no}
+                                                        <EyeIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
                                                     </button>
-                                                ) : (
-                                                    <span className="font-semibold text-black" title="Already sent">{lt.ref_no}</span>
-                                                )}
-                                            </td>
-                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{lt.format_type_name || '-'}</td>
-                                            <td className="px-2 py-1.5 text-center text-[11px] border-r border-gray-100">
-                                                <div className="flex gap-1 justify-center flex-wrap">
-                                                    {chs.length === 0 && <span className="text-gray-400">-</span>}
-                                                    {chs.includes('email') && (
-                                                        <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] ${lt.sent_email ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
-                                                            <EnvelopeIcon className="h-2.5 w-2.5" /> Email
-                                                        </span>
-                                                    )}
-                                                    {chs.includes('whatsapp') && (
-                                                        <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] ${lt.sent_whatsapp ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                                                            <ChatBubbleLeftRightIcon className="h-2.5 w-2.5" /> WhatsApp
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100 whitespace-nowrap">{formatDateTime(lt.created_at)}</td>
-                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100 whitespace-nowrap">
-                                                {lt.sent_by_name || '-'}{lt.sent_by_id ? ` (${lt.sent_by_id})` : ''}
-                                            </td>
-                                            <td className="px-2 py-1.5 text-center text-[11px] border-r border-gray-100">
-                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${statusStyle}`}>
-                                                    {lt.status || '-'}
-                                                </span>
-                                            </td>
-                                            <td className="px-2 py-1.5 text-center whitespace-nowrap">
-                                                <button
-                                                    onClick={() => viewLetterRecord(lt.id)}
-                                                    className="p-0.5 hover:bg-gray-100 rounded-lg"
-                                                    title="View letter PDF"
-                                                >
-                                                    <EyeIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
-                                                </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                    {letterHistory.length === 0 && !letterHistoryLoading && (
+                                        <tr>
+                                            <td colSpan="7" className="px-2 py-3 text-center text-[11px] text-gray-500">
+                                                No letters yet for this customer
                                             </td>
                                         </tr>
-                                    );
-                                })}
-                                {letterHistory.length === 0 && !letterHistoryLoading && (
-                                    <tr>
-                                        <td colSpan="7" className="px-2 py-3 text-center text-[11px] text-gray-500">
-                                            No letters yet for this customer
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                </div>
                 )}
 
                 {/* PDF Chat Panel */}
@@ -7934,7 +8709,7 @@ ${f.body}`;
                                             <DocumentTextIcon className="h-8 w-8 sm:h-12 sm:w-12 text-gray-300 mb-2" />
                                             <p className="text-[10px] sm:text-xs text-gray-500 text-center">
                                                 {campaignPdfs.length === 0
-                                                    ? 'No PDF scripts available for this campaign'
+                                                    ? 'No PDF scripts available for this drive'
                                                     : 'Select a PDF from above to view'}
                                             </p>
                                         </div>
@@ -8170,6 +8945,7 @@ ${f.body}`;
                 )}
 
                 {/* Send Letter Wizard */}
+                {/* Send Letter Wizard */}
                 {showLetterWizard && (
                     <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-end lg:items-center justify-center z-50 p-2 sm:p-3">
                         <div className="bg-white rounded-xl shadow-2xl w-full lg:max-w-4xl max-h-[94vh] overflow-hidden flex flex-col">
@@ -8186,14 +8962,13 @@ ${f.body}`;
                                 </button>
                             </div>
 
-                            {/* Step indicator */}
+                            {/* Step indicator (3 steps — Customer Details tab removed) */}
                             <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
-                                <div className="flex items-center justify-between max-w-2xl mx-auto">
+                                <div className="flex items-center justify-between max-w-xl mx-auto">
                                     {[
                                         { n: 1, label: 'Format Type' },
-                                        { n: 2, label: 'Customer Info' },
-                                        { n: 3, label: 'Letter' },
-                                        { n: 4, label: 'Review & Send' },
+                                        { n: 2, label: 'Letter' },
+                                        { n: 3, label: 'Review & Send' },
                                     ].map((s, idx) => (
                                         <React.Fragment key={s.n}>
                                             <button type="button"
@@ -8205,7 +8980,7 @@ ${f.body}`;
                                                 </span>
                                                 <span className={`text-[10px] font-medium ${letterStep >= s.n ? 'text-black' : 'text-gray-400'}`}>{s.label}</span>
                                             </button>
-                                            {idx < 3 && (
+                                            {idx < 2 && (
                                                 <div className="flex-1 h-0.5 mx-1" style={{ backgroundColor: letterStep > s.n ? themeColor : '#e5e7eb' }} />
                                             )}
                                         </React.Fragment>
@@ -8241,23 +9016,24 @@ ${f.body}`;
                                                 </select>
                                             )}
                                             {!letterFormatsLoading && wizardLetterFormats.length === 0 && (
-                                                <p className="text-[11px] text-red-500 mt-1">No letter formats found. Add one from Campaign → Letter Master.</p>
+                                                <p className="text-[11px] text-red-500 mt-1">No letter formats found. Add one from Drive → Letter Master.</p>
                                             )}
                                         </div>
 
                                         {selectedLetterFormat && (
                                             <div className="space-y-3">
                                                 <div className="border border-gray-200 rounded-lg p-3">
-                                                    <p className="text-[11px] font-bold text-black uppercase mb-1.5">Channels</p>
+                                                    <p className="text-[11px] font-bold text-black uppercase mb-1.5">Products</p>
                                                     <div className="flex flex-wrap gap-1.5">
-                                                        {(selectedLetterFormat.channels || []).length === 0 && <span className="text-xs text-gray-400">None set</span>}
-                                                        {(selectedLetterFormat.channels || []).includes('email') && (
-                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs"><EnvelopeIcon className="h-3 w-3" /> Email</span>
-                                                        )}
-                                                        {(selectedLetterFormat.channels || []).includes('whatsapp') && (
-                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs"><ChatBubbleLeftRightIcon className="h-3 w-3" /> WhatsApp</span>
-                                                        )}
+                                                        {(selectedLetterFormat.products || []).length === 0 && <span className="text-xs text-gray-400">None</span>}
+                                                        {(selectedLetterFormat.products || []).map((p, i) => (
+                                                            <span key={i} className="inline-flex items-center px-2 py-0.5 bg-[#2f3192]/10 text-[#2f3192] rounded text-xs font-medium">{p}</span>
+                                                        ))}
                                                     </div>
+                                                </div>
+                                                <div className="border border-gray-200 rounded-lg p-3">
+                                                    <p className="text-[11px] font-bold text-black uppercase mb-1.5">Reference No</p>
+                                                    <span className="text-xs text-black font-mono break-all">{selectedLetterFormat.reference_no || '—'}</span>
                                                 </div>
                                                 <div className="border border-gray-200 rounded-lg p-3">
                                                     <p className="text-[11px] font-bold text-black uppercase mb-1.5">Default Attachments</p>
@@ -8274,175 +9050,237 @@ ${f.body}`;
                                                         </div>
                                                     )}
                                                 </div>
-                                                <div className="border border-gray-200 rounded-lg p-3">
-                                                    <p className="text-[11px] font-bold text-black uppercase mb-1.5">Letter Format</p>
-                                                    <pre className="text-xs text-black whitespace-pre-wrap break-words font-sans leading-relaxed max-h-40 overflow-y-auto">
-                                                        {selectedLetterFormat.letter_format || 'No template text — a default AMC letter will be used.'}
-                                                    </pre>
-                                                </div>
                                             </div>
                                         )}
                                     </div>
                                 )}
 
-                                {/* STEP 2 — Customer Info (uses already-fetched data) */}
-                                {letterStep === 2 && (() => {
-                                    const v = getLetterValues();
-                                    return (
-                                        <div className="space-y-3 max-w-3xl mx-auto">
-                                            <div className="border border-gray-200 rounded-lg overflow-hidden">
-                                                <div className="px-3 py-1.5 bg-gray-50 border-b text-xs font-bold text-black">Customer Details</div>
-                                                <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                                                    <div><span className="font-semibold">Instance ID:</span> {v.instance_id || '-'}</div>
-                                                    <div><span className="font-semibold">Customer Name:</span> {v.customer_name || '-'}</div>
-                                                    <div><span className="font-semibold">Contact:</span> {formatPhoneNumber(v.contact)}</div>
-                                                    <div><span className="font-semibold">Email:</span> {v.email || '-'}</div>
-                                                    <div><span className="font-semibold">Branch:</span> {v.branch_id || '-'} {v.branch_name ? `(${v.branch_name})` : ''}</div>
-                                                    <div><span className="font-semibold">Location:</span> {v.location || '-'}</div>
-                                                </div>
-                                            </div>
-                                            <div className="border border-gray-200 rounded-lg overflow-hidden">
-                                                <div className="px-3 py-1.5 bg-gray-50 border-b text-xs font-bold text-black">Asset Details</div>
-                                                <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                                                    <div><span className="font-semibold">Engine Model:</span> {v.engine_model || '-'}</div>
-                                                    <div><span className="font-semibold">KVA Rating:</span> {v.kva || '-'}</div>
-                                                    <div><span className="font-semibold">Agreement No:</span> {v.agreement_no || '-'}</div>
-                                                    <div><span className="font-semibold">Agreement End:</span> {v.agreement_end || '-'}</div>
-                                                    <div><span className="font-semibold">Warranty Expiry:</span> {v.warranty_expiry || '-'}</div>
-                                                </div>
-                                            </div>
-                                            {cspInfo.length > 0 && (
-                                                <div className="border border-gray-200 rounded-lg overflow-hidden">
-                                                    <div className="px-3 py-1.5 bg-gray-50 border-b text-xs font-bold text-black">CSP Info</div>
-                                                    <div className="p-3 overflow-x-auto">
-                                                        <table className="w-full text-[11px]">
-                                                            <thead>
-                                                                <tr className="text-left text-black border-b">
-                                                                    <th className="px-2 py-1 font-semibold">SR Number</th>
-                                                                    <th className="px-2 py-1 font-semibold">SR Status</th>
-                                                                    <th className="px-2 py-1 font-semibold">Subtype</th>
-                                                                    <th className="px-2 py-1 font-semibold">Segment</th>
-                                                                    <th className="px-2 py-1 font-semibold">Open Date</th>
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {cspInfo.map((row, i) => (
-                                                                    <tr key={i} className="border-b border-gray-100">
-                                                                        <td className="px-2 py-1">{row.sr_number || '-'}</td>
-                                                                        <td className="px-2 py-1">{row.sr_status || '-'}</td>
-                                                                        <td className="px-2 py-1">{row.sr_subtype || '-'}</td>
-                                                                        <td className="px-2 py-1">{row.segment || '-'}</td>
-                                                                        <td className="px-2 py-1">{row.sr_open_date || '-'}</td>
-                                                                    </tr>
-                                                                ))}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })()}
-
-                                {/* STEP 3 — Editable letter page */}
-                                {letterStep === 3 && (
+                                {/* STEP 2 — Generated, editable letter */}
+                                {letterStep === 2 && (
                                     <div className="space-y-3 max-w-3xl mx-auto">
-                                        <div className="border border-gray-300 rounded-lg p-4 sm:p-6 bg-white">
-                                            <div className="flex justify-between items-start border-b-2 pb-3" style={{ borderColor: themeColor }}>
-                                                <div className="flex items-center gap-3">
-                                                    {logoDataUrl ? (
-                                                        <img src={logoDataUrl} alt={COMPANY_NAME} className="h-12 w-auto object-contain" />
-                                                    ) : (
-                                                        <div className="w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold" style={{ backgroundColor: themeColor }}>KC</div>
-                                                    )}
-                                                    <div>
-                                                        <div className="text-base font-bold" style={{ color: themeColor }}>{COMPANY_NAME}</div>
-                                                        <div className="text-[10px] text-gray-500">{COMPANY_FULL}</div>
-                                                    </div>
+                                        <div className="border border-gray-300 rounded-lg overflow-hidden bg-white">
+                                            {/* Header: logo.png (left) + letter-header.png (right) */}
+                                            {(logoImgDataUrl || headerImgDataUrl) ? (
+                                                <div className="flex items-center justify-between gap-3 px-4 py-3 border-b-2" style={{ borderColor: themeColor }}>
+                                                    {logoImgDataUrl
+                                                        ? <img src={logoImgDataUrl} alt={COMPANY_NAME} className="h-20 w-auto object-contain" />
+                                                        : <span />}
+                                                    {headerImgDataUrl
+                                                        ? <img src={headerImgDataUrl} alt={COMPANY_FULL} className="h-20 w-auto object-contain" />
+                                                        : <span />}
                                                 </div>
-                                                <div className="text-right space-y-1">
-                                                    <div className="flex items-center gap-1 justify-end text-[11px]">
-                                                        <span className="font-semibold">Ref No:</span>
-                                                        <input value={letterFields.ref_no} readOnly disabled
-                                                            className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] w-28 text-right bg-gray-100 cursor-not-allowed" />
-                                                    </div>
-                                                    <div className="flex items-center gap-1 justify-end text-[11px]">
-                                                        <span className="font-semibold">Date:</span>
-                                                        <input value={letterFields.date} readOnly disabled
-                                                            className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] w-28 text-right bg-gray-100 cursor-not-allowed" />
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <div className="mt-3 space-y-1.5 text-xs">
-                                                <span className="font-semibold">To,</span>
-                                                <input value={letterFields.to_name} onChange={(e) => setLetterFields(p => ({ ...p, to_name: e.target.value }))}
-                                                    className="w-full border border-gray-200 rounded px-2 py-1 text-xs" placeholder="Customer name" />
-                                                <textarea value={letterFields.to_address} onChange={(e) => setLetterFields(p => ({ ...p, to_address: e.target.value }))}
-                                                    className="w-full border border-gray-200 rounded px-2 py-1 text-xs" rows="2" placeholder="Address" />
-                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                                                    <div>
-                                                        <label className="text-[10px] text-gray-500">Instance ID (locked)</label>
-                                                        <input value={letterFields.instance_id} readOnly disabled
-                                                            className="w-full border border-gray-200 rounded px-2 py-1 text-xs bg-gray-100 cursor-not-allowed" />
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-[10px] text-gray-500">Engine Model (locked)</label>
-                                                        <input value={letterFields.engine_model} readOnly disabled
-                                                            className="w-full border border-gray-200 rounded px-2 py-1 text-xs bg-gray-100 cursor-not-allowed" />
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-[10px] text-gray-500">Agreement No (locked)</label>
-                                                        <input value={letterFields.agreement_no} readOnly disabled
-                                                            className="w-full border border-gray-200 rounded px-2 py-1 text-xs bg-gray-100 cursor-not-allowed" />
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-[10px] text-gray-500">Contact</label>
-                                                        <input value={letterFields.contact} onChange={(e) => setLetterFields(p => ({ ...p, contact: e.target.value }))}
-                                                            className="w-full border border-gray-200 rounded px-2 py-1 text-xs" />
-                                                    </div>
-                                                    <div className="sm:col-span-2">
-                                                        <label className="text-[10px] text-gray-500">Email</label>
-                                                        <input value={letterFields.email} onChange={(e) => setLetterFields(p => ({ ...p, email: e.target.value }))}
-                                                            className="w-full border border-gray-200 rounded px-2 py-1 text-xs" />
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <div className="mt-3">
-                                                <label className="text-[10px] text-gray-500">Subject</label>
-                                                <input value={letterFields.subject} onChange={(e) => setLetterFields(p => ({ ...p, subject: e.target.value }))}
-                                                    className="w-full border border-gray-200 rounded px-2 py-1 text-xs font-semibold" />
-                                            </div>
-
-                                            {previousLetters.length > 0 && (
-                                                <div className="mt-3 border border-gray-200 rounded-lg bg-gray-50 px-3 py-2">
-                                                    <p className="text-[10px] font-bold text-black uppercase tracking-wide mb-1">
-                                                        Previous Letters (last {previousLetters.length})
-                                                    </p>
-                                                    <div className="space-y-1">
-                                                        {previousLetters.map((pl, i) => (
-                                                            <div key={i} className="flex items-center justify-between text-[11px] text-black">
-                                                                <span className="font-semibold">{pl.ref_no}</span>
-                                                                <span className="text-gray-600">{pl.date || '-'}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
+                                            ) : (
+                                                <div className="px-4 py-3 border-b-2 text-base font-bold" style={{ borderColor: themeColor, color: themeColor }}>{COMPANY_NAME}</div>
                                             )}
 
-                                            <div className="mt-2">
-                                                <label className="text-[10px] text-gray-500">Letter Body</label>
-                                                <textarea value={letterFields.body} onChange={(e) => setLetterFields(p => ({ ...p, body: e.target.value }))}
-                                                    className="w-full border border-gray-200 rounded px-2 py-2 text-xs leading-relaxed" style={{ minHeight: '220px' }} />
+                                            <div className="p-4 sm:p-6">
+                                                {/* Ref No (left) + Date (left, editable) */}
+                                                <div className="space-y-1.5 mb-4">
+                                                    <div className="flex items-center gap-1 text-[11px]">
+                                                        <span className="font-semibold w-16">Ref No:</span>
+                                                        <input value={letterFields.ref_no} readOnly disabled
+                                                            className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] flex-1 bg-gray-100 cursor-not-allowed font-mono" />
+                                                    </div>
+                                                    <div className="flex items-center gap-1 text-[11px]">
+                                                        <span className="font-semibold w-16">Date:</span>
+                                                        <input type="date" value={letterFields.date}
+                                                            onChange={(e) => setLetterFields(p => ({ ...p, date: e.target.value }))}
+                                                            className="border border-gray-300 rounded px-1.5 py-0.5 text-[11px] w-40" />
+                                                    </div>
+                                                </div>
+
+                                                {/* Customer details (name + instance id locked, rest editable) */}
+                                                <div className="space-y-1.5 text-xs mb-3">
+                                                    <span className="font-semibold">To,</span>
+                                                    <input value={letterFields.to_name} onChange={(e) => setLetterFields(p => ({ ...p, to_name: e.target.value }))}
+                                                        className="w-full border border-gray-200 rounded px-2 py-1 text-xs" placeholder="Customer Name" />
+                                                    <textarea value={letterFields.to_address} onChange={(e) => setLetterFields(p => ({ ...p, to_address: e.target.value }))}
+                                                        className="w-full border border-gray-200 rounded px-2 py-1 text-xs" rows="2" placeholder="Address" />
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                                                        <div>
+                                                            <label className="text-[10px] text-gray-500">Instance ID (locked)</label>
+                                                            <input value={letterFields.instance_id} readOnly disabled
+                                                                className="w-full border border-gray-200 rounded px-2 py-1 text-xs bg-gray-100 cursor-not-allowed" />
+                                                        </div>
+                                                        {isCspLetter() && getCspSubtypes() && (
+                                                            <div>
+                                                                <label className="text-[10px] text-gray-500">SR Subtype (from CSP Info)</label>
+                                                                <input value={getCspSubtypes()} readOnly disabled
+                                                                    className="w-full border border-gray-200 rounded px-2 py-1 text-xs bg-gray-100 cursor-not-allowed" />
+                                                            </div>
+                                                        )}
+                                                        <div>
+                                                            <label className="text-[10px] text-gray-500">Engine Model</label>
+                                                            <input value={letterFields.engine_model} onChange={(e) => setLetterFields(p => ({ ...p, engine_model: e.target.value }))}
+                                                                className="w-full border border-gray-200 rounded px-2 py-1 text-xs" />
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-[10px] text-gray-500">Agreement No</label>
+                                                            <input value={letterFields.agreement_no} onChange={(e) => setLetterFields(p => ({ ...p, agreement_no: e.target.value }))}
+                                                                className="w-full border border-gray-200 rounded px-2 py-1 text-xs" />
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* Subject (= format type name, editable) */}
+                                                <div className="mb-3">
+                                                    <label className="text-[10px] text-gray-500">Subject</label>
+                                                    <input value={letterFields.subject} onChange={(e) => setLetterFields(p => ({ ...p, subject: e.target.value }))}
+                                                        className="w-full border border-gray-200 rounded px-2 py-1 text-xs font-semibold" />
+                                                </div>
+
+                                                <div className="text-xs mb-2">Dear Sir/Madam,</div>
+
+                                                {/* Start para */}
+                                                <div className="mb-3">
+                                                    <label className="text-[10px] text-gray-500">Start Paragraph</label>
+                                                    <textarea value={letterFields.start_para} onChange={(e) => setLetterFields(p => ({ ...p, start_para: e.target.value }))}
+                                                        className="w-full border border-gray-200 rounded px-2 py-2 text-xs leading-relaxed" style={{ minHeight: '120px' }} />
+                                                </div>
+
+                                                {/* Middle: Follow-up + Quotation + Letter Ref checkboxes */}
+                                                <div className="mb-3 border border-dashed border-gray-300 rounded-lg p-3 bg-gray-50 space-y-2">
+                                                    <div className="flex flex-wrap items-center gap-4">
+                                                        <label className="flex items-center gap-1.5 text-xs font-medium text-black cursor-pointer">
+                                                            <input type="checkbox" checked={includeFollowups}
+                                                                onChange={(e) => {
+                                                                    if (e.target.checked) {
+                                                                        if (formatFollowups().length === 0) {
+                                                                            toast.error('No follow-up records available to include');
+                                                                            return; // keep the box unticked
+                                                                        }
+                                                                        setIncludeFollowups(true);
+                                                                        setShowFollowupPicker(true);
+                                                                    } else {
+                                                                        setIncludeFollowups(false);
+                                                                        setSelectedFollowupIds([]);
+                                                                    }
+                                                                }}
+                                                                style={{ accentColor: themeColor }} />
+                                                            Include Follow-up history
+                                                        </label>
+                                                        {includeFollowups && (
+                                                            <button type="button" onClick={() => setShowFollowupPicker(true)}
+                                                                className="text-[11px] px-2 py-0.5 rounded border" style={{ color: themeColor, borderColor: themeColor }}>
+                                                                Select follow-ups ({selectedFollowupIds.length})
+                                                            </button>
+                                                        )}
+
+                                                        <label className="flex items-center gap-1.5 text-xs font-medium text-black cursor-pointer">
+                                                            <input type="checkbox" checked={includeQuotations}
+                                                                onChange={(e) => {
+                                                                    if (e.target.checked) {
+                                                                        if (quotationFollowups().length === 0) {
+                                                                            toast.error('No quotation records available to include');
+                                                                            return; // keep the box unticked
+                                                                        }
+                                                                        setIncludeQuotations(true);
+                                                                        setShowQuotationPicker(true);
+                                                                    } else {
+                                                                        setIncludeQuotations(false);
+                                                                        setSelectedQuotationIds([]);
+                                                                    }
+                                                                }}
+                                                                style={{ accentColor: themeColor }} />
+                                                            Include Quotation
+                                                        </label>
+                                                        {includeQuotations && (
+                                                            <button type="button" onClick={() => setShowQuotationPicker(true)}
+                                                                className="text-[11px] px-2 py-0.5 rounded border" style={{ color: themeColor, borderColor: themeColor }}>
+                                                                Select quotations ({selectedQuotationIds.length})
+                                                            </button>
+                                                        )}
+
+                                                        <label className="flex items-center gap-1.5 text-xs font-medium text-black cursor-pointer">
+                                                            <input type="checkbox" checked={includeLetterRefs}
+                                                                onChange={(e) => {
+                                                                    if (e.target.checked) {
+                                                                        if (letterRefOptions().length === 0) {
+                                                                            toast.error('No previous letters available to include');
+                                                                            return; // keep the box unticked
+                                                                        }
+                                                                        setIncludeLetterRefs(true);
+                                                                        setShowLetterRefPicker(true);
+                                                                    } else {
+                                                                        setIncludeLetterRefs(false);
+                                                                        setSelectedLetterRefIds([]);
+                                                                    }
+                                                                }}
+                                                                style={{ accentColor: themeColor }} />
+                                                            Include Letter Ref
+                                                        </label>
+                                                        {includeLetterRefs && (
+                                                            <button type="button" onClick={() => setShowLetterRefPicker(true)}
+                                                                className="text-[11px] px-2 py-0.5 rounded border" style={{ color: themeColor, borderColor: themeColor }}>
+                                                                Select letters ({selectedLetterRefIds.length})
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    {includeFollowups && (
+                                                        <div className="pt-1">
+                                                            <label className="text-[10px] text-gray-500">Follow-up intro line (editable)</label>
+                                                            <textarea
+                                                                value={letterFields.followup_intro}
+                                                                onChange={(e) => setLetterFields(p => ({ ...p, followup_intro: e.target.value }))}
+                                                                className="w-full border border-gray-200 rounded px-2 py-1 text-[11px] leading-relaxed"
+                                                                rows="2"
+                                                            />
+                                                            {selectedFollowupIds.length > 0 && (
+                                                                <p className="text-[10px] text-gray-500 mt-0.5">{selectedFollowupIds.length} follow-up(s) will be added to the letter.</p>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                    {includeQuotations && (
+                                                        <div className="pt-1">
+                                                            <label className="text-[10px] text-gray-500">Quotation intro line (editable)</label>
+                                                            <textarea
+                                                                value={letterFields.quotation_intro}
+                                                                onChange={(e) => setLetterFields(p => ({ ...p, quotation_intro: e.target.value }))}
+                                                                className="w-full border border-gray-200 rounded px-2 py-1 text-[11px] leading-relaxed"
+                                                                rows="2"
+                                                            />
+                                                            {selectedQuotationIds.length > 0 && (
+                                                                <p className="text-[10px] text-gray-500 mt-0.5">{selectedQuotationIds.length} quotation(s) will be added to the letter.</p>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                    {includeLetterRefs && (
+                                                        <div className="pt-1">
+                                                            <label className="text-[10px] text-gray-500">Letter Ref intro line (editable)</label>
+                                                            <textarea
+                                                                value={letterFields.letterref_intro}
+                                                                onChange={(e) => setLetterFields(p => ({ ...p, letterref_intro: e.target.value }))}
+                                                                className="w-full border border-gray-200 rounded px-2 py-1 text-[11px] leading-relaxed"
+                                                                rows="2"
+                                                            />
+                                                            {selectedLetterRefIds.length > 0 && (
+                                                                <p className="text-[10px] text-gray-500 mt-0.5">{selectedLetterRefIds.length} letter(s) will be added to the letter.</p>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {/* End para */}
+                                                <div className="mb-3">
+                                                    <label className="text-[10px] text-gray-500">End Paragraph</label>
+                                                    <textarea value={letterFields.end_para} onChange={(e) => setLetterFields(p => ({ ...p, end_para: e.target.value }))}
+                                                        className="w-full border border-gray-200 rounded px-2 py-2 text-xs leading-relaxed" style={{ minHeight: '90px' }} />
+                                                </div>
+
+                                                {/* Common signature (not editable) */}
+                                                <div className="text-xs whitespace-pre-wrap text-gray-700 border-t border-gray-100 pt-2">{LETTER_SIGNATURE}</div>
                                             </div>
+
+                                            {/* Footer image (pic 2) */}
+                                            {footerImgDataUrl && <img src={footerImgDataUrl} alt={COMPANY_FULL} className="block w-full h-auto" style={{ maxWidth: '780px', margin: '0 auto' }} />}
                                         </div>
 
+                                        {/* Attachments */}
                                         <div className="border border-gray-200 rounded-lg p-3">
                                             <div className="flex items-center justify-between mb-2">
                                                 <p className="text-[11px] font-bold text-black uppercase">Attachments ({letterAttachments.length})</p>
                                                 <div className="flex items-center gap-2">
-                                                    <input type="file" multiple accept=".mp4,.jpg,.jpeg,.png,.pdf,.doc,.docx"
+                                                    <input type="file" multiple accept=".mp4,.jpg,.jpeg,.png,.pdf,.doc,.docx,.xlsx,.xls,.csv"
                                                         onChange={handleLetterAddAttachment} className="hidden" id="letter-extra-attach" />
                                                     <label htmlFor="letter-extra-attach"
                                                         className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-white rounded-md cursor-pointer"
@@ -8477,8 +9315,8 @@ ${f.body}`;
                                     </div>
                                 )}
 
-                                {/* STEP 4 — Review & Send */}
-                                {letterStep === 4 && (
+                                {/* STEP 3 — Review & Send */}
+                                {letterStep === 3 && (
                                     <div className="space-y-3 max-w-3xl mx-auto">
                                         <div className="border border-gray-200 rounded-lg overflow-hidden">
                                             <div className="px-3 py-1.5 bg-gray-50 border-b text-xs font-bold text-black flex items-center justify-between">
@@ -8506,20 +9344,68 @@ ${f.body}`;
                                             </div>
 
                                             {letterChannels.includes('email') && (
-                                                <div>
-                                                    <label className="text-[10px] text-gray-500">Recipient Email</label>
-                                                    <input value={letterEmailTo} onChange={(e) => setLetterEmailTo(e.target.value)}
-                                                        className="w-full border border-gray-300 rounded-lg px-2 py-1 text-xs text-black" placeholder="customer@email.com" />
+                                                <div className="space-y-2">
+                                                    <div>
+                                                        <label className="text-[10px] text-gray-500">Recipient Email (To)</label>
+                                                        <input value={letterEmailTo} onChange={(e) => setLetterEmailTo(e.target.value)}
+                                                            className="w-full border border-gray-300 rounded-lg px-2 py-1 text-xs text-black" placeholder="customer@email.com" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] text-gray-500">Add more emails (CC)</label>
+                                                        <div className="flex gap-1.5">
+                                                            <input value={letterCcInput}
+                                                                onChange={(e) => setLetterCcInput(e.target.value)}
+                                                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCcEmail(); } }}
+                                                                className="flex-1 border border-gray-300 rounded-lg px-2 py-1 text-xs text-black" placeholder="another@email.com" />
+                                                            <button type="button" onClick={addCcEmail}
+                                                                className="px-2.5 py-1 text-[11px] text-white rounded-lg" style={{ backgroundColor: themeColor }}>Add</button>
+                                                        </div>
+                                                        {letterCcList.length > 0 && (
+                                                            <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                                                {letterCcList.map((e, i) => (
+                                                                    <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#2f3192]/10 text-[#2f3192] rounded text-[11px]">
+                                                                        {e}
+                                                                        <button type="button" onClick={() => removeCcEmail(i)} className="hover:text-red-600"><XMarkIcon className="h-3 w-3" /></button>
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             )}
+
                                             {letterChannels.includes('whatsapp') && (
-                                                <div>
-                                                    <label className="text-[10px] text-gray-500">WhatsApp Number (with country code)</label>
-                                                    <input value={letterWhatsappTo} onChange={(e) => setLetterWhatsappTo(e.target.value)}
-                                                        className="w-full border border-gray-300 rounded-lg px-2 py-1 text-xs text-black" placeholder="9198xxxxxxxx" />
-                                                    <p className="text-[10px] text-gray-400 mt-0.5">Letter text is sent over WhatsApp; file attachments go via email.</p>
+                                                <div className="space-y-2">
+                                                    <div>
+                                                        <label className="text-[10px] text-gray-500">WhatsApp Number (with country code)</label>
+                                                        <input value={letterWhatsappTo} onChange={(e) => setLetterWhatsappTo(e.target.value)}
+                                                            className="w-full border border-gray-300 rounded-lg px-2 py-1 text-xs text-black" placeholder="9198xxxxxxxx" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] text-gray-500">Add more WhatsApp numbers</label>
+                                                        <div className="flex gap-1.5">
+                                                            <input value={letterWhatsappInput}
+                                                                onChange={(e) => setLetterWhatsappInput(e.target.value)}
+                                                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addWhatsappNumber(); } }}
+                                                                className="flex-1 border border-gray-300 rounded-lg px-2 py-1 text-xs text-black" placeholder="9198xxxxxxxx" />
+                                                            <button type="button" onClick={addWhatsappNumber}
+                                                                className="px-2.5 py-1 text-[11px] text-white rounded-lg" style={{ backgroundColor: themeColor }}>Add</button>
+                                                        </div>
+                                                        {letterWhatsappList.length > 0 && (
+                                                            <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                                                {letterWhatsappList.map((n, i) => (
+                                                                    <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 rounded text-[11px]">
+                                                                        {n}
+                                                                        <button type="button" onClick={() => removeWhatsappNumber(i)} className="hover:text-red-600"><XMarkIcon className="h-3 w-3" /></button>
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                        <p className="text-[10px] text-gray-400 mt-0.5">Letter text is sent over WhatsApp; file attachments go via email.</p>
+                                                    </div>
                                                 </div>
                                             )}
+
                                             <div className="text-[11px] text-gray-600">
                                                 <span className="font-semibold">Ref No:</span> {letterFields.ref_no} &nbsp;·&nbsp;
                                                 <span className="font-semibold">Attachments:</span> {letterAttachments.length}
@@ -8529,7 +9415,7 @@ ${f.body}`;
                                 )}
                             </div>
 
-                            {/* Footer */}
+                            {/* Footer / navigation */}
                             <div className="px-4 py-3 border-t border-gray-200 flex justify-between gap-2 bg-white">
                                 <div className="flex items-center gap-2">
                                     <button
@@ -8539,7 +9425,7 @@ ${f.body}`;
                                     >
                                         {letterStep > 1 ? 'Back' : 'Cancel'}
                                     </button>
-                                    {(letterStep === 3 || letterStep === 4) && (
+                                    {(letterStep === 2 || letterStep === 3) && (
                                         <button
                                             onClick={handleSaveLetterDraft}
                                             disabled={letterSending}
@@ -8550,7 +9436,7 @@ ${f.body}`;
                                         </button>
                                     )}
                                 </div>
-                                {letterStep < 4 ? (
+                                {letterStep < 3 ? (
                                     <button
                                         onClick={() => goToLetterStep(letterStep + 1)}
                                         className="px-4 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 flex items-center gap-1.5"
@@ -8569,6 +9455,138 @@ ${f.body}`;
                                         Send Letter
                                     </button>
                                 )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Follow-up picker popup */}
+                {showFollowupPicker && (
+                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[70] p-3">
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+                            <div className="px-4 py-3 flex justify-between items-center" style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
+                                <h3 className="text-sm font-semibold text-white">Select Follow-up history</h3>
+                                <button onClick={() => { setShowFollowupPicker(false); if (selectedFollowupIds.length === 0) setIncludeFollowups(false); }} className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100">
+                                    <XMarkIcon className="h-4 w-4" />
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
+                                {formatFollowups().length === 0 ? (
+                                    <p className="text-xs text-gray-500 text-center py-6">No follow-ups found for this product.</p>
+                                ) : (
+                                    <div className="space-y-1.5">
+                                        {formatFollowups().map(fu => (
+                                            <label key={fu.id} className="flex items-start gap-2 p-2 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+                                                <input type="checkbox" checked={selectedFollowupIds.includes(fu.id)} onChange={() => toggleSelectedFollowup(fu.id)}
+                                                    className="mt-0.5" style={{ accentColor: themeColor }} />
+                                                <div className="flex-1 min-w-0 text-[11px] text-black">
+                                                    <div className="flex flex-wrap gap-x-3">
+                                                        <span><b>Date:</b> {formatDate(fu.followup_date)}</span>
+                                                        <span><b>Product:</b> {fu.campaign_service || fu.campaign_name || '-'}</span>
+                                                        <span className="capitalize"><b>Status:</b> {fu.status || '-'}</span>
+                                                        <span><b>Employee:</b> {fu.user_name || '-'}</span>
+                                                    </div>
+                                                    <div className="mt-0.5 break-words"><b>Remark:</b> {fu.followup_remark || '-'}</div>
+                                                </div>
+                                            </label>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="px-4 py-3 border-t border-gray-200 flex justify-between items-center">
+                                <span className="text-[11px] text-gray-500">{selectedFollowupIds.length} selected</span>
+                                <button onClick={() => { setShowFollowupPicker(false); if (selectedFollowupIds.length === 0) setIncludeFollowups(false); }}
+                                    className="px-4 py-1.5 text-white rounded-lg text-[11px] font-medium" style={{ backgroundColor: themeColor }}>
+                                    Done
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Quotation picker popup (only quotation-sent = Yes) */}
+                {showQuotationPicker && (
+                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[70] p-3">
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+                            <div className="px-4 py-3 flex justify-between items-center" style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
+                                <h3 className="text-sm font-semibold text-white">Select Quotation(s)</h3>
+                                <button onClick={() => { setShowQuotationPicker(false); if (selectedQuotationIds.length === 0) setIncludeQuotations(false); }} className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100">
+                                    <XMarkIcon className="h-4 w-4" />
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
+                                {quotationFollowups().length === 0 ? (
+                                    <p className="text-xs text-gray-500 text-center py-6">No quotations found for this product.</p>
+                                ) : (
+                                    <div className="space-y-1.5">
+                                        {quotationFollowups().map(q => (
+                                            <label key={q.id} className="flex items-start gap-2 p-2 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+                                                <input type="checkbox" checked={selectedQuotationIds.includes(q.id)} onChange={() => toggleSelectedQuotation(q.id)}
+                                                    className="mt-0.5" style={{ accentColor: themeColor }} />
+                                                <div className="flex-1 min-w-0 text-[11px] text-black">
+                                                    <div className="flex flex-wrap gap-x-3">
+                                                        <span><b>Quote No:</b> {q.quotation_no || '-'}</span>
+                                                        <span><b>Date:</b> {formatDate(q.followup_date)}</span>
+                                                        <span><b>Value:</b> {q.quotation_value ? `₹${Number(q.quotation_value).toLocaleString('en-IN')}` : '-'}</span>
+                                                        <span><b>Product:</b> {q.campaign_service || q.campaign_name || '-'}</span>
+                                                        <span><b>Employee:</b> {q.user_name || '-'}</span>
+                                                    </div>
+                                                </div>
+                                            </label>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="px-4 py-3 border-t border-gray-200 flex justify-between items-center">
+                                <span className="text-[11px] text-gray-500">{selectedQuotationIds.length} selected</span>
+                                <button onClick={() => { setShowQuotationPicker(false); if (selectedQuotationIds.length === 0) setIncludeQuotations(false); }}
+                                    className="px-4 py-1.5 text-white rounded-lg text-[11px] font-medium" style={{ backgroundColor: themeColor }}>
+                                    Done
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Letter Ref picker popup (this customer's previously saved/sent letters) */}
+                {showLetterRefPicker && (
+                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[70] p-3">
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+                            <div className="px-4 py-3 flex justify-between items-center" style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
+                                <h3 className="text-sm font-semibold text-white">Select Letter Reference(s)</h3>
+                                <button onClick={() => setShowLetterRefPicker(false)} className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100">
+                                    <XMarkIcon className="h-4 w-4" />
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
+                                {letterRefOptions().length === 0 ? (
+                                    <p className="text-xs text-gray-500 text-center py-6">No previous letters found for this customer.</p>
+                                ) : (
+                                    <div className="space-y-1.5">
+                                        {letterRefOptions().map(l => (
+                                            <label key={l.id} className="flex items-start gap-2 p-2 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+                                                <input type="checkbox" checked={selectedLetterRefIds.includes(l.id)} onChange={() => toggleSelectedLetterRef(l.id)}
+                                                    className="mt-0.5" style={{ accentColor: themeColor }} />
+                                                <div className="flex-1 min-w-0 text-[11px] text-black">
+                                                    <div className="flex flex-wrap gap-x-3">
+                                                        <span><b>Ref No:</b> {l.ref_no || '-'}</span>
+                                                        <span><b>Format Type:</b> {l.format_type_name || '-'}</span>
+                                                        <span><b>Channels:</b> {letterRefChannelText(l)}</span>
+                                                        <span><b>Date:</b> {formatDate(l.created_at)}</span>
+                                                        <span><b>Sent By:</b> {l.sent_by_name || '-'}</span>
+                                                    </div>
+                                                </div>
+                                            </label>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="px-4 py-3 border-t border-gray-200 flex justify-between items-center">
+                                <span className="text-[11px] text-gray-500">{selectedLetterRefIds.length} selected</span>
+                                <button onClick={() => { setShowLetterRefPicker(false); if (selectedLetterRefIds.length === 0) setIncludeLetterRefs(false); }}
+                                    className="px-4 py-1.5 text-white rounded-lg text-[11px] font-medium" style={{ backgroundColor: themeColor }}>
+                                    Done
+                                </button>
                             </div>
                         </div>
                     </div>
