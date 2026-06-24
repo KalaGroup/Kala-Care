@@ -307,6 +307,9 @@ const CustomerEng = () => {
     const observerRef = useRef();
     const tableContainerRef = useRef();
     const savedScrollPosition = useRef(0);
+    // Remembers how many rows were loaded (lazy-load depth) when a customer was opened,
+    // so returning to the list restores the EXACT same rows + scroll position.
+    const savedDisplayCount = useRef(0);
 
     // Sorting state
     const [sortConfig, setSortConfig] = useState({
@@ -546,29 +549,41 @@ const CustomerEng = () => {
         fetchCompletedCount();
     }, [currentUser]);
 
-    // Restore scroll position when returning to list view
-    useEffect(() => {
-        if (!showCustomerDetails && savedScrollPosition.current > 0 && displayedCustomers.length > 0) {
-            // Load enough items to reach the saved scroll position
-            const itemsNeeded = Math.ceil((savedScrollPosition.current + 600) / 40); // approximate row height ~40px
-            const pagesNeeded = Math.ceil(itemsNeeded / ITEMS_PER_PAGE);
+    // Restore the EXACT scroll position + loaded-row depth when returning to the list view.
+    //
+    // We intentionally do NOT re-fetch the whole list on Back (it was already refreshed the
+    // moment the follow-up was saved). So coming back only needs to:
+    //   1) re-mount the same number of rows the user had scrolled through, and
+    //   2) put the scrollbar back exactly where it was.
+    // Because the sort/filter is deterministic, only the customer whose follow-up changed
+    // moves to its new position — every other row stays put. useLayoutEffect runs BEFORE the
+    // browser paints, so there is no visible jump/flicker.
+    useLayoutEffect(() => {
+        if (showCustomerDetails) return;
+        if (savedScrollPosition.current <= 0) return;
+        if (filteredCustomers.length === 0) return;
 
-            if (pagesNeeded > page && filteredCustomers.length > displayedCustomers.length) {
-                const newEnd = Math.min(pagesNeeded * ITEMS_PER_PAGE, filteredCustomers.length);
-                setDisplayedCustomers(filteredCustomers.slice(0, newEnd));
-                setPage(pagesNeeded);
-                setHasMore(newEnd < filteredCustomers.length);
-            }
+        // How many rows to bring back (at least one page, capped to what's available).
+        const wantCount = Math.min(
+            Math.max(savedDisplayCount.current, ITEMS_PER_PAGE),
+            filteredCustomers.length
+        );
 
-            // Restore scroll after DOM updates
-            setTimeout(() => {
-                if (tableContainerRef.current) {
-                    tableContainerRef.current.scrollTop = savedScrollPosition.current;
-                    savedScrollPosition.current = 0; // Reset after restoring
-                }
-            }, 100);
+        // Not enough rows mounted yet → mount them, then restore on the next pass.
+        if (displayedCustomers.length < wantCount) {
+            setDisplayedCustomers(filteredCustomers.slice(0, wantCount));
+            setPage(Math.ceil(wantCount / ITEMS_PER_PAGE));
+            setHasMore(wantCount < filteredCustomers.length);
+            return;
         }
-    }, [showCustomerDetails, displayedCustomers.length, filteredCustomers.length]);
+
+        // Rows are present → snap the scrollbar back to where the user was.
+        if (tableContainerRef.current) {
+            tableContainerRef.current.scrollTop = savedScrollPosition.current;
+            savedScrollPosition.current = 0;
+            savedDisplayCount.current = 0;
+        }
+    }, [showCustomerDetails, displayedCustomers, filteredCustomers]);
 
     // Fetch data when date filters change
     useEffect(() => {
@@ -1841,10 +1856,12 @@ const CustomerEng = () => {
         // after Back was clicked will NOT re-open the details view.
         activeCustomerRequestRef.current = customerId;
 
-        // Save current scroll position before navigating
+        // Save current scroll position + how many rows are loaded, so Back can restore
+        // the same view (same rows, same scroll) instead of snapping to the top.
         if (tableContainerRef.current) {
             savedScrollPosition.current = tableContainerRef.current.scrollTop;
         }
+        savedDisplayCount.current = displayedCustomers.length;
 
         // Pre-populate from list data so the Customer Info box renders instantly
         const listCustomer = customers.find(c => c.customer_id === customerId);
@@ -1898,7 +1915,10 @@ const CustomerEng = () => {
         setCommonFollowupBy('call');
         setCommonFollowupFlag('');
         setCommonNextFollowupDate('');
-        fetchEngagementData();
+        // Do NOT re-fetch the whole list here. It was already refreshed when the follow-up
+        // was saved (see handleSubmitFollowup). Re-fetching again would reset the loaded rows
+        // + scroll to the top. Skipping it lets the restore effect put the user back exactly
+        // where they were, with only the edited row repositioned per the active sort/filter.
         setCustomerEditInfo(null);
         setShowEditHistory(false);
         setIsEditHistoryExpanded(true);
@@ -3668,8 +3688,8 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     const buildLetterReference = (fmt, v, seq) => {
         if (fmt && fmt.reference_no && fmt.reference_no.trim()) {
             return fmt.reference_no
-                .replace(/BranchCode/gi, v.branch_id || '-')
-                .replace(/serial\s*no/gi, String(seq).padStart(2, '0'));
+                .replace(/branch[_\s]?code/gi, v.branch_id || '-')
+                .replace(/serial[_\s]?no\.?/gi, String(seq).padStart(2, '0'));
         }
         return letterRefNo || `KC/${letterFy || ''}/${String(seq).padStart(2, '0')}`;
     };
@@ -3734,9 +3754,25 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         } catch (e) { /* non-blocking */ }
     };
 
-    const selectLetterFormat = (fmt) => {
+    const selectLetterFormat = async (fmt) => {
         setSelectedLetterFormat(fmt);
         setLetterAttachments((fmt.default_attachments || []).map(a => ({ ...a })));
+
+        // Re-fetch the sequence/ref using this format's serial_start
+        if (customerDetails?.instance_id && fmt?.id) {
+            try {
+                const res = await fetch(
+                    `${API_BASE_URL}/v1/engagement/letter/next-ref?instance_id=${encodeURIComponent(customerDetails.instance_id)}&format_type_id=${fmt.id}`
+                );
+                if (res.ok) {
+                    const d = await res.json();
+                    setLetterFy(d.financial_year);
+                    setLetterSeq(d.sequence);
+                    setPreviousLetters(d.previous_letters || []);
+                    // Don't setLetterRefNo here — buildLetterReference fills in BranchCode client-side
+                }
+            } catch (e) { /* non-blocking */ }
+        }
     };
 
     const prepareLetterFields = () => {
@@ -5246,23 +5282,30 @@ ${f.start_para}`;
                     return isNaN(d.getTime()) ? null : d;
                 };
 
-                // Due date: PG = 90 days, IND = 30 days from SR Open Date
-                const getDueDate = (openDateStr, segment) => {
+                // Due date = SR Open Date + 30 days.
+                // If the asset's warranty expiry falls WITHIN that window
+                // (on/after SR open date and on/before the +30-day date),
+                // the warranty expiry date becomes the due date instead.
+                const getDueDate = (openDateStr, warrantyDateStr) => {
                     const open = parseDate(openDateStr);
                     if (!open) return '-';
-
-                    const seg = String(segment || '').trim().toUpperCase();
-                    let days;
-                    if (seg === 'PG') days = 30;
-                    else if (seg === 'IND') days = 30;
-                    else return '-';
+                    open.setHours(0, 0, 0, 0);
 
                     const due = new Date(open);
-                    due.setDate(due.getDate() + days);
+                    due.setDate(due.getDate() + 30);
 
-                    const dd = String(due.getDate()).padStart(2, '0');
-                    const mm = String(due.getMonth() + 1).padStart(2, '0');
-                    const yyyy = due.getFullYear();
+                    let finalDue = due;
+                    const warranty = parseDate(warrantyDateStr);
+                    if (warranty) {
+                        warranty.setHours(0, 0, 0, 0);
+                        if (warranty >= open && warranty <= due) {
+                            finalDue = warranty;   // warranty falls inside the 30-day range
+                        }
+                    }
+
+                    const dd = String(finalDue.getDate()).padStart(2, '0');
+                    const mm = String(finalDue.getMonth() + 1).padStart(2, '0');
+                    const yyyy = finalDue.getFullYear();
                     return `${dd}-${mm}-${yyyy}`;
                 };
 
@@ -5296,8 +5339,7 @@ ${f.start_para}`;
                                             <td className="px-2 py-1.5 text-left text-[11px] text-black">{row.sr_status || '-'}</td>
                                             <td className="px-2 py-1.5 text-left text-[11px] text-black">{row.segment || '-'}</td>
                                             <td className="px-2 py-1.5 text-left text-[11px] font-bold text-black bg-[#ffdb62]">
-                                                {/* {getDueDate(row.sr_open_date, row.segment)} */}
-                                                -
+                                                {getDueDate(row.sr_open_date, assetData?.warranty_expiry_date)}
                                             </td>
                                         </tr>
                                     ))}
@@ -5469,84 +5511,111 @@ ${f.start_para}`;
                         </div>
                     </div>
 
-                    {/* Row 2 : Flag + Campaign (compact: drives wrap, flags 3-row grid) */}
+                    {/* Row 2 : Flag + Campaign (Left = drive filter, Right = flag filter fixed) */}
                     <div className="bg-white rounded-xl shadow-sm px-3 py-1 mb-2">
-                        <div className="flex flex-wrap items-stretch gap-2">
-                            {/* ===== Drive filter — Customers/Assets + campaign chips inline, wrapping ===== */}
-                            <div
-                                className="flex-1 min-w-[300px] flex flex-wrap items-center gap-1.5 content-start overflow-y-auto"
-                                style={{ scrollbarWidth: "thin", maxHeight: "52px" }}
-                            >
-                                {/* Customers summary */}
-                                <button
-                                    onClick={handleAllCampaigns}
-                                    className={`px-2 py-0.5 rounded-md text-sm font-bold whitespace-nowrap flex items-center gap-1 ${selectedCampaigns.length === 0
-                                        ? 'bg-[#2f3192] text-white'
-                                        : 'bg-transparent text-black hover:bg-gray-50'
-                                        }`}
-                                >
-                                    Customers - {customers.filter(c => {
-                                        if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
-                                            return String(c.branch_id) === String(userBranch);
+                        <div className="flex items-stretch gap-2">
+                            {/* ===== LEFT: Customers/Assets 2-row column + campaign chips wrapping ===== */}
+                            <div className="flex items-stretch gap-2 flex-1 min-w-0">
+                                {/* Fixed 2-row column: Customers on top, Assets below */}
+                                <div className="flex flex-col gap-1 justify-center flex-shrink-0">
+                                    <button
+                                        onClick={handleAllCampaigns}
+                                        className={`px-2 py-0.5 rounded-md text-sm font-bold whitespace-nowrap ${selectedCampaigns.length === 0
+                                            ? 'bg-[#2f3192] text-white'
+                                            : 'bg-transparent text-black hover:bg-gray-50'
+                                            }`}
+                                    >
+                                        Customers - {customers.filter(c => {
+                                            if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
+                                                return String(c.branch_id) === String(userBranch);
+                                            }
+                                            return true;
+                                        }).length}
+                                    </button>
+                                    <button
+                                        onClick={handleAllCampaigns}
+                                        className={`px-2 py-0.5 rounded-md text-sm font-bold whitespace-nowrap ${selectedCampaigns.length === 0
+                                            ? 'bg-[#2f3192] text-white'
+                                            : 'bg-transparent text-black hover:bg-gray-50'
+                                            }`}
+                                    >
+                                        Assets - {
+                                            activeCampaigns.reduce((sum, campaign) => {
+                                                return sum + customers.filter(c => {
+                                                    if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
+                                                        if (String(c.branch_id) !== String(userBranch)) return false;
+                                                    }
+                                                    return c.campaigns?.includes(campaign);
+                                                }).length;
+                                            }, 0)
                                         }
-                                        return true;
-                                    }).length}
-                                </button>
+                                    </button>
+                                </div>
 
-                                {/* Assets summary */}
-                                <button
-                                    onClick={handleAllCampaigns}
-                                    className={`px-2 py-0.5 rounded-md text-sm font-bold whitespace-nowrap flex items-center gap-1 ${selectedCampaigns.length === 0
-                                        ? 'bg-[#2f3192] text-white'
-                                        : 'bg-transparent text-black hover:bg-gray-50'
-                                        }`}
-                                >
-                                    Assets - {
-                                        activeCampaigns.reduce((sum, campaign) => {
-                                            return sum + customers.filter(c => {
+                                {/* Vertical divider */}
+                                <div className="w-px bg-gray-200 flex-shrink-0" />
+
+                                {/* Campaign chips — wrap row by row top to bottom, scrollable, with ↑↓ arrow */}
+                                <div className="flex items-center gap-1 flex-1 min-w-0">
+                                    <div
+                                        id="campaign-chips-scroll"
+                                        className="flex flex-wrap gap-1.5 flex-1 min-w-0 overflow-y-auto"
+                                        style={{ maxHeight: '52px', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                                    >
+                                        {activeCampaigns.map((campaign, idx) => {
+                                            const campaignCount = customers.filter(c => {
                                                 if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
                                                     if (String(c.branch_id) !== String(userBranch)) return false;
                                                 }
                                                 return c.campaigns?.includes(campaign);
                                             }).length;
-                                        }, 0)
-                                    }
-                                </button>
+                                            const color = campaignColors[campaign] || '#406093';
+                                            return (
+                                                <button
+                                                    key={idx}
+                                                    onClick={() => handleCampaignToggle(campaign)}
+                                                    title={campaign}
+                                                    className={`px-2 py-0.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 flex items-center gap-1 font-bold ${selectedCampaigns.includes(campaign)
+                                                        ? 'text-white'
+                                                        : 'text-gray-700 hover:bg-gray-50'
+                                                        }`}
+                                                    style={selectedCampaigns.includes(campaign) ? { backgroundColor: color } : {}}
+                                                >
+                                                    {campaign} - {campaignCount}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
 
-                                {/* Campaign chips flow right after Assets, wrap to second row if needed */}
-                                {activeCampaigns.map((campaign, idx) => {
-                                    const campaignCount = customers.filter(c => {
-                                        if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
-                                            if (String(c.branch_id) !== String(userBranch)) return false;
-                                        }
-                                        return c.campaigns?.includes(campaign);
-                                    }).length;
-                                    const color = campaignColors[campaign] || '#406093';
-
-                                    return (
+                                    {/* Single ↑↓ scroll button pair */}
+                                    <div className="flex flex-col gap-0.5 flex-shrink-0">
                                         <button
-                                            key={idx}
-                                            onClick={() => handleCampaignToggle(campaign)}
-                                            title={campaign}
-                                            className={`px-2 py-0.5 rounded-full text-sm whitespace-nowrap flex items-center gap-1 font-bold ${selectedCampaigns.includes(campaign)
-                                                ? 'text-white'
-                                                : 'text-gray-700 hover:bg-gray-50'
-                                                }`}
-                                            style={
-                                                selectedCampaigns.includes(campaign)
-                                                    ? { backgroundColor: color }
-                                                    : {}
-                                            }
+                                            onClick={() => {
+                                                const el = document.getElementById('campaign-chips-scroll');
+                                                if (el) el.scrollBy({ top: -40, behavior: 'smooth' });
+                                            }}
+                                            className="p-0.5 rounded hover:bg-gray-100 text-gray-400"
+                                            title="Scroll up"
                                         >
-                                            {campaign} - {campaignCount}
+                                            <ChevronUpIcon className="h-3.5 w-3.5" />
                                         </button>
-                                    );
-                                })}
+                                        <button
+                                            onClick={() => {
+                                                const el = document.getElementById('campaign-chips-scroll');
+                                                if (el) el.scrollBy({ top: 40, behavior: 'smooth' });
+                                            }}
+                                            className="p-0.5 rounded hover:bg-gray-100 text-gray-400"
+                                            title="Scroll down"
+                                        >
+                                            <ChevronDownIcon className="h-3.5 w-3.5" />
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
 
-                            {/* ===== Flag filter — 3 rows: C1–C4 / C5–C7 / NC,R,C — All centered on first two rows ===== */}
+                            {/* ===== RIGHT: Flag filter — fixed, never moves ===== */}
                             <div
-                                className="border-l border-gray-100 pl-3 grid gap-0.5 content-center"
+                                className="border-l border-gray-200 pl-3 grid gap-0.5 content-center flex-shrink-0"
                                 style={{ gridTemplateColumns: 'repeat(5, auto)' }}
                             >
                                 {/* All button — spans & centers across the first two rows only (left side) */}
@@ -6660,6 +6729,36 @@ ${f.start_para}`;
                                     No more customers to load
                                 </div>
                             )}
+                        </div>
+
+                        {/* Floating scroll to top / bottom buttons — bottom-right corner */}
+                        <div className="fixed bottom-6 right-4 z-40 flex flex-col gap-1.5">
+                            <button
+                                onClick={() => {
+                                    if (tableContainerRef.current) {
+                                        tableContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+                                    }
+                                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                                }}
+                                className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
+                                style={{ backgroundColor: themeColor }}
+                                title="Scroll to top"
+                            >
+                                <ChevronUpIcon className="h-4 w-4 text-white" />
+                            </button>
+                            <button
+                                onClick={() => {
+                                    if (tableContainerRef.current) {
+                                        tableContainerRef.current.scrollTo({ top: tableContainerRef.current.scrollHeight, behavior: 'smooth' });
+                                    }
+                                    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+                                }}
+                                className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
+                                style={{ backgroundColor: themeColor }}
+                                title="Scroll to bottom"
+                            >
+                                <ChevronDownIcon className="h-4 w-4 text-white" />
+                            </button>
                         </div>
 
                         {/* Diary Modal — Personal Notes / Thoughts */}
@@ -7885,7 +7984,7 @@ ${f.start_para}`;
                                                                 style={{ '--tw-ring-color': themeColor }}
                                                                 placeholder="Add detailed remark here..."
                                                             />
-                                                            
+
                                                             {selectedCampaignsForFollowup.length > 1 && (
                                                                 <button
                                                                     type="button"
@@ -7937,7 +8036,7 @@ ${f.start_para}`;
                                                                     />
                                                                 </button>
                                                             )}
-                                                            
+
                                                         </div>
 
                                                         {/* Recent remarks dropdown */}

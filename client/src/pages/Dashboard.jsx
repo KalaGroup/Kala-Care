@@ -272,8 +272,15 @@ const Dashboard = () => {
                 {
                     label: 'Rejected',
                     data: campaignPerformance.map(c => c.rejected_count || 0),
-                    backgroundColor: 'rgba(239, 68, 68, 0.85)',
-                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(220, 100, 40, 0.85)',
+                    borderColor: '#dc6428',
+                    borderWidth: 1, borderRadius: 4, barPercentage: 0.7, categoryPercentage: 0.8
+                },
+                {
+                    label: 'NC',
+                    data: campaignPerformance.map(c => c.not_connected_count || 0),
+                    backgroundColor: 'rgba(107, 114, 128, 0.85)',
+                    borderColor: '#6b7280',
                     borderWidth: 1, borderRadius: 4, barPercentage: 0.7, categoryPercentage: 0.8
                 },
                 {
@@ -296,6 +303,7 @@ const Dashboard = () => {
                     c.wip_count || 0,
                     c.rescheduled_count || 0,
                     c.rejected_count || 0,
+                    c.not_connected_count || 0,
                     c.completed_count || c.total_completed_followups || c.completed || 0
                 );
                 if (m > maxValue) maxValue = m;
@@ -336,23 +344,25 @@ const Dashboard = () => {
 
     // === Memoized Pie Chart for Asset Status Distribution ===
     const assetStatusPieData = useMemo(() => ({
-        labels: ['Completed', 'WIP', 'FR', 'Rejected'],
+        labels: ['Completed', 'WIP', 'FR', 'Rejected', 'NC'],
         datasets: [{
             data: [
                 summaryStats?.completed_assets || 0,
                 summaryStats?.wip_assets || 0,
                 summaryStats?.rescheduled_assets || 0,
-                summaryStats?.rejected_assets || 0
+                summaryStats?.rejected_assets || 0,
+                summaryStats?.not_connected_assets || 0
             ],
-            backgroundColor: ['rgba(34, 197, 94, 0.85)', 'rgba(234, 179, 8, 0.85)', 'rgba(168, 85, 247, 0.85)', 'rgba(239, 68, 68, 0.85)'],
-            borderColor: ['#22c55e', '#eab308', '#a855f7', '#ef4444'],
+            backgroundColor: ['rgba(34, 197, 94, 0.85)', 'rgba(234, 179, 8, 0.85)', 'rgba(168, 85, 247, 0.85)', 'rgba(220, 100, 40, 0.85)','rgba(107, 114, 128, 0.85)'],
+            borderColor: ['#22c55e', '#eab308', '#a855f7', '#dc6428', '#6b7280'],
             borderWidth: 2
         }]
     }), [summaryStats]);
 
     const assetStatusPieOptions = useMemo(() => {
         const total = (summaryStats?.completed_assets || 0) + (summaryStats?.wip_assets || 0) +
-            (summaryStats?.rescheduled_assets || 0) + (summaryStats?.rejected_assets || 0);
+            (summaryStats?.rescheduled_assets || 0) + (summaryStats?.rejected_assets || 0) +
+            (summaryStats?.not_connected_assets || 0);
         return {
             responsive: true, maintainAspectRatio: true,
             plugins: {
@@ -413,13 +423,15 @@ const Dashboard = () => {
             const totalWip = engagedData.wip_followups || 0;
             const totalRejected = engagedData.rejected_followups || 0;
             const totalRescheduled = engagedData.rescheduled_followups || 0;
+            const totalNotConnected = engagedData.not_connected_followups || 0;
             const completionRate = engagedData.branch_completion_rate || 0;
             const totalRemaining = totalBranchAssets - totalCompleted;
-            const totalFR = totalEngagedCustomers - (totalWip + totalCompleted + totalRejected);
+            const totalFR = totalEngagedCustomers - (totalWip + totalCompleted + totalRejected + totalNotConnected);
 
             map[branch.branch] = {
                 totalBranchAssets, totalCampaigns, totalEngagedCustomers,
                 totalCompleted, totalWip, totalRejected, totalRescheduled,
+                totalNotConnected,
                 completionRate, totalRemaining, totalFR
             };
         }
@@ -3558,22 +3570,26 @@ const Dashboard = () => {
                                                     </p>
                                                 </div>
                                                 <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
-                                                <div className="w-[60%] grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-semibold">
+                                                <div className="w-[60%] grid grid-cols-3 gap-x-2 gap-y-1 text-xs font-semibold">
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>WIP:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.wip_assets || 0}</TimeValue></span>
+                                                        <span className="font-bold text-base whitespace-nowrap"><TimeValue>{summaryStats?.wip_assets || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>FR:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.rescheduled_assets || 0}</TimeValue></span>
+                                                        <span className="font-bold text-base whitespace-nowrap"><TimeValue>{summaryStats?.rescheduled_assets || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>R:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.rejected_assets || 0}</TimeValue></span>
+                                                        <span className="font-bold text-base whitespace-nowrap"><TimeValue>{summaryStats?.rejected_assets || 0}</TimeValue></span>
+                                                    </div>
+                                                    <div className="flex flex-row justify-between items-baseline">
+                                                        <span>NC:</span>
+                                                        <span className="font-bold text-base whitespace-nowrap"><TimeValue>{summaryStats?.not_connected_assets || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>C:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.completed_assets || 0}</TimeValue></span>
+                                                        <span className="font-bold text-base whitespace-nowrap"><TimeValue>{summaryStats?.completed_assets || 0}</TimeValue></span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -3760,12 +3776,15 @@ const Dashboard = () => {
                                                                                 const totalCompleted = engagedData.completed_followups || 0;
                                                                                 const totalWip = engagedData.wip_followups || 0;
                                                                                 const totalRejected = engagedData.rejected_followups || 0;
+                                                                                const totalNotConnected = engagedData.not_connected_followups || 0;
                                                                                 const totalEngagedCustomers = engagedData.total_customers || 0;
-                                                                                const totalFR = totalEngagedCustomers - (totalWip + totalCompleted + totalRejected);
+                                                                                const totalFR = totalEngagedCustomers - (totalWip + totalCompleted + totalRejected + totalNotConnected);
+
                                                                                 const completedPercent = totalBranchAssets > 0 ? ((totalCompleted / totalBranchAssets) * 100).toFixed(1) : 0;
                                                                                 const wipPercent = totalEngagedCustomers > 0 ? ((totalWip / totalEngagedCustomers) * 100).toFixed(1) : 0;
                                                                                 const frPercent = totalEngagedCustomers > 0 ? ((totalFR / totalEngagedCustomers) * 100).toFixed(1) : 0;
                                                                                 const rejectedPercent = totalEngagedCustomers > 0 ? ((totalRejected / totalEngagedCustomers) * 100).toFixed(1) : 0;
+                                                                                const ncPercent = totalEngagedCustomers > 0 ? ((totalNotConnected / totalEngagedCustomers) * 100).toFixed(1) : 0;
 
                                                                                 const campaignDetails = [];
                                                                                 engagedData.campaigns.forEach(campaign => {
@@ -3791,6 +3810,7 @@ const Dashboard = () => {
                                                                                     `WIP: ${totalWip.toLocaleString()} (${wipPercent}%)`,
                                                                                     `FR: ${totalFR.toLocaleString()} (${frPercent}%)`,
                                                                                     `Rejected: ${totalRejected.toLocaleString()} (${rejectedPercent}%)`,
+                                                                                    `NC: ${totalNotConnected.toLocaleString()} (${ncPercent}%)`,
                                                                                     `━━━━━━━━━━━━━━━━━━━━`,
                                                                                 ];
                                                                             }
@@ -3923,6 +3943,7 @@ const Dashboard = () => {
                                     const _stats = branchComputedStats[branch.branch] || {
                                         totalBranchAssets: 0, totalCampaigns: 0, totalEngagedCustomers: 0,
                                         totalCompleted: 0, totalWip: 0, totalRejected: 0, totalRescheduled: 0,
+                                        totalNotConnected: 0,
                                         completionRate: 0, totalRemaining: 0, totalFR: 0
                                     };
                                     const totalBranchAssets = _stats.totalBranchAssets;
@@ -3932,6 +3953,7 @@ const Dashboard = () => {
                                     const totalWip = _stats.totalWip;
                                     const totalRejected = _stats.totalRejected;
                                     const totalRescheduled = _stats.totalRescheduled;
+                                    const totalNotConnected = _stats.totalNotConnected;
                                     const completionRate = _stats.completionRate;
                                     const totalRemaining = _stats.totalRemaining;
                                     const totalFR = _stats.totalFR;
@@ -4065,24 +4087,29 @@ const Dashboard = () => {
                                                                 </p>
                                                             </div>
                                                             <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
-                                                            <div className="w-[60%] grid grid-cols-2 gap-x-3 gap-y-1 text-xs font-semibold place-items-center">
+                                                            <div className="w-[60%] grid grid-cols-3 gap-x-2 gap-y-1 text-xs font-semibold place-items-center">
                                                                 <div>
-                                                                    W: <span className="font-bold text-lg text-black">
+                                                                    W: <span className="font-bold text-base text-black">
                                                                         {totalWip.toLocaleString()}
                                                                     </span>
                                                                 </div>
                                                                 <div>
-                                                                    FR: <span className="font-bold text-lg text-black">
+                                                                    FR: <span className="font-bold text-base text-black">
                                                                         {totalFR.toLocaleString()}
                                                                     </span>
                                                                 </div>
                                                                 <div>
-                                                                    R: <span className="font-bold text-lg text-black">
+                                                                    R: <span className="font-bold text-base text-black">
                                                                         {totalRejected.toLocaleString()}
                                                                     </span>
                                                                 </div>
                                                                 <div>
-                                                                    C: <span className="font-bold text-lg text-black">
+                                                                    NC: <span className="font-bold text-base text-black">
+                                                                        {totalNotConnected.toLocaleString()}
+                                                                    </span>
+                                                                </div>
+                                                                <div>
+                                                                    C: <span className="font-bold text-base text-black">
                                                                         {totalCompleted.toLocaleString()}
                                                                     </span>
                                                                 </div>

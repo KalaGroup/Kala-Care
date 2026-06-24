@@ -576,30 +576,29 @@ const CustomerEng2 = () => {
     }
   }, [currentUser]);
 
-  // Restore scroll position when returning to list view
-  useEffect(() => {
-    if (!showCustomerDetails && savedScrollPosition.current > 0 && customers.length > 0) {
-      // If we had loaded more pages before clicking, make sure we have enough data loaded
-      // by fetching pages until we reach the saved page count
-      const loadPagesUntilSaved = async () => {
-        let currentPage = page;
-        while (currentPage < savedPageCount.current && hasMore) {
-          await fetchNonCampaignCustomers(currentPage + 1, false);
-          currentPage++;
-        }
+  // Restore the EXACT scroll position when returning to the list view.
+  //
+  // useLayoutEffect runs synchronously AFTER the list re-renders but BEFORE the
+  // browser paints, so the virtualized rows land in the right place on the first
+  // frame — no jump to the top, no blank flash. We deliberately do NOT refetch:
+  // the list still holds every row it had, and the one edited customer was already
+  // patched in place during save. Result: only that row re-sorts to its new spot
+  // while every other row keeps its exact position, and the scrollbar stays where
+  // the user left it (same Sr. No. on screen).
+  useLayoutEffect(() => {
+    if (showCustomerDetails) return;
+    if (savedScrollPosition.current <= 0) return;
+    if (customers.length === 0) return;
 
-        // After all pages are loaded, restore scroll position
-        setTimeout(() => {
-          if (tableContainerRef.current) {
-            tableContainerRef.current.scrollTop = savedScrollPosition.current;
-            savedScrollPosition.current = 0; // Reset after restoring
-            savedPageCount.current = 0;
-          }
-        }, 150);
-      };
-
-      loadPagesUntilSaved();
+    const target = savedScrollPosition.current;
+    // Keep the windowed slice (tableScrollTop) and the real scrollbar in sync so
+    // the correct rows are both rendered AND visible immediately.
+    setTableScrollTop(target);
+    if (tableContainerRef.current) {
+      tableContainerRef.current.scrollTop = target;
     }
+    savedScrollPosition.current = 0;
+    savedPageCount.current = 0;
   }, [showCustomerDetails]);
 
   // Auto-load next chunk when scrolled to bottom (only when NOT searching)
@@ -2414,24 +2413,30 @@ const CustomerEng2 = () => {
       // Refresh the details panel (you're still on this screen)
       await fetchCustomerDetails(selectedCustomer);
 
-      // FAST PATH: the non-campaign list's status comes only from the latest
-      // "other" follow-up, so patch just this customer in place — no network
-      // refetch, instant re-sort, scroll position and loaded rows preserved.
-      const otherData = campaignFollowupData['other'];
-      if (otherData?.status) {
+      // FAST PATH: patch ONLY this customer's row in place — no list refetch — so it
+      // re-sorts to its new position on its own while every other row stays exactly
+      // where it is, and the scroll position + loaded rows are preserved.
+      // The row's status follows the latest follow-up just saved: prefer the "Other"
+      // follow-up if one was taken, otherwise the last drive that was filled in.
+      const lastSelectedId = selectedCampaignsForFollowup[selectedCampaignsForFollowup.length - 1];
+      const patchSource = campaignFollowupData['other'] || campaignFollowupData[lastSelectedId];
+      if (patchSource?.status) {
+        const newStatus = patchSource.status;
+        // Completed / Rejected clear the next date; the other statuses keep one.
+        const keepsNextDate =
+          newStatus === 'rescheduled' || newStatus === 'wip' || newStatus === 'not_connected';
         setCustomers(prev =>
           prev.map(c =>
             c.customer_id === selectedCustomer
               ? {
                 ...c,
-                latest_status: otherData.status,
+                latest_status: newStatus,
                 last_followup_date: new Date().toISOString(),
                 last_followup_user: currentUser?.name || c.last_followup_user,
-                last_followup_remark: otherData.remark || c.last_followup_remark,
-                next_followup_date:
-                  (otherData.status === 'rescheduled' || otherData.status === 'wip')
-                    ? (otherData.next_followup_date || commonNextFollowupDate || c.next_followup_date)
-                    : null,
+                last_followup_remark: patchSource.remark || c.last_followup_remark,
+                next_followup_date: keepsNextDate
+                  ? (patchSource.next_followup_date || commonNextFollowupDate || c.next_followup_date)
+                  : null,
               }
               : c
           )
@@ -3073,8 +3078,8 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
   const buildLetterReference = (fmt, v, seq) => {
     if (fmt && fmt.reference_no && fmt.reference_no.trim()) {
       return fmt.reference_no
-        .replace(/BranchCode/gi, v.branch_id || '-')
-        .replace(/serial\s*no/gi, String(seq).padStart(2, '0'));
+        .replace(/branch[_\s]?code/gi, v.branch_id || '-')
+        .replace(/serial[_\s]?no\.?/gi, String(seq).padStart(2, '0'));
     }
     return letterRefNo || `KC/${letterFy || ''}/${String(seq).padStart(2, '0')}`;
   };
@@ -3139,9 +3144,25 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     } catch (e) { /* non-blocking */ }
   };
 
-  const selectLetterFormat = (fmt) => {
+  const selectLetterFormat = async (fmt) => {
     setSelectedLetterFormat(fmt);
     setLetterAttachments((fmt.default_attachments || []).map(a => ({ ...a })));
+
+    // Re-fetch the sequence/ref using this format's serial_start
+    if (customerDetails?.instance_id && fmt?.id) {
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/v1/engagement/letter/next-ref?instance_id=${encodeURIComponent(customerDetails.instance_id)}&format_type_id=${fmt.id}`
+        );
+        if (res.ok) {
+          const d = await res.json();
+          setLetterFy(d.financial_year);
+          setLetterSeq(d.sequence);
+          setPreviousLetters(d.previous_letters || []);
+          // Don't setLetterRefNo here — buildLetterReference fills in BranchCode client-side
+        }
+      } catch (e) { /* non-blocking */ }
+    }
   };
 
   const prepareLetterFields = () => {
@@ -5944,6 +5965,36 @@ ${f.start_para}`;
                   All {customers.length} customers loaded
                 </div>
               )}
+            </div>
+
+            {/* Floating scroll to top / bottom buttons — bottom-right corner */}
+            <div className="fixed bottom-6 right-4 z-40 flex flex-col gap-1.5">
+              <button
+                onClick={() => {
+                  if (tableContainerRef.current) {
+                    tableContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+                  }
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
+                style={{ backgroundColor: themeColor }}
+                title="Scroll to top"
+              >
+                <ChevronUpIcon className="h-4 w-4 text-white" />
+              </button>
+              <button
+                onClick={() => {
+                  if (tableContainerRef.current) {
+                    tableContainerRef.current.scrollTo({ top: tableContainerRef.current.scrollHeight, behavior: 'smooth' });
+                  }
+                  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+                }}
+                className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
+                style={{ backgroundColor: themeColor }}
+                title="Scroll to bottom"
+              >
+                <ChevronDownIcon className="h-4 w-4 text-white" />
+              </button>
             </div>
 
             {/* Background-load progress — hidden while searching and once everything is loaded */}

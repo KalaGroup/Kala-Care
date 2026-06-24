@@ -84,8 +84,24 @@ class CampaignLetterFormat(Base):
 
     products = Column(JSON, default=[])                 # e.g. ["Battery", "Oil"] - one or more products for this letter type
     reference_no = Column(String(255), nullable=True)   # e.g. "KCGL/26-27/Battery,Oil/BranchCode/serial no"
+    serial_start = Column(String(50), nullable=True, default='1')   # starting serial number for letters
+    note = Column(Text, nullable=True)                  # optional internal note about this format
 
     default_attachments = Column(JSON, default=[])      # [{"name","content","type","size"}, ...]
+
+    customer_detail_fields = Column(JSON, default=[])   # e.g. ["instance_id", "account_name", ...]
+    engagement_detail_fields = Column(JSON, default=[]) # e.g. ["followup_history", "quotation_history", ...]
+
+    # Default To/CC recipients per branch + GOEM filter
+    # Structure: [
+    #   {
+    #     "branch_codes": ["420435_1", "420435_2"],  # [] means applies to all remaining
+    #     "goem_oem": "CUMMINS",                     # null means all GOEMs
+    #     "to_emails": ["a@b.com"],
+    #     "cc_emails": ["c@d.com"]
+    #   }, ...
+    # ]
+    default_recipients = Column(JSON, default=[])
 
     start_para = Column(Text, nullable=True)            # opening paragraph of the letter
     end_para = Column(Text, nullable=True)              # closing paragraph of the letter
@@ -110,6 +126,22 @@ class CampaignDriveMeta(Base):
     data_start_date = Column(DateTime, nullable=True)   # Drive Data Duration — start
     data_end_date = Column(DateTime, nullable=True)     # Drive Data Duration — end
     drive_remark = Column(Text, nullable=True)          # free-text remark
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class BranchEmailMaster(Base):
+    """
+    Stores one email address per branch code.
+    branch_code is unique — upsert on save.
+    """
+    __tablename__ = "branch_email_master"
+
+    id = Column(Integer, primary_key=True, index=True)
+    branch_code = Column(String(50), nullable=False, unique=True, index=True)
+    branch_name = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=True)          # nullable — user may leave blank
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)        

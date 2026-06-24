@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
+import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -161,6 +162,30 @@ const Campaign = () => {
   const [letterFormatsLoading, setLetterFormatsLoading] = useState(false);
   const [letterFormatSaving, setLetterFormatSaving] = useState(false);
   const [viewingLetterFormat, setViewingLetterFormat] = useState(null);
+
+  // Branch Email Master
+  const [showBranchEmailMaster, setShowBranchEmailMaster] = useState(false);
+  const [branchEmails, setBranchEmails] = useState([]);
+  const [branchEmailsLoading, setBranchEmailsLoading] = useState(false);
+  const [branchEmailsSaving, setBranchEmailsSaving] = useState(false);
+  const [branchEmailErrors, setBranchEmailErrors] = useState({});
+
+  const BRANCH_LIST = [
+    { code: '420435_1', name: 'Ch.Sambhaji Nagar' },
+    { code: '420435_2', name: 'Ahilyanagar' },
+    { code: '420435_3', name: 'Beed' },
+    { code: '420435_4', name: 'Nanded' },
+    { code: '420435_5', name: 'Babhaleshwar' },
+    { code: '420435_6', name: 'Latur' },
+    { code: '420435_7', name: 'Parbhani' },
+    { code: '420435_8', name: 'Hubli' },
+    { code: '420435_9', name: 'Belagavi' },
+    { code: '420435_10', name: 'Hospet' },
+    { code: '420435_11', name: 'Ballari' },
+    { code: '420435_12', name: 'Bagalkot' },
+    { code: '420435_13', name: 'Gulbarga' },
+    { code: '420435_14', name: 'Bijapur' },
+  ];
   const [letterFormatData, setLetterFormatData] = useState({
     id: null,
     format_type_name: '',
@@ -170,6 +195,24 @@ const Campaign = () => {
     start_para: '',
     end_para: ''
   });
+
+  const [goemOemList, setGoemOemList] = useState([]);
+  const [showRecipientForm, setShowRecipientForm] = useState(false);
+
+  // Blank rule template
+  const blankRule = () => ({
+    _key: Date.now() + Math.random(),
+    branch_codes: [],
+    goem_oem: '',
+    to_emails: [],
+    cc_emails: [],
+    _toInput: '',
+    _ccInput: '',
+    _toError: '',
+    _ccError: '',
+  });
+
+  const [recipientRules, setRecipientRules] = useState([]);
 
   const themeColor = '#2f3192';
   const themeShades = {
@@ -988,7 +1031,7 @@ const Campaign = () => {
 
       const result = await response.json();
       toast.dismiss(spToast);
-      toast.success(`✅ SP Info saved (${result.inserted} added, ${result.updated} updated)`);
+      toast.success(`SP Info saved (${result.inserted} added, ${result.updated} updated)`);
       return result;
     } catch (err) {
       toast.dismiss(spToast);
@@ -1411,6 +1454,210 @@ const Campaign = () => {
   const openLetterMaster = () => {
     setShowLetterMaster(true);
     fetchLetterFormats();
+    fetchGoemOemList();
+  };
+
+  const fetchGoemOemList = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/v1/campaigns/letter-master/goem-oem-list`);
+      if (response.ok) {
+        const data = await response.json();
+        setGoemOemList(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch GOEM list:', err);
+    }
+  };
+
+  // Convert raw DB rules → UI rules (add temp input/error fields)
+  const dbRulesToUiRules = (rules) =>
+    (rules || []).map(r => ({
+      _key: Date.now() + Math.random(),
+      branch_codes: r.branch_codes || [],
+      goem_oem: r.goem_oem || '',
+      to_emails: r.to_emails || [],
+      cc_emails: r.cc_emails || [],
+      _toInput: '',
+      _ccInput: '',
+      _toError: '',
+      _ccError: '',
+    }));
+
+  // Convert UI rules → clean DB payload (strip temp fields)
+  const uiRulesToDbRules = (rules) =>
+    rules.map(r => ({
+      branch_codes: r.branch_codes || [],
+      goem_oem: r.goem_oem || null,
+      to_emails: r.to_emails || [],
+      cc_emails: r.cc_emails || [],
+    }));
+
+  const validateSingleEmail = (email) => {
+    if (!email || !email.trim()) return false;
+    return /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(email.trim());
+  };
+
+  const addEmailToRule = (ruleKey, field, inputField, errorField) => {
+    setRecipientRules(prev => prev.map(r => {
+      if (r._key !== ruleKey) return r;
+      const email = r[inputField].trim();
+      if (!email) return r;
+      if (!validateSingleEmail(email)) {
+        return { ...r, [errorField]: `"${email}" is not a valid email` };
+      }
+      if (r[field].includes(email.toLowerCase())) {
+        return { ...r, [inputField]: '', [errorField]: 'Email already added' };
+      }
+      return {
+        ...r,
+        [field]: [...r[field], email.toLowerCase()],
+        [inputField]: '',
+        [errorField]: '',
+      };
+    }));
+  };
+
+  const removeEmailFromRule = (ruleKey, field, email) => {
+    setRecipientRules(prev => prev.map(r =>
+      r._key !== ruleKey ? r : { ...r, [field]: r[field].filter(e => e !== email) }
+    ));
+  };
+
+  const toggleBranchInRule = (ruleKey, branchCode) => {
+    setRecipientRules(prev => prev.map(r => {
+      if (r._key !== ruleKey) return r;
+      const has = r.branch_codes.includes(branchCode);
+      return { ...r, branch_codes: has ? r.branch_codes.filter(b => b !== branchCode) : [...r.branch_codes, branchCode] };
+    }));
+  };
+
+  const updateRuleField = (ruleKey, field, value) => {
+    setRecipientRules(prev => prev.map(r =>
+      r._key !== ruleKey ? r : { ...r, [field]: value }
+    ));
+  };
+
+  const addRecipientRule = () => {
+    setRecipientRules(prev => [...prev, blankRule()]);
+  };
+
+  const removeRecipientRule = async (ruleKey) => {
+    const ruleIdx = recipientRules.findIndex(r => r._key === ruleKey);
+    const result = await Swal.fire({
+      title: 'Remove Rule?',
+      text: `Are you sure you want to remove Rule ${ruleIdx + 1}? All To/CC emails and branch assignments in this rule will be lost.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#6b7280',
+      confirmButtonText: 'Yes, Remove',
+      cancelButtonText: 'Cancel',
+      reverseButtons: true,
+    });
+    if (result.isConfirmed) {
+      setRecipientRules(prev => prev.filter(r => r._key !== ruleKey));
+      toast.success(`Rule ${ruleIdx + 1} removed`);
+    }
+  };
+
+  // Which branch codes are already claimed by earlier rules
+  const getClaimedBranches = (upToKey) => {
+    const claimed = new Set();
+    for (const r of recipientRules) {
+      if (r._key === upToKey) break;
+      r.branch_codes.forEach(b => claimed.add(b));
+    }
+    return claimed;
+  };
+
+  const fetchBranchEmails = async () => {
+    setBranchEmailsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/v1/campaigns/branch-email-master`);
+      if (!response.ok) throw new Error('Failed to fetch branch emails');
+      const data = await response.json();
+      // Merge DB data with BRANCH_LIST so all 14 branches always show
+      const emailMap = {};
+      data.forEach(row => { emailMap[row.branch_code] = row.email || ''; });
+      setBranchEmails(
+        BRANCH_LIST.map(b => ({ ...b, email: emailMap[b.code] || '' }))
+      );
+    } catch (err) {
+      toast.error(err.message || 'Failed to load branch emails');
+      // Still show all branches with empty emails on error
+      setBranchEmails(BRANCH_LIST.map(b => ({ ...b, email: '' })));
+    } finally {
+      setBranchEmailsLoading(false);
+    }
+  };
+
+  const openBranchEmailMaster = () => {
+    setShowBranchEmailMaster(true);
+    setBranchEmailErrors({});
+    fetchBranchEmails();
+  };
+
+  const validateEmail = (email) => {
+    if (!email || email.trim() === '') return true; // blank is allowed
+    return /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(email.trim());
+  };
+
+  const handleBranchEmailChange = (code, value) => {
+    setBranchEmails(prev => prev.map(b => b.code === code ? { ...b, email: value } : b));
+    // Live validation
+    if (value && !validateEmail(value)) {
+      setBranchEmailErrors(prev => ({ ...prev, [code]: 'Invalid email address' }));
+    } else {
+      setBranchEmailErrors(prev => { const n = { ...prev }; delete n[code]; return n; });
+    }
+  };
+
+  const handleSaveBranchEmails = async () => {
+    // Validate all before saving
+    const errors = {};
+    branchEmails.forEach(b => {
+      if (b.email && !validateEmail(b.email)) {
+        errors[b.code] = 'Invalid email address';
+      }
+    });
+    if (Object.keys(errors).length > 0) {
+      setBranchEmailErrors(errors);
+      toast.error('Please fix invalid email addresses before saving');
+      return;
+    }
+
+    setBranchEmailsSaving(true);
+    const saveToast = toast.loading('Saving branch emails...');
+    try {
+      const payload = {
+        entries: branchEmails.map(b => ({
+          branch_code: b.code,
+          branch_name: b.name,
+          email: b.email.trim() || null
+        }))
+      };
+      const response = await fetch(`${API_BASE_URL}/v1/campaigns/branch-email-master/bulk-save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getUserHeaders() },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to save branch emails');
+      }
+      const result = await response.json();
+      toast.dismiss(saveToast);
+      if (result.errors && result.errors.length > 0) {
+        toast.error(`Saved ${result.saved} branches. ${result.errors.length} failed.`);
+      } else {
+        toast.success(`✅ Saved ${result.saved} branch email${result.saved !== 1 ? 's' : ''} successfully!`);
+      }
+    } catch (err) {
+      toast.dismiss(saveToast);
+      toast.error(err.message || 'Failed to save branch emails');
+    } finally {
+      setBranchEmailsSaving(false);
+    }
   };
 
   const resetLetterFormatForm = () => {
@@ -1419,10 +1666,16 @@ const Campaign = () => {
       format_type_name: '',
       products: [],
       reference_no: '',
+      serial_start: '1',
+      note: '',
+      customer_detail_fields: ['instance_id'],
+      engagement_detail_fields: [],
       default_attachments: [],
       start_para: '',
       end_para: ''
     });
+    setRecipientRules([]);
+    setShowRecipientForm(false);
   };
 
   const openAddLetterFormat = () => {
@@ -1436,13 +1689,17 @@ const Campaign = () => {
       id: fmt.id,
       format_type_name: fmt.format_type_name || '',
       products: product ? [product] : [],
-      // keep the stored reference number; only fall back to building one
-      // for older rows that don't have it saved yet
       reference_no: fmt.reference_no || buildReferenceNo(product, fmt.id),
+      serial_start: fmt.serial_start || '1',
+      note: fmt.note || '',
+      customer_detail_fields: fmt.customer_detail_fields || [],
+      engagement_detail_fields: fmt.engagement_detail_fields || [],
       default_attachments: fmt.default_attachments || [],
       start_para: fmt.start_para || '',
       end_para: fmt.end_para || ''
     });
+    setRecipientRules(dbRulesToUiRules(fmt.default_recipients || []));
+    setShowRecipientForm((fmt.default_recipients || []).length > 0);
     setShowLetterFormatForm(true);
   };
 
@@ -1478,6 +1735,38 @@ const Campaign = () => {
       products: productName ? [productName] : [],
       reference_no: buildReferenceNo(productName, prev.id)
     }));
+  };
+
+  const CUSTOMER_DETAIL_OPTIONS = [
+    { value: 'instance_id', label: 'Instance ID' },
+    { value: 'account_name', label: 'Account Name' },
+    { value: 'kva_rating', label: 'KVA Rating' },
+    { value: 'commissioning_date', label: 'Commissioning Date' },
+    { value: 'application_code', label: 'Application Code' },
+    { value: 'engine_no', label: 'Engine No.' },
+    { value: 'engine_model', label: 'Engine Model' },
+    { value: 'warranty_expiry', label: 'Warranty Expiry' },
+    { value: 'product_segment', label: 'Product Segment' },
+    { value: 'engine_series', label: 'Engine Series' },
+    { value: 'segment', label: 'Segment' },
+  ];
+
+  const ENGAGEMENT_DETAIL_OPTIONS = [
+    { value: 'followup_history', label: 'Followups History' },
+    { value: 'quotation_history', label: 'Quotation History' },
+    { value: 'letter_history', label: 'Letter History' },
+  ];
+
+  const toggleLetterCheckbox = (field, value) => {
+    setLetterFormatData(prev => {
+      const current = prev[field] || [];
+      return {
+        ...prev,
+        [field]: current.includes(value)
+          ? current.filter(v => v !== value)
+          : [...current, value]
+      };
+    });
   };
 
   const handleLetterAttachmentUpload = (e) => {
@@ -1554,6 +1843,11 @@ const Campaign = () => {
         reference_no: product
           ? (letterFormatData.reference_no || buildReferenceNo(product, letterFormatData.id))
           : '',
+        serial_start: letterFormatData.serial_start || '1',
+        note: letterFormatData.note || '',
+        customer_detail_fields: ['instance_id', ...((letterFormatData.customer_detail_fields || []).filter(f => f !== 'instance_id'))],
+        engagement_detail_fields: letterFormatData.engagement_detail_fields || [],
+        default_recipients: uiRulesToDbRules(recipientRules),
         default_attachments: letterFormatData.default_attachments,
         start_para: letterFormatData.start_para || '',
         end_para: letterFormatData.end_para || ''
@@ -3143,18 +3437,28 @@ const Campaign = () => {
               </div>
 
               <div className="p-4 lg:p-5 overflow-y-auto custom-scrollbar">
-                <div className="flex items-center justify-between mb-3 gap-2">
+                <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
                   <p className="text-xs text-gray-500">
                     {letterFormats.length} format{letterFormats.length !== 1 ? 's' : ''} saved
                   </p>
-                  <button
-                    onClick={openAddLetterFormat}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs text-white font-medium rounded-md transition-all shadow-sm hover:shadow-md whitespace-nowrap"
-                    style={{ background: "#2f3192" }}
-                  >
-                    <PlusIcon className="h-3.5 w-3.5" />
-                    Add Format Type
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={openBranchEmailMaster}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs text-white font-medium rounded-md transition-all shadow-sm hover:shadow-md whitespace-nowrap"
+                      style={{ background: "#2f3192" }}
+                    >
+                      <EnvelopeIcon className="h-3.5 w-3.5" />
+                      Branch Email Master
+                    </button>
+                    <button
+                      onClick={openAddLetterFormat}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs text-white font-medium rounded-md transition-all shadow-sm hover:shadow-md whitespace-nowrap"
+                      style={{ background: "#2f3192" }}
+                    >
+                      <PlusIcon className="h-3.5 w-3.5" />
+                      Add Format Type
+                    </button>
+                  </div>
                 </div>
 
                 {letterFormatsLoading ? (
@@ -3171,70 +3475,287 @@ const Campaign = () => {
                     </button>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto border border-gray-200 rounded-lg">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="text-left text-black" style={{ backgroundColor: themeShades.light }}>
-                          <th className="px-3 py-2 font-semibold">Format Type</th>
-                          <th className="px-3 py-2 font-semibold">Products</th>
-                          <th className="px-3 py-2 font-semibold">Reference No</th>
-                          <th className="px-3 py-2 font-semibold">Default Attachment</th>
-                          <th className="px-3 py-2 font-semibold">Letter Format</th>
-                          <th className="px-3 py-2 font-semibold text-right">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {letterFormats.map(fmt => (
-                          <tr key={fmt.id} className="border-t border-gray-100 hover:bg-gray-50 align-top">
-                            <td className="px-3 py-2 text-black font-medium whitespace-nowrap">{fmt.format_type_name}</td>
-                            <td className="px-3 py-2">
-                              <div className="flex flex-wrap gap-1">
-                                {(fmt.products || []).length === 0 && <span className="text-gray-400">—</span>}
-                                {(fmt.products || []).map((p, i) => (
-                                  <span key={i} className="inline-flex items-center px-1.5 py-0.5 bg-[#2f3192]/10 text-[#2f3192] rounded">
-                                    {p}
-                                  </span>
-                                ))}
-                              </div>
-                            </td>
-                            <td className="px-3 py-2 text-gray-600">
-                              <span className="block max-w-[220px] truncate font-mono text-[11px]">
-                                {fmt.reference_no || '—'}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2 text-black whitespace-nowrap">
-                              {(fmt.default_attachments || []).length > 0 ? (
-                                <span className="inline-flex items-center gap-1">
-                                  <PaperClipIcon className="h-3 w-3 text-gray-500" />
-                                  {fmt.default_attachments.length} file{fmt.default_attachments.length > 1 ? 's' : ''}
-                                </span>
-                              ) : <span className="text-gray-400">None</span>}
-                            </td>
-                            <td className="px-3 py-2 text-gray-600">
-                              <span className="block max-w-[220px] truncate">
-                                {(fmt.start_para || fmt.end_para)
-                                  ? `${fmt.start_para || ''} ${fmt.end_para || ''}`.replace(/\n/g, ' ').trim()
-                                  : '—'}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2">
-                              <div className="flex items-center justify-end gap-1">
-                                <button onClick={() => openViewLetterFormat(fmt)}
-                                  className="p-1 text-black hover:text-[#2f3192] hover:bg-[#2f3192]/10 rounded-md transition-all" title="View format">
-                                  <EyeIcon className="h-3.5 w-3.5" />
-                                </button>
-                                <button onClick={() => openEditLetterFormat(fmt)}
-                                  className="p-1 text-black hover:text-blue-600 hover:bg-blue-50 rounded-md transition-all" title="Edit format">
-                                  <PencilIcon className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            </td>
+                  <div className="relative border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="overflow-x-auto overflow-y-auto max-h-[55vh] custom-scrollbar">
+                      <table className="text-xs" style={{ minWidth: '1000px', width: '100%', tableLayout: 'fixed' }}>
+                        <colgroup>
+                          <col style={{ width: '150px' }} />
+                          <col style={{ width: '100px' }} />
+                          <col style={{ width: '160px' }} />
+                          <col style={{ width: '180px' }} />
+                          <col style={{ width: '110px' }} />
+                          <col style={{ width: '120px' }} />
+                          <col style={{ width: '100px' }} />
+                          <col style={{ width: '80px' }} />
+                        </colgroup>
+                        <thead className="sticky top-0 z-10">
+                          <tr className="text-center text-black" style={{ backgroundColor: themeShades.light }}>
+                            <th className="px-3 py-2.5 font-semibold text-center border-b border-gray-200 whitespace-nowrap">Format Type</th>
+                            <th className="px-3 py-2.5 font-semibold text-center border-b border-gray-200 whitespace-nowrap">Products</th>
+                            <th className="px-3 py-2.5 font-semibold text-center border-b border-gray-200 whitespace-nowrap">Description</th>
+                            <th className="px-3 py-2.5 font-semibold text-center border-b border-gray-200 whitespace-nowrap">Reference No</th>
+                            <th className="px-3 py-2.5 font-semibold text-center border-b border-gray-200 whitespace-nowrap">Customer Details</th>
+                            <th className="px-3 py-2.5 font-semibold text-center border-b border-gray-200 whitespace-nowrap">Engagement Details</th>
+                            <th className="px-3 py-2.5 font-semibold text-center border-b border-gray-200 whitespace-nowrap">Attachments</th>
+                            <th className="px-3 py-2.5 font-semibold text-center border-b border-gray-200 whitespace-nowrap">Action</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {letterFormats.map((fmt, rowIdx) => (
+                            <tr
+                              key={fmt.id}
+                              className={`border-b border-gray-100 hover:bg-blue-50/40 transition-colors align-middle ${rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}
+                            >
+                              {/* Format Type */}
+                              <td className="px-3 py-2.5 text-center">
+                                <span className="text-black font-semibold text-xs leading-tight block truncate" title={fmt.format_type_name}>
+                                  {fmt.format_type_name}
+                                </span>
+                              </td>
+
+                              {/* Products */}
+                              <td className="px-3 py-2.5 text-center">
+                                {(fmt.products || []).length === 0 ? (
+                                  <span className="text-gray-400">—</span>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1 justify-center">
+                                    {(fmt.products || []).map((p, i) => (
+                                      <span key={i} className="inline-flex items-center px-1.5 py-0.5 bg-[#2f3192]/10 text-[#2f3192] rounded text-[11px] font-medium">
+                                        {p}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+
+                              {/* Description (note) */}
+                              <td className="px-3 py-2.5 text-center">
+                                {fmt.note ? (
+                                  <span
+                                    className="text-[11px] text-gray-600 block truncate text-center"
+                                    title={fmt.note}
+                                  >
+                                    {fmt.note}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </td>
+
+                              {/* Reference No */}
+                              <td className="px-3 py-2.5 text-center">
+                                {fmt.reference_no ? (
+                                  <span
+                                    className="font-mono text-[11px] text-gray-600 block truncate text-center"
+                                    title={fmt.reference_no}
+                                  >
+                                    {fmt.reference_no}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </td>
+
+                              {/* Customer Details count */}
+                              <td className="px-3 py-2.5 text-center">
+                                {(() => {
+                                  const fields = ['instance_id', ...((fmt.customer_detail_fields || []).filter(f => f !== 'instance_id'))];
+                                  return fields.length > 0 ? (
+                                    <span className="inline-flex items-center justify-center gap-1 px-2 py-0.5 bg-[#2f3192]/10 text-[#2f3192] rounded-full text-[11px] font-semibold">
+                                      ✓ {fields.length} field{fields.length > 1 ? 's' : ''}
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-400">—</span>
+                                  );
+                                })()}
+                              </td>
+
+                              {/* Engagement Details count */}
+                              <td className="px-3 py-2.5 text-center">
+                                {(fmt.engagement_detail_fields || []).length > 0 ? (
+                                  <span className="inline-flex items-center justify-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-[11px] font-semibold">
+                                    ✓ {fmt.engagement_detail_fields.length} field{fmt.engagement_detail_fields.length > 1 ? 's' : ''}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </td>
+
+                              {/* Default Attachments */}
+                              <td className="px-3 py-2.5 text-center">
+                                {(fmt.default_attachments || []).length > 0 ? (
+                                  <span className="inline-flex items-center justify-center gap-1 text-[11px] text-gray-700">
+                                    <PaperClipIcon className="h-3 w-3 text-gray-500 shrink-0" />
+                                    {fmt.default_attachments.length} file{fmt.default_attachments.length > 1 ? 's' : ''}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">None</span>
+                                )}
+                              </td>
+
+                              {/* Action */}
+                              <td className="px-3 py-2.5 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button
+                                    onClick={() => openViewLetterFormat(fmt)}
+                                    className="p-1 text-black hover:text-[#2f3192] hover:bg-[#2f3192]/10 rounded-md transition-all"
+                                    title="View format"
+                                  >
+                                    <EyeIcon className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => openEditLetterFormat(fmt)}
+                                    className="p-1 text-black hover:text-blue-600 hover:bg-blue-50 rounded-md transition-all"
+                                    title="Edit format"
+                                  >
+                                    <PencilIcon className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Branch Email Master Modal */}
+        {showBranchEmailMaster && (
+          <div className="fixed inset-0 flex items-end lg:items-center justify-center z-[65] p-3">
+            <div
+              className="absolute inset-0 backdrop-blur-sm bg-black/30"
+              onClick={() => !branchEmailsSaving && setShowBranchEmailMaster(false)}
+            />
+            <div className="relative bg-white rounded-xl shadow-xl w-full lg:max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+              {/* Header */}
+              <div
+                className="sticky top-0 px-4 py-3 lg:px-5 lg:py-3.5 rounded-t-xl flex justify-between items-center z-10"
+                style={{ background: `linear-gradient(135deg, #335478, #2f3192)` }}
+              >
+                <div className="flex items-center gap-2">
+                  <EnvelopeIcon className="h-4 w-4 text-white shrink-0" />
+                  <h2 className="text-sm lg:text-base font-semibold text-white">Branch Email Master</h2>
+                </div>
+                <button
+                  onClick={() => !branchEmailsSaving && setShowBranchEmailMaster(false)}
+                  className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100"
+                  disabled={branchEmailsSaving}
+                >
+                  <XMarkIcon className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-4 lg:p-5">
+                {branchEmailsLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <ArrowPathIcon className="h-5 w-5 animate-spin" style={{ color: themeColor }} />
+                    <span className="ml-2 text-sm text-black">Loading branch emails...</span>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-xs text-gray-500 mb-3">
+                      Enter the email address for each branch. Leave blank if not applicable.
+                    </p>
+                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                      <table className="w-full text-xs" style={{ tableLayout: 'fixed' }}>
+                        <colgroup>
+                          <col style={{ width: '40px' }} />
+                          <col style={{ width: '120px' }} />
+                          <col style={{ width: '130px' }} />
+                          <col />
+                        </colgroup>
+                        <thead>
+                          <tr style={{ backgroundColor: themeShades.light }}>
+                            <th className="px-3 py-2.5 text-center font-semibold text-black border-b border-gray-200">#</th>
+                            <th className="px-3 py-2.5 text-left font-semibold text-black border-b border-gray-200">Branch Code</th>
+                            <th className="px-3 py-2.5 text-left font-semibold text-black border-b border-gray-200">Branch Name</th>
+                            <th className="px-3 py-2.5 text-left font-semibold text-black border-b border-gray-200">Email Address</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {branchEmails.map((branch, idx) => (
+                            <tr
+                              key={branch.code}
+                              className={`border-b border-gray-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}
+                            >
+                              {/* Sr No */}
+                              <td className="px-3 py-2 text-center text-gray-400 font-mono">{idx + 1}</td>
+
+                              {/* Branch Code */}
+                              <td className="px-3 py-2">
+                                <span className="font-mono text-[11px] text-[#2f3192] font-semibold">{branch.code}</span>
+                              </td>
+
+                              {/* Branch Name */}
+                              <td className="px-3 py-2">
+                                <span className="text-black font-medium">{branch.name}</span>
+                              </td>
+
+                              {/* Email Input */}
+                              <td className="px-3 py-2">
+                                <div className="flex flex-col gap-0.5">
+                                  <input
+                                    type="email"
+                                    value={branch.email}
+                                    onChange={(e) => handleBranchEmailChange(branch.code, e.target.value)}
+                                    placeholder="e.g. branch@example.com"
+                                    disabled={branchEmailsSaving}
+                                    className={`w-full border rounded-md px-2.5 py-1.5 text-xs focus:ring-2 transition-all bg-white text-black ${branchEmailErrors[branch.code]
+                                        ? 'border-red-400 focus:ring-red-300'
+                                        : branch.email
+                                          ? 'border-green-400 focus:ring-green-300'
+                                          : 'border-gray-300 focus:ring-[#2f3192]/30'
+                                      }`}
+                                  />
+                                  {branchEmailErrors[branch.code] && (
+                                    <span className="text-[10px] text-red-500">{branchEmailErrors[branch.code]}</span>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-4 lg:px-5 py-3 border-t bg-white flex items-center justify-between gap-3">
+                <p className="text-xs text-gray-500">
+                  {branchEmails.filter(b => b.email).length} of {branchEmails.length} branches have emails
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => !branchEmailsSaving && setShowBranchEmailMaster(false)}
+                    disabled={branchEmailsSaving}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-black hover:bg-gray-50 transition-all disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveBranchEmails}
+                    disabled={branchEmailsSaving || branchEmailsLoading || Object.keys(branchEmailErrors).length > 0}
+                    className="px-4 py-2 text-white font-medium rounded-md text-sm hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    style={{ background: `linear-gradient(135deg, #335478, #2f3192)` }}
+                  >
+                    {branchEmailsSaving ? (
+                      <><ArrowPathIcon className="h-4 w-4 animate-spin" /> Saving...</>
+                    ) : (
+                      <>
+                        <CheckCircleIcon className="h-4 w-4" />
+                        Save All Emails
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -3277,38 +3798,75 @@ const Campaign = () => {
                     ))}
                   </select>
                   <p className="text-[11px] text-gray-500 mt-1">
-                    One product per letter format. If the same product is reused in another format, its reference number is numbered -1, -2, and so on.
+                    Note: One product per letter format. If the same product is reused in another format, its reference number is numbered -1, -2, and so on.
                   </p>
                 </div>
 
-                {/* 2) Reference No — split into 5 read-only boxes (shown after a product is picked) */}
+                {/* 1b) Note — optional, shown after product select */}
+                {letterFormatData.products.length > 0 && (
+                  <div>
+                    <label className="block text-xs font-semibold text-black mb-1">
+                      Discription <span className="text-gray-400 font-normal">(optional)</span>
+                    </label>
+                    <textarea
+                      value={letterFormatData.note || ''}
+                      onChange={(e) => setLetterFormatData({ ...letterFormatData, note: e.target.value })}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
+                      style={{ '--tw-ring-color': themeColor, minHeight: '60px' }}
+                      placeholder="Any internal note about this letter format..."
+                      disabled={letterFormatSaving}
+                      rows={2}
+                    />
+                  </div>
+                )}
+
+                {/* 2) Reference No — split into boxes; Serial No is editable inline */}
                 {letterFormatData.products.length > 0 && (
                   <div>
                     <label className="block text-xs font-semibold text-black mb-1.5">Reference No</label>
-                    <div className="flex flex-wrap items-end gap-2">
-                      {(letterFormatData.reference_no || '').split('/').map((part, idx, arr) => (
-                        <React.Fragment key={idx}>
-                          <div className="flex flex-col">
-                            <span className="text-[10px] text-gray-500 mb-0.5">
-                              {['Prefix', 'FY', 'Product', 'Branch Code', 'Serial No'][idx] || `Part ${idx + 1}`}
-                            </span>
-                            <input
-                              type="text"
-                              value={part}
-                              readOnly
-                              title={part}
-                              className="border border-gray-300 rounded-md px-2 py-2 text-sm text-center bg-gray-50 text-black font-mono cursor-not-allowed"
-                              style={{ width: `${Math.max(part.length, 8) + 6}ch`, minWidth: '90px' }}
-                            />
-                          </div>
-                          {idx < arr.length - 1 && (
-                            <span className="text-gray-400 font-bold self-end mb-2.5">/</span>
-                          )}
-                        </React.Fragment>
-                      ))}
+                    <div className="flex flex-nowrap items-end gap-2 overflow-x-auto pb-1">
+                      {(letterFormatData.reference_no || '').split('/').map((part, idx, arr) => {
+                        const labels = ['Prefix', 'FY', 'Product', 'Branch Code', 'Serial No'];
+                        const isSerialNo = idx === arr.length - 1;
+                        return (
+                          <React.Fragment key={idx}>
+                            <div className="flex flex-col shrink-0">
+                              <span className="text-[10px] text-gray-500 mb-0.5">
+                                {labels[idx] || `Part ${idx + 1}`}
+                              </span>
+                              {isSerialNo ? (
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={letterFormatData.serial_start || '1'}
+                                  onChange={(e) => setLetterFormatData({ ...letterFormatData, serial_start: e.target.value })}
+                                  className="border border-[#2f3192] rounded-md px-2 py-2 text-sm text-center bg-white text-black font-mono"
+                                  style={{ minWidth: '90px', width: '90px' }}
+                                  disabled={letterFormatSaving}
+                                  placeholder="1"
+                                  title="Enter starting serial number"
+                                />
+                              ) : (
+                                <input
+                                  type="text"
+                                  value={part}
+                                  readOnly
+                                  title={part}
+                                  className="border border-gray-300 rounded-md px-2 py-2 text-sm text-center bg-gray-50 text-black font-mono cursor-not-allowed"
+                                  style={{ width: `${Math.max(part.length, 8) + 6}ch`, minWidth: '90px' }}
+                                />
+                              )}
+                            </div>
+                            {idx < arr.length - 1 && (
+                              <span className="text-gray-400 font-bold self-end mb-2.5">/</span>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
                     </div>
                     <p className="text-[11px] text-gray-500 mt-1">
-                      <span className="font-semibold">Branch Code</span> and <span className="font-semibold">Serial No</span> are filled automatically for each customer.
+                      <span className="font-semibold">Branch Code</span> is filled automatically per customer.{' '}
+                      <span className="font-semibold">Serial No</span> box is editable — set the starting number for this format.
                     </p>
                   </div>
                 )}
@@ -3328,7 +3886,38 @@ const Campaign = () => {
                   />
                 </div>
 
-                {/* 4) Start Paragraph */}
+                {/* 4) Customer Detail Fields — checkboxes */}
+                <div className="border border-gray-200 rounded-lg p-3">
+                  <label className="block text-xs font-semibold text-black mb-2">
+                    Customer Details to show in Reference{' '}
+                    <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1.5">
+                    {CUSTOMER_DETAIL_OPTIONS.map(opt => {
+                      const isDefault = opt.value === 'instance_id';
+                      return (
+                        <label key={opt.value} className={`flex items-center gap-2 group ${isDefault ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+                          <input
+                            type="checkbox"
+                            checked={isDefault ? true : (letterFormatData.customer_detail_fields || []).includes(opt.value)}
+                            onChange={() => {
+                              if (isDefault) return;
+                              toggleLetterCheckbox('customer_detail_fields', opt.value);
+                            }}
+                            className="rounded border-gray-300"
+                            style={{ accentColor: themeColor }}
+                            disabled={letterFormatSaving || isDefault}
+                          />
+                          <span className={`text-xs transition-colors ${isDefault ? 'text-[#2f3192] font-semibold' : 'text-black group-hover:text-[#2f3192]'}`}>
+                            {opt.label}{isDefault && <span className="ml-1 text-[10px] text-gray-400 font-normal">(default)</span>}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 5) Start Paragraph */}
                 <div>
                   <label className="block text-xs font-semibold text-black mb-1">Start Paragraph:</label>
                   <textarea
@@ -3341,7 +3930,30 @@ const Campaign = () => {
                   />
                 </div>
 
-                {/* 5) End Paragraph */}
+                {/* 6) Engagement Details — checkboxes (after start paragraph) */}
+                <div className="border border-gray-200 rounded-lg p-3">
+                  <label className="block text-xs font-semibold text-black mb-2">
+                    Engagement Details{' '}
+                    <span className="text-gray-400 font-normal">(optional — shown between paragraphs)</span>
+                  </label>
+                  <div className="flex flex-wrap gap-x-6 gap-y-1.5">
+                    {ENGAGEMENT_DETAIL_OPTIONS.map(opt => (
+                      <label key={opt.value} className="flex items-center gap-2 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={(letterFormatData.engagement_detail_fields || []).includes(opt.value)}
+                          onChange={() => toggleLetterCheckbox('engagement_detail_fields', opt.value)}
+                          className="rounded border-gray-300"
+                          style={{ accentColor: themeColor }}
+                          disabled={letterFormatSaving}
+                        />
+                        <span className="text-xs text-black group-hover:text-[#2f3192] transition-colors">{opt.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 7) End Paragraph */}
                 <div>
                   <label className="block text-xs font-semibold text-black mb-1">End Paragraph:</label>
                   <textarea
@@ -3354,7 +3966,253 @@ const Campaign = () => {
                   />
                 </div>
 
-                {/* 6) Default Attachment */}
+                {/* 8) Default To/CC Recipients */}
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowRecipientForm(prev => {
+                        if (!prev && recipientRules.length === 0) {
+                          setRecipientRules([blankRule()]);
+                        }
+                        return !prev;
+                      });
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2.5 bg-gray-50 hover:bg-gray-100 transition-all"
+                    disabled={letterFormatSaving}
+                  >
+                    <div className="flex items-center gap-2">
+                      <EnvelopeIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
+                      <span className="text-xs font-semibold text-black">Add default To/CC</span>
+                      {recipientRules.length > 0 && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 bg-[#2f3192] text-white rounded-full text-[10px] font-semibold">
+                          {recipientRules.length} rule{recipientRules.length > 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-gray-400 text-xs">{showRecipientForm ? '▲ collapse' : '▼ expand'}</span>
+                  </button>
+
+                  {showRecipientForm && (
+                    <div className="p-3 space-y-4 border-t border-gray-100">
+                      <p className="text-[11px] text-gray-500">
+                        Note: Set default To/CC email addresses per branch and GOEM. Branches not assigned to any rule will use their Branch Email Master address. Leave branch checkboxes empty on a rule to apply it to all remaining unmatched branches.
+                      </p>
+
+                      {recipientRules.map((rule, ruleIdx) => {
+                        const claimed = getClaimedBranches(rule._key);
+                        const available = BRANCH_LIST.filter(b => !claimed.has(b.code));
+                        const isLast = ruleIdx === recipientRules.length - 1;
+
+                        return (
+                          <div key={rule._key} className="border border-gray-200 rounded-lg p-3 space-y-3 bg-white">
+                            {/* Rule header */}
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold text-[#2f3192]">
+                                Rule {ruleIdx + 1}
+                                {rule.branch_codes.length === 0
+                                  ? <span className="ml-1 text-[10px] text-gray-400 font-normal">(applies to all remaining branches)</span>
+                                  : <span className="ml-1 text-[10px] text-gray-400 font-normal">({rule.branch_codes.length} branch{rule.branch_codes.length > 1 ? 'es' : ''})</span>
+                                }
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => removeRecipientRule(rule._key)}
+                                className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-all"
+                                title="Remove this rule"
+                              >
+                                <XMarkIcon className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+
+                            {/* Branch checkboxes */}
+                            <div>
+                              <p className="text-[11px] font-semibold text-black mb-1.5">
+                                Branches
+                              </p>
+                              {available.length === 0 ? (
+                                <p className="text-[11px] text-gray-400 italic">All branches assigned to earlier rules.</p>
+                              ) : (
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                                  {available.map(b => (
+                                    <label key={b.code} className="flex items-center gap-1.5 cursor-pointer group">
+                                      <input
+                                        type="checkbox"
+                                        checked={rule.branch_codes.includes(b.code)}
+                                        onChange={() => toggleBranchInRule(rule._key, b.code)}
+                                        className="rounded border-gray-300"
+                                        style={{ accentColor: themeColor }}
+                                        disabled={letterFormatSaving}
+                                      />
+                                      <span className="text-[11px] text-black group-hover:text-[#2f3192] transition-colors leading-tight">
+                                        <span className="font-mono text-gray-400">{b.code}</span> {b.name}
+                                      </span>
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* GOEM dropdown */}
+                            <div>
+                              <label className="block text-[11px] font-semibold text-black mb-1">
+                                GOEM / OEM Filter <span className="text-gray-400 font-normal">(optional — leave blank for all)</span>
+                              </label>
+                              <select
+                                value={rule.goem_oem}
+                                onChange={(e) => updateRuleField(rule._key, 'goem_oem', e.target.value)}
+                                className="w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-xs bg-white text-black focus:ring-2 transition-all"
+                                style={{ '--tw-ring-color': themeColor }}
+                                disabled={letterFormatSaving}
+                              >
+                                <option value="">— All GOEMs —</option>
+                                {goemOemList.map(g => (
+                                  <option key={g} value={g}>{g}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {/* To emails */}
+                            <div>
+                              <label className="block text-[11px] font-semibold text-black mb-1">To Emails</label>
+                              <div className="flex gap-1.5 mb-1.5">
+                                <input
+                                  type="text"
+                                  value={rule._toInput}
+                                  onChange={(e) => updateRuleField(rule._key, '_toInput', e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      addEmailToRule(rule._key, 'to_emails', '_toInput', '_toError');
+                                    }
+                                  }}
+                                  placeholder="email@example.com"
+                                  className={`flex-1 border rounded-md px-2.5 py-1.5 text-xs bg-white text-black focus:ring-2 transition-all ${rule._toError ? 'border-red-400' : 'border-gray-300'}`}
+                                  style={{ '--tw-ring-color': themeColor }}
+                                  disabled={letterFormatSaving}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => addEmailToRule(rule._key, 'to_emails', '_toInput', '_toError')}
+                                  className="px-2.5 py-1.5 text-xs text-white rounded-md transition-all"
+                                  style={{ background: themeColor }}
+                                  disabled={letterFormatSaving}
+                                >
+                                  Add
+                                </button>
+                              </div>
+                              {rule._toError && <p className="text-[10px] text-red-500 mb-1">{rule._toError}</p>}
+                              {rule.to_emails.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                  {rule.to_emails.map(email => (
+                                    <span key={email} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-[11px]">
+                                      {email}
+                                      <button type="button" onClick={() => removeEmailFromRule(rule._key, 'to_emails', email)}>
+                                        <XMarkIcon className="h-3 w-3 hover:text-blue-600" />
+                                      </button>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {rule.to_emails.length === 0 && <p className="text-[10px] text-gray-400">No To emails added</p>}
+                            </div>
+
+                            {/* CC emails */}
+                            <div>
+                              <label className="block text-[11px] font-semibold text-black mb-1">CC Emails</label>
+                              <div className="flex gap-1.5 mb-1.5">
+                                <input
+                                  type="text"
+                                  value={rule._ccInput}
+                                  onChange={(e) => updateRuleField(rule._key, '_ccInput', e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      addEmailToRule(rule._key, 'cc_emails', '_ccInput', '_ccError');
+                                    }
+                                  }}
+                                  placeholder="email@example.com"
+                                  className={`flex-1 border rounded-md px-2.5 py-1.5 text-xs bg-white text-black focus:ring-2 transition-all ${rule._ccError ? 'border-red-400' : 'border-gray-300'}`}
+                                  style={{ '--tw-ring-color': themeColor }}
+                                  disabled={letterFormatSaving}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => addEmailToRule(rule._key, 'cc_emails', '_ccInput', '_ccError')}
+                                  className="px-2.5 py-1.5 text-xs text-white rounded-md transition-all"
+                                  style={{ background: themeColor }}
+                                  disabled={letterFormatSaving}
+                                >
+                                  Add
+                                </button>
+                              </div>
+                              {rule._ccError && <p className="text-[10px] text-red-500 mb-1">{rule._ccError}</p>}
+                              {rule.cc_emails.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                  {rule.cc_emails.map(email => (
+                                    <span key={email} className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-800 rounded text-[11px]">
+                                      {email}
+                                      <button type="button" onClick={() => removeEmailFromRule(rule._key, 'cc_emails', email)}>
+                                        <XMarkIcon className="h-3 w-3 hover:text-green-600" />
+                                      </button>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {rule.cc_emails.length === 0 && <p className="text-[10px] text-gray-400">No CC emails added</p>}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {/* Add another rule button */}
+                      {(() => {
+                        // Count all branches claimed across ALL rules
+                        const allClaimed = new Set(
+                          recipientRules.flatMap(r => r.branch_codes)
+                        );
+                        const allBranchesClaimed = allClaimed.size >= BRANCH_LIST.length;
+                        // Also disable if any existing rule has branch_codes = [] (catches all remaining)
+                        const hasOpenRule = recipientRules.some(r => r.branch_codes.length === 0);
+                        const isDisabled = letterFormatSaving || allBranchesClaimed || hasOpenRule;
+
+                        return (
+                          <div className="flex flex-col items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={addRecipientRule}
+                              className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 border border-dashed rounded-md text-xs font-medium transition-all ${
+                                isDisabled
+                                  ? 'border-gray-200 text-gray-300 cursor-not-allowed bg-gray-50'
+                                  : 'border-[#2f3192] text-[#2f3192] hover:bg-[#2f3192]/5 cursor-pointer'
+                              }`}
+                              disabled={isDisabled}
+                              title={
+                                allBranchesClaimed
+                                  ? 'All branches have been assigned to existing rules'
+                                  : hasOpenRule
+                                  ? 'A rule with no branch selected already covers all remaining branches'
+                                  : 'Add another branch rule'
+                              }
+                            >
+                              <PlusIcon className="h-3.5 w-3.5" />
+                              Add Another Branch Rule
+                            </button>
+                            {(allBranchesClaimed || hasOpenRule) && (
+                              <p className="text-[10px] text-gray-400 text-center">
+                                {allBranchesClaimed
+                                  ? 'All 14 branches have been assigned — no more rules can be added.'
+                                  : 'A catch-all rule (no branch selected) already covers all remaining branches.'}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* 9) Default Attachment */}
                 <div>
                   <label className="block text-xs font-semibold text-black mb-1.5">Default Attachment</label>
                   <input type="file" multiple accept=".mp4,.jpg,.jpeg,.png,.pdf,.doc,.docx,.xlsx,.xls,.csv" onChange={handleLetterAttachmentUpload} className="hidden" id="letter-attach-upload" disabled={letterFormatSaving} />
@@ -3421,6 +4279,8 @@ const Campaign = () => {
               </div>
 
               <div className="p-4 lg:p-5 overflow-y-auto custom-scrollbar space-y-4">
+
+                {/* Product */}
                 <div>
                   <p className="text-xs font-semibold text-black mb-1.5">Products</p>
                   {(viewingLetterFormat.products || []).length === 0 ? (
@@ -3434,13 +4294,179 @@ const Campaign = () => {
                   )}
                 </div>
 
+                {/* Note */}
+                {viewingLetterFormat.note && (
+                  <div>
+                    <p className="text-xs font-semibold text-black mb-1.5">Note</p>
+                    <div className="border border-gray-200 rounded-md p-2.5 bg-yellow-50">
+                      <p className="text-sm text-black whitespace-pre-wrap break-words">{viewingLetterFormat.note}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Reference No + Serial Start */}
                 <div>
                   <p className="text-xs font-semibold text-black mb-1.5">Reference No</p>
                   {viewingLetterFormat.reference_no ? (
-                    <span className="text-sm text-black font-mono break-all">{viewingLetterFormat.reference_no}</span>
+                    <div className="flex flex-nowrap items-end gap-2 overflow-x-auto pb-1">
+                      {viewingLetterFormat.reference_no.split('/').map((part, idx, arr) => {
+                        const labels = ['Prefix', 'FY', 'Product', 'Branch Code', 'Serial No'];
+                        const isSerialNo = idx === arr.length - 1;
+                        return (
+                          <React.Fragment key={idx}>
+                            <div className="flex flex-col shrink-0">
+                              <span className="text-[10px] text-gray-500 mb-0.5">{labels[idx] || `Part ${idx + 1}`}</span>
+                              <div className={`border rounded-md px-2 py-1.5 text-sm text-center font-mono ${isSerialNo ? 'border-[#2f3192] bg-[#2f3192]/5 text-[#2f3192] font-semibold' : 'border-gray-200 bg-gray-50 text-black'}`}
+                                style={{ minWidth: '90px' }}>
+                                {isSerialNo ? (viewingLetterFormat.serial_start || '1') : part}
+                              </div>
+                            </div>
+                            {idx < arr.length - 1 && (
+                              <span className="text-gray-400 font-bold self-end mb-2">/</span>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </div>
                   ) : <span className="text-sm text-gray-400">—</span>}
                 </div>
 
+                {/* Format Type Name */}
+                <div>
+                  <p className="text-xs font-semibold text-black mb-1.5">Format Type Name</p>
+                  <span className="text-sm text-black">{viewingLetterFormat.format_type_name || '—'}</span>
+                </div>
+
+                {/* Customer Detail Fields */}
+                <div>
+                  <p className="text-xs font-semibold text-black mb-1.5">Customer Details in Reference</p>
+                  {(viewingLetterFormat.customer_detail_fields || []).length === 0 ? (
+                    <span className="text-sm text-gray-400">None selected</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {['instance_id', ...(viewingLetterFormat.customer_detail_fields || []).filter(f => f !== 'instance_id')].map((val, idx) => {
+                        const CUSTOMER_DETAIL_OPTIONS = [
+                          { value: 'instance_id', label: 'Instance ID' },
+                          { value: 'account_name', label: 'Account Name' },
+                          { value: 'kva_rating', label: 'KVA Rating' },
+                          { value: 'commissioning_date', label: 'Commissioning Date' },
+                          { value: 'application_code', label: 'Application Code' },
+                          { value: 'engine_no', label: 'Engine No.' },
+                          { value: 'engine_model', label: 'Engine Model' },
+                          { value: 'warranty_expiry', label: 'Warranty Expiry' },
+                          { value: 'product_segment', label: 'Product Segment' },
+                          { value: 'engine_series', label: 'Engine Series' },
+                          { value: 'segment', label: 'Segment' },
+                        ];
+                        const opt = CUSTOMER_DETAIL_OPTIONS.find(o => o.value === val);
+                        const isDefault = val === 'instance_id';
+                        return (
+                          <span key={idx} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${isDefault ? 'bg-[#2f3192] text-white' : 'bg-[#2f3192]/10 text-[#2f3192]'}`}>
+                            {opt ? opt.label : val}
+                            {isDefault && <span className="text-[10px] opacity-75">(default)</span>}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Start Paragraph */}
+                <div>
+                  <p className="text-xs font-semibold text-black mb-1.5">Start Para</p>
+                  <div className="border border-gray-200 rounded-md p-3 bg-gray-50 max-h-[30vh] overflow-y-auto">
+                    {viewingLetterFormat.start_para ? (
+                      <pre className="text-sm text-black whitespace-pre-wrap break-words font-mono leading-relaxed">{viewingLetterFormat.start_para}</pre>
+                    ) : <span className="text-sm text-gray-400">No start paragraph provided</span>}
+                  </div>
+                </div>
+
+                {/* Engagement Detail Fields */}
+                <div>
+                  <p className="text-xs font-semibold text-black mb-1.5">Engagement Details</p>
+                  {(viewingLetterFormat.engagement_detail_fields || []).length === 0 ? (
+                    <span className="text-sm text-gray-400">None selected</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {(viewingLetterFormat.engagement_detail_fields || []).map((val, idx) => {
+                        const ENGAGEMENT_DETAIL_OPTIONS = [
+                          { value: 'followup_history', label: 'Followups History' },
+                          { value: 'quotation_history', label: 'Quotation History' },
+                          { value: 'letter_history', label: 'Letter History' },
+                        ];
+                        const opt = ENGAGEMENT_DETAIL_OPTIONS.find(o => o.value === val);
+                        return (
+                          <span key={idx} className="inline-flex items-center px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                            {opt ? opt.label : val}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* End Paragraph */}
+                <div>
+                  <p className="text-xs font-semibold text-black mb-1.5">End Para</p>
+                  <div className="border border-gray-200 rounded-md p-3 bg-gray-50 max-h-[30vh] overflow-y-auto">
+                    {viewingLetterFormat.end_para ? (
+                      <pre className="text-sm text-black whitespace-pre-wrap break-words font-mono leading-relaxed">{viewingLetterFormat.end_para}</pre>
+                    ) : <span className="text-sm text-gray-400">No end paragraph provided</span>}
+                  </div>
+                </div>
+
+                {/* Default Recipients */}
+                <div>
+                  <p className="text-xs font-semibold text-black mb-1.5">Default To/CC Recipients</p>
+                  {(viewingLetterFormat.default_recipients || []).length === 0 ? (
+                    <span className="text-sm text-gray-400">None configured</span>
+                  ) : (
+                    <div className="space-y-2">
+                      {(viewingLetterFormat.default_recipients || []).map((rule, idx) => (
+                        <div key={idx} className="border border-gray-200 rounded-md p-2.5 bg-gray-50 space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[11px] font-semibold text-[#2f3192]">Rule {idx + 1}:</span>
+                            {(rule.branch_codes || []).length === 0 ? (
+                              <span className="text-[11px] text-gray-500 italic">All remaining branches</span>
+                            ) : (
+                              (rule.branch_codes || []).map(code => {
+                                const branch = BRANCH_LIST.find(b => b.code === code);
+                                return (
+                                  <span key={code} className="inline-flex items-center px-1.5 py-0.5 bg-[#2f3192]/10 text-[#2f3192] rounded text-[10px] font-medium">
+                                    {branch ? branch.name : code}
+                                  </span>
+                                );
+                              })
+                            )}
+                            {rule.goem_oem && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-[10px] font-medium">
+                                GOEM: {rule.goem_oem}
+                              </span>
+                            )}
+                          </div>
+                          {(rule.to_emails || []).length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1">
+                              <span className="text-[10px] font-semibold text-gray-500">To:</span>
+                              {rule.to_emails.map(e => (
+                                <span key={e} className="text-[11px] px-1.5 py-0.5 bg-blue-100 text-blue-800 rounded">{e}</span>
+                              ))}
+                            </div>
+                          )}
+                          {(rule.cc_emails || []).length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1">
+                              <span className="text-[10px] font-semibold text-gray-500">CC:</span>
+                              {rule.cc_emails.map(e => (
+                                <span key={e} className="text-[11px] px-1.5 py-0.5 bg-green-100 text-green-800 rounded">{e}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Default Attachments */}
                 <div>
                   <p className="text-xs font-semibold text-black mb-1.5">Default Attachments</p>
                   {(viewingLetterFormat.default_attachments || []).length === 0 ? (
@@ -3459,23 +4485,6 @@ const Campaign = () => {
                   )}
                 </div>
 
-                <div>
-                  <p className="text-xs font-semibold text-black mb-1.5">Start Para</p>
-                  <div className="border border-gray-200 rounded-md p-3 bg-gray-50 max-h-[30vh] overflow-y-auto">
-                    {viewingLetterFormat.start_para ? (
-                      <pre className="text-sm text-black whitespace-pre-wrap break-words font-mono leading-relaxed">{viewingLetterFormat.start_para}</pre>
-                    ) : <span className="text-sm text-gray-400">No start paragraph provided</span>}
-                  </div>
-                </div>
-
-                <div>
-                  <p className="text-xs font-semibold text-black mb-1.5">End Para</p>
-                  <div className="border border-gray-200 rounded-md p-3 bg-gray-50 max-h-[30vh] overflow-y-auto">
-                    {viewingLetterFormat.end_para ? (
-                      <pre className="text-sm text-black whitespace-pre-wrap break-words font-mono leading-relaxed">{viewingLetterFormat.end_para}</pre>
-                    ) : <span className="text-sm text-gray-400">No end paragraph provided</span>}
-                  </div>
-                </div>
               </div>
 
               <div className="px-4 lg:px-5 py-3 border-t flex justify-end gap-2">

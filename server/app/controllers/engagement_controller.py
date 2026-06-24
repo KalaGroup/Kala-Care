@@ -2335,6 +2335,66 @@ class EngagementController:
             "rows": result_rows,
         }      
 
+# ==================== Warranty Expiry Map (for CSP due-date cap) ====================
+
+    def get_warranty_expiry_map(self, instance_ids: List[str]) -> Dict[str, Optional[str]]:
+        """
+        Batch-lookup warranty_expiry_date from asset_detailed for many instance_ids
+        in ONE indexed query per chunk (chunked at 1000 to stay under SQL Server's
+        2100-parameter IN() limit). Returns { instance_id: 'YYYY-MM-DD' | None }.
+
+        Keys are returned for BOTH the raw id sent in and its normalized form, so the
+        frontend lookup by row.instance_id always hits regardless of ".0" formatting.
+        When an instance has multiple asset rows, the latest (max) warranty wins.
+        """
+        try:
+            ids = [str(i) for i in (instance_ids or []) if i is not None and str(i).strip()]
+            if not ids:
+                return {}
+
+            # Query candidates: include normalized forms so DB rows match either shape.
+            candidates = set()
+            for i in ids:
+                candidates.add(i)
+                norm = self._normalize_id(i)
+                if norm:
+                    candidates.add(norm)
+            candidate_list = [c for c in candidates if c]
+
+            # normalized id -> latest warranty (datetime)
+            warranty_by_norm: Dict[str, Any] = {}
+            CHUNK = 1000  # SQL Server 2100-param IN() limit
+            for i in range(0, len(candidate_list), CHUNK):
+                chunk = candidate_list[i:i + CHUNK]
+                for inst_id, warranty in self.db.query(
+                    AssetDetailed.instance_id,
+                    AssetDetailed.warranty_expiry_date
+                ).filter(AssetDetailed.instance_id.in_(chunk)).all():
+                    norm = self._normalize_id(inst_id)
+                    if not norm:
+                        continue
+                    existing = warranty_by_norm.get(norm)
+                    if warranty and (existing is None or warranty > existing):
+                        warranty_by_norm[norm] = warranty
+
+            # Key the response by EVERY id the caller sent (raw + normalized) so the
+            # axios lookup by row.instance_id never misses on a formatting difference.
+            result: Dict[str, Optional[str]] = {}
+            for i in ids:
+                norm = self._normalize_id(i)
+                warranty = warranty_by_norm.get(norm) if norm else None
+                value = warranty.strftime('%Y-%m-%d') if warranty else None
+                result[i] = value
+                if norm:
+                    result[norm] = value
+            return result
+
+        except Exception as e:
+            print(f"Error in get_warranty_expiry_map: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {}        
+
 # ==================== Letter Sending ====================
 
     def _get_financial_year(self, dt: Optional[datetime] = None) -> str:
@@ -2344,32 +2404,65 @@ class EngagementController:
             return f"{year}-{str(year + 1)[-2:]}"
         return f"{year - 1}-{str(year)[-2:]}"
 
-    def get_next_letter_ref(self, instance_id: str) -> Dict[str, Any]:
-        """Preview the next Ref No (KC/FY/NN) for an instance — per instance per FY.
-        Also returns the 2 most recent letters already sent for this instance."""
+    def get_next_letter_ref(self, instance_id: str, format_type_id: Optional[int] = None) -> Dict[str, Any]:
+        """Preview the next Ref No for an instance.
+        Uses the format master's reference_no template and serial_start if a format is given.
+        Falls back to KC/FY/NN when no format is selected yet."""
+        from app.models.campaign_model import CampaignLetterFormat
+    
         norm = self._normalize_id(instance_id)
         fy = self._get_financial_year()
-        count = self.db.query(LetterSendRecord).filter(
+    
+        # How many letters for this instance+FY already exist?
+        existing_count = self.db.query(LetterSendRecord).filter(
             LetterSendRecord.instance_id == norm,
             LetterSendRecord.financial_year == fy
         ).count()
-        seq = count + 1
-
+    
+        # Determine serial_start from the format master (default 1)
+        serial_start = 1
+        ref_template = None
+        if format_type_id:
+            fmt = self.db.query(CampaignLetterFormat).filter(
+                CampaignLetterFormat.id == format_type_id
+            ).first()
+            if fmt:
+                ref_template = (fmt.reference_no or '').strip() or None
+                try:
+                    serial_start = int(fmt.serial_start or 1)
+                except (ValueError, TypeError):
+                    serial_start = 1
+    
+        seq = serial_start + existing_count
+    
+        # Build the preview ref no (branch_id not known here — filled client-side in buildLetterReference)
+        if ref_template:
+            import re as _re
+            preview_ref = _re.sub(
+                r'(?i)serial[_\s]no\.?', str(seq).zfill(2), ref_template
+            )
+            preview_ref = _re.sub(
+                r'(?i)branch[_\s]code\.?', '___', preview_ref
+            )
+        else:
+            preview_ref = f"KC/{fy}/{str(seq).zfill(2)}"
+    
         recent = self.db.query(LetterSendRecord).filter(
             LetterSendRecord.instance_id == norm
         ).order_by(desc(LetterSendRecord.created_at)).limit(2).all()
-
+    
         previous_letters = [{
             "ref_no": r.ref_no,
             "date": r.created_at.strftime('%d %b %Y') if r.created_at else None,
             "subject": r.subject,
         } for r in recent]
-
+    
         return {
             "instance_id": norm,
             "financial_year": fy,
             "sequence": seq,
-            "ref_no": f"KC/{fy}/{str(seq).zfill(2)}",
+            "serial_start": serial_start,
+            "ref_no": preview_ref,
             "previous_letters": previous_letters
         }
 

@@ -61,6 +61,33 @@ def get_all_campaigns(
     controller = CampaignController(db)
     return controller.get_all_campaigns(service, status)
 
+# ==================== GOEM OEM distinct values ====================
+
+@router.get("/letter-master/goem-oem-list")
+def get_distinct_goem_oem(db: Session = Depends(get_db)):
+    """Distinct goem_oem values from asset_detailed for letter format recipient rules."""
+    controller = CampaignController(db)
+    return controller.get_distinct_goem_oem()
+
+# ==================== Branch Email Master endpoints ====================
+# IMPORTANT: These must be defined BEFORE /{campaign_id} routes to avoid
+# FastAPI matching "branch-email-master" as a campaign_id integer.
+
+@router.get("/branch-email-master", response_model=List[campaign_schema.BranchEmailResponse])
+def get_all_branch_emails(db: Session = Depends(get_db)):
+    """Get all branch email records."""
+    controller = CampaignController(db)
+    return controller.get_all_branch_emails()
+
+@router.post("/branch-email-master/bulk-save", response_model=campaign_schema.BranchEmailBulkSaveResponse)
+def bulk_save_branch_emails(
+    data: campaign_schema.BranchEmailBulkSave,
+    db: Session = Depends(get_db)
+):
+    """Upsert branch emails in bulk."""
+    controller = CampaignController(db)
+    return controller.bulk_save_branch_emails(data)
+
 @router.get("/{campaign_id}", response_model=campaign_schema.CampaignResponse)
 def get_campaign(campaign_id: int, db: Session = Depends(get_db)):
     controller = CampaignController(db)
@@ -244,3 +271,5 @@ def update_letter_format(request: Request, format_id: int, data: campaign_schema
 def delete_letter_format(format_id: int, db: Session = Depends(get_db)):
     controller = CampaignController(db)
     return controller.delete_letter_format(format_id)
+
+

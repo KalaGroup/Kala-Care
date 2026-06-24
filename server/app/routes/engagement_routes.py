@@ -328,6 +328,21 @@ async def get_csp_status(
     controller = EngagementController(db)
     return controller.get_csp_status_for_branch(branch_id, role)    
 
+@router.post("/warranty-expiry-map", response_model=dict)
+async def get_warranty_expiry_map(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Batch warranty_expiry_date lookup (from asset_detailed) for a list of
+    instance_ids. Used by the CSP modals to cap the 30-day due date to the
+    warranty expiry when it falls inside the window.
+    Body: { "instance_ids": ["...", "..."] }
+    """
+    controller = EngagementController(db)
+    instance_ids = payload.get("instance_ids") or []
+    return {"warranty_map": controller.get_warranty_expiry_map(instance_ids)}
+    
 @router.get("/campaigns/{campaign_id}/scripts/{script_index}", response_model=dict)
 async def get_campaign_script_pdf(
     campaign_id: int,
@@ -343,11 +358,12 @@ async def get_campaign_script_pdf(
 @router.get("/letter/next-ref", response_model=dict)
 async def get_letter_next_ref(
     instance_id: str = Query(..., description="Customer instance_id"),
+    format_type_id: Optional[int] = Query(None, description="Letter format master ID"),
     db: Session = Depends(get_db)
 ):
-    """Preview the next letter Ref No (KC/FY/NN) for an instance_id."""
+    """Preview the next letter Ref No for an instance_id, optionally scoped to a format master."""
     controller = EngagementController(db)
-    return controller.get_next_letter_ref(instance_id)
+    return controller.get_next_letter_ref(instance_id, format_type_id)
 
 
 @router.get("/letter/history", response_model=list)

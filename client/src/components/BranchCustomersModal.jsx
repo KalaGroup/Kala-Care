@@ -403,8 +403,18 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                 {
                     label: 'Rejected',
                     data: sortedCampaigns.map(c => c.rejected_followups || 0),
-                    backgroundColor: 'rgba(239, 68, 68, 0.85)',
-                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(220, 100, 40, 0.85)',
+                    borderColor: '#dc6428',
+                    borderWidth: 1,
+                    borderRadius: 4,
+                    barPercentage: 0.7,
+                    categoryPercentage: 0.8
+                },
+                {
+                    label: 'NC',
+                    data: sortedCampaigns.map(c => ncCountByCampaign[c.campaign_id] || 0),
+                    backgroundColor: 'rgba(107, 114, 128, 0.85)',
+                    borderColor: '#6b7280',
                     borderWidth: 1,
                     borderRadius: 4,
                     barPercentage: 0.7,
@@ -468,6 +478,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                 campaign.wip_followups || 0,
                                 campaign.rescheduled_followups || 0,
                                 campaign.rejected_followups || 0,
+                                ncCountByCampaign[campaign.campaign_id] || 0,
                                 campaign.completed_followups || 0
                             ];
                             const campaignMax = Math.max(...values);
@@ -508,27 +519,31 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
 
     // Asset Status Distribution Data
     const getAssetStatusData = () => {
+        const ncTotal = Object.values(ncCountByCampaign).reduce((a, b) => a + b, 0);
         return {
-            labels: ['Completed', 'WIP', 'FR', 'Rejected'],
+            labels: ['Completed', 'WIP', 'FR', 'Rejected', 'NC'],
             datasets: [
                 {
                     data: [
                         branchData?.completed_followups || 0,
                         branchData?.wip_followups || 0,
                         branchData?.rescheduled_followups || 0,
-                        branchData?.rejected_followups || 0
+                        branchData?.rejected_followups || 0,
+                        ncTotal
                     ],
                     backgroundColor: [
                         'rgba(34, 197, 94, 0.85)',
                         'rgba(234, 179, 8, 0.85)',
                         'rgba(168, 85, 247, 0.85)',
-                        'rgba(239, 68, 68, 0.85)'
+                        'rgba(220, 100, 40, 0.85)',
+                        'rgba(107, 114, 128, 0.85)'
                     ],
                     borderColor: [
                         '#22c55e',
                         '#eab308',
                         '#a855f7',
-                        '#ef4444'
+                        '#dc6428',
+                        '#6b7280'
                     ],
                     borderWidth: 2
                 }
@@ -551,8 +566,11 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
     const totalCompleted = branchData?.completed_followups || 0;
     const totalWip = branchData?.wip_followups || 0;
     const totalRejected = branchData?.rejected_followups || 0;
+    // Branch-total NC = sum of per-campaign NC (same source the table & export use)
+    const totalNotConnected = Object.values(ncCountByCampaign).reduce((a, b) => a + b, 0);
     const completionRate = branchData?.branch_completion_rate || 0;
-    const totalFR = totalEngagedCustomers - (totalWip + totalCompleted + totalRejected);
+    const totalFR = totalEngagedCustomers - (totalWip + totalCompleted + totalRejected + totalNotConnected);
+
     const totalRemaining = totalBranchAssets - totalEngagedCustomers;
 
     if (!isOpen) return null;
@@ -672,18 +690,21 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                         </p>
                                     </div>
                                     <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
-                                    <div className="w-[60%] grid grid-cols-2 gap-x-3 gap-y-1 text-xs font-semibold place-items-center">
+                                    <div className="w-[60%] grid grid-cols-3 gap-x-2 gap-y-1 text-xs font-semibold place-items-center">
                                         <div>
-                                            W: <span className="font-bold text-lg text-black">{totalWip.toLocaleString()}</span>
+                                            W: <span className="font-bold text-base text-black">{totalWip.toLocaleString()}</span>
                                         </div>
                                         <div>
-                                            FR: <span className="font-bold text-lg text-black">{totalFR.toLocaleString()}</span>
+                                            FR: <span className="font-bold text-base text-black">{totalFR.toLocaleString()}</span>
                                         </div>
                                         <div>
-                                            R: <span className="font-bold text-lg text-black">{totalRejected.toLocaleString()}</span>
+                                            R: <span className="font-bold text-base text-black">{totalRejected.toLocaleString()}</span>
                                         </div>
                                         <div>
-                                            C: <span className="font-bold text-lg text-black">{totalCompleted.toLocaleString()}</span>
+                                            NC: <span className="font-bold text-base text-black">{totalNotConnected.toLocaleString()}</span>
+                                        </div>
+                                        <div>
+                                            C: <span className="font-bold text-base text-black">{totalCompleted.toLocaleString()}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -727,7 +748,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                     <h3 className="text-base font-semibold text-gray-800">
                                         Drive-wise Customer Breakdown
                                     </h3>
-                                    <p className="text-[10px] text-gray-500 mt-0.5">Remaining vs WIP vs FR vs Rejected vs Completed</p>
+                                    <p className="text-[10px] text-gray-500 mt-0.5">Remaining vs WIP vs FR vs Rejected vs NC vs Completed</p>
                                 </div>
                                 <div className="flex gap-1.5">
                                     <button
@@ -964,7 +985,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                         </button>
                                         <button
                                             onClick={() => setStatusFilter('rejected')}
-                                            className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${statusFilter === 'rejected' ? 'bg-red-500 text-white' : 'bg-red-50 text-red-700 hover:bg-red-100'}`}
+                                            className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${statusFilter === 'rejected' ? 'bg-rose-700 text-white' : 'bg-rose-50 text-rose-800 hover:bg-rose-100'}`}
                                         >
                                             Rejected ({selectedCampaign.rejected_followups || 0})
                                         </button>

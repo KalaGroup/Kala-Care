@@ -1553,6 +1553,40 @@ const Customer = () => {
         </div>
       )}
 
+      {/* Floating scroll to top / bottom buttons — bottom-right corner */}
+      <div className="fixed bottom-6 right-4 z-40 flex flex-col gap-1.5">
+        <button
+          onClick={() => {
+            if (tableContainerRef.current) {
+              tableContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
+          style={{ backgroundColor: themeColor }}
+          title="Scroll to top"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="white" className="w-4 h-4">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+          </svg>
+        </button>
+        <button
+          onClick={() => {
+            if (tableContainerRef.current) {
+              tableContainerRef.current.scrollTo({ top: tableContainerRef.current.scrollHeight, behavior: 'smooth' });
+            }
+            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+          }}
+          className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
+          style={{ backgroundColor: themeColor }}
+          title="Scroll to bottom"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="white" className="w-4 h-4">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+          </svg>
+        </button>
+      </div>
+
       <style>{`
         .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
         .scrollbar-thin::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }

@@ -45,6 +45,29 @@ const formatWorkingHours = (decimalHours) => {
     return `${minutes}m`;
 };
 
+// Robust date parser for SR Open / warranty values. Handles:
+//   YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY, and DD-MMM-YYYY (e.g. 05-Jan-2025)
+const parseAnyDate = (val) => {
+    if (!val) return null;
+    const s = String(val).trim();
+
+    let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+
+    m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
+
+    m = s.match(/^(\d{1,2})[-/\s]([A-Za-z]{3,})[-/\s](\d{4})$/);
+    if (m) {
+        const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+        const mon = months.indexOf(m[2].slice(0, 3).toLowerCase());
+        if (mon >= 0) return new Date(+m[3], mon, +m[1]);
+    }
+
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+};
+
 const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, isBranchAdmin, isMasterAdmin, isITAdmin }) => {
     const navigate = useNavigate();
 
@@ -105,6 +128,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const [followupSearchTerm, setFollowupSearchTerm] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
+    const [statusLocked, setStatusLocked] = useState(false); // true = a status card opened the modal, so hide the Status dropdown
     const [showCancelledCspModal, setShowCancelledCspModal] = useState(false);
 
     // Non-Campaign Customers modal
@@ -118,6 +142,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const [showCspModal, setShowCspModal] = useState(false);
     const [cspData, setCspData] = useState({ total_instances: 0, total_rows: 0, rows: [] });
     const [loadingCsp, setLoadingCsp] = useState(false);
+    const [warrantyMap, setWarrantyMap] = useState({}); // instance_id -> warranty_expiry (YYYY-MM-DD)
     const [cspSearchTerm, setCspSearchTerm] = useState('');
     const [cspDueFromDate, setCspDueFromDate] = useState('');
     const [cspDueToDate, setCspDueToDate] = useState('');
@@ -161,7 +186,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
     // Reset the view dropdown whenever the All-Follow-ups modal closes
     useEffect(() => {
-        if (!showAllFollowupsModal) setFollowupView('all');
+        if (!showAllFollowupsModal) {
+            setFollowupView('all');
+            setStatusFilter('all');
+            setStatusLocked(false);
+        }
     }, [showAllFollowupsModal]);
 
     // Format date for API — use LOCAL (IST) date parts so the chosen day isn't
@@ -232,6 +261,10 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     visit_wip: day.visit_wip || 0,
                     visit_rejected: day.visit_rejected || 0,
                     visit_rescheduled: day.visit_rescheduled || 0,
+                    call_not_connected: day.call_not_connected || 0,
+                    whatsapp_not_connected: day.whatsapp_not_connected || 0,
+                    email_not_connected: day.email_not_connected || 0,
+                    visit_not_connected: day.visit_not_connected || 0,
                     campaign_name: day.campaign_name || 'N/A'
                 }));
                 setDailyPerformance(dailyData);
@@ -391,6 +424,24 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setCreatedFromDate('');
         setCreatedToDate('');
         setStatusFilter('all');
+        setStatusLocked(false);
+        fetchAllFollowups();
+    };
+
+    // Open the All-Follow-ups modal filtered to ONE status (C / WIP / R / FR / NC).
+    // status must be: 'completed' | 'wip' | 'rejected' | 'rescheduled' | 'not_connected'
+    // The Status dropdown is hidden because the status is fixed by the clicked card.
+    const handleOpenStatusFollowups = (status) => {
+        setQuotationFilterActive(false);
+        setQuotationSentFilterActive(false);
+        setCspQuotationFilterActive(false);
+        setCspQuotationSentFilterActive(false);
+        setShowAllFollowupsModal(true);
+        setFollowupSearchTerm('');
+        setCreatedFromDate('');
+        setCreatedToDate('');
+        setStatusFilter(status);
+        setStatusLocked(true);
         fetchAllFollowups();
     };
 
@@ -494,7 +545,25 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 role: userData.role || ''
             });
             const response = await axios.get(`${API_BASE_URL}/v1/engagement/csp-status?${params.toString()}`);
-            setCspData(response.data || { total_instances: 0, total_rows: 0, rows: [] });
+            const data = response.data || { total_instances: 0, total_rows: 0, rows: [] };
+            setCspData(data);
+
+            // ONE batch call to fetch warranty expiry for every CSP instance_id,
+            // used to cap the 30-day due date. Non-blocking for the table render.
+            const ids = [...new Set((data.rows || []).map(r => r.instance_id).filter(Boolean))];
+            if (ids.length > 0) {
+                try {
+                    const wRes = await axios.post(`${API_BASE_URL}/v1/engagement/warranty-expiry-map`, {
+                        instance_ids: ids
+                    });
+                    setWarrantyMap(wRes.data?.warranty_map || {});
+                } catch (werr) {
+                    console.error('Error fetching warranty map:', werr);
+                    setWarrantyMap({});
+                }
+            } else {
+                setWarrantyMap({});
+            }
         } catch (error) {
             console.error('Error fetching CSP status:', error);
             setCspData({ total_instances: 0, total_rows: 0, rows: [] });
@@ -627,6 +696,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             fetchCspStatus();
         }
     };
+
     // Parse a "DD-MM-YYYY" due-date string (the backend's output format) into a Date
     const parseCspDueDate = (str) => {
         if (!str) return null;
@@ -636,20 +706,48 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         return isNaN(d.getTime()) ? null : d;
     };
 
-    // Due/Overdue Days relative to due date. Positive = overdue, negative = days left.
-    // todayMs is computed once per render cycle, not inside every call
+    // Due Date = SR Open Date + 30 days.
+    // If the asset's warranty expiry (looked up by instance_id) falls WITHIN that
+    // window (on/after SR open date and on/before the +30-day date), the warranty
+    // expiry date becomes the due date instead.
+    const getCspDueDate = useCallback((row) => {
+        const open = parseAnyDate(row?.sr_open_date);
+        if (!open) return null;
+        open.setHours(0, 0, 0, 0);
+
+        const due = new Date(open);
+        due.setDate(due.getDate() + 30);
+
+        const warranty = parseAnyDate(warrantyMap[row?.instance_id]);
+        if (warranty) {
+            warranty.setHours(0, 0, 0, 0);
+            if (warranty >= open && warranty <= due) return warranty;
+        }
+        return due;
+    }, [warrantyMap]);
+
+    // Format a computed due Date back to DD-MM-YYYY for display
+    const fmtCspDueDate = (d) => {
+        if (!d) return '-';
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        return `${dd}-${mm}-${d.getFullYear()}`;
+    };
+
+    // Due/Overdue Days relative to the COMPUTED due date.
+    // Positive = overdue, negative = days left. todayStartMs computed once per render.
     const todayStartMs = useMemo(() => {
         const t = new Date();
         t.setHours(0, 0, 0, 0);
         return t.getTime();
     }, []);
 
-    const getCspDaysPass = useCallback((str) => {
-        const due = parseCspDueDate(str);
+    const getCspDaysPass = useCallback((row) => {
+        const due = getCspDueDate(row);
         if (!due) return null;
         due.setHours(0, 0, 0, 0);
         return Math.round((todayStartMs - due.getTime()) / (1000 * 60 * 60 * 24));
-    }, [todayStartMs]);
+    }, [todayStartMs, getCspDueDate]);
 
     // Shared filter: search + segment + due-date range
     const applyCspFilters = useCallback((rows, search, segment, fromDate, toDate) => {
@@ -670,7 +768,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 if ((row.segment || '') !== segment) return false;
             }
             if (fromDate || toDate) {
-                const due = parseCspDueDate(row.due_date);
+                const due = getCspDueDate(row);
                 if (!due) return false;
                 due.setHours(0, 0, 0, 0);
                 if (fromDate) {
@@ -686,7 +784,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             }
             return true;
         });
-    }, []);
+    }, [getCspDueDate]);
 
     // Segment options (shared by both modals) — derived from the already-fetched rows
     const cspSegmentOptions = useMemo(() => {
@@ -721,13 +819,13 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     // Sorted CSP rows for Total CSP modal
     const sortedCspRows = useMemo(() => {
         return [...filteredCspRows].sort((a, b) => {
-            const da = getCspDaysPass(a.due_date);
-            const db = getCspDaysPass(b.due_date);
+            const da = getCspDaysPass(a);
+            const db = getCspDaysPass(b);
             const valA = da === null ? -Infinity : da;
             const valB = db === null ? -Infinity : db;
             return cspDaysSort === 'desc' ? valB - valA : valA - valB;
         });
-    }, [filteredCspRows, cspDaysSort]);
+    }, [filteredCspRows, cspDaysSort, getCspDaysPass]);
 
     // Sorted CSP rows for Open CSP modal
     const sortedOpenCspRows = useMemo(() => {
@@ -760,6 +858,13 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
     // Count for the front box
     const quotationCount = quotationFollowupIds.size;
+
+    // NC (Not Connected) count for the top card — derived from already-fetched
+    // follow-ups (status is its own value now). No backend change needed.
+    const notConnectedCount = useMemo(
+        () => allFollowupsData.filter(fu => (fu.status || '').trim().toLowerCase() === 'not_connected').length,
+        [allFollowupsData]
+    );
 
     // Quotation Sent box: quotation sent AND still WIP
     const quotationSentCount = useMemo(
@@ -827,6 +932,15 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const isPlainAllView =
         !quotationFilterActive && !quotationSentFilterActive &&
         !cspQuotationFilterActive && !cspQuotationSentFilterActive;
+
+    // Header label for the All-Follow-ups modal when a status card opened it
+    const lockedStatusLabel = {
+        completed: 'Completed',
+        wip: 'WIP',
+        rejected: 'Rejected',
+        rescheduled: 'FR (Rescheduled)',
+        not_connected: 'NC (Not Connected)',
+    }[statusFilter] || 'Follow-ups';
 
     const mergedFollowups = useMemo(
         () => (isPlainAllView ? [...allFollowupsData, ...otherCompletedFollowups] : allFollowupsData),
@@ -939,22 +1053,24 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     }, [userData]);
 
     const statusBarData = useMemo(() => ({
-        labels: ['Completed', 'WIP', 'Rejected', 'Rescheduled'],
+        labels: ['Completed', 'WIP', 'Rejected', 'Rescheduled', 'NC'],
         datasets: [{
             label: 'Status Count',
             data: [
                 performance.completed_count || 0,
                 performance.wip_count || 0,
                 performance.rejected_count || 0,
-                performance.rescheduled_count || 0
+                performance.rescheduled_count || 0,
+                performance.not_connected_count || notConnectedCount || 0
             ],
             backgroundColor: [
                 'rgba(34, 197, 94, 0.85)',
                 'rgba(234, 179, 8, 0.85)',
-                'rgba(239, 68, 68, 0.85)',
-                'rgba(168, 85, 247, 0.85)'
+                'rgba(220, 100, 40, 0.85)',
+                'rgba(168, 85, 247, 0.85)',
+                'rgba(107, 114, 128, 0.85)'
             ],
-            borderColor: ['#22c55e', '#eab308', '#ef4444', '#a855f7'],
+            borderColor: ['#22c55e', '#eab308', '#dc6428', '#a855f7', '#6b7280'],
             borderWidth: 2,
             borderRadius: 12,
             barPercentage: 0.7,
@@ -964,7 +1080,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             shadowBlur: 4,
             shadowColor: 'rgba(0, 0, 0, 0.1)'
         }]
-    }), [performance.completed_count, performance.wip_count, performance.rejected_count, performance.rescheduled_count]);
+    }), [performance.completed_count, performance.wip_count, performance.rejected_count, performance.rescheduled_count, performance.not_connected_count, notConnectedCount]);
 
     const statusBarOptions = useMemo(() => ({
         responsive: true,
@@ -990,8 +1106,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 callbacks: {
                     label: function (context) {
                         const value = context.raw;
-                        const total = performance.completed_count + performance.wip_count +
-                            performance.rejected_count + performance.rescheduled_count;
+                        const ncTotal = performance.not_connected_count || notConnectedCount || 0;
+                        const total = (performance.completed_count || 0) + (performance.wip_count || 0) +
+                            (performance.rejected_count || 0) + (performance.rescheduled_count || 0) + ncTotal;
                         const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
                         return `${value.toLocaleString()} (${percentage}%)`;
                     }
@@ -1012,7 +1129,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 }
             }
         }
-    }), [performance.completed_count, performance.wip_count, performance.rejected_count, performance.rescheduled_count]);
+    }), [performance.completed_count, performance.wip_count, performance.rejected_count, performance.rescheduled_count, performance.not_connected_count, notConnectedCount]);
 
     const followupTypeChartData = useMemo(() => {
         const breakdown = performance?.followup_type_breakdown || {};
@@ -1106,21 +1223,25 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             'Call WIP': day.call_wip || 0,
             'Call Rejected': day.call_rejected || 0,
             'Call Rescheduled': day.call_rescheduled || 0,
+            'Call Not Connected': day.call_not_connected || 0,
             'By WhatsApp': day.followup_by_whatsapp || 0,
             'WhatsApp Completed': day.whatsapp_completed || 0,
             'WhatsApp WIP': day.whatsapp_wip || 0,
             'WhatsApp Rejected': day.whatsapp_rejected || 0,
             'WhatsApp Rescheduled': day.whatsapp_rescheduled || 0,
+            'WhatsApp Not Connected': day.whatsapp_not_connected || 0,
             'By Email': day.followup_by_email || 0,
             'Email Completed': day.email_completed || 0,
             'Email WIP': day.email_wip || 0,
             'Email Rejected': day.email_rejected || 0,
             'Email Rescheduled': day.email_rescheduled || 0,
+            'Email Not Connected': day.email_not_connected || 0,
             'By Visit': day.followup_by_visit || 0,
             'Visit Completed': day.visit_completed || 0,
             'Visit WIP': day.visit_wip || 0,
             'Visit Rejected': day.visit_rejected || 0,
             'Visit Rescheduled': day.visit_rescheduled || 0,
+            'Visit Not Connected': day.visit_not_connected || 0,
             'Quotation Sent': getQuotationSentForDay(day.date)
         }));
 
@@ -1138,21 +1259,25 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             'Call WIP': dailyTotals.call_wip,
             'Call Rejected': dailyTotals.call_rejected,
             'Call Rescheduled': dailyTotals.call_rescheduled,
+            'Call Not Connected': dailyTotals.call_not_connected,
             'By WhatsApp': dailyTotals.by_whatsapp,
             'WhatsApp Completed': dailyTotals.whatsapp_completed,
             'WhatsApp WIP': dailyTotals.whatsapp_wip,
             'WhatsApp Rejected': dailyTotals.whatsapp_rejected,
             'WhatsApp Rescheduled': dailyTotals.whatsapp_rescheduled,
+            'WhatsApp Not Connected': dailyTotals.whatsapp_not_connected,
             'By Email': dailyTotals.by_email,
             'Email Completed': dailyTotals.email_completed,
             'Email WIP': dailyTotals.email_wip,
             'Email Rejected': dailyTotals.email_rejected,
             'Email Rescheduled': dailyTotals.email_rescheduled,
+            'Email Not Connected': dailyTotals.email_not_connected,
             'By Visit': dailyTotals.by_visit,
             'Visit Completed': dailyTotals.visit_completed,
             'Visit WIP': dailyTotals.visit_wip,
             'Visit Rejected': dailyTotals.visit_rejected,
             'Visit Rescheduled': dailyTotals.visit_rescheduled,
+            'Visit Not Connected': dailyTotals.visit_not_connected,
             'Quotation Sent': dailyTotals.quotation_sent
         };
 
@@ -1402,26 +1527,31 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             wip_all: sum(d => (d.call_wip || 0) + (d.whatsapp_wip || 0) + (d.email_wip || 0) + (d.visit_wip || 0)),
             rejected_all: sum(d => (d.call_rejected || 0) + (d.whatsapp_rejected || 0) + (d.email_rejected || 0) + (d.visit_rejected || 0)),
             rescheduled_all: sum(d => (d.call_rescheduled || 0) + (d.whatsapp_rescheduled || 0) + (d.email_rescheduled || 0) + (d.visit_rescheduled || 0)),
+            not_connected_all: sum(d => (d.call_not_connected || 0) + (d.whatsapp_not_connected || 0) + (d.email_not_connected || 0) + (d.visit_not_connected || 0)),
             by_call: sum(d => d.followup_by_call || 0),
             call_completed: sum(d => d.call_completed || 0),
             call_wip: sum(d => d.call_wip || 0),
             call_rejected: sum(d => d.call_rejected || 0),
             call_rescheduled: sum(d => d.call_rescheduled || 0),
+            call_not_connected: sum(d => d.call_not_connected || 0),
             by_whatsapp: sum(d => d.followup_by_whatsapp || 0),
             whatsapp_completed: sum(d => d.whatsapp_completed || 0),
             whatsapp_wip: sum(d => d.whatsapp_wip || 0),
             whatsapp_rejected: sum(d => d.whatsapp_rejected || 0),
             whatsapp_rescheduled: sum(d => d.whatsapp_rescheduled || 0),
+            whatsapp_not_connected: sum(d => d.whatsapp_not_connected || 0),
             by_email: sum(d => d.followup_by_email || 0),
             email_completed: sum(d => d.email_completed || 0),
             email_wip: sum(d => d.email_wip || 0),
             email_rejected: sum(d => d.email_rejected || 0),
             email_rescheduled: sum(d => d.email_rescheduled || 0),
+            email_not_connected: sum(d => d.email_not_connected || 0),
             by_visit: sum(d => d.followup_by_visit || 0),
             visit_completed: sum(d => d.visit_completed || 0),
             visit_wip: sum(d => d.visit_wip || 0),
             visit_rejected: sum(d => d.visit_rejected || 0),
             visit_rescheduled: sum(d => d.visit_rescheduled || 0),
+            visit_not_connected: sum(d => d.visit_not_connected || 0),
             quotation_sent: filteredDailyPerformance.reduce((s, day) => s + getQuotationSentForDay(day.date), 0),
         };
     }, [filteredDailyPerformance, getQuotationSentForDay]);
@@ -1558,26 +1688,76 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     </div>
                 </div>
 
-                <div className="bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md transition-shadow text-center flex flex-col justify-between min-h-[90px]">
-                    <h3 className="text-[11px] sm:text-[12px] font-semibold text-black leading-tight">Work In Progress</h3>
+                <div
+                    onClick={() => handleOpenStatusFollowups('wip')}
+                    className="group relative bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all text-center cursor-pointer flex flex-col justify-between min-h-[90px]"
+                >
+                    <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Work In Progress</h3>
                     <p className="text-lg sm:text-xl font-bold text-black mt-1"><TimeValue>{performance.wip_count || 0}</TimeValue></p>
+                    <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
+                        <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
+                            Click to view WIP follow-ups
+                            <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-black"></div>
+                        </div>
+                    </div>
                 </div>
 
-                <div className="bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md transition-shadow text-center flex flex-col justify-between min-h-[90px]">
-                    <h3 className="text-[11px] sm:text-[12px] font-semibold text-black leading-tight">Rescheduled</h3>
+                <div
+                    onClick={() => handleOpenStatusFollowups('rescheduled')}
+                    className="group relative bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all text-center cursor-pointer flex flex-col justify-between min-h-[90px]"
+                >
+                    <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Rescheduled</h3>
                     <p className="text-lg sm:text-xl font-bold text-black mt-1"><TimeValue>{performance.rescheduled_count || 0}</TimeValue></p>
+                    <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
+                        <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
+                            Click to view rescheduled (FR) follow-ups
+                            <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-black"></div>
+                        </div>
+                    </div>
                 </div>
 
-                <div className="bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md transition-shadow text-center flex flex-col justify-between min-h-[90px]">
-                    <h3 className="text-[11px] sm:text-[12px] font-semibold text-black leading-tight">Rejected</h3>
+                <div
+                    onClick={() => handleOpenStatusFollowups('rejected')}
+                    className="group relative bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all text-center cursor-pointer flex flex-col justify-between min-h-[90px]"
+                >
+                    <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Rejected</h3>
                     <p className="text-lg sm:text-xl font-bold text-black mt-1"><TimeValue>{performance.rejected_count || 0}</TimeValue></p>
+                    <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
+                        <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
+                            Click to view rejected follow-ups
+                            <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-black"></div>
+                        </div>
+                    </div>
                 </div>
 
-                <div className="bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md transition-shadow text-center flex flex-col justify-between min-h-[90px]">
-                    <h3 className="text-[11px] sm:text-[12px] font-semibold text-black leading-tight">Completed</h3>
+                <div
+                    onClick={() => handleOpenStatusFollowups('not_connected')}
+                    className="group relative bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all text-center cursor-pointer flex flex-col justify-between min-h-[90px]"
+                >
+                    <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Not Connected</h3>
+                    <p className="text-lg sm:text-xl font-bold text-black mt-1"><TimeValue>{notConnectedCount}</TimeValue></p>
+                    <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
+                        <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
+                            Click to view not connected (NC) follow-ups
+                            <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-black"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    onClick={() => handleOpenStatusFollowups('completed')}
+                    className="group relative bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all text-center cursor-pointer flex flex-col justify-between min-h-[90px]"
+                >
+                    <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Completed</h3>
                     <p className="text-lg sm:text-xl font-bold text-black mt-1">
                         <TimeValue>{(performance.completed_count || 0) + (nonFollowupCustomerStats?.completed || 0)}</TimeValue>
                     </p>
+                    <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
+                        <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
+                            Click to view completed follow-ups
+                            <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-black"></div>
+                        </div>
+                    </div>
                 </div>
 
                 <div
@@ -1740,8 +1920,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                         </div>
                         <div className="rounded-lg px-3 py-1.5">
                             <span className="text-xs font-semibold text-black">
-                                Total: {(performance.completed_count + performance.wip_count +
-                                    performance.rejected_count + performance.rescheduled_count).toLocaleString()}
+                                Total: {((performance.completed_count || 0) + (performance.wip_count || 0) +
+                                    (performance.rejected_count || 0) + (performance.rescheduled_count || 0) +
+                                    (performance.not_connected_count || notConnectedCount || 0)).toLocaleString()}
                             </span>
                         </div>
                     </div>
@@ -1831,6 +2012,20 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 {nonDriveReachedTotal > 0 && (
                                     <span className="text-[9px] text-purple-600">
                                         ({((nonFollowupCustomerStats.rescheduled / nonDriveReachedTotal) * 100).toFixed(0)}%)
+                                    </span>
+                                )}
+                            </div>
+
+                            {/* NC (Not Connected) */}
+                            <div className="flex items-center gap-1 bg-gray-50 border border-gray-300 rounded-full px-2 py-0.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-gray-500 inline-block"></span>
+                                <span className="text-[10px] sm:text-[11px] font-medium text-gray-700">NC</span>
+                                <span className="text-[10px] sm:text-[11px] font-bold text-gray-800">
+                                    {nonFollowupCustomerStats.not_connected || 0}
+                                </span>
+                                {nonDriveReachedTotal > 0 && (
+                                    <span className="text-[9px] text-gray-600">
+                                        ({(((nonFollowupCustomerStats.not_connected || 0) / nonDriveReachedTotal) * 100).toFixed(0)}%)
                                     </span>
                                 )}
                             </div>
@@ -1937,21 +2132,21 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         <div>Hours</div>
                                     </th>
                                     <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[60px]">Total Calls</th>
-                                    <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[130px]">
+                                    <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[150px]">
                                         <div>By Call</div>
-                                        <div>(C/W/R/FR)</div>
+                                        <div>(C/W/R/FR/NC)</div>
+                                    </th>
+                                    <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[170px]">
+                                        <div>By WhatsApp</div>
+                                        <div>(C/W/R/FR/NC)</div>
                                     </th>
                                     <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[150px]">
-                                        <div>By WhatsApp</div>
-                                        <div>(C/W/R/FR)</div>
-                                    </th>
-                                    <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[130px]">
                                         <div>By Email</div>
-                                        <div>(C/W/R/FR)</div>
+                                        <div>(C/W/R/FR/NC)</div>
                                     </th>
-                                    <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[130px]">
+                                    <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[150px]">
                                         <div>By Visit</div>
-                                        <div>(C/W/R/FR)</div>
+                                        <div>(C/W/R/FR/NC)</div>
                                     </th>
                                     <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[90px]">
                                         <div>QT</div>
@@ -1994,7 +2189,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                         (C-{(day.call_completed || 0) + (day.whatsapp_completed || 0) + (day.email_completed || 0) + (day.visit_completed || 0)},
                                                         W-{(day.call_wip || 0) + (day.whatsapp_wip || 0) + (day.email_wip || 0) + (day.visit_wip || 0)},
                                                         R-{(day.call_rejected || 0) + (day.whatsapp_rejected || 0) + (day.email_rejected || 0) + (day.visit_rejected || 0)},
-                                                        FR-{(day.call_rescheduled || 0) + (day.whatsapp_rescheduled || 0) + (day.email_rescheduled || 0) + (day.visit_rescheduled || 0)})
+                                                        FR-{(day.call_rescheduled || 0) + (day.whatsapp_rescheduled || 0) + (day.email_rescheduled || 0) + (day.visit_rescheduled || 0)},
+                                                        NC-{(day.call_not_connected || 0) + (day.whatsapp_not_connected || 0) + (day.email_not_connected || 0) + (day.visit_not_connected || 0)})
                                                     </span>
                                                 </div>
                                             </td>
@@ -2002,7 +2198,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 <div className="flex flex-col items-center">
                                                     <span className="font-medium text-black">{day.followup_by_call || 0}</span>
                                                     <span className="text-[10px] text-black hidden sm:inline">
-                                                        (C-{day.call_completed || 0}, W-{day.call_wip || 0}, R-{day.call_rejected || 0}, FR-{day.call_rescheduled || 0})
+                                                        (C-{day.call_completed || 0}, W-{day.call_wip || 0}, R-{day.call_rejected || 0}, FR-{day.call_rescheduled || 0}, NC-{day.call_not_connected || 0})
                                                     </span>
                                                 </div>
                                             </td>
@@ -2010,7 +2206,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 <div className="flex flex-col items-center">
                                                     <span className="font-medium text-black">{day.followup_by_whatsapp || 0}</span>
                                                     <span className="text-[10px] text-black hidden sm:inline">
-                                                        (C-{day.whatsapp_completed || 0}, W-{day.whatsapp_wip || 0}, R-{day.whatsapp_rejected || 0}, FR-{day.whatsapp_rescheduled || 0})
+                                                        (C-{day.whatsapp_completed || 0}, W-{day.whatsapp_wip || 0}, R-{day.whatsapp_rejected || 0}, FR-{day.whatsapp_rescheduled || 0}, NC-{day.whatsapp_not_connected || 0})
                                                     </span>
                                                 </div>
                                             </td>
@@ -2018,7 +2214,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 <div className="flex flex-col items-center">
                                                     <span className="font-medium text-black">{day.followup_by_email || 0}</span>
                                                     <span className="text-[10px] text-black hidden sm:inline">
-                                                        (C-{day.email_completed || 0}, W-{day.email_wip || 0}, R-{day.email_rejected || 0}, FR-{day.email_rescheduled || 0})
+                                                        (C-{day.email_completed || 0}, W-{day.email_wip || 0}, R-{day.email_rejected || 0}, FR-{day.email_rescheduled || 0}, NC-{day.email_not_connected || 0})
                                                     </span>
                                                 </div>
                                             </td>
@@ -2026,7 +2222,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 <div className="flex flex-col items-center">
                                                     <span className="font-medium text-black">{day.followup_by_visit || 0}</span>
                                                     <span className="text-[10px] text-black hidden sm:inline">
-                                                        (C-{day.visit_completed || 0}, W-{day.visit_wip || 0}, R-{day.visit_rejected || 0}, FR-{day.visit_rescheduled || 0})
+                                                        (C-{day.visit_completed || 0}, W-{day.visit_wip || 0}, R-{day.visit_rejected || 0}, FR-{day.visit_rescheduled || 0}, NC-{day.visit_not_connected || 0})
                                                     </span>
                                                 </div>
                                             </td>
@@ -2066,7 +2262,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                     (C-{dailyTotals.completed_all},
                                                     W-{dailyTotals.wip_all},
                                                     R-{dailyTotals.rejected_all},
-                                                    FR-{dailyTotals.rescheduled_all})
+                                                    FR-{dailyTotals.rescheduled_all},
+                                                    NC-{dailyTotals.not_connected_all})
                                                 </span>
                                             </div>
                                         </td>
@@ -2079,7 +2276,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                     (C-{dailyTotals.call_completed},
                                                     W-{dailyTotals.call_wip},
                                                     R-{dailyTotals.call_rejected},
-                                                    FR-{dailyTotals.call_rescheduled})
+                                                    FR-{dailyTotals.call_rescheduled},
+                                                    NC-{dailyTotals.call_not_connected})
                                                 </span>
                                             </div>
                                         </td>
@@ -2092,7 +2290,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                     (C-{dailyTotals.whatsapp_completed},
                                                     W-{dailyTotals.whatsapp_wip},
                                                     R-{dailyTotals.whatsapp_rejected},
-                                                    FR-{dailyTotals.whatsapp_rescheduled})
+                                                    FR-{dailyTotals.whatsapp_rescheduled},
+                                                    NC-{dailyTotals.whatsapp_not_connected})
                                                 </span>
                                             </div>
                                         </td>
@@ -2105,7 +2304,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                     (C-{dailyTotals.email_completed},
                                                     W-{dailyTotals.email_wip},
                                                     R-{dailyTotals.email_rejected},
-                                                    FR-{dailyTotals.email_rescheduled})
+                                                    FR-{dailyTotals.email_rescheduled},
+                                                    NC-{dailyTotals.email_not_connected})
                                                 </span>
                                             </div>
                                         </td>
@@ -2118,7 +2318,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                     (C-{dailyTotals.visit_completed},
                                                     W-{dailyTotals.visit_wip},
                                                     R-{dailyTotals.visit_rejected},
-                                                    FR-{dailyTotals.visit_rescheduled})
+                                                    FR-{dailyTotals.visit_rescheduled},
+                                                    NC-{dailyTotals.visit_not_connected})
                                                 </span>
                                             </div>
                                         </td>
@@ -2156,7 +2357,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: themeColor }}></span>
                                 <span className="text-[11px]">Visit</span>
                             </span>
-                            <span className="text-[10px] text-black hidden sm:inline">C=Completed, W=In Progress, R=Rejected, FR=Follow-up Rescheduled</span>
+                            <span className="text-[10px] text-black hidden sm:inline">C=Completed, W=In Progress, R=Rejected, FR=Follow-up Rescheduled, NC=Not Connected</span>
                         </span>
                         <span className="text-[10px] text-black text-center">
                             Showing {filteredDailyPerformance.length} of {dailyPerformance.length} total days
@@ -2362,7 +2563,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
                                                 {sortedCspRows.map((row, idx) => {
-                                                    const dp = getCspDaysPass(row.due_date);
+                                                    const dueDate = getCspDueDate(row);
+                                                    const dp = getCspDaysPass(row);
                                                     return (
                                                         <tr
                                                             key={idx}
@@ -2388,16 +2590,14 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.sr_subtype || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.sr_status || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.segment || '-'}</td>
-                                                            <td className="px-2 py-1 border border-gray-200 text-center font-bold" style={{ backgroundColor: dp > 0 ? 'transparent' : (row.due_date ? '#ffdb62' : 'transparent') }}>
-                                                                {/* {row.due_date || '-'} */}
-                                                                -
+                                                            <td className="px-2 py-1 border border-gray-200 text-center font-bold" style={{ backgroundColor: dp > 0 ? 'transparent' : (dueDate ? '#ffdb62' : 'transparent') }}>
+                                                                {fmtCspDueDate(dueDate)}
                                                             </td>
                                                             <td
                                                                 className="px-2 py-1 border border-gray-200 text-center font-semibold whitespace-nowrap"
                                                                 style={{ color: dp === null ? '#6b7280' : dp > 0 ? '#dc2626' : '#16a34a' }}
                                                             >
-                                                                {/* {dp === null ? '-' : dp > 0 ? `${dp} overdue` : dp === 0 ? 'Due today' : `${Math.abs(dp)} left`} */}
-                                                                -
+                                                                {dp === null ? '-' : dp > 0 ? `${dp} overdue` : dp === 0 ? 'Due today' : `${Math.abs(dp)} left`}
                                                             </td>
                                                         </tr>
                                                     );
@@ -2579,7 +2779,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
                                                 {sortedOpenCspRows.map((row, idx) => {
-                                                    const dp = getCspDaysPass(row.due_date);
+                                                    const dueDate = getCspDueDate(row);
+                                                    const dp = getCspDaysPass(row);
                                                     return (
                                                         <tr key={idx} className={`transition-colors ${dp > 0 ? 'bg-orange-300 hover:bg-orange-400' : 'hover:bg-gray-50'}`}>                                                          <td className="px-2 py-1 border border-gray-200 text-center">{idx + 1}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">
@@ -2602,16 +2803,14 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.sr_subtype || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.sr_status || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.segment || '-'}</td>
-                                                            <td className="px-2 py-1 border border-gray-200 text-center font-bold" style={{ backgroundColor: dp > 0 ? 'transparent' : (row.due_date ? '#ffdb62' : 'transparent') }}>
-                                                                {/* {row.due_date || '-'} */}
-                                                                -
+                                                            <td className="px-2 py-1 border border-gray-200 text-center font-bold" style={{ backgroundColor: dp > 0 ? 'transparent' : (dueDate ? '#ffdb62' : 'transparent') }}>
+                                                                {fmtCspDueDate(dueDate)}
                                                             </td>
                                                             <td
                                                                 className="px-2 py-1 border border-gray-200 text-center font-semibold whitespace-nowrap"
                                                                 style={{ color: dp === null ? '#6b7280' : dp > 0 ? '#dc2626' : '#16a34a' }}
                                                             >
-                                                                {/* {dp === null ? '-' : dp > 0 ? `${dp} overdue` : dp === 0 ? 'Due today' : `${Math.abs(dp)} left`} */}
-                                                                -
+                                                                {dp === null ? '-' : dp > 0 ? `${dp} overdue` : dp === 0 ? 'Due today' : `${Math.abs(dp)} left`}
                                                             </td>
                                                         </tr>
                                                     );
@@ -2645,18 +2844,20 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                             >
                                 <div>
                                     <h3 className="text-base font-semibold text-white">
-                                        {quotationFilterActive
-                                            ? 'Quotation Follow-ups'
-                                            : quotationSentFilterActive
-                                                ? 'Quotation Sent Customers'
-                                                : cspQuotationFilterActive
-                                                    ? 'CSP Quotation Follow-ups'
-                                                    : cspQuotationSentFilterActive
-                                                        ? 'CSP Quotation Sent Customers'
-                                                        : 'All Follow-ups'} by {userData?.name || 'User'}
+                                        {statusLocked
+                                            ? `${lockedStatusLabel} Follow-ups`
+                                            : quotationFilterActive
+                                                ? 'Quotation Follow-ups'
+                                                : quotationSentFilterActive
+                                                    ? 'Quotation Sent Customers'
+                                                    : cspQuotationFilterActive
+                                                        ? 'CSP Quotation Follow-ups'
+                                                        : cspQuotationSentFilterActive
+                                                            ? 'CSP Quotation Sent Customers'
+                                                            : 'All Follow-ups'} by {userData?.name || 'User'}
                                     </h3>
                                     <p className="text-[11px] text-white/80 mt-0.5">
-                                        {getDateRangeText()} • Total: {followupView !== 'all'
+                                        {getDateRangeText()} • Total: {(followupView !== 'all' || statusLocked)
                                             ? displayedFollowups.length
                                             : quotationFilterActive
                                                 ? quotationCount
@@ -2705,7 +2906,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                             className="border border-gray-300 rounded-md px-2 py-1 text-[11px] bg-white text-black"
                                         />
                                     </div>
-                                    {!quotationSentFilterActive && (
+                                    {!quotationSentFilterActive && !statusLocked && (
                                         <div className="flex items-center gap-1">
                                             <label className="text-[11px] text-white whitespace-nowrap">Status:</label>
                                             <div className="relative">
@@ -2879,7 +3080,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                             <td className="px-2 py-1 border border-gray-200 text-center capitalize">
                                                                 <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${fu.status === 'completed' ? 'bg-green-100 text-green-700' :
                                                                     fu.status === 'wip' ? 'bg-yellow-100 text-yellow-700' :
-                                                                        fu.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                                                                        fu.status === 'rejected' ? 'bg-rose-100 text-rose-800' :
                                                                             fu.status === 'rescheduled' ? 'bg-purple-100 text-purple-700' :
                                                                                 'bg-gray-100 text-gray-700'
                                                                     }`}>
@@ -3146,6 +3347,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 <option value="wip">WIP</option>
                                                 <option value="rejected">Rejected</option>
                                                 <option value="rescheduled">FR (Rescheduled)</option>
+                                                <option value="not_connected">NC (Not Connected)</option>
                                             </select>
                                             <svg className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-black pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -3258,7 +3460,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                         <td className="px-2 py-1 border border-gray-200 text-center capitalize">
                                                             <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${c.last_status === 'completed' ? 'bg-green-100 text-green-700' :
                                                                 c.last_status === 'wip' ? 'bg-yellow-100 text-yellow-700' :
-                                                                    c.last_status === 'rejected' ? 'bg-red-100 text-red-700' :
+                                                                    c.last_status === 'rejected' ? 'bg-rose-100 text-rose-800' :
                                                                         c.last_status === 'rescheduled' ? 'bg-purple-100 text-purple-700' :
                                                                             'bg-gray-100 text-gray-700'
                                                                 }`}>

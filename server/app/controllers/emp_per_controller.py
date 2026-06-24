@@ -164,7 +164,12 @@ class EmployeePerformanceController:
                     SUM(CASE WHEN cf.followup_by = 'visit' AND cf.status = 'completed' THEN 1 ELSE 0 END) as visit_completed,
                     SUM(CASE WHEN cf.followup_by = 'visit' AND cf.status = 'wip' THEN 1 ELSE 0 END) as visit_wip,
                     SUM(CASE WHEN cf.followup_by = 'visit' AND cf.status = 'rejected' THEN 1 ELSE 0 END) as visit_rejected,
-                    SUM(CASE WHEN cf.followup_by = 'visit' AND cf.status = 'rescheduled' THEN 1 ELSE 0 END) as visit_rescheduled
+                    SUM(CASE WHEN cf.followup_by = 'visit' AND cf.status = 'rescheduled' THEN 1 ELSE 0 END) as visit_rescheduled,
+                    -- NC breakdown (all 4 together at the end so row[25]-row[28] match Python)
+                    SUM(CASE WHEN cf.followup_by = 'call'     AND cf.status = 'not_connected' THEN 1 ELSE 0 END) as call_not_connected,
+                    SUM(CASE WHEN cf.followup_by = 'whatsapp' AND cf.status = 'not_connected' THEN 1 ELSE 0 END) as whatsapp_not_connected,
+                    SUM(CASE WHEN cf.followup_by = 'email'    AND cf.status = 'not_connected' THEN 1 ELSE 0 END) as email_not_connected,
+                    SUM(CASE WHEN cf.followup_by = 'visit'    AND cf.status = 'not_connected' THEN 1 ELSE 0 END) as visit_not_connected
                 FROM combined_followups cf
                 GROUP BY CONVERT(DATE, cf.created_at)
                 ORDER BY CONVERT(DATE, cf.created_at) DESC
@@ -218,7 +223,11 @@ class EmployeePerformanceController:
                     'visit_completed': int(row[21]) if row[21] else 0,
                     'visit_wip': int(row[22]) if row[22] else 0,
                     'visit_rejected': int(row[23]) if row[23] else 0,
-                    'visit_rescheduled': int(row[24]) if row[24] else 0
+                    'visit_rescheduled': int(row[24]) if row[24] else 0,
+                    'call_not_connected': int(row[25]) if row[25] else 0,
+                    'whatsapp_not_connected': int(row[26]) if row[26] else 0,
+                    'email_not_connected': int(row[27]) if row[27] else 0,
+                    'visit_not_connected': int(row[28]) if row[28] else 0
                 })
                             
             return daily_performance
@@ -731,6 +740,7 @@ class EmployeePerformanceController:
             rejected_assets = 0
             rescheduled_assets = 0
             pending_assets = 0
+            not_connected_assets = 0  # NC: latest status = not_connected
             
             for key, data in asset_combination_tracker.items():
                 status = data['status']
@@ -742,6 +752,8 @@ class EmployeePerformanceController:
                     rejected_assets += 1
                 elif status == 'rescheduled':
                     rescheduled_assets += 1
+                elif status == 'not_connected':
+                    not_connected_assets += 1
                 elif status == 'pending':
                     pending_assets += 1
             
@@ -805,6 +817,7 @@ class EmployeePerformanceController:
                 'wip_assets': wip_assets,
                 'rejected_assets': rejected_assets,
                 'rescheduled_assets': rescheduled_assets,
+                'not_connected_assets': not_connected_assets,
                 'pending_assets': pending_assets,
                 
                 # Customer metrics (unique assets only)
@@ -839,6 +852,7 @@ class EmployeePerformanceController:
                 'wip_assets': 0,
                 'rejected_assets': 0,
                 'rescheduled_assets': 0,
+                'not_connected_assets': 0,
                 'pending_assets': 0,
                 'total_customers': 0,
                 'attended_customers': 0,
@@ -1950,6 +1964,7 @@ class EmployeePerformanceController:
                     'wip_followups': 0,
                     'rejected_followups': 0,
                     'rescheduled_followups': 0,
+                    'not_connected_followups': 0,
                     'pending_followups': 0,
                     'branch_completion_rate': 0,
                     'campaigns': []
@@ -1983,6 +1998,7 @@ class EmployeePerformanceController:
             total_branch_wip = 0
             total_branch_rejected = 0
             total_branch_rescheduled = 0
+            total_branch_not_connected = 0
             total_branch_pending = 0
             
             # Process ALL campaigns (even those with no follow-ups)
@@ -2111,6 +2127,7 @@ class EmployeePerformanceController:
                 wip_followups = len([c for c in customers_list if c['last_status'] == 'wip'])
                 rejected_followups = len([c for c in customers_list if c['last_status'] == 'rejected'])
                 rescheduled_followups = len([c for c in customers_list if c['last_status'] == 'rescheduled'])
+                not_connected_followups = len([c for c in customers_list if c['last_status'] == 'not_connected'])
                 pending_followups = len([c for c in customers_list if c['last_status'] == 'pending'])
                 
                 # Engaged customers = customers with any follow-up (not pending status from assets without followups)
@@ -2137,6 +2154,7 @@ class EmployeePerformanceController:
                     'wip_followups': wip_followups,
                     'rejected_followups': rejected_followups,
                     'rescheduled_followups': rescheduled_followups,
+                    'not_connected_followups': not_connected_followups,
                     'pending_followups': pending_followups,
                     'completion_rate': completion_rate,
                     'customers': customers_list
@@ -2148,6 +2166,7 @@ class EmployeePerformanceController:
                 total_branch_wip += wip_followups
                 total_branch_rejected += rejected_followups
                 total_branch_rescheduled += rescheduled_followups
+                total_branch_not_connected += not_connected_followups
                 total_branch_pending += pending_followups
             
             # Sort campaigns by name
@@ -2173,6 +2192,7 @@ class EmployeePerformanceController:
                 'wip_followups': total_branch_wip,
                 'rejected_followups': total_branch_rejected,
                 'rescheduled_followups': total_branch_rescheduled,
+                'not_connected_followups': total_branch_not_connected,
                 'pending_followups': total_branch_pending,
                 'branch_completion_rate': branch_completion_rate,
                 'campaigns': campaign_data
@@ -2332,6 +2352,7 @@ class EmployeePerformanceController:
             wip = 0
             rejected = 0
             rescheduled = 0
+            not_connected = 0
             pending = 0
     
             for instance_id, nfu in latest_map.items():
@@ -2344,6 +2365,8 @@ class EmployeePerformanceController:
                     rejected += 1
                 elif status == 'rescheduled':
                     rescheduled += 1
+                elif status == 'not_connected':
+                    not_connected += 1
                 else:
                     pending += 1
     
@@ -2353,6 +2376,7 @@ class EmployeePerformanceController:
                 "wip": wip,
                 "rejected": rejected,
                 "rescheduled": rescheduled,
+                "not_connected": not_connected,
                 "pending": pending
             }
     
@@ -2366,6 +2390,7 @@ class EmployeePerformanceController:
                 "wip": 0,
                 "rejected": 0,
                 "rescheduled": 0,
+                "not_connected": 0,
                 "pending": 0
             }            
         
@@ -2462,34 +2487,108 @@ class EmployeePerformanceController:
         """
         Get per-campaign performance for a specific employee.
         Shows unique customer latest-followup status counts for each active campaign.
+
+        Intentionally does NOT use apply_time_filter — filters on followup_date
+        (the IST date the employee chose when logging) with full-day IST boundaries
+        (00:00:00 → 23:59:59) so Today/Yesterday/custom ranges match exactly what
+        the employee sees on their own screen.  created_at is used only as a
+        fallback when followup_date is NULL.
         """
         try:
             from app.models.campaign_model import Campaign
             from app.models.engagement_model import FollowUp
-    
-            active_campaigns = db.query(Campaign).filter(Campaign.status == 'active').order_by(Campaign.name).all()
-    
+
+            active_campaigns = (
+                db.query(Campaign)
+                .filter(Campaign.status == 'active')
+                .order_by(Campaign.name)
+                .all()
+            )
+
+            # ── Build IST-aware date boundaries ──────────────────────────────
+            # followup_date is stored as an IST DateTime (SQL Server GETDATE()).
+            # We want the full calendar day in IST, so:
+            #   start_dt = YYYY-MM-DD 00:00:00  (inclusive)
+            #   end_dt   = YYYY-MM-DD 23:59:59.999999  (inclusive)
+            # Both as IST-naive datetimes (no tzinfo) to match the column type.
+
+            start_dt: datetime | None = None
+            end_dt:   datetime | None = None
+
+            if time_period == 'all' or not time_period:
+                pass  # no date filter — return all records
+
+            elif time_period == 'custom':
+                # start_date / end_date arrive as 'YYYY-MM-DD' strings from the route
+                if start_date and end_date:
+                    try:
+                        sd = datetime.strptime(str(start_date)[:10], '%Y-%m-%d')
+                        ed = datetime.strptime(str(end_date)[:10],   '%Y-%m-%d')
+                        start_dt = sd.replace(hour=0,  minute=0,  second=0,  microsecond=0)
+                        end_dt   = ed.replace(hour=23, minute=59, second=59, microsecond=999999)
+                    except Exception as parse_err:
+                        print(f"[employee_campaign_progress] date parse error: {parse_err}")
+
+            else:
+                # Safety-net for any named periods the caller might send directly
+                # (frontend normally converts these to 'custom' + explicit dates).
+                now_ist = datetime.now(IST).replace(tzinfo=None)
+                today_start = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+                today_end   = now_ist.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+                if time_period == 'today':
+                    start_dt = today_start
+                    end_dt   = today_end
+                elif time_period == 'yesterday':
+                    yesterday = today_start - timedelta(days=1)
+                    start_dt  = yesterday
+                    end_dt    = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
+                elif time_period == 'week':
+                    start_dt = today_start - timedelta(days=6)
+                    end_dt   = today_end
+                elif time_period == 'month':
+                    start_dt = today_start - timedelta(days=29)
+                    end_dt   = today_end
+                # any other unknown period → no filter (treat as 'all')
+
+            # ── Per-campaign query ────────────────────────────────────────────
             result = []
-    
+
             for campaign in active_campaigns:
                 base_q = db.query(FollowUp).filter(
                     FollowUp.campaign_id == campaign.id,
                     FollowUp.user_id == employee_id,
-                    FollowUp.customer_instance_id.isnot(None)
+                    FollowUp.customer_instance_id.isnot(None),
                 )
-                filtered_q = EmployeePerformanceController.apply_time_filter(
-                    base_q, FollowUp, time_period, start_date, end_date
-                )
-    
-                all_followups = filtered_q.all()
-    
+
+                if start_dt and end_dt:
+                    # Primary: filter on followup_date (the date the employee chose).
+                    # Fallback: when followup_date is NULL, fall back to created_at
+                    # so records saved without an explicit date are still included.
+                    base_q = base_q.filter(
+                        or_(
+                            and_(
+                                FollowUp.followup_date.isnot(None),
+                                FollowUp.followup_date >= start_dt,
+                                FollowUp.followup_date <= end_dt,
+                            ),
+                            and_(
+                                FollowUp.followup_date.is_(None),
+                                FollowUp.created_at >= start_dt,
+                                FollowUp.created_at <= end_dt,
+                            ),
+                        )
+                    )
+
+                all_followups = base_q.all()
+
                 if not all_followups:
                     continue
-    
-                # Build latest followup per unique customer
-                latest_map = {}
+
+                # ── Latest followup per unique customer ───────────────────────
+                latest_map: dict = {}
                 for fu in all_followups:
-                    iid = fu.customer_instance_id
+                    iid     = fu.customer_instance_id
                     fu_date = fu.followup_date if fu.followup_date else fu.created_at
                     if iid not in latest_map:
                         latest_map[iid] = fu
@@ -2501,35 +2600,37 @@ class EmployeePerformanceController:
                         )
                         if fu_date and existing_date and fu_date > existing_date:
                             latest_map[iid] = fu
-    
-                total_unique = len(latest_map)
-                completed = sum(1 for fu in latest_map.values() if fu.status == 'completed')
-                wip       = sum(1 for fu in latest_map.values() if fu.status == 'wip')
-                rescheduled = sum(1 for fu in latest_map.values() if fu.status == 'rescheduled')
-                rejected  = sum(1 for fu in latest_map.values() if fu.status == 'rejected')
-                pending   = sum(1 for fu in latest_map.values() if fu.status == 'pending')
-    
+
+                total_unique  = len(latest_map)
+                completed     = sum(1 for fu in latest_map.values() if fu.status == 'completed')
+                wip           = sum(1 for fu in latest_map.values() if fu.status == 'wip')
+                rescheduled   = sum(1 for fu in latest_map.values() if fu.status == 'rescheduled')
+                rejected      = sum(1 for fu in latest_map.values() if fu.status == 'rejected')
+                not_connected = sum(1 for fu in latest_map.values() if fu.status == 'not_connected')
+                pending       = sum(1 for fu in latest_map.values() if fu.status == 'pending')
+
                 total_followups = len(all_followups)
-                success_pct = round((completed / total_unique * 100) if total_unique > 0 else 0, 1)
-    
+                success_pct     = round((completed / total_unique * 100) if total_unique > 0 else 0, 1)
+
                 result.append({
-                    'campaign_id':   campaign.id,
-                    'campaign_name': campaign.name,
-                    'service':       campaign.service,
-                    'status':        campaign.status,
+                    'campaign_id':            campaign.id,
+                    'campaign_name':          campaign.name,
+                    'service':                campaign.service,
+                    'status':                 campaign.status,
                     'total_unique_customers': total_unique,
                     'total_followups':        total_followups,
-                    'completed':   completed,
-                    'wip':         wip,
-                    'rescheduled': rescheduled,
-                    'rejected':    rejected,
-                    'pending':     pending,
-                    'success_pct': success_pct,
+                    'completed':              completed,
+                    'wip':                    wip,
+                    'rescheduled':            rescheduled,
+                    'rejected':               rejected,
+                    'not_connected':          not_connected,
+                    'pending':                pending,
+                    'success_pct':            success_pct,
                 })
-    
+
             result.sort(key=lambda x: x['total_unique_customers'], reverse=True)
             return result
-    
+
         except Exception as e:
             print(f"Error in get_employee_campaign_progress: {str(e)}")
             import traceback

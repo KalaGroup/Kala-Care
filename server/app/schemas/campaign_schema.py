@@ -116,17 +116,57 @@ class AssetValidationResponse(BaseModel):
     total_valid: int
     total_invalid: int
 
+class RecipientRule(BaseModel):
+    """One To/CC rule for a set of branch codes + optional GOEM filter."""
+    branch_codes: List[str] = []      # empty = applies to all remaining/unmatched branches
+    goem_oem: Optional[str] = None    # None = all GOEMs
+    to_emails: List[str] = []
+    cc_emails: List[str] = []
+
+    @field_validator('to_emails', 'cc_emails', mode='before')
+    @classmethod
+    def _validate_emails(cls, v):
+        import re
+        pattern = r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$'
+        if not v:
+            return []
+        errors = [e for e in v if e and not re.match(pattern, str(e).strip())]
+        if errors:
+            raise ValueError(f"Invalid email(s): {', '.join(errors)}")
+        return [e.strip().lower() for e in v if e and str(e).strip()]
+
+
 class LetterFormatBase(BaseModel):
     format_type_name: str
     products: List[str] = []
     reference_no: Optional[str] = None
+    serial_start: Optional[str] = '1'
+    note: Optional[str] = None
     default_attachments: List[Dict[str, Any]] = []
+    customer_detail_fields: List[str] = []
+    engagement_detail_fields: List[str] = []
+    default_recipients: List[Dict[str, Any]] = []
     start_para: Optional[str] = None
     end_para: Optional[str] = None
 
     @field_validator("products", mode="before")
     @classmethod
     def _products_none_to_list(cls, v):
+        return v or []
+
+    @field_validator("customer_detail_fields", mode="before")
+    @classmethod
+    def _customer_fields_none_to_list(cls, v):
+        return v or []
+
+    @field_validator("engagement_detail_fields", mode="before")
+    @classmethod
+    def _engagement_fields_none_to_list(cls, v):
+        return v or []
+
+    @field_validator("default_recipients", mode="before")
+    @classmethod
+    def _recipients_none_to_list(cls, v):
         return v or []
 
 
@@ -138,7 +178,12 @@ class LetterFormatUpdate(BaseModel):
     format_type_name: Optional[str] = None
     products: Optional[List[str]] = None
     reference_no: Optional[str] = None
+    serial_start: Optional[str] = None
+    note: Optional[str] = None
     default_attachments: Optional[List[Dict[str, Any]]] = None
+    customer_detail_fields: Optional[List[str]] = None
+    engagement_detail_fields: Optional[List[str]] = None
+    default_recipients: Optional[List[Dict[str, Any]]] = None
     start_para: Optional[str] = None
     end_para: Optional[str] = None
 
@@ -151,4 +196,56 @@ class LetterFormatResponse(LetterFormatBase):
     updated_at: Optional[datetime] = None
 
     class Config:
-        from_attributes = True    
+        from_attributes = True
+
+
+# ==================== Branch Email Master ====================
+
+class BranchEmailEntry(BaseModel):
+    """Single branch email entry for bulk save payload."""
+    branch_code: str
+    branch_name: str
+    email: Optional[str] = None
+
+    @field_validator('email', mode='before')
+    @classmethod
+    def validate_email(cls, v):
+        if v is None or v == '':
+            return None
+        v = str(v).strip()
+        if v == '':
+            return None
+        import re
+        pattern = r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$'
+        if not re.match(pattern, v):
+            raise ValueError(f"'{v}' is not a valid email address")
+        return v.lower()
+
+    @field_validator('branch_code', mode='before')
+    @classmethod
+    def validate_branch_code(cls, v):
+        if not v or not str(v).strip():
+            raise ValueError("branch_code is required")
+        return str(v).strip()
+
+
+class BranchEmailBulkSave(BaseModel):
+    """Payload for bulk upsert of branch emails."""
+    entries: List[BranchEmailEntry]
+
+
+class BranchEmailResponse(BaseModel):
+    id: int
+    branch_code: str
+    branch_name: str
+    email: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class BranchEmailBulkSaveResponse(BaseModel):
+    saved: int
+    errors: List[Dict[str, Any]] = []    

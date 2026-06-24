@@ -10,6 +10,7 @@ const STATUS_CONFIG = {
     wip: { label: 'WIP', color: '#b45309', bg: '#fef3c7', short: 'W' },
     rescheduled: { label: 'FR', color: '#7c3aed', bg: '#ede9fe', short: 'FR' },
     rejected: { label: 'Rejected', color: '#dc2626', bg: '#fee2e2', short: 'R' },
+    not_connected: { label: 'NC', color: '#0369a1', bg: '#e0f2fe', short: 'NC' },
     pending: { label: 'Pending', color: '#6b7280', bg: '#f3f4f6', short: 'P' },
 };
 
@@ -22,10 +23,13 @@ const STATUS_CONFIG = {
  */
 const getDefaultWorkingDay = () => {
     const d = new Date();
-    d.setHours(0, 0, 0, 0);
     d.setDate(d.getDate() - 1);
-    if (d.getDay() === 0) d.setDate(d.getDate() - 1);
-    return d.toISOString().split('T')[0];
+    if (d.getDay() === 0) d.setDate(d.getDate() - 1);   // skip Sunday → Saturday
+    // Use local date parts — toISOString() gives UTC which is wrong for IST
+    const yyyy = d.getFullYear();
+    const mm   = String(d.getMonth() + 1).padStart(2, '0');
+    const dd   = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
 };
 
 const formatDisplay = (dateStr) => {
@@ -71,7 +75,9 @@ const StatBadge = ({ status, count }) => {
 
 const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
 
-    const defaultDay = getDefaultWorkingDay();
+    // All date state is purely LOCAL — never derived from parent props.
+    // Initialised lazily so each modal open starts fresh.
+    const getDefault = () => getDefaultWorkingDay();
 
     const [campaigns, setCampaigns] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -80,11 +86,11 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
     const [sortKey, setSortKey] = useState('total_unique_customers');
     const [sortDir, setSortDir] = useState('desc');
 
-    // date-filter state — completely independent of Dashboard
-    const [startDate, setStartDate] = useState(defaultDay);
-    const [endDate, setEndDate] = useState(defaultDay);
-    const [tempStart, setTempStart] = useState(defaultDay);
-    const [tempEnd, setTempEnd] = useState(defaultDay);
+    // date-filter state — 100% independent of Dashboard / any parent state
+    const [startDate, setStartDate] = useState(getDefault);
+    const [endDate, setEndDate] = useState(getDefault);
+    const [tempStart, setTempStart] = useState(getDefault);
+    const [tempEnd, setTempEnd] = useState(getDefault);
 
     const [quickMode, setQuickMode] = useState('yesterday');
 
@@ -103,20 +109,24 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
         return () => clearTimeout(t);
     }, [assetsSearch]);
 
-    /* ── fetch campaigns ── */
+    /* ── fetch campaigns — uses ONLY this modal's own local date state ── */
     const fetchData = useCallback(async () => {
         if (!employee || !isOpen) return;
         setLoading(true);
         setError(null);
         try {
+            // Build params from LOCAL state only — parent dashboard dates are
+            // never read here, even if the parent re-renders with new dates.
             const params = new URLSearchParams();
 
             if (quickMode === 'all') {
                 params.append('time_period', 'all');
             } else {
+                // Always send as 'custom' with explicit IST date strings
+                // so the backend filters on followup_date boundaries correctly.
                 params.append('time_period', 'custom');
-                params.append('start_date', startDate);
-                params.append('end_date', endDate);
+                params.append('start_date', startDate);   // local state only
+                params.append('end_date', endDate);       // local state only
             }
 
             const payload = {
@@ -138,14 +148,11 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
         }
     }, [employee, isOpen, userData, quickMode, startDate, endDate]);
 
-    /* ── fetch attended assets (all-followups for the TARGET employee) ── */
+    /* ── fetch attended assets — uses ONLY this modal's own local date state ── */
     const fetchAttendedAssets = useCallback(async () => {
         if (!employee || !employee.user_id) return;
         setLoadingAssets(true);
         try {
-            // Same endpoint MyPerformance uses for "Total Calls and Followups" —
-            // but we pass the TARGET employee's user_id in the payload so the
-            // backend returns that employee's followups (not the admin's).
             const payload = {
                 user_id: employee.user_id,
                 name: employee.user_name || employee.name,
@@ -156,12 +163,13 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
             let url = `${API_BASE_URL}/performance/my-performance/all-followups`;
             const params = new URLSearchParams();
 
+            // Use ONLY local modal date state — never parent dashboard dates
             if (quickMode === 'all') {
                 params.append('time_period', 'all');
             } else {
                 params.append('time_period', 'custom');
-                params.append('start_date', startDate);
-                params.append('end_date', endDate);
+                params.append('start_date', startDate);   // local state only
+                params.append('end_date', endDate);       // local state only
             }
             url += `?${params.toString()}`;
 
@@ -175,17 +183,18 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
         }
     }, [employee, userData, quickMode, startDate, endDate]);
 
-    /* ── reset when modal opens ── */
+    /* ── reset when modal opens — always back to "yesterday", never inherits parent dates ── */
     useEffect(() => {
         if (isOpen) {
             const day = getDefaultWorkingDay();
+            // Force reset to yesterday every time the modal opens,
+            // regardless of whatever the parent Dashboard date filter is set to.
             setStartDate(day);
             setEndDate(day);
             setTempStart(day);
             setTempEnd(day);
             setQuickMode('yesterday');
             setSearch('');
-            // close any open asset drill-down when parent re-opens
             setShowAssetsModal(false);
             setAllFollowupsData([]);
         }
@@ -247,25 +256,33 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
 
     /* ── quick-mode helpers ── */
     const applyQuick = (mode) => {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const fmt = (d) => d.toISOString().split('T')[0];
+        // Use local date parts (not toISOString which converts to UTC and
+        // returns the wrong date for IST users after midnight UTC).
+        const toLocalDateStr = (d) => {
+            const yyyy = d.getFullYear();
+            const mm   = String(d.getMonth() + 1).padStart(2, '0');
+            const dd   = String(d.getDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        };
+
+        const today = new Date();           // local IST date/time
+        const todayStr = toLocalDateStr(today);
 
         let s, e;
 
         if (mode === 'yesterday') {
-            const day = getDefaultWorkingDay();
+            const day = getDefaultWorkingDay();     // already uses local date arithmetic
             s = day; e = day;
         } else if (mode === 'today') {
-            s = fmt(today); e = fmt(today);
+            s = todayStr; e = todayStr;
         } else if (mode === 'week') {
             const w = new Date(today);
             w.setDate(today.getDate() - 6);
-            s = fmt(w); e = fmt(today);
+            s = toLocalDateStr(w); e = todayStr;
         } else if (mode === 'month') {
             const m = new Date(today);
             m.setDate(today.getDate() - 29);
-            s = fmt(m); e = fmt(today);
+            s = toLocalDateStr(m); e = todayStr;
         } else if (mode === 'all') {
             s = ''; e = '';
         }
@@ -337,7 +354,8 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
         wip: acc.wip + c.wip,
         rescheduled: acc.rescheduled + c.rescheduled,
         rejected: acc.rejected + c.rejected,
-    }), { unique: 0, followups: 0, completed: 0, wip: 0, rescheduled: 0, rejected: 0 });
+        not_connected: acc.not_connected + (c.not_connected || 0),
+    }), { unique: 0, followups: 0, completed: 0, wip: 0, rescheduled: 0, rejected: 0, not_connected: 0 });
 
     /* ── period label ── */
     const periodLabel = () => {
@@ -470,7 +488,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
 
                 {/* ── Summary cards ── */}
                 {!loading && campaigns.length > 0 && (
-                    <div className="px-5 py-3 border-b border-gray-100 grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2 flex-shrink-0">
+                    <div className="px-5 py-3 border-b border-gray-100 grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-8 gap-2 flex-shrink-0">
                         {[
                             { label: 'Drives', value: campaigns.length, color: 'black' },
                             { label: 'Attended Assets', value: totals.unique, color: 'black', clickable: true },
@@ -479,6 +497,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                             { label: 'WIP', value: totals.wip, color: '#000000' },
                             { label: 'FR', value: totals.rescheduled, color: '#000000' },
                             { label: 'Rejected', value: totals.rejected, color: '#000000' },
+                            { label: 'NC', value: totals.not_connected, color: '#000000' },
                         ].map(card => (
                             <div
                                 key={card.label}
@@ -596,6 +615,12 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                                     </th>
                                     <th
                                         className="px-3 py-2 text-center font-bold text-black border border-gray-200 cursor-pointer hover:bg-gray-100 select-none"
+                                        onClick={() => handleSort('not_connected')}
+                                    >
+                                        NC <SortIcon col="not_connected" />
+                                    </th>
+                                    <th
+                                        className="px-3 py-2 text-center font-bold text-black border border-gray-200 cursor-pointer hover:bg-gray-100 select-none"
                                         onClick={() => handleSort('completed')}
                                     >
                                         Completed <SortIcon col="completed" />
@@ -636,6 +661,9 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                                             <StatBadge status="rejected" count={c.rejected} />
                                         </td>
                                         <td className="px-3 py-2 text-center border border-gray-200">
+                                            <StatBadge status="not_connected" count={c.not_connected || 0} />
+                                        </td>
+                                        <td className="px-3 py-2 text-center border border-gray-200">
                                             <StatBadge status="completed" count={c.completed} />
                                         </td>
                                     </tr>
@@ -664,6 +692,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                                     <td className="px-3 py-2 text-center border border-gray-300 text-yellow-700">{totals.wip}</td>
                                     <td className="px-3 py-2 text-center border border-gray-300 text-purple-700">{totals.rescheduled}</td>
                                     <td className="px-3 py-2 text-center border border-gray-300 text-red-700">{totals.rejected}</td>
+                                    <td className="px-3 py-2 text-center border border-gray-300 text-sky-700">{totals.not_connected}</td>
                                     <td className="px-3 py-2 text-center border border-gray-300 text-green-700">{totals.completed}</td>
                                 </tr>
                             </tbody>

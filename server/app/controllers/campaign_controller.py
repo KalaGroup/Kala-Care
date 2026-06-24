@@ -847,6 +847,18 @@ class CampaignController:
             .all()
         )
 
+    def get_distinct_goem_oem(self) -> List[str]:
+        """Return all distinct non-null goem_oem values from asset_detailed."""
+        from app.models.customer_model import AssetDetailed
+        rows = (
+            self.db.query(AssetDetailed.goem_oem)
+            .filter(AssetDetailed.goem_oem.isnot(None))
+            .distinct()
+            .order_by(AssetDetailed.goem_oem)
+            .all()
+        )
+        return [r[0] for r in rows if r[0] and str(r[0]).strip()]
+
     def get_letter_format(self, format_id: int):
         from app.models.campaign_model import CampaignLetterFormat
         fmt = self.db.query(CampaignLetterFormat).filter(
@@ -872,6 +884,18 @@ class CampaignController:
 
         payload = data.model_dump()
         payload["format_type_name"] = name
+
+        # Ensure JSON list fields are never None
+        payload["customer_detail_fields"] = payload.get("customer_detail_fields") or []
+        payload["engagement_detail_fields"] = payload.get("engagement_detail_fields") or []
+        payload["default_attachments"] = payload.get("default_attachments") or []
+        payload["products"] = payload.get("products") or []
+        payload["default_recipients"] = payload.get("default_recipients") or []
+
+        # Default serial_start to '1' if not provided
+        if not payload.get("serial_start"):
+            payload["serial_start"] = "1"
+
         if user_data:
             payload["created_by_id"] = user_data.get("user_id") or user_data.get("id")
             payload["created_by_name"] = user_data.get("name")
@@ -899,6 +923,16 @@ class CampaignController:
                 raise HTTPException(status_code=400, detail="A format with this name already exists")
             update_data["format_type_name"] = new_name.strip()
 
+        # Ensure JSON list fields are never set to None
+        for list_field in ("customer_detail_fields", "engagement_detail_fields",
+                           "default_attachments", "products", "default_recipients"):
+            if list_field in update_data and update_data[list_field] is None:
+                update_data[list_field] = []
+
+        # Default serial_start to '1' if explicitly set to empty
+        if "serial_start" in update_data and not update_data["serial_start"]:
+            update_data["serial_start"] = "1"
+
         for key, value in update_data.items():
             setattr(db_fmt, key, value)
 
@@ -912,3 +946,54 @@ class CampaignController:
         self.db.delete(db_fmt)
         self.db.commit()
         return {"deleted": True, "message": "Letter format deleted successfully"}
+
+# ==================== Branch Email Master ====================
+
+    def get_all_branch_emails(self) -> List:
+        """Return all branch email rows ordered by branch_code."""
+        from app.models.campaign_model import BranchEmailMaster
+        return (
+            self.db.query(BranchEmailMaster)
+            .order_by(BranchEmailMaster.branch_code)
+            .all()
+        )
+
+    def bulk_save_branch_emails(self, data: campaign_schema.BranchEmailBulkSave) -> Dict:
+        """
+        Upsert branch emails.
+        Each entry is matched by branch_code — insert if new, update if exists.
+        Returns count of saved rows and any per-row errors.
+        """
+        from app.models.campaign_model import BranchEmailMaster
+
+        saved = 0
+        errors = []
+
+        for entry in data.entries:
+            try:
+                existing = (
+                    self.db.query(BranchEmailMaster)
+                    .filter(BranchEmailMaster.branch_code == entry.branch_code)
+                    .first()
+                )
+                if existing:
+                    existing.email = entry.email
+                    existing.branch_name = entry.branch_name
+                    existing.updated_at = datetime.utcnow()
+                else:
+                    row = BranchEmailMaster(
+                        branch_code=entry.branch_code,
+                        branch_name=entry.branch_name,
+                        email=entry.email
+                    )
+                    self.db.add(row)
+                saved += 1
+            except Exception as e:
+                errors.append({
+                    "branch_code": entry.branch_code,
+                    "branch_name": entry.branch_name,
+                    "error": str(e)
+                })
+
+        self.db.commit()
+        return {"saved": saved, "errors": errors}

@@ -226,7 +226,7 @@ const EmployeeActivityModal = ({
                 </div>
 
                 {/* Body */}
-                <div className="flex-1 overflow-auto p-3">
+                <div className="flex-1 min-h-0 overflow-hidden p-3 flex flex-col">
                     {loading ? (
                         <div className="flex items-center justify-center py-10">
                             <div className="w-8 h-8 border-2 border-t-2 border-t-[#2f3192] border-gray-200 rounded-full animate-spin"></div>
@@ -237,7 +237,7 @@ const EmployeeActivityModal = ({
                             No follow-ups found for this activity.
                         </div>
                     ) : (
-                        <div className="overflow-x-auto">
+                        <div className="flex-1 min-h-0 overflow-auto border border-gray-200 rounded-lg">
                             <table className="min-w-[2000px] w-full border-collapse text-[11px]">
                                 <thead className="bg-gray-100 sticky top-0 z-10">
                                     <tr>
