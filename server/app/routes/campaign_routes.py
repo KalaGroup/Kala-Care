@@ -255,6 +255,12 @@ def get_letter_format(format_id: int, db: Session = Depends(get_db)):
     controller = CampaignController(db)
     return controller.get_letter_format(format_id)
 
+@router.get("/letter-master/formats/{format_id}/usage")
+def get_letter_format_usage(format_id: int, db: Session = Depends(get_db)):
+    """Has this format already sent letters? Locks the Serial No box in Letter Master."""
+    controller = CampaignController(db)
+    return controller.get_letter_format_usage(format_id)
+
 @router.post("/letter-master/formats", response_model=campaign_schema.LetterFormatResponse, status_code=status.HTTP_201_CREATED)
 def create_letter_format(request: Request, data: campaign_schema.LetterFormatCreate, db: Session = Depends(get_db)):
     controller = CampaignController(db)

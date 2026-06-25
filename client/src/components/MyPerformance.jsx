@@ -1447,6 +1447,49 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         XLSX.writeFile(wb, `${labelPart}_${new Date().toISOString().split('T')[0]}.xlsx`);
     };
 
+    // Export the Total Calls and Follow-ups box — the full list (all follow-ups +
+    // non-drive "other" completed rows), independent of any modal filter state.
+    const exportTotalFollowupsToExcel = () => {
+        const rows = [...allFollowupsData, ...otherCompletedFollowups];
+        if (!rows.length) return;
+
+        const exportData = rows.map((fu, idx) => ({
+            'S.No': idx + 1,
+            'Follow-up Date': fu.followup_date
+                ? new Date(fu.followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                : '-',
+            'Instance ID': fu.customer_instance_id || '-',
+            'Customer Name': fu.customer_name || '-',
+            'Phone': fu.phone_number || '-',
+            'Email': fu.email || '-',
+            'Branch': fu.branch_id || '-',
+            'Drive': fu.campaign_name || '-',
+            'Service': fu.campaign_service || '-',
+            'Subtype': fu.csp_subtype || '-',
+            'Follow-up By': fu.followup_by || '-',
+            'Flag': fu.followup_flag || '-',
+            'Status': fu.status === 'rescheduled' ? 'FR' : (fu.status || '-'),
+            'Next Follow-up': fu.next_followup_date
+                ? new Date(fu.next_followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                : '-',
+            'Activity': fu.activity_content || '-',
+            'Reject Reason': fu.rr_content || '-',
+            'Remark': fu.followup_remark || '-',
+            'Quotation Sent': fu.quotation_sent ? 'Yes' : 'No',
+            'Quotation No': fu.quotation_no || '-',
+            'Quotation Value': fu.quotation_value || 0,
+            'Created At': fu.created_at
+                ? new Date(fu.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                : '-',
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Total Follow-ups');
+        ws['!cols'] = Object.keys(exportData[0]).map(() => ({ wch: 20 }));
+        XLSX.writeFile(wb, `total_calls_followups_${new Date().toISOString().split('T')[0]}.xlsx`);
+    };
+
     const fetchNonFollowupCustomerStats = useCallback(async () => {
         if (!userData || !userData.user_id) return;
         try {
@@ -1667,6 +1710,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     onClick={handleOpenAllFollowups}
                     className="group relative bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all text-center cursor-pointer flex flex-col justify-between min-h-[90px]"
                 >
+
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>
                         Total Calls and Follow-ups
                         {branchAssetCount > 0 && (

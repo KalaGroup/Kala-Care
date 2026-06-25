@@ -2,13 +2,19 @@
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func, text, inspect
 from typing import List
 import uuid
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.database import SessionLocal
 from app.controllers.import_controller import ImportController
+from app.models.customer_model import (
+    AMCAgreement, AssetDetailed, AssetService,
+    AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
+    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport
+)
 
 router = APIRouter(prefix="/import", tags=["import"])
 
@@ -70,6 +76,8 @@ def run_import_job(job_id: str, file_contents: bytes, filename: str, file_type: 
             ),
             "finished_at": datetime.utcnow().isoformat(),
         })
+        # New data landed → drop cached last-updated so the next read is fresh
+        _last_updated_cache.clear()
 
     except Exception as e:
         import_jobs[job_id].update({
@@ -138,6 +146,100 @@ async def get_import_status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+# Maps each UI file type to the table whose updated_at we read
+FILE_TYPE_MODELS = {
+    "AMC Population Report": AMCAgreement,
+    "Asset Detailed Report": AssetDetailed,
+    "Asset Details with Last Oil Service": AssetService,
+    "Anubandhan Plus Quotes Report": AnubandhanPlusQuote,
+    "Anubandhan Quotes Report": AnubandhanQuote,
+    "BandhanPlus Quotes Report": BandhanPlusQuote,
+    "Pulse Quotation - Service Only": PulseQuotation,
+    "Regular Bandhan Customers Report": RegularBandhan,
+    "LMS Data for ERP": LMSData,
+    "Open SR Load Report": OpenSRLoadReport,
+}
+
+# In-memory cache so clicking through the dropdown doesn't re-hit the DB.
+# Cleared after every successful import; the TTL is a backstop for outside changes.
+_last_updated_cache = {}      # {file_type: {"payload": {...}, "ts": float}}
+_LAST_UPDATED_TTL = 300       # seconds
+
+# Index on updated_at makes MAX(updated_at) a fast tail read instead of a full
+# table scan. Checked once per process; only the genuinely-missing ones are added.
+_indexes_ensured = False
+_UPDATED_AT_TABLES = [
+    "amc_agreements", "asset_detailed", "oil_services",
+    "anubandhan_plus_quotes", "anubandhan_quotes", "bandhan_plus_quotes",
+    "pulse_quotations", "regular_bandhan", "lms_data", "open_sr_load_reports",
+]
+
+
+def _ensure_updated_at_indexes(db: Session):
+    """Add an updated_at index to each report table — ONLY where one is missing,
+    and only once per process so it's never re-checked on later requests."""
+    global _indexes_ensured
+    if _indexes_ensured:
+        return
+
+    inspector = inspect(db.get_bind())
+    for table in _UPDATED_AT_TABLES:
+        try:
+            existing = inspector.get_indexes(table)
+        except Exception:
+            existing = []
+
+        # If any index already covers updated_at, leave it alone — don't add again
+        already = any("updated_at" in (ix.get("column_names") or []) for ix in existing)
+        if already:
+            continue
+
+        idx = f"ix_{table}_updated_at"
+        try:
+            db.execute(text(f"CREATE INDEX {idx} ON {table} (updated_at)"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    _indexes_ensured = True
+
+
+@router.get("/last-updated")
+async def get_last_updated(file_type: str, db: Session = Depends(get_db)):
+    """Newest updated_at + record count for a file type. Served from cache when fresh."""
+    model = FILE_TYPE_MODELS.get(file_type)
+    if model is None:
+        raise HTTPException(status_code=400, detail=f"Unknown file type: {file_type}")
+
+    cached = _last_updated_cache.get(file_type)
+    if cached and (time.time() - cached["ts"] < _LAST_UPDATED_TTL):
+        return cached["payload"]
+
+    # First uncached request of the process makes sure the indexes exist
+    _ensure_updated_at_indexes(db)
+
+    # One round trip instead of two: MAX(updated_at) and COUNT(id) in a single SELECT
+    last_updated, total_records = db.query(
+        func.max(model.updated_at),
+        func.count(model.id),
+    ).one()
+
+    # Stored timestamps are naive UTC (datetime.utcnow). Tag them as UTC so the
+    # browser converts correctly to the user's local time (IST) on display.
+    last_updated_iso = (
+        last_updated.replace(tzinfo=timezone.utc).isoformat()
+        if last_updated else None
+    )
+
+    payload = {
+        "file_type": file_type,
+        "last_updated": last_updated_iso,
+        "total_records": total_records or 0,
+    }
+    _last_updated_cache[file_type] = {"payload": payload, "ts": time.time()}
+    return payload
 
 
 @router.post("/multiple")

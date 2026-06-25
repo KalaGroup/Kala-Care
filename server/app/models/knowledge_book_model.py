@@ -3,45 +3,58 @@ from sqlalchemy.sql import func
 from app.database import Base
 
 
+class KBCategory(Base):
+    """Master category list (Leaflet, PDF, Image, Video, Script, ...).
+
+    Managed by the Master Admin from the top of the Knowledge Book. Used as the
+    dropdown when uploading/editing a file, and as the file filter in the toolbar.
+    """
+    __tablename__ = "kb_categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False, unique=True)
+    created_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class KBFolder(Base):
     """A folder in the Knowledge Book.
 
-    Top-level product folders have parent_id = NULL. Any folder can contain
-    subfolders (parent_id -> kb_folders.id), giving unlimited nesting.
+    Top-level folders (parent_id = NULL) are rendered as tabs. "Sales" and
+    "Service" are seeded with is_system = True and cannot be renamed/deleted/hidden.
+    Any folder can contain subfolders, giving unlimited nesting.
     """
     __tablename__ = "kb_folders"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(200), nullable=False)
+    description = Column(String(1000), nullable=True)            # NEW
     parent_id = Column(Integer, ForeignKey("kb_folders.id"), nullable=True, index=True)
     is_hidden = Column(Boolean, default=False, nullable=False)
-    created_by = Column(String(50), nullable=True)   # master_admin user_id
+    is_system = Column(Boolean, default=False, nullable=False)   # NEW: Sales / Service
+    created_by = Column(String(50), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # No two folders with the same name under the same parent.
-    # (SQL Server treats NULLs as equal in unique constraints, so this also
-    #  blocks duplicate top-level product names.)
     __table_args__ = (
         UniqueConstraint("parent_id", "name", name="uq_kb_folder_parent_name"),
     )
 
 
 class KBFile(Base):
-    """A file uploaded into a Knowledge Book folder.
-
-    The bytes live on disk under uploads/knowledge_book/. Only metadata is
-    stored here.
-    """
+    """A file uploaded into a Knowledge Book folder. Bytes live in `data`."""
     __tablename__ = "kb_files"
 
     id = Column(Integer, primary_key=True, index=True)
     folder_id = Column(Integer, ForeignKey("kb_folders.id"), nullable=False, index=True)
-    original_name = Column(String(300), nullable=False)   # name shown in the UI
-    stored_name = Column(String(300), nullable=True)      # legacy, no longer used
-    content_type = Column(String(150), nullable=True)     # e.g. image/png, video/mp4
-    data = Column(LargeBinary, nullable=True)             # the file bytes (VARBINARY(MAX) on SQL Server)
+    original_name = Column(String(300), nullable=False)
+    stored_name = Column(String(300), nullable=True)            # legacy, unused
+    content_type = Column(String(150), nullable=True)
+    data = Column(LargeBinary, nullable=True)                  # the file bytes
     kind = Column(String(20), nullable=False, default="other")  # image|video|pdf|other
+    description = Column(String(1000), nullable=True)           # NEW
+    category_id = Column(Integer, ForeignKey("kb_categories.id"), nullable=True, index=True)  # NEW
+    is_hidden = Column(Boolean, default=False, nullable=False)  # NEW
     size_bytes = Column(Integer, nullable=True)
-    uploaded_by = Column(String(50), nullable=True)       # master_admin user_id
+    uploaded_by = Column(String(50), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

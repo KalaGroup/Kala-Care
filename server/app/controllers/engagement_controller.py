@@ -2412,14 +2412,8 @@ class EngagementController:
     
         norm = self._normalize_id(instance_id)
         fy = self._get_financial_year()
-    
-        # How many letters for this instance+FY already exist?
-        existing_count = self.db.query(LetterSendRecord).filter(
-            LetterSendRecord.instance_id == norm,
-            LetterSendRecord.financial_year == fy
-        ).count()
-    
-        # Determine serial_start from the format master (default 1)
+
+        # Determine serial_start + reference template from the format master (default 1)
         serial_start = 1
         ref_template = None
         if format_type_id:
@@ -2432,8 +2426,17 @@ class EngagementController:
                     serial_start = int(fmt.serial_start or 1)
                 except (ValueError, TypeError):
                     serial_start = 1
-    
-        seq = serial_start + existing_count
+
+        # Serial counting is PER FORMAT TYPE (FY + format), NOT per instance/branch.
+        if format_type_id:
+            existing_count = self.db.query(LetterSendRecord).filter(
+                LetterSendRecord.financial_year == fy,
+                LetterSendRecord.format_type_id == format_type_id,
+            ).count()
+            seq = serial_start + existing_count
+        else:
+            # No format chosen yet -> preview the starting number only
+            seq = serial_start
     
         # Build the preview ref no (branch_id not known here — filled client-side in buildLetterReference)
         if ref_template:
@@ -2466,6 +2469,131 @@ class EngagementController:
             "previous_letters": previous_letters
         }
 
+    def _next_letter_sequence(self, instance_id: str, fy: str, format_type_id: Optional[int]) -> int:
+        """Next serial PER FORMAT TYPE per FY (NOT per instance, NOT per branch).
+        One shared counter for the whole format type, starting at the format
+        master's serial_start and resetting each financial year.
+        (instance_id is kept in the signature for caller compatibility but is
+        no longer used in the count.)"""
+        from app.models.campaign_model import CampaignLetterFormat
+        serial_start = 1
+        if format_type_id:
+            fmt = self.db.query(CampaignLetterFormat).filter(
+                CampaignLetterFormat.id == format_type_id
+            ).first()
+            if fmt and fmt.serial_start:
+                try:
+                    serial_start = int(fmt.serial_start)
+                except (ValueError, TypeError):
+                    serial_start = 1
+    
+        # Without a format type we can't scope correctly -> just return the start.
+        if not format_type_id:
+            return serial_start
+    
+        existing = self.db.query(LetterSendRecord).filter(
+            LetterSendRecord.financial_year == fy,
+            LetterSendRecord.format_type_id == format_type_id,
+        ).count()
+        return serial_start + existing   
+
+    def get_letter_default_recipients(self, format_type_id: Optional[int],
+                                      branch_id: Optional[str],
+                                      goem_oem: Optional[str] = None) -> Dict[str, Any]:
+        """Resolve default To/CC for a letter from the format master's
+        default_recipients and append the branch's email from
+        branch_email_master into CC.
+
+        Matching rule for default_recipients:
+          - A rule applies to this customer's branch if the branch_code is
+            EXPLICITLY listed in rule.branch_codes, OR the rule is a catch-all
+            (branch_codes == []), which covers every remaining branch.
+          - If the branch is NOT named in any specific rule and there is NO
+            catch-all rule, that branch contributes no master To/CC at all.
+          - GOEM filter: a blank rule GOEM applies to all; a GOEM-specific rule
+            only matches when the customer's GOEM is known AND equal.
+        """
+        from app.models.campaign_model import CampaignLetterFormat, BranchEmailMaster
+        import json as _json
+
+        to_emails, cc_emails = [], []
+        branch_code = str(branch_id).strip() if branch_id is not None else ''
+        goem = (goem_oem or '').strip().upper()
+
+        rules = []
+        matched = 0
+        matched_goems = []
+        if format_type_id:
+            fmt = self.db.query(CampaignLetterFormat).filter(
+                CampaignLetterFormat.id == format_type_id
+            ).first()
+            if fmt:
+                raw = fmt.default_recipients
+                # JSON column can come back as a STRING depending on the driver — parse it
+                if isinstance(raw, str):
+                    try:
+                        raw = _json.loads(raw)
+                    except Exception:
+                        raw = []
+                rules = raw if isinstance(raw, list) else []
+
+                for rule in rules:
+                    if not isinstance(rule, dict):
+                        continue
+                    branch_codes = [str(b).strip() for b in (rule.get('branch_codes') or [])]
+
+                    # Match on BRANCH ONLY. The rule applies if this customer's branch
+                    # is explicitly listed, OR the rule is a catch-all (branch_codes == []).
+                    # GOEM is stored for reference but is NOT used to filter here.
+                    if len(branch_codes) == 0:
+                        branch_ok = True
+                    else:
+                        branch_ok = (branch_code != '' and branch_code in branch_codes)
+
+                    if branch_ok:
+                        matched += 1
+                        to_emails.extend(rule.get('to_emails') or [])
+                        cc_emails.extend(rule.get('cc_emails') or [])
+                        rg = (rule.get('goem_oem') or '').strip()
+                        if rg:
+                            matched_goems.append(rg)
+
+        # Branch email from branch_email_master -> CC (independent of the rules above)
+        if branch_code:
+            be = self.db.query(BranchEmailMaster).filter(
+                BranchEmailMaster.branch_code == branch_code
+            ).first()
+            if be and be.email and be.email.strip():
+                cc_emails.append(be.email.strip())
+
+        def clean(lst):
+            seen, out = set(), []
+            for e in lst:
+                e = (e or '').strip()
+                if e and e.lower() not in seen:
+                    seen.add(e.lower())
+                    out.append(e)
+            return out
+
+        # de-dup GOEMs case-insensitively, keep first-seen spelling
+        seen_g, goems_clean = set(), []
+        for g in matched_goems:
+            if g.lower() not in seen_g:
+                seen_g.add(g.lower())
+                goems_clean.append(g)
+
+        return {
+            "to_emails": clean(to_emails),
+            "cc_emails": clean(cc_emails),
+            "goems": goems_clean,
+            "_debug": {
+                "branch_code": branch_code,
+                "goem": goem,
+                "rules_total": len(rules),
+                "rules_matched": matched,
+            },
+        }
+
     def get_letter_history(self, instance_id: str) -> List[Dict[str, Any]]:
         norm = self._normalize_id(instance_id)
         rows = self.db.query(LetterSendRecord).filter(
@@ -2481,29 +2609,47 @@ class EngagementController:
             "created_at": r.created_at,
         } for r in rows]
 
-    def _send_letter_email(self, to_email, subject, html_body, attachments, cc_emails=None):
+    def _send_letter_email(self, to_email, subject, html_body, attachments, cc_emails=None, to_extra=None):
         if not all([self.sender_email, self.sender_password]):
             return False, "Company email is not configured"
         try:
             import base64
+            import mimetypes
             from email.mime.base import MIMEBase
+            from email.mime.application import MIMEApplication
+            from email.mime.image import MIMEImage
             from email import encoders
 
-            # Clean CC list (drop blanks / duplicates / the primary recipient)
+            # Build the full To list: primary customer email + any extra To addresses.
+            to_clean = []
+            for e in ([to_email] + list(to_extra or [])):
+                e = (e or '').strip()
+                if e and e.lower() not in [x.lower() for x in to_clean]:
+                    to_clean.append(e)
+            if not to_clean:
+                return False, "No recipient To address"
+
+            to_lower = {x.lower() for x in to_clean}
+
+            # Clean CC list (drop blanks / duplicates / anything already in To)
             cc_clean = []
             for e in (cc_emails or []):
                 e = (e or '').strip()
-                if e and e != to_email and e not in cc_clean:
+                if e and e.lower() not in to_lower and e.lower() not in [x.lower() for x in cc_clean]:
                     cc_clean.append(e)
 
             msg = MIMEMultipart('mixed')
             msg['From'] = self.sender_email
-            msg['To'] = to_email
+            msg['To'] = ", ".join(to_clean)
             if cc_clean:
                 msg['Cc'] = ", ".join(cc_clean)
             msg['Subject'] = subject or "Letter from KALA Care"
             msg.attach(MIMEText(html_body or "", 'html'))
 
+            # Attach files IN ORDER. The caller already puts the rendered letter PDF
+            # FIRST, so it appears before the other attachments in the email. Use each
+            # file's real content type (e.g. application/pdf) so the letter shows as a
+            # proper, previewable PDF instead of a generic binary blob.
             for att in (attachments or []):
                 content = att.get('content')
                 if not content:
@@ -2513,13 +2659,29 @@ class EngagementController:
                     file_bytes = base64.b64decode(content)
                 except Exception:
                     continue
-                part = MIMEBase('application', 'octet-stream')
-                part.set_payload(file_bytes)
-                encoders.encode_base64(part)
-                part.add_header('Content-Disposition', f'attachment; filename="{name}"')
+
+                # Resolve maintype/subtype from the declared type, else guess from the name.
+                ctype = (att.get('type') or '').strip().lower()
+                if not ctype or '/' not in ctype:
+                    guessed, _ = mimetypes.guess_type(name)
+                    ctype = (guessed or 'application/octet-stream').lower()
+                maintype, _, subtype = ctype.partition('/')
+                if not subtype:
+                    maintype, subtype = 'application', 'octet-stream'
+
+                if maintype == 'image':
+                    part = MIMEImage(file_bytes, _subtype=subtype)
+                elif maintype == 'application' and subtype == 'pdf':
+                    part = MIMEApplication(file_bytes, _subtype='pdf')
+                else:
+                    part = MIMEBase(maintype, subtype)
+                    part.set_payload(file_bytes)
+                    encoders.encode_base64(part)
+
+                part.add_header('Content-Disposition', 'attachment', filename=name)
                 msg.attach(part)
 
-            recipients = [to_email] + cc_clean
+            recipients = to_clean + cc_clean
             with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
                 server.starttls()
                 server.login(self.sender_email, self.sender_password)
@@ -2596,12 +2758,9 @@ class EngagementController:
             seq = existing.sequence_number
             ref_no = existing.ref_no
         else:
-            # Generate ref no fresh (per instance per FY) so it can't duplicate
+            # Fresh number — PER FORMAT, honoring the format's serial_start
             fy = self._get_financial_year()
-            seq = self.db.query(LetterSendRecord).filter(
-                LetterSendRecord.instance_id == instance_id,
-                LetterSendRecord.financial_year == fy
-            ).count() + 1
+            seq = self._next_letter_sequence(instance_id, fy, payload.get('format_type_id'))
             ref_no = payload.get('ref_no') or f"KC/{fy}/{str(seq).zfill(2)}"
 
         sent_email = False
@@ -2609,14 +2768,15 @@ class EngagementController:
         errors = []
 
         cc_emails = payload.get('cc_emails') or []          # additional emails -> CC
+        to_extra = payload.get('to_emails') or []           # additional emails -> To
         whatsapp_extra = payload.get('whatsapp_numbers') or []  # additional WhatsApp numbers
 
         if 'email' in channels:
-            if not email_to:
+            if not email_to and not to_extra:
                 errors.append("No recipient email address")
             else:
                 email_body_html = payload.get('email_body_html') or letter_html
-                ok, err = self._send_letter_email(email_to, subject, email_body_html, attachments, cc_emails)
+                ok, err = self._send_letter_email(email_to, subject, email_body_html, attachments, cc_emails, to_extra)
                 sent_email = ok
                 if not ok:
                     errors.append(f"Email: {err}")
@@ -2731,10 +2891,7 @@ class EngagementController:
             ref_no = existing.ref_no
         else:
             fy = self._get_financial_year()
-            seq = self.db.query(LetterSendRecord).filter(
-                LetterSendRecord.instance_id == instance_id,
-                LetterSendRecord.financial_year == fy
-            ).count() + 1
+            seq = self._next_letter_sequence(instance_id, fy, payload.get('format_type_id'))
             ref_no = payload.get('ref_no') or f"KC/{fy}/{str(seq).zfill(2)}"
 
         if existing:

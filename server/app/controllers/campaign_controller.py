@@ -933,6 +933,26 @@ class CampaignController:
         if "serial_start" in update_data and not update_data["serial_start"]:
             update_data["serial_start"] = "1"
 
+        # LOCK the Serial No once a letter has already been SENT with this format.
+        # Re-saving the SAME number is fine; only an actual CHANGE is blocked.
+        if "serial_start" in update_data:
+            new_serial = str(update_data.get("serial_start") or "1")
+            current_serial = str(db_fmt.serial_start or "1")
+            if new_serial != current_serial:
+                try:
+                    from app.models.engagement_model import LetterSendRecord
+                except ImportError:
+                    from app.models.letter_model import LetterSendRecord  # adjust path if different
+                sent_count = self.db.query(LetterSendRecord).filter(
+                    LetterSendRecord.format_type_id == format_id,
+                    LetterSendRecord.status.in_(['sent', 'partial'])
+                ).count()
+                if sent_count > 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Serial number cannot be changed because a letter has already been sent with this format."
+                    )
+
         for key, value in update_data.items():
             setattr(db_fmt, key, value)
 
@@ -946,6 +966,30 @@ class CampaignController:
         self.db.delete(db_fmt)
         self.db.commit()
         return {"deleted": True, "message": "Letter format deleted successfully"}
+
+    def get_letter_format_usage(self, format_id: int) -> Dict[str, Any]:
+        """
+        Has this format already been used to SEND a letter to a customer?
+        Drives the Serial No lock in Letter Master. Counts status 'sent' or
+        'partial' (drafts and failed attempts do NOT count).
+        """
+        self.get_letter_format(format_id)  # 404 if it doesn't exist
+
+        try:
+            from app.models.engagement_model import LetterSendRecord
+        except ImportError:
+            from app.models.letter_model import LetterSendRecord  # adjust path if different
+
+        sent_count = self.db.query(LetterSendRecord).filter(
+            LetterSendRecord.format_type_id == format_id,
+            LetterSendRecord.status.in_(['sent', 'partial'])
+        ).count()
+
+        return {
+            "format_id": format_id,
+            "sent_count": sent_count,
+            "serial_locked": sent_count > 0,
+        }
 
 # ==================== Branch Email Master ====================
 

@@ -162,6 +162,9 @@ const Campaign = () => {
   const [letterFormatsLoading, setLetterFormatsLoading] = useState(false);
   const [letterFormatSaving, setLetterFormatSaving] = useState(false);
   const [viewingLetterFormat, setViewingLetterFormat] = useState(null);
+  // Serial No lock: true once a letter has already been sent with the format being edited
+  const [serialLocked, setSerialLocked] = useState(false);
+  const [serialLockLoading, setSerialLockLoading] = useState(false);
 
   // Branch Email Master
   const [showBranchEmailMaster, setShowBranchEmailMaster] = useState(false);
@@ -1676,6 +1679,8 @@ const Campaign = () => {
     });
     setRecipientRules([]);
     setShowRecipientForm(false);
+    setSerialLocked(false);          // a new format is never locked
+    setSerialLockLoading(false);
   };
 
   const openAddLetterFormat = () => {
@@ -1701,6 +1706,29 @@ const Campaign = () => {
     setRecipientRules(dbRulesToUiRules(fmt.default_recipients || []));
     setShowRecipientForm((fmt.default_recipients || []).length > 0);
     setShowLetterFormatForm(true);
+
+    // Lock the Serial No box if a letter has already been sent with this format
+    setSerialLocked(false);
+    checkLetterFormatSerialLock(fmt.id);
+  };
+
+  // Ask the backend whether this format already sent letters (locks Serial No)
+  const checkLetterFormatSerialLock = async (formatId) => {
+    if (!formatId) { setSerialLocked(false); return; }
+    setSerialLockLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/v1/campaigns/letter-master/formats/${formatId}/usage`);
+      if (res.ok) {
+        const d = await res.json();
+        setSerialLocked(!!d.serial_locked);
+      } else {
+        setSerialLocked(false);
+      }
+    } catch (e) {
+      setSerialLocked(false);
+    } finally {
+      setSerialLockLoading(false);
+    }
   };
 
   const openViewLetterFormat = (fmt) => {
@@ -3840,11 +3868,11 @@ const Campaign = () => {
                                   min="1"
                                   value={letterFormatData.serial_start || '1'}
                                   onChange={(e) => setLetterFormatData({ ...letterFormatData, serial_start: e.target.value })}
-                                  className="border border-[#2f3192] rounded-md px-2 py-2 text-sm text-center bg-white text-black font-mono"
+                                  className={`border rounded-md px-2 py-2 text-sm text-center font-mono ${serialLocked ? 'border-gray-300 bg-gray-100 text-gray-500 cursor-not-allowed' : 'border-[#2f3192] bg-white text-black'}`}
                                   style={{ minWidth: '90px', width: '90px' }}
-                                  disabled={letterFormatSaving}
+                                  disabled={letterFormatSaving || serialLocked}
                                   placeholder="1"
-                                  title="Enter starting serial number"
+                                  title={serialLocked ? 'Locked — a letter has already been sent with this format' : 'Enter starting serial number'}
                                 />
                               ) : (
                                 <input
@@ -3868,6 +3896,14 @@ const Campaign = () => {
                       <span className="font-semibold">Branch Code</span> is filled automatically per customer.{' '}
                       <span className="font-semibold">Serial No</span> box is editable — set the starting number for this format.
                     </p>
+                    {serialLocked && (
+                      <p className="text-[11px] text-amber-600 mt-1 flex items-center gap-1">
+                        🔒 Serial No is locked because a letter has already been sent with this format — it can no longer be changed.
+                      </p>
+                    )}
+                    {serialLockLoading && (
+                      <p className="text-[11px] text-gray-400 mt-1">Checking serial lock…</p>
+                    )}
                   </div>
                 )}
 

@@ -12,7 +12,8 @@ import {
     EyeIcon,
     ArrowPathIcon,
     DocumentTextIcon,
-    ExclamationTriangleIcon
+    ExclamationTriangleIcon,
+    ClockIcon
 } from '@heroicons/react/24/outline';
 import * as XLSX from 'xlsx';
 
@@ -196,6 +197,8 @@ const Import = () => {
     const [previewLoading, setPreviewLoading] = useState(false);
     const [showPreview, setShowPreview] = useState(false);
     const [formatError, setFormatError] = useState(null);
+    const [lastUpdatedInfo, setLastUpdatedInfo] = useState(null);
+    const [lastUpdatedLoading, setLastUpdatedLoading] = useState(false);
 
     const themeColor = '#2f3192';
     const themeShades = {
@@ -218,6 +221,36 @@ const Import = () => {
         }
 
         return instanceStr;
+    };
+
+    // Format the UTC ISO timestamp into readable IST date/time
+    const formatDateTime = (isoString) => {
+        if (!isoString) return null;
+        const date = new Date(isoString);
+        return date.toLocaleString('en-IN', {
+            day: '2-digit', month: 'short', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', hour12: true
+        });
+    };
+
+    // Fetch the newest updated_at for the selected file type
+    const fetchLastUpdated = async (fileType) => {
+        if (!fileType) {
+            setLastUpdatedInfo(null);
+            return;
+        }
+        setLastUpdatedLoading(true);
+        try {
+            const res = await axios.get(`${API_BASE_URL}/import/last-updated`, {
+                params: { file_type: fileType }
+            });
+            setLastUpdatedInfo(res.data);
+        } catch (error) {
+            console.error('Failed to fetch last updated info:', error);
+            setLastUpdatedInfo(null);
+        } finally {
+            setLastUpdatedLoading(false);
+        }
     };
 
     // Updated readExcelFile function with proper parsing
@@ -514,6 +547,9 @@ const Import = () => {
         setSelectedFileType(newFileType);
         setFormatError(null);
 
+        // Fetch when this file type's data was last updated
+        fetchLastUpdated(newFileType);
+
         // Re-validate if we have a file preview
         if (filePreview && newFileType) {
             const validation = validateFileFormat(filePreview.headers, newFileType);
@@ -586,6 +622,40 @@ const Import = () => {
                                 </div>
                                 <p className="mt-0.5 text-[10px] text-black">Choose the type of data you're importing</p>
                             </div>
+
+                            {/* Last Updated Info — newest updated_at for the selected file type */}
+                            {selectedFileType && (
+                                <div
+                                    className="rounded-lg border overflow-hidden"
+                                    style={{ borderColor: themeShades.medium, backgroundColor: themeShades.light }}
+                                >
+                                    <div className="px-2 sm:px-3 py-1.5 sm:py-2 flex items-center gap-1.5 sm:gap-2">
+                                        <ClockIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" style={{ color: themeColor }} />
+                                        {lastUpdatedLoading ? (
+                                            <span className="text-[10px] sm:text-xs text-black flex items-center gap-1.5">
+                                                <ArrowPathIcon className="animate-spin h-3 w-3" style={{ color: themeColor }} />
+                                                Checking last update...
+                                            </span>
+                                        ) : lastUpdatedInfo && lastUpdatedInfo.last_updated ? (
+                                            <div className="flex items-center gap-3 whitespace-nowrap">
+                                                <span className="text-[10px] sm:text-xs text-black">
+                                                    <span className="font-semibold">Last data update:</span>{' '}
+                                                    {formatDateTime(lastUpdatedInfo.last_updated)}
+                                                </span>
+
+                                                <span className="text-[10px] sm:text-xs text-black">
+                                                    <span className="font-semibold">Total records:</span>{' '}
+                                                    {lastUpdatedInfo.total_records.toLocaleString('en-IN')}
+                                                </span>
+                                            </div>
+                                        ) : (
+                                            <span className="text-[10px] sm:text-xs text-black">
+                                                No data has been uploaded yet for this file type.
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
 
                             {/* File Format Display Section - Shows expected columns for selected file type */}
                             {selectedFileType && FILE_TYPE_COLUMNS[selectedFileType] && (

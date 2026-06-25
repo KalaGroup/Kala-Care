@@ -515,6 +515,25 @@ function Navbar({ children }) {
     recordLogoutAndClear('manual');
   };
 
+  // On the customer info page (taking follow-ups) → open Knowledge Bank in a small
+  // CHROME POPUP WINDOW (not a new tab). The fixed window name "knowledgeBankPopup"
+  // means a second click reuses the same popup instead of opening another one.
+  // Everywhere else it navigates normally in the same tab.
+  const handleOtherPageClick = (e, path) => {
+    if (path === '/knowledge-book' && sessionStorage.getItem('onCustomerInfoPage') === 'true') {
+      e.preventDefault();
+      const w = 1000, h = 700;
+      const left = window.screenX + Math.max(0, (window.outerWidth - w) / 2);
+      const top = window.screenY + Math.max(0, (window.outerHeight - h) / 2);
+      window.open(
+        '/knowledge-book',
+        'knowledgeBankPopup',
+        `popup=yes,width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=yes`
+      );
+    }
+    if (isMobile) setSidebarOpen(false);
+  };
+
   // ---- Auto-logout after 10 minutes of inactivity ----
   useEffect(() => {
     if (!user) return;
@@ -1634,9 +1653,7 @@ function Navbar({ children }) {
                         <NavLink
                           key={item.path}
                           to={item.path}
-                          onClick={() => {
-                            if (isMobile) setSidebarOpen(false);
-                          }}
+                          onClick={(e) => handleOtherPageClick(e, item.path)}
                           onMouseEnter={() => setHoveredItem(item.path)}
                           onMouseLeave={() => setHoveredItem(null)}
                           className={({ isActive }) =>
@@ -1674,9 +1691,7 @@ function Navbar({ children }) {
                         <NavLink
                           key={item.path}
                           to={item.path}
-                          onClick={() => {
-                            if (isMobile) setSidebarOpen(false);
-                          }}
+                          onClick={(e) => handleOtherPageClick(e, item.path)}
                           className={({ isActive }) =>
                             `group relative flex items-center justify-center px-1 py-1 rounded-lg transition-all duration-200`
                           }

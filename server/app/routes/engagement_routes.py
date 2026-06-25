@@ -342,7 +342,7 @@ async def get_warranty_expiry_map(
     controller = EngagementController(db)
     instance_ids = payload.get("instance_ids") or []
     return {"warranty_map": controller.get_warranty_expiry_map(instance_ids)}
-    
+
 @router.get("/campaigns/{campaign_id}/scripts/{script_index}", response_model=dict)
 async def get_campaign_script_pdf(
     campaign_id: int,
@@ -404,3 +404,14 @@ async def get_letter_record(
     """Full single letter (html, fields, attachments) for viewing or reopening a draft."""
     controller = EngagementController(db)
     return controller.get_letter_record(record_id)    
+
+@router.get("/letter/default-recipients", response_model=dict)
+async def get_letter_default_recipients(
+    format_type_id: Optional[int] = Query(None),
+    branch_id: Optional[str] = Query(None),
+    goem_oem: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Resolve default To/CC emails for a letter (format master rules + branch email master)."""
+    controller = EngagementController(db)
+    return controller.get_letter_default_recipients(format_type_id, branch_id, goem_oem)    

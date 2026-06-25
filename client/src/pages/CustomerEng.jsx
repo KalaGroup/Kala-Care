@@ -115,6 +115,7 @@ const CustomerEng = () => {
     const [viewLetterHtml, setViewLetterHtml] = useState(null);
     const [viewLetterBareHtml, setViewLetterBareHtml] = useState('');
     const [viewLetterAttachments, setViewLetterAttachments] = useState([]);
+    const [viewLetterSubject, setViewLetterSubject] = useState('');
 
     // Date filters
     const [fromDate, setFromDate] = useState('');
@@ -168,8 +169,9 @@ const CustomerEng = () => {
     const [branchFilterPosition, setBranchFilterPosition] = useState(null);
     const [campaignFilterPosition, setCampaignFilterPosition] = useState(null);
 
-    // Flag filter
+    // Flag filter (C1–C7) and Status filter (NC / R / WIP / FR) are now INDEPENDENT
     const [selectedFlag, setSelectedFlag] = useState('all');
+    const [selectedStatus, setSelectedStatus] = useState('all');
     const [userCanExport, setUserCanExport] = useState(false);
     const [completedCountFromAPI, setCompletedCountFromAPI] = useState(0);
     // Campaign column filters - per-campaign status filter
@@ -196,15 +198,17 @@ const CustomerEng = () => {
 
     // ==================== Send Letter wizard states ====================
     const COMPANY_NAME = 'KALA Care';
-    const COMPANY_FULL = 'KALA Care Global LLP';
-    // Header is two images side by side: logo.png on the LEFT, letter-header.png on the RIGHT.
-    // letter-footer.png is the footer band. All three live in the public/ folder.
-    const LETTER_LOGO_IMG = '/logo.png';
-    const LETTER_HEADER_IMG = '/letter-header.png';
-    const LETTER_FOOTER_IMG = '/letter-footer.png';
+    const COMPANY_FULL = 'KALA Care Global LLP.,';
+    // Letterhead is two full-width bands from the KALA letter-format document:
+    //   letter-header-band.png = KALA logo (left) + kirloskar care (right)
+    //   letter-footer-band.png = company name + address + shapes
+    // Both live in the public/ folder. The header band sits at the top of page 1;
+    // the footer band is stamped at the bottom of the LAST page.
+    const LETTER_HEADER_IMG = '/letter-header-band.png';
+    const LETTER_FOOTER_IMG = '/letter-footer-band.png';
     const LETTER_ATTACH_EXTS = ['mp4', 'jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'xlsx', 'xls', 'csv'];
     // Common signature shown at the bottom of EVERY letter (after the editable end-para)
-    const LETTER_SIGNATURE = 'Best regards,\nKALA Care Global LLP\n\nAuthorized Signatory';
+    const LETTER_SIGNATURE = 'Best regards,\nKALA Care Global LLP.,\n\nAuthorized Signatory';
     // Default (editable) intro lines shown above the follow-up / quotation tables.
     // Re-applied whenever the letter is (re)generated so the boxes are never blank.
     const DEFAULT_FOLLOWUP_INTRO = 'As part of our ongoing service engagement, our team has been in regular touch with you regarding the above. A summary of our recent follow-up(s) is provided below for your kind reference:';
@@ -221,10 +225,13 @@ const CustomerEng = () => {
     const [letterFy, setLetterFy] = useState('');
     const [letterSeq, setLetterSeq] = useState(1);
     const [previousLetters, setPreviousLetters] = useState([]);
-    const [logoImgDataUrl, setLogoImgDataUrl] = useState('');
     const [headerImgDataUrl, setHeaderImgDataUrl] = useState('');
     const [footerImgDataUrl, setFooterImgDataUrl] = useState('');
     const [letterSending, setLetterSending] = useState(false);
+    // True while "Next" is fetching the live serial number (drives the loading spinner)
+    const [letterStepLoading, setLetterStepLoading] = useState(false);
+    // Editable file name for the generated letter PDF (shown in Review & Send)
+    const [letterFileName, setLetterFileName] = useState('');
 
     // Follow-up / Quotation inclusion (middle of the letter)
     const [includeFollowups, setIncludeFollowups] = useState(false);
@@ -242,6 +249,9 @@ const CustomerEng = () => {
     // Send channels + multi-recipient (extra emails go to CC, extra numbers each get the message)
     const [letterChannels, setLetterChannels] = useState([]);
     const [letterEmailTo, setLetterEmailTo] = useState('');
+    const [letterToList, setLetterToList] = useState([]);
+    const [letterToInput, setLetterToInput] = useState('');
+    const [letterMatchedGoems, setLetterMatchedGoems] = useState([]);
     const [letterCcList, setLetterCcList] = useState([]);
     const [letterCcInput, setLetterCcInput] = useState('');
     const [letterWhatsappTo, setLetterWhatsappTo] = useState('');
@@ -257,6 +267,18 @@ const CustomerEng = () => {
         quotation_intro: DEFAULT_QUOTATION_INTRO,
         letterref_intro: DEFAULT_LETTERREF_INTRO
     });
+
+    // ---- Step-2 editable References (Customer Detail Fields) ----
+    const [letterRefFieldValues, setLetterRefFieldValues] = useState({});   // { key: editedValue }
+    const [letterRefHiddenFields, setLetterRefHiddenFields] = useState([]);  // keys removed from THIS letter
+
+    // ---- Step-2 editable tables: per-row cell edits + removed columns ----
+    const [followupCellEdits, setFollowupCellEdits] = useState({});   // { followupId: { col: value } }
+    const [followupHiddenCols, setFollowupHiddenCols] = useState([]);
+    const [quotationCellEdits, setQuotationCellEdits] = useState({});
+    const [quotationHiddenCols, setQuotationHiddenCols] = useState([]);
+    const [letterRefCellEdits, setLetterRefCellEdits] = useState({});
+    const [letterRefHiddenCols, setLetterRefHiddenCols] = useState([]);
 
     // Data states
     const [activeCampaigns, setActiveCampaigns] = useState([]);
@@ -691,6 +713,17 @@ const CustomerEng = () => {
         }
     }, [showCustomerDetails]);
 
+    // Tell the navbar we're on the customer info page so it can open Knowledge Bank
+    // in a NEW tab only while a follow-up is being taken here. Cleared on leave/unmount.
+    useEffect(() => {
+        if (isInCustomerDetails) {
+            sessionStorage.setItem('onCustomerInfoPage', 'true');
+        } else {
+            sessionStorage.removeItem('onCustomerInfoPage');
+        }
+        return () => sessionStorage.removeItem('onCustomerInfoPage');
+    }, [isInCustomerDetails]);
+
     // Close remark suggestions dropdown when clicking outside OR on scroll
     useEffect(() => {
         const handleClickOutside = (e) => {
@@ -994,30 +1027,34 @@ const CustomerEng = () => {
             filtered = [...tempWithinRange, ...tempOutsideRange, ...tempNoDate];
         }
 
-        // ========== STEP 4: FLAG FILTER (also handles NC = Not connected, R = Rejected) ==========
-        if (selectedFlag !== 'all') {
-            // One predicate for whichever chip is active.
+        // ========== STEP 4: FLAG (C1–C7) + STATUS (NC/R/WIP/FR) FILTERS — INDEPENDENT ==========
+        // The two filters are combined with AND: a row must satisfy BOTH the active flag chip
+        // and the active status chip. Either one set to 'all' is a no-op for that filter.
+        if (selectedFlag !== 'all' || selectedStatus !== 'all') {
+            // Flag predicate — C1..C7 only.
             const matchesSelectedFlag = (customer) => {
-                if (selectedFlag === 'NC') {
-                    // "Not connected" — any matching drive status is 'not_connected'
-                    // (respects selected drives + branch, mirrors the Rejected filter)
-                    const status = customer.campaign_status || {};
-                    if (selectedCampaigns.length > 0) {
-                        return selectedCampaigns.some(camp => status[camp] === 'not_connected');
-                    }
-                    return Object.values(status).some(s => s === 'not_connected');
-                }
-                if (selectedFlag === 'R') {
-                    // Rejected — any matching drive status is 'rejected' (respects selected drives + branch)
-                    const status = customer.campaign_status || {};
-                    if (selectedCampaigns.length > 0) {
-                        return selectedCampaigns.some(camp => status[camp] === 'rejected');
-                    }
-                    return Object.values(status).some(s => s === 'rejected');
-                }
-                // C1..C7 flags
+                if (selectedFlag === 'all') return true;
                 return !!customer.followup_flags?.[selectedFlag];
             };
+
+            // Status predicate — NC / R / WIP / FR only (respects selected drives + branch).
+            const matchesSelectedStatus = (customer) => {
+                if (selectedStatus === 'all') return true;
+                const statusKey =
+                    selectedStatus === 'NC' ? 'not_connected'
+                        : selectedStatus === 'R' ? 'rejected'
+                            : selectedStatus === 'WIP' ? 'wip'
+                                : selectedStatus === 'FR' ? 'rescheduled'
+                                    : null;
+                if (!statusKey) return true;
+                const status = customer.campaign_status || {};
+                if (selectedCampaigns.length > 0) {
+                    return selectedCampaigns.some(camp => status[camp] === statusKey);
+                }
+                return Object.values(status).some(s => s === statusKey);
+            };
+
+            const matchesBoth = (c) => matchesSelectedFlag(c) && matchesSelectedStatus(c);
 
             let tempWithinRange = [];
             let tempOutsideRange = [];
@@ -1039,9 +1076,9 @@ const CustomerEng = () => {
                 }
             });
 
-            tempWithinRange = tempWithinRange.filter(matchesSelectedFlag);
-            tempOutsideRange = tempOutsideRange.filter(matchesSelectedFlag);
-            tempNoDate = tempNoDate.filter(matchesSelectedFlag);
+            tempWithinRange = tempWithinRange.filter(matchesBoth);
+            tempOutsideRange = tempOutsideRange.filter(matchesBoth);
+            tempNoDate = tempNoDate.filter(matchesBoth);
 
             filtered = [...tempWithinRange, ...tempOutsideRange, ...tempNoDate];
         }
@@ -1235,7 +1272,7 @@ const CustomerEng = () => {
             if (customer.followup_flags?.C7) counts.C7++;
         });
         setFlagCounts(counts);
-    }, [searchTerm, customers, selectedCampaigns, selectedFlag, sortConfig, isAdmin, userBranch, fromDate, toDate, selectedBranches, campaignColumnFilters, warrantyDateRange, agreementDateRange]);
+    }, [searchTerm, customers, selectedCampaigns, selectedFlag, selectedStatus, sortConfig, isAdmin, userBranch, fromDate, toDate, selectedBranches, campaignColumnFilters, warrantyDateRange, agreementDateRange]);
 
     // R (Rejected) count — respects campaign + branch filters
     const rejectedCount = useMemo(() => {
@@ -1293,6 +1330,60 @@ const CustomerEng = () => {
                 // All drives → count every not-connected status
                 Object.values(status).forEach(s => {
                     if (s === 'not_connected') count++;
+                });
+            }
+        });
+
+        return count;
+    }, [customers, selectedCampaigns, selectedBranches, isAdmin, userBranch]);
+
+    // WIP (Work in Progress) count — mirrors the Not connected / Rejected counts
+    const wipCount = useMemo(() => {
+        let visible = [...customers];
+        if (!isAdmin && userBranch && userBranch !== 'HO') {
+            visible = visible.filter(c => !c.branch_id || String(c.branch_id) === String(userBranch));
+        }
+        if (selectedBranches.length > 0) {
+            visible = visible.filter(c => selectedBranches.includes(String(c.branch_id || '')));
+        }
+
+        let count = 0;
+        visible.forEach(customer => {
+            const status = customer.campaign_status || {};
+            if (selectedCampaigns.length > 0) {
+                selectedCampaigns.forEach(camp => {
+                    if (status[camp] === 'wip') count++;
+                });
+            } else {
+                Object.values(status).forEach(s => {
+                    if (s === 'wip') count++;
+                });
+            }
+        });
+
+        return count;
+    }, [customers, selectedCampaigns, selectedBranches, isAdmin, userBranch]);
+
+    // FR (Follow-up Reschedule) count — mirrors the Not connected / Rejected counts
+    const rescheduledCount = useMemo(() => {
+        let visible = [...customers];
+        if (!isAdmin && userBranch && userBranch !== 'HO') {
+            visible = visible.filter(c => !c.branch_id || String(c.branch_id) === String(userBranch));
+        }
+        if (selectedBranches.length > 0) {
+            visible = visible.filter(c => selectedBranches.includes(String(c.branch_id || '')));
+        }
+
+        let count = 0;
+        visible.forEach(customer => {
+            const status = customer.campaign_status || {};
+            if (selectedCampaigns.length > 0) {
+                selectedCampaigns.forEach(camp => {
+                    if (status[camp] === 'rescheduled') count++;
+                });
+            } else {
+                Object.values(status).forEach(s => {
+                    if (s === 'rescheduled') count++;
                 });
             }
         });
@@ -3574,29 +3665,38 @@ const CustomerEng = () => {
     // The footer band is NOT part of the flowed content; it is stamped at the
     // BOTTOM of the LAST page only (so on a 2-page letter it appears once, on the
     // page where the letter ends — never repeated on every page).
+    // Renders the CURRENT letter to a multi-page A4 PDF (base64, no data: prefix) for emailing/saving.
+    // The header band is stamped at the TOP and the footer band at the BOTTOM of EVERY page, so they
+    // repeat identically when the letter content grows onto further pages.
     const generateLetterPdfBase64 = async () => {
         if (!window.html2canvas) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
         if (!window.jspdf) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
 
-        // Footer image height (in px at our 780px render width) — reserved as bottom
-        // padding so the flowed content never overlaps the stamped footer.
-        let footerPxHeight = 0;
-        if (footerImgDataUrl) {
-            try {
-                const fImg = await loadHtmlImage(footerImgDataUrl);
-                if (fImg.width) footerPxHeight = Math.round(780 * (fImg.height / fImg.width));
-            } catch (e) { footerPxHeight = 0; }
-        }
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const pageW = pdf.internal.pageSize.getWidth();   // 210
+        const pageH = pdf.internal.pageSize.getHeight();  // 297
 
+        // Band heights in mm (each image is placed at full page width).
+        let headerH = 0, footerH = 0;
+        if (headerImgDataUrl) {
+            try { const h = await loadHtmlImage(headerImgDataUrl); if (h.width) headerH = pageW * (h.height / h.width); } catch (e) { headerH = 0; }
+        }
+        if (footerImgDataUrl) {
+            try { const f = await loadHtmlImage(footerImgDataUrl); if (f.width) footerH = pageW * (f.height / f.width); } catch (e) { footerH = 0; }
+        }
+        const SAFE_MM = 4;                                  // small safety gap so edges never clip
+        const contentTop = headerH;
+        const contentH = Math.max(20, pageH - headerH - footerH - SAFE_MM); // body height available per page (mm)
+
+        // Render the BODY only (no header, no footer in the flow).
         const holder = document.createElement('div');
         holder.style.position = 'fixed';
         holder.style.left = '-10000px';
         holder.style.top = '0';
         holder.style.width = '780px';
         holder.style.background = '#ffffff';
-        // omitFooter=true → render body only; reserve space at the bottom for the footer
-        holder.innerHTML = buildLetterHtml(false, true);
-        if (footerPxHeight) holder.style.paddingBottom = `${footerPxHeight + 12}px`;
+        holder.innerHTML = buildLetterHtml(false, true, true);
         document.body.appendChild(holder);
 
         const imgs = Array.from(holder.querySelectorAll('img'));
@@ -3605,34 +3705,34 @@ const CustomerEng = () => {
 
         try {
             const canvas = await window.html2canvas(holder, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
-            const { jsPDF } = window.jspdf;
-            const pdf = new jsPDF('p', 'mm', 'a4');
-            const pageW = pdf.internal.pageSize.getWidth();
-            const pageH = pdf.internal.pageSize.getHeight();
-            const imgW = pageW;
-            const imgH = (canvas.height * imgW) / canvas.width;
-            const imgData = canvas.toDataURL('image/jpeg', 0.92);
+            const W = canvas.width;
+            const H = canvas.height;
+            const pxPerMm = W / pageW;                       // body is rendered at full page width
+            const sliceHpx = Math.max(1, Math.floor(contentH * pxPerMm));  // body px per page
+            const totalPages = Math.max(1, Math.ceil(H / sliceHpx));
 
-            // Lay out the body across as many pages as needed.
-            let heightLeft = imgH;
-            let position = 0;
-            pdf.addImage(imgData, 'JPEG', 0, position, imgW, imgH);
-            heightLeft -= pageH;
-            while (heightLeft > 0) {
-                position -= pageH;
-                pdf.addPage();
-                pdf.addImage(imgData, 'JPEG', 0, position, imgW, imgH);
-                heightLeft -= pageH;
-            }
+            for (let p = 0; p < totalPages; p++) {
+                if (p > 0) pdf.addPage();
 
-            // Stamp the footer once, at the bottom of the CURRENT (last) page.
-            if (footerImgDataUrl) {
-                try {
-                    const fImg = await loadHtmlImage(footerImgDataUrl);
-                    const fW = pageW;
-                    const fH = fImg.width ? (fImg.height * fW) / fImg.width : 0;
-                    if (fH > 0) pdf.addImage(footerImgDataUrl, 'PNG', 0, pageH - fH, fW, fH);
-                } catch (e) { /* footer is optional */ }
+                const sourceY = p * sliceHpx;
+                const thisSliceHpx = Math.min(sliceHpx, H - sourceY);
+
+                const c = document.createElement('canvas');
+                c.width = W;
+                c.height = thisSliceHpx;
+                const ctx = c.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, c.width, c.height);
+                ctx.drawImage(canvas, 0, sourceY, W, thisSliceHpx, 0, 0, W, thisSliceHpx);
+                const sliceData = c.toDataURL('image/jpeg', 0.92);
+                const sliceHmm = thisSliceHpx / pxPerMm;
+
+                // Body slice between the bands
+                pdf.addImage(sliceData, 'JPEG', 0, contentTop, pageW, sliceHmm);
+                // Header on top of EVERY page
+                if (headerImgDataUrl && headerH > 0) pdf.addImage(headerImgDataUrl, 'PNG', 0, 0, pageW, headerH);
+                // Footer on bottom of EVERY page
+                if (footerImgDataUrl && footerH > 0) pdf.addImage(footerImgDataUrl, 'PNG', 0, pageH - footerH, pageW, footerH);
             }
 
             return pdf.output('datauristring').split(',')[1];
@@ -3685,13 +3785,14 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
 
     // Reference No from the format template: KCGL/26-27/<product>/BranchCode/serial no
     // -> "BranchCode" filled with the customer's branch, "serial no" with the FY sequence.
-    const buildLetterReference = (fmt, v, seq) => {
+    const buildLetterReference = (fmt, v, seq, fyOverride) => {
         if (fmt && fmt.reference_no && fmt.reference_no.trim()) {
             return fmt.reference_no
                 .replace(/branch[_\s]?code/gi, v.branch_id || '-')
                 .replace(/serial[_\s]?no\.?/gi, String(seq).padStart(2, '0'));
         }
-        return letterRefNo || `KC/${letterFy || ''}/${String(seq).padStart(2, '0')}`;
+        const fy = (fyOverride !== undefined && fyOverride !== null) ? fyOverride : (letterFy || '');
+        return `KC/${fy}/${String(seq).padStart(2, '0')}`;
     };
 
     const fetchLetterFormatsForWizard = async () => {
@@ -3710,9 +3811,15 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
 
     const resetLetterWizardState = () => {
         setLetterStep(1);
+        // clear any leftover number/FY from the PREVIOUS customer so it can't flash stale
+        setLetterSeq(1);
+        setLetterRefNo('');
+        setLetterFy('');
+        setPreviousLetters([]);
         setSelectedLetterFormat(null);
         setLetterAttachments([]);
         setLetterChannels([]);
+        setLetterFileName('');
         setEditingLetterRecordId(null);
         setIncludeFollowups(false);
         setIncludeQuotations(false);
@@ -3723,10 +3830,22 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         setIncludeLetterRefs(false);
         setSelectedLetterRefIds([]);
         setShowLetterRefPicker(false);
+        setLetterToList([]);
+        setLetterToInput('');
+        setLetterMatchedGoems([]);
         setLetterCcList([]);
         setLetterCcInput('');
         setLetterWhatsappList([]);
         setLetterWhatsappInput('');
+        // editable References + tables (Step 2)
+        setLetterRefFieldValues({});
+        setLetterRefHiddenFields([]);
+        setFollowupCellEdits({});
+        setFollowupHiddenCols([]);
+        setQuotationCellEdits({});
+        setQuotationHiddenCols([]);
+        setLetterRefCellEdits({});
+        setLetterRefHiddenCols([]);
     };
 
     const openLetterWizard = async () => {
@@ -3738,7 +3857,6 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         setShowLetterWizard(true);
         fetchLetterFormatsForWizard();
 
-        if (!logoImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_LOGO_IMG); if (d) setLogoImgDataUrl(d); }
         if (!headerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_HEADER_IMG); if (d) setHeaderImgDataUrl(d); }
         if (!footerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_FOOTER_IMG); if (d) setFooterImgDataUrl(d); }
 
@@ -3775,11 +3893,31 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         }
     };
 
-    const prepareLetterFields = () => {
+    // Always re-pull the live per-format sequence from the backend (read-only count,
+    // never creates a row) so the number is correct even right after a customer change.
+    const fetchLetterSequenceForFormat = async () => {
+        if (!customerDetails?.instance_id || !selectedLetterFormat?.id) return null;
+        try {
+            const res = await fetch(
+                `${API_BASE_URL}/v1/engagement/letter/next-ref?instance_id=${encodeURIComponent(customerDetails.instance_id)}&format_type_id=${selectedLetterFormat.id}`
+            );
+            if (res.ok) {
+                const d = await res.json();
+                setLetterFy(d.financial_year);
+                setLetterSeq(d.sequence);
+                setPreviousLetters(d.previous_letters || []);
+                return { fy: d.financial_year, seq: d.sequence };
+            }
+        } catch (e) { /* non-blocking */ }
+        return null;
+    };
+
+    const prepareLetterFields = (explicitSeq, explicitFy) => {
         const v = getLetterValues();
         const fmt = selectedLetterFormat;
-        const seq = letterSeq || 1;
-        const refNo = buildLetterReference(fmt, v, seq);
+        const seq = (explicitSeq !== undefined && explicitSeq !== null) ? explicitSeq : (letterSeq || 1);
+        const fy = (explicitFy !== undefined && explicitFy !== null) ? explicitFy : letterFy;
+        const refNo = buildLetterReference(fmt, v, seq, fy);
         setLetterRefNo(refNo);
 
         const startPara = (fmt && fmt.start_para && fmt.start_para.trim())
@@ -3809,16 +3947,28 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         }));
     };
 
-    const goToLetterStep = (step) => {
+    const goToLetterStep = async (step) => {
         if (step >= 2 && !selectedLetterFormat) {
             toast.error('Please select a Format Type first');
             return;
         }
-        if (step === 2) prepareLetterFields();
+        if (step === 2) {
+            setLetterStepLoading(true);                            // show spinner
+            const fresh = await fetchLetterSequenceForFormat();   // get the latest number NOW
+            prepareLetterFields(fresh?.seq, fresh?.fy);           // build ref from that, not stale state
+            const allow = getAllowedEngagementToggles();
+            if (!allow.followups) { setIncludeFollowups(false); setSelectedFollowupIds([]); }
+            if (!allow.quotations) { setIncludeQuotations(false); setSelectedQuotationIds([]); }
+            if (!allow.letterrefs) { setIncludeLetterRefs(false); setSelectedLetterRefIds([]); }
+            setLetterStepLoading(false);                           // hide spinner
+        }
         if (step === 3) {
             if (!letterFields.subject && !letterFields.start_para) prepareLetterFields();
             setLetterEmailTo(customerDetails?.email || '');
             setLetterWhatsappTo(String(customerDetails?.phone_number || ''));
+            // Default the (editable) PDF file name from the subject; keep any name the user already typed
+            setLetterFileName(prev => (prev && prev.trim()) ? prev : (letterFields.subject || letterFields.ref_no || 'Letter'));
+            prefillDefaultRecipients();   // <-- THIS line is what loads branch email + rule emails into CC
         }
         setLetterStep(step);
     };
@@ -3848,11 +3998,28 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     const letterRefOptions = () =>
         (letterHistory || []).filter(l => !editingLetterRecordId || l.id !== editingLetterRecordId);
 
+    const addToEmail = () => {
+        const e = letterToInput.trim();
+        if (!e) return;
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) { toast.error('Enter a valid email'); return; }
+        const lo = e.toLowerCase();
+        if (lo === (letterEmailTo || '').toLowerCase()
+            || letterToList.some(x => x.toLowerCase() === lo)) { toast.error('Email already added'); return; }
+        // if it was sitting in CC, move it to To
+        setLetterCcList(prev => prev.filter(x => x.toLowerCase() !== lo));
+        setLetterToList(prev => [...prev, e]);
+        setLetterToInput('');
+    };
+    const removeToEmail = (i) => setLetterToList(prev => prev.filter((_, idx) => idx !== i));
+
     const addCcEmail = () => {
         const e = letterCcInput.trim();
         if (!e) return;
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) { toast.error('Enter a valid email'); return; }
-        if (e === letterEmailTo || letterCcList.includes(e)) { toast.error('Email already added'); return; }
+        const lo = e.toLowerCase();
+        if (lo === (letterEmailTo || '').toLowerCase()
+            || letterCcList.some(x => x.toLowerCase() === lo)
+            || letterToList.some(x => x.toLowerCase() === lo)) { toast.error('Email already added'); return; }
         setLetterCcList(prev => [...prev, e]);
         setLetterCcInput('');
     };
@@ -3871,74 +4038,223 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         String(s == null ? '' : s)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+    // ==================== Step-2 editable letter tables / References ====================
+    // editable = inline-editable cell; removable = can be hidden from THIS letter via ✕
+    // (the underlying data is never deleted).
+    const LETTER_FOLLOWUP_COLS = [
+        { key: 'date', label: 'Date', editable: false, removable: false },
+        { key: 'drive', label: 'Drive', editable: true, removable: true },
+        { key: 'status', label: 'Drive Status', editable: true, removable: true },
+        { key: 'product', label: 'Service/Product', editable: true, removable: true },
+        { key: 'employee', label: 'Employee', editable: true, removable: true },
+        { key: 'mode', label: 'Follow-up By', editable: true, removable: true },
+        { key: 'remark', label: 'Remark', editable: true, removable: true },
+    ];
+    const LETTER_QUOTATION_COLS = [
+        { key: 'quote_no', label: 'Quote No', editable: true, removable: true },
+        { key: 'date', label: 'Date', editable: false, removable: false },
+        { key: 'value', label: 'Value', editable: false, removable: false },
+        { key: 'product', label: 'Product', editable: true, removable: true },
+        { key: 'employee', label: 'Employee', editable: true, removable: true },
+    ];
+    const LETTER_REF_COLS = [
+        { key: 'ref_no', label: 'Ref No', editable: false, removable: true },
+        { key: 'format', label: 'Format Type', editable: true, removable: true },
+        { key: 'channels', label: 'Channels', editable: true, removable: true },
+        { key: 'date', label: 'Date', editable: false, removable: true },
+        { key: 'sent_by', label: 'Sent By', editable: true, removable: true },
+    ];
+
+    const _ld = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+    const _followupStatusLabel = (s) =>
+        s === 'not_connected' ? 'Not Connected'
+            : s === 'rescheduled' ? 'Rescheduled'
+                : s === 'wip' ? 'WIP'
+                    : s === 'completed' ? 'Completed'
+                        : s === 'rejected' ? 'Rejected'
+                            : (s || '-');
+
+    // ----- raw (pre-edit) cell values -----
+    const followupCellRaw = (fu, k) => {
+        switch (k) {
+            case 'date': return _ld(fu.followup_date);
+            case 'drive': return fu.campaign_name || '-';
+            case 'status': return _followupStatusLabel(fu.status);
+            case 'product': return fu.campaign_service || fu.campaign_name || '-';
+            case 'employee': return fu.user_name || '-';
+            case 'mode': return fu.followup_by || '-';
+            case 'remark': return fu.followup_remark || '-';
+            default: return '-';
+        }
+    };
+    const quotationCellRaw = (q, k) => {
+        switch (k) {
+            case 'quote_no': return q.quotation_no || '-';
+            case 'date': return _ld(q.followup_date);
+            case 'value': return q.quotation_value ? '₹' + Number(q.quotation_value).toLocaleString('en-IN') : '-';
+            case 'product': return q.campaign_service || q.campaign_name || '-';
+            case 'employee': return q.user_name || '-';
+            default: return '-';
+        }
+    };
+    const letterRefCellRaw = (l, k) => {
+        switch (k) {
+            case 'ref_no': return l.ref_no || '-';
+            case 'format': return l.format_type_name || '-';
+            case 'channels': return letterRefChannelText(l);
+            case 'date': return _ld(l.created_at);
+            case 'sent_by': return l.sent_by_name || '-';
+            default: return '-';
+        }
+    };
+
+    // ----- edited-or-raw cell values -----
+    const followupCellValue = (fu, k) => { const e = followupCellEdits[fu.id]?.[k]; return (e !== undefined && e !== null) ? e : followupCellRaw(fu, k); };
+    const quotationCellValue = (q, k) => { const e = quotationCellEdits[q.id]?.[k]; return (e !== undefined && e !== null) ? e : quotationCellRaw(q, k); };
+    const letterRefCellValue = (l, k) => { const e = letterRefCellEdits[l.id]?.[k]; return (e !== undefined && e !== null) ? e : letterRefCellRaw(l, k); };
+
+    // ----- per-table cell setters -----
+    const setFollowupCell = (id, k, v) => setFollowupCellEdits(p => ({ ...p, [id]: { ...(p[id] || {}), [k]: v } }));
+    const setQuotationCell = (id, k, v) => setQuotationCellEdits(p => ({ ...p, [id]: { ...(p[id] || {}), [k]: v } }));
+    const setLetterRefCell = (id, k, v) => setLetterRefCellEdits(p => ({ ...p, [id]: { ...(p[id] || {}), [k]: v } }));
+
+    // ----- visible (not-hidden) columns -----
+    const visibleFollowupCols = () => LETTER_FOLLOWUP_COLS.filter(c => !followupHiddenCols.includes(c.key));
+    const visibleQuotationCols = () => LETTER_QUOTATION_COLS.filter(c => !quotationHiddenCols.includes(c.key));
+    const visibleLetterRefCols = () => LETTER_REF_COLS.filter(c => !letterRefHiddenCols.includes(c.key));
+
+    // ----- selected rows -----
+    const selectedFollowupRows = () => (customerFollowups || []).filter(f => selectedFollowupIds.includes(f.id));
+    const selectedQuotationRows = () => (customerFollowups || []).filter(f => selectedQuotationIds.includes(f.id) && f.quotation_sent);
+    const selectedLetterRefRows = () => letterRefOptions().filter(l => selectedLetterRefIds.includes(l.id));
+
+    // ----- References rows: instance_id locked & permanent; everything else editable + removable -----
+    const getLetterReferenceRows = () => {
+        const map = getCustomerDetailFieldMap();
+        const keys = getSelectedCustomerDetailKeys();
+        const rows = [];
+        keys.forEach(k => {
+            if (!map[k]) return;
+            const isInstance = k === 'instance_id';
+            rows.push({ key: k, label: map[k].label, value: map[k].value, editable: !isInstance, removable: !isInstance });
+        });
+        if (isCspLetter() && getCspSubtypes()) {
+            const cspRow = { key: 'csp_subtype', label: 'SR Subtype', value: getCspSubtypes(), editable: true, removable: true };
+            const idx = rows.findIndex(r => r.key === 'instance_id');
+            if (idx >= 0) rows.splice(idx + 1, 0, cspRow); else rows.unshift(cspRow);
+        }
+        return rows;
+    };
+    const letterRefFieldValue = (key, raw) => {
+        const e = letterRefFieldValues[key];
+        return (e !== undefined && e !== null) ? e : raw;
+    };
+
+    // ----- generic editable table used by all three blocks in Step 2 -----
+    const renderLetterEditTable = ({ cols, hiddenCols, setHiddenCols, rows, rowId, getCell, onCellChange, emptyText }) => {
+        const visible = cols.filter(c => !hiddenCols.includes(c.key));
+        const hidden = cols.filter(c => hiddenCols.includes(c.key));
+        if (rows.length === 0) return <p className="text-[10px] text-gray-400 mt-1">{emptyText}</p>;
+        return (
+            <div className="mt-1">
+                <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                    <table className="w-full text-[11px]">
+                        <thead className="bg-gray-100">
+                            <tr>
+                                {visible.map(c => (
+                                    <th key={c.key} className="px-2 py-1 text-left font-semibold text-black border-r border-gray-200 whitespace-nowrap">
+                                        <span className="inline-flex items-center gap-1">
+                                            {c.label}
+                                            {c.removable && (
+                                                <button type="button" title={`Remove "${c.label}" from this letter`}
+                                                    onClick={() => setHiddenCols(prev => [...prev, c.key])}
+                                                    className="text-gray-400 hover:text-red-600">
+                                                    <XMarkIcon className="h-3 w-3" />
+                                                </button>
+                                            )}
+                                        </span>
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {rows.map(row => {
+                                const id = rowId(row);
+                                return (
+                                    <tr key={id} className="border-t border-gray-100">
+                                        {visible.map(c => (
+                                            <td key={c.key} className="px-1.5 py-1 border-r border-gray-100 align-middle">
+                                                {c.editable ? (
+                                                    <input value={getCell(row, c.key)}
+                                                        onChange={(e) => onCellChange(id, c.key, e.target.value)}
+                                                        className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-[11px] text-black" />
+                                                ) : (
+                                                    <span className="text-black">{getCell(row, c.key)}</span>
+                                                )}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+                {hidden.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                        <span className="text-[10px] text-gray-500">Hidden:</span>
+                        {hidden.map(c => (
+                            <button key={c.key} type="button"
+                                onClick={() => setHiddenCols(prev => prev.filter(k => k !== c.key))}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-dashed border-gray-300 text-[10px] text-gray-600 hover:bg-gray-50">
+                                <PlusIcon className="h-2.5 w-2.5" /> {c.label}
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
     const buildFollowupLetterHtml = () => {
-        const items = (customerFollowups || []).filter(f => selectedFollowupIds.includes(f.id));
-        if (items.length === 0) return '';
-        const fd = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
-        const rows = items.map(fu => `<tr>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(fd(fu.followup_date))}</td>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(fu.campaign_service || fu.campaign_name || '-')}</td>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;text-transform:capitalize;">${escapeLetterHtml(fu.followup_by || '-')}</td>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(fu.user_name || '-')}</td>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(fu.followup_remark || '-')}</td>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(fd(fu.next_followup_date))}</td>
-      </tr>`).join('');
+        const items = selectedFollowupRows();
+        const cols = visibleFollowupCols();
+        if (items.length === 0 || cols.length === 0) return '';
+        const th = cols.map(c => `<th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">${escapeLetterHtml(c.label)}</th>`).join('');
+        const rows = items.map(fu => `<tr>${cols.map(c => `<td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(followupCellValue(fu, c.key))}</td>`).join('')}</tr>`).join('');
         return `<div style="margin-top:12px;font-size:13px;line-height:1.7;">${escapeLetterHtml(letterFields.followup_intro)}</div>
       <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:11px;">
-        <thead><tr style="background:#f3f4f6;">
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Date</th>
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Product</th>
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Mode</th>
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Employee</th>
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Remark</th>
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Next Follow-up</th>
-        </tr></thead>
+        <thead><tr style="background:#f3f4f6;">${th}</tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
     };
 
     const buildQuotationLetterHtml = () => {
-        const items = (customerFollowups || []).filter(f => selectedQuotationIds.includes(f.id) && f.quotation_sent);
-        if (items.length === 0) return '';
-        const fd = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
-        const rows = items.map(q => `<tr>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(q.quotation_no || '-')}</td>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(fd(q.followup_date))}</td>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(q.campaign_service || q.campaign_name || '-')}</td>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(q.user_name || '-')}</td>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;text-align:right;">${q.quotation_value ? '₹' + Number(q.quotation_value).toLocaleString('en-IN') : '-'}</td>
-      </tr>`).join('');
+        const items = selectedQuotationRows();
+        const cols = visibleQuotationCols();
+        if (items.length === 0 || cols.length === 0) return '';
+        const th = cols.map(c => `<th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">${escapeLetterHtml(c.label)}</th>`).join('');
+        const rows = items.map(q => `<tr>${cols.map(c => `<td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(quotationCellValue(q, c.key))}</td>`).join('')}</tr>`).join('');
         return `<div style="margin-top:12px;font-size:13px;line-height:1.7;">${escapeLetterHtml(letterFields.quotation_intro)}</div>
       <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:11px;">
-        <thead><tr style="background:#f3f4f6;">
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Quotation No.</th>
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Date</th>
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Product</th>
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Employee</th>
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:right;">Value</th>
-        </tr></thead>
+        <thead><tr style="background:#f3f4f6;">${th}</tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
     };
 
     const buildFollowupLetterText = () => {
-        const items = (customerFollowups || []).filter(f => selectedFollowupIds.includes(f.id));
-        if (items.length === 0) return '';
-        const fd = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+        const items = selectedFollowupRows();
+        const cols = visibleFollowupCols();
+        if (items.length === 0 || cols.length === 0) return '';
         let out = `\n\n${letterFields.followup_intro}`;
-        items.forEach((fu, i) => {
-            out += `\n${i + 1}. ${fd(fu.followup_date)} | ${fu.campaign_service || fu.campaign_name || '-'} | ${fu.followup_by || '-'} | ${fu.user_name || '-'} | ${fu.followup_remark || '-'} | Next: ${fd(fu.next_followup_date)}`;
-        });
+        items.forEach((fu, i) => { out += `\n${i + 1}. ` + cols.map(c => `${c.label}: ${followupCellValue(fu, c.key)}`).join(' | '); });
         return out;
     };
     const buildQuotationLetterText = () => {
-        const items = (customerFollowups || []).filter(f => selectedQuotationIds.includes(f.id) && f.quotation_sent);
-        if (items.length === 0) return '';
-        const fd = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+        const items = selectedQuotationRows();
+        const cols = visibleQuotationCols();
+        if (items.length === 0 || cols.length === 0) return '';
         let out = `\n\n${letterFields.quotation_intro}`;
-        items.forEach((q, i) => {
-            out += `\n${i + 1}. ${q.quotation_no || '-'} dated ${fd(q.followup_date)} | ${q.campaign_service || q.campaign_name || '-'} | ${q.user_name || '-'} | ${q.quotation_value ? '₹' + Number(q.quotation_value).toLocaleString('en-IN') : '-'}`;
-        });
+        items.forEach((q, i) => { out += `\n${i + 1}. ` + cols.map(c => `${c.label}: ${quotationCellValue(q, c.key)}`).join(' | '); });
         return out;
     };
 
@@ -3949,80 +4265,207 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         return chs.map(c => (c === 'email' ? 'Email' : c === 'whatsapp' ? 'WhatsApp' : c)).join(', ');
     };
 
-    // Table: Ref No | Format Type | Channels | Date | Sent By (wording is the editable intro above)
+    // Table: Ref No | Format Type | Channels | Date | Sent By — Ref No + Date locked; columns removable
     const buildLetterRefHtml = () => {
-        const items = letterRefOptions().filter(l => selectedLetterRefIds.includes(l.id));
-        if (items.length === 0) return '';
-        const fd = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
-        const rows = items.map(l => `<tr>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(l.ref_no || '-')}</td>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(l.format_type_name || '-')}</td>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(letterRefChannelText(l))}</td>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(fd(l.created_at))}</td>
-        <td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(l.sent_by_name || '-')}</td>
-      </tr>`).join('');
+        const items = selectedLetterRefRows();
+        const cols = visibleLetterRefCols();
+        if (items.length === 0 || cols.length === 0) return '';
+        const th = cols.map(c => `<th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">${escapeLetterHtml(c.label)}</th>`).join('');
+        const rows = items.map(l => `<tr>${cols.map(c => `<td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(letterRefCellValue(l, c.key))}</td>`).join('')}</tr>`).join('');
         return `<div style="margin-top:12px;font-size:13px;line-height:1.7;">${escapeLetterHtml(letterFields.letterref_intro)}</div>
       <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:11px;">
-        <thead><tr style="background:#f3f4f6;">
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Ref No</th>
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Format Type</th>
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Channels</th>
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Date</th>
-          <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Sent By</th>
-        </tr></thead>
+        <thead><tr style="background:#f3f4f6;">${th}</tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
     };
 
     const buildLetterRefText = () => {
-        const items = letterRefOptions().filter(l => selectedLetterRefIds.includes(l.id));
-        if (items.length === 0) return '';
-        const fd = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+        const items = selectedLetterRefRows();
+        const cols = visibleLetterRefCols();
+        if (items.length === 0 || cols.length === 0) return '';
         let out = `\n\n${letterFields.letterref_intro}`;
-        items.forEach((l, i) => {
-            out += `\n${i + 1}. ${l.ref_no || '-'} | ${l.format_type_name || '-'} | ${letterRefChannelText(l)} | ${fd(l.created_at)} | ${l.sent_by_name || '-'}`;
-        });
+        items.forEach((l, i) => { out += `\n${i + 1}. ` + cols.map(c => `${c.label}: ${letterRefCellValue(l, c.key)}`).join(' | '); });
         return out;
     };
 
-    const buildLetterHtml = (pinFooter = false, omitFooter = false) => {
+    // Keys MUST match Campaign.jsx → CUSTOMER_DETAIL_OPTIONS exactly
+    const CUSTOMER_FIELD_LABELS = {
+        instance_id: 'Instance ID',
+        account_name: 'Account Name',
+        kva_rating: 'KVA Rating',
+        commissioning_date: 'Commissioning Date',
+        application_code: 'Application Code',
+        engine_no: 'Engine No.',
+        engine_model: 'Engine Model',
+        warranty_expiry: 'Warranty Expiry',
+        product_segment: 'Product Segment',
+        engine_series: 'Engine Series',
+        segment: 'Segment',
+    };
+
+    // key -> { label, value }, from ALREADY-loaded customer data
+    const getCustomerDetailFieldMap = () => {
+        const v = getLetterValues();
+        const asset = customerCompleteData?.asset_detailed?.[0] || {};
+        const openSR = customerCompleteData?.open_sr_load_reports?.[0] || {}; // engine_series lives here
+        const fmtD = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+        const val = {
+            instance_id: v.instance_id,
+            account_name: asset.account_name || '',
+            kva_rating: v.kva || asset.kva_rating || '',
+            commissioning_date: fmtD(asset.commissioning_date),
+            application_code: asset.application_code || '',
+            engine_no: asset.engine_serial_no || '',          // master key "engine_no" -> asset.engine_serial_no
+            engine_model: v.engine_with_kva || v.engine_model || '',
+            warranty_expiry: v.warranty_expiry || '',
+            product_segment: asset.product_segment || '',
+            engine_series: openSR.engine_series || '',         // master key "engine_series" -> open_sr_load_reports
+            segment: asset.segment || '',
+        };
+        const map = {};
+        Object.keys(CUSTOMER_FIELD_LABELS).forEach(k => {
+            map[k] = { label: CUSTOMER_FIELD_LABELS[k], value: val[k] || '' };
+        });
+        return map;
+    };
+
+    // Which customer keys the format wants in the "References" block (falls back to legacy 3).
+    const getSelectedCustomerDetailKeys = () => {
+        const keys = selectedLetterFormat?.customer_detail_fields;
+        if (Array.isArray(keys) && keys.length > 0) return keys;
+        return ['instance_id', 'engine_model', 'agreement_no'];
+    };
+
+    // engagement_detail_fields key -> which include toggle it controls
+    const ENGAGEMENT_FIELD_TO_TOGGLE = {
+        followup_history: 'followups', quotation_history: 'quotations',
+        letter_history: 'letterrefs', letterref: 'letterrefs',
+    };
+    const getAllowedEngagementToggles = () => {
+        const keys = selectedLetterFormat?.engagement_detail_fields;
+        if (!Array.isArray(keys) || keys.length === 0) {
+            return { followups: true, quotations: true, letterrefs: true };
+        }
+        const allow = { followups: false, quotations: false, letterrefs: false };
+        keys.forEach(k => {
+            const t = ENGAGEMENT_FIELD_TO_TOGGLE[(k || '').toLowerCase()];
+            if (t) allow[t] = true;
+        });
+        return allow;
+    };
+
+    // "References" inner HTML — built from the editable rows, skipping any the user removed
+    const buildReferencesHtml = () => {
+        const rows = getLetterReferenceRows().filter(r => !letterRefHiddenFields.includes(r.key));
+        const parts = [];
+        rows.forEach(r => { const v = letterRefFieldValue(r.key, r.value); if (v) parts.push(`${escapeLetterHtml(r.label)}: ${escapeLetterHtml(v)}`); });
+        if (parts.length === 0) return '';
+        return `<div style="margin-top:6px;color:#333;font-size:12px;"><strong>References:</strong> ${parts.join(' &nbsp;|&nbsp; ')}</div>`;
+    };
+
+    const buildReferencesText = () => {
+        const rows = getLetterReferenceRows().filter(r => !letterRefHiddenFields.includes(r.key));
+        const parts = [];
+        rows.forEach(r => { const v = letterRefFieldValue(r.key, r.value); if (v) parts.push(`${r.label}: ${v}`); });
+        return parts.join(' | ');
+    };
+
+    // Prefill To/CC from format master default_recipients + branch_email_master
+    const prefillDefaultRecipients = async () => {
+        if (!selectedLetterFormat?.id) return;
+        const branchId = customerDetails?.branch_id || '';
+        const customerEmailLower = (customerDetails?.email || '').trim().toLowerCase();
+
+        // GOEM/OEM only when it's a real GOEM (CSP info). Anything else (dealer/account
+        // names from asset rows) must NOT be sent — it can never equal a rule's GOEM and
+        // would wrongly filter out blank-GOEM rules. Send blank so those rules still apply.
+        const goem = isCspLetter() ? (cspInfo?.[0]?.goem_oem || '') : '';
+
+        try {
+            const res = await fetch(
+                `${API_BASE_URL}/v1/engagement/letter/default-recipients` +
+                `?format_type_id=${selectedLetterFormat.id}` +
+                `&branch_id=${encodeURIComponent(branchId)}` +
+                `&goem_oem=${encodeURIComponent(goem)}`
+            );
+            if (!res.ok) return;
+            const d = await res.json();
+
+            const masterTo = (d.to_emails || []).map(e => (e || '').trim()).filter(Boolean);
+            // backend already appended the branch_email_master address into cc_emails
+            const masterCc = (d.cc_emails || []).map(e => (e || '').trim()).filter(Boolean);
+            setLetterMatchedGoems(d.goems || []);
+
+            const primaryTo = customerDetails?.email || '';
+            const primaryToLower = primaryTo.trim().toLowerCase();
+
+            // Rule To emails -> the To LIST (real To recipients, alongside the customer).
+            // Drop the customer's own address to avoid duplication.
+            const toIncoming = masterTo.filter(e => {
+                const lo = e.toLowerCase();
+                return lo !== primaryToLower && lo !== customerEmailLower;
+            });
+            if (toIncoming.length > 0) {
+                setLetterToList(prev => {
+                    const merged = [...prev];
+                    toIncoming.forEach(e => {
+                        if (!merged.some(x => x.toLowerCase() === e.toLowerCase())) merged.push(e);
+                    });
+                    return merged;
+                });
+            }
+
+            // Rule CC emails (incl. branch_email_master) -> the CC list. Skip anything
+            // already sitting in To (primary or the extra-To list).
+            const toListLower = new Set(toIncoming.map(e => e.toLowerCase()));
+            const ccIncoming = masterCc.filter(e => {
+                const lo = e.toLowerCase();
+                return lo !== primaryToLower && lo !== customerEmailLower && !toListLower.has(lo);
+            });
+            if (ccIncoming.length > 0) {
+                setLetterCcList(prev => {
+                    const merged = [...prev];
+                    ccIncoming.forEach(e => {
+                        if (!merged.some(x => x.toLowerCase() === e.toLowerCase())) merged.push(e);
+                    });
+                    return merged;
+                });
+            }
+        } catch (e) { /* non-blocking */ }
+    };
+
+    const buildLetterHtml = (pinFooter = false, omitFooter = false, omitHeader = false) => {
         const f = letterFields;
         const followupBlock = includeFollowups ? buildFollowupLetterHtml() : '';
         const quotationBlock = includeQuotations ? buildQuotationLetterHtml() : '';
         const letterrefBlock = includeLetterRefs ? buildLetterRefHtml() : '';
-        const cspSub = isCspLetter() ? getCspSubtypes() : '';
 
-        // Header: logo.png (left) + letter-header.png (right). Table layout = email-client safe.
-        const headerBlock = (logoImgDataUrl || headerImgDataUrl)
-            ? `<table style="width:100%;border-collapse:collapse;border-bottom:2px solid ${themeColor};">
-                 <tr>
-                   <td style="padding:12px 24px;text-align:left;vertical-align:middle;width:50%;">
-                     ${logoImgDataUrl ? `<img src="${logoImgDataUrl}" alt="${escapeLetterHtml(COMPANY_NAME)}" style="height:80px;width:auto;display:inline-block;" />` : ''}
-                   </td>
-                   <td style="padding:12px 24px;text-align:right;vertical-align:middle;width:50%;">
-                     ${headerImgDataUrl ? `<img src="${headerImgDataUrl}" alt="${escapeLetterHtml(COMPANY_FULL)}" style="height:80px;width:auto;display:inline-block;" />` : ''}
-                   </td>
-                 </tr>
-               </table>`
-            : `<div style="border-bottom:2px solid ${themeColor};padding:0 28px 10px;font-size:18px;font-weight:700;color:${themeColor};">${escapeLetterHtml(COMPANY_NAME)}</div>`;
+        // Header band: single full-width letterhead image (already contains KALA logo + kirloskar care).
+        // omitHeader=true → render NO header in the flow (print/PDF stamp the band on EVERY page instead,
+        // so it repeats when the letter spills onto more pages).
+        const headerBlock = omitHeader
+            ? ''
+            : (headerImgDataUrl
+                ? `<img src="${headerImgDataUrl}" alt="${escapeLetterHtml(COMPANY_FULL)}" style="display:block;width:100%;max-width:780px;height:auto;margin:0 auto;" />`
+                : `<div style="border-bottom:2px solid ${themeColor};padding:0 28px 10px;font-size:18px;font-weight:700;color:${themeColor};">${escapeLetterHtml(COMPANY_NAME)}</div>`);
 
         return `
 <div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:780px;margin:0 auto;${pinFooter ? 'min-height:1040px;display:flex;flex-direction:column;' : ''}">
   ${headerBlock}
 
-  <div style="padding:18px 28px 24px;">
-    <div style="font-size:12px;line-height:1.7;margin-bottom:14px;">
-      <div><strong>Ref No:</strong> ${escapeLetterHtml(f.ref_no)}</div>
-      <div><strong>Date:</strong> ${escapeLetterHtml(fmtDisplayDate(f.date))}</div>
-    </div>
+  <div style="padding:6px 28px 24px;">
+    <table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12px;line-height:1.7;">
+      <tr>
+        <td style="text-align:left;vertical-align:top;"><strong>Ref No:</strong> ${escapeLetterHtml(f.ref_no)}</td>
+        <td style="text-align:right;vertical-align:top;white-space:nowrap;"><strong>Date:</strong> ${escapeLetterHtml(fmtDisplayDate(f.date))}</td>
+      </tr>
+    </table>
 
     <div style="font-size:13px;line-height:1.6;margin-bottom:12px;">
       <div><strong>To,</strong></div>
       <div>${escapeLetterHtml(f.to_name)}</div>
       <div style="white-space:pre-wrap;">${escapeLetterHtml(f.to_address)}</div>
-      <div style="margin-top:6px;color:#333;font-size:12px;">
-        Instance ID: ${escapeLetterHtml(f.instance_id)}${cspSub ? ` &nbsp;|&nbsp; SR Subtype: ${escapeLetterHtml(cspSub)}` : ''}${f.engine_model ? ` &nbsp;|&nbsp; Engine Model: ${escapeLetterHtml(f.engine_model)}` : ''}${f.agreement_no ? `<br/>Agreement No: ${escapeLetterHtml(f.agreement_no)}` : ''}
-      </div>
+      ${buildReferencesHtml()}
     </div>
 
     <div style="font-size:13px;margin-bottom:12px;"><strong>Subject:</strong> ${escapeLetterHtml(f.subject)}</div>
@@ -4052,7 +4495,7 @@ Ref No: ${f.ref_no}   Date: ${fmtDisplayDate(f.date)}
 To,
 ${f.to_name}
 ${f.to_address}
-Instance ID: ${f.instance_id}${f.engine_model ? ` | Engine Model: ${f.engine_model}` : ''}
+References: ${buildReferencesText()}
 
 Subject: ${f.subject}
 
@@ -4076,24 +4519,31 @@ ${f.start_para}`;
                 await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
             }
 
-            // Footer height (px at the 780px letter width) so we reserve space and never overlap it.
-            let footerPx = 0;
-            if (footerImgDataUrl) {
-                try {
-                    const f = await loadHtmlImage(footerImgDataUrl);
-                    if (f.width) footerPx = Math.round(780 * (f.height / f.width));
-                } catch (e) { footerPx = 0; }
-            }
+            // Work entirely in REAL A4 millimetres so nothing scales/clips at print time.
+            const LETTER_W = 780;            // render width (css px) of the body capture
+            const PAGE_W_MM = 210;
+            const PAGE_H_MM = 297;
+            const SAFE_MM = 4;               // tiny safety margin so edges never clip
 
-            // Render the letter BODY only (footer omitted from the flow).
+            // Band heights in mm (each image spans the full page width).
+            let headerMm = 0, footerMm = 0;
+            if (headerImgDataUrl) {
+                try { const h = await loadHtmlImage(headerImgDataUrl); if (h.width) headerMm = PAGE_W_MM * (h.height / h.width); } catch (e) { headerMm = 0; }
+            }
+            if (footerImgDataUrl) {
+                try { const f = await loadHtmlImage(footerImgDataUrl); if (f.width) footerMm = PAGE_W_MM * (f.height / f.width); } catch (e) { footerMm = 0; }
+            }
+            // Usable body height per page (mm), leaving the bands + a small safe gap.
+            const bodyRegionMm = Math.max(40, PAGE_H_MM - headerMm - footerMm - SAFE_MM);
+
+            // Render the letter BODY only (no header, no footer in the flow).
             holder = document.createElement('div');
             holder.style.position = 'fixed';
             holder.style.left = '-10000px';
             holder.style.top = '0';
-            holder.style.width = '780px';
+            holder.style.width = `${LETTER_W}px`;
             holder.style.background = '#ffffff';
-            holder.innerHTML = buildLetterHtml(false, true);
-            if (footerPx) holder.style.paddingBottom = `${footerPx + 16}px`;
+            holder.innerHTML = buildLetterHtml(false, true, true);
             document.body.appendChild(holder);
 
             const innerImgs = Array.from(holder.querySelectorAll('img'));
@@ -4104,33 +4554,41 @@ ${f.start_para}`;
             document.body.removeChild(holder);
             holder = null;
 
-            // Slice the body into A4-sized page images.
-            const pageWpx = canvas.width;
-            const pageHpx = Math.round(pageWpx * (297 / 210)); // A4 aspect
-            const totalPages = Math.max(1, Math.ceil(canvas.height / pageHpx));
-            const pageImgs = [];
+            // Captured-pixels ↔ mm relationship: the canvas width == PAGE_W_MM across the page.
+            const pxPerMm = canvas.width / PAGE_W_MM;
+            const sliceHpx = Math.max(1, Math.floor(bodyRegionMm * pxPerMm));  // body px per page
+            const totalPages = Math.max(1, Math.ceil(canvas.height / sliceHpx));
+
+            const headerHtml = (headerImgDataUrl && headerMm > 0)
+                ? `<img src="${headerImgDataUrl}" style="position:absolute;top:0;left:0;width:${PAGE_W_MM}mm;height:${headerMm}mm;display:block;" />`
+                : '';
+            const footerHtml = (footerImgDataUrl && footerMm > 0)
+                ? `<img src="${footerImgDataUrl}" style="position:absolute;bottom:0;left:0;width:${PAGE_W_MM}mm;height:${footerMm}mm;display:block;" />`
+                : '';
+
+            // One real A4 page (in mm) per div: header pinned top, body slice between bands, footer pinned bottom.
+            const pageDivs = [];
             for (let p = 0; p < totalPages; p++) {
-                const sliceH = Math.min(pageHpx, canvas.height - p * pageHpx);
+                const sourceY = p * sliceHpx;
+                const thisSliceHpx = Math.min(sliceHpx, canvas.height - sourceY);
                 const c = document.createElement('canvas');
-                c.width = pageWpx;
-                c.height = pageHpx;
+                c.width = canvas.width;
+                c.height = thisSliceHpx;
                 const ctx = c.getContext('2d');
                 ctx.fillStyle = '#ffffff';
                 ctx.fillRect(0, 0, c.width, c.height);
-                ctx.drawImage(canvas, 0, p * pageHpx, pageWpx, sliceH, 0, 0, pageWpx, sliceH);
-                pageImgs.push(c.toDataURL('image/jpeg', 0.92));
+                ctx.drawImage(canvas, 0, sourceY, canvas.width, thisSliceHpx, 0, 0, canvas.width, thisSliceHpx);
+                const sliceData = c.toDataURL('image/jpeg', 0.92);
+                const sliceHmm = thisSliceHpx / pxPerMm;
+
+                pageDivs.push(`
+                    <div style="position:relative;width:${PAGE_W_MM}mm;height:${PAGE_H_MM}mm;background:#fff;overflow:hidden;page-break-after:${p < totalPages - 1 ? 'always' : 'auto'};">
+                        ${headerHtml}
+                        <img src="${sliceData}" style="position:absolute;top:${headerMm}mm;left:0;width:${PAGE_W_MM}mm;height:${sliceHmm}mm;display:block;" />
+                        ${footerHtml}
+                    </div>`);
             }
-
-            // Footer image -> bottom of the LAST page only.
-            const footerOnLast = footerImgDataUrl
-                ? `<img src="${footerImgDataUrl}" style="position:absolute;left:0;bottom:0;width:100%;display:block;" />`
-                : '';
-
-            const pagesHtml = pageImgs.map((src, i) => `
-          <div style="position:relative;width:100%;page-break-after:${i < pageImgs.length - 1 ? 'always' : 'auto'};">
-            <img src="${src}" style="display:block;width:100%;" />
-            ${i === pageImgs.length - 1 ? footerOnLast : ''}
-          </div>`).join('');
+            const pagesHtml = pageDivs.join('');
 
             // Attachment pages after the letter (image full-width, PDF page-by-page).
             let attHtml = '';
@@ -4138,11 +4596,11 @@ ${f.start_para}`;
 
             toast.dismiss(t);
             if (!w || w.closed) return;
-            try { w.document.title = escapeLetterHtml(letterFields.ref_no || 'Letter'); } catch (e) { }
+            try { w.document.title = escapeLetterHtml(letterFields.subject || letterFields.ref_no || 'Letter'); } catch (e) { }
             w.document.body.style.margin = '0';
             w.document.body.innerHTML =
-                `<style>@page{size:A4;margin:0;}body{margin:0;}</style>
-             <div style="max-width:780px;margin:0 auto;">${pagesHtml}</div>${attHtml}`;
+                `<style>@page{size:A4;margin:0;}html,body{margin:0;padding:0;}img{display:block;}</style>
+             ${pagesHtml}${attHtml}`;
 
             const doPrint = () => { try { w.focus(); w.print(); } catch (e) { } };
             const imgs = w.document.images;
@@ -4160,6 +4618,87 @@ ${f.start_para}`;
             try { if (w && !w.closed) w.close(); } catch (err) { }
             toast.error('Could not prepare the letter for printing');
             console.error('Print letter error:', e);
+        }
+    };
+
+    // ---- Save (download) helpers ----
+    // Default file name = letter subject (sanitized), falling back to "Letter".
+    const safePdfName = (name) => {
+        const base = String(name || 'Letter').trim().replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').slice(0, 120) || 'Letter';
+        return base.toLowerCase().endsWith('.pdf') ? base : `${base}.pdf`;
+    };
+
+    const downloadBase64Pdf = (base64, filename) => {
+        try {
+            const bytes = base64ToUint8Array(base64);
+            const blob = new Blob([bytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            toast.error('Could not save the PDF');
+            console.error('Download PDF error:', e);
+        }
+    };
+
+    // Generic html -> multi-page PDF (used for the stored history letter, whose bands flow inline).
+    const htmlToPdfBase64 = async (html) => {
+        if (!window.html2canvas) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+        if (!window.jspdf) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+        const holder = document.createElement('div');
+        holder.style.position = 'fixed';
+        holder.style.left = '-10000px';
+        holder.style.top = '0';
+        holder.style.width = '780px';
+        holder.style.background = '#ffffff';
+        holder.innerHTML = `<div style="max-width:780px;margin:0 auto;background:#fff;">${html}</div>`;
+        document.body.appendChild(holder);
+        const imgs = Array.from(holder.querySelectorAll('img'));
+        await Promise.all(imgs.map(im => im.complete ? Promise.resolve()
+            : new Promise(res => { im.onload = res; im.onerror = res; })));
+        try {
+            const canvas = await window.html2canvas(holder, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const pageW = pdf.internal.pageSize.getWidth();
+            const pageH = pdf.internal.pageSize.getHeight();
+            const imgW = pageW;
+            const imgH = (canvas.height * imgW) / canvas.width;
+            const imgData = canvas.toDataURL('image/jpeg', 0.92);
+            let heightLeft = imgH;
+            let position = 0;
+            pdf.addImage(imgData, 'JPEG', 0, position, imgW, imgH);
+            heightLeft -= pageH;
+            while (heightLeft > 0) {
+                position -= pageH;
+                pdf.addPage();
+                pdf.addImage(imgData, 'JPEG', 0, position, imgW, imgH);
+                heightLeft -= pageH;
+            }
+            return pdf.output('datauristring').split(',')[1];
+        } finally {
+            document.body.removeChild(holder);
+        }
+    };
+
+    // Save the CURRENT wizard letter as a downloaded PDF (per-page bands). File name = subject.
+    const handleSaveLetterPdf = async () => {
+        const t = toast.loading('Preparing PDF…');
+        try {
+            const b64 = await generateLetterPdfBase64();
+            toast.dismiss(t);
+            if (!b64) { toast.error('Could not generate the PDF'); return; }
+            downloadBase64Pdf(b64, safePdfName(letterFileName || letterFields.subject || letterFields.ref_no));
+            toast.success('Letter PDF downloaded.');
+        } catch (e) {
+            toast.dismiss(t);
+            toast.error('Could not save the PDF');
+            console.error('Downloaded letter PDF error:', e);
         }
     };
     const toggleLetterSendChannel = (ch) =>
@@ -4194,7 +4733,7 @@ ${f.start_para}`;
 
     const handleSendLetter = async () => {
         if (letterChannels.length === 0) { toast.error('Select at least one channel to send'); return; }
-        if (letterChannels.includes('email') && !letterEmailTo.trim()) { toast.error('Enter a recipient email address'); return; }
+        if (letterChannels.includes('email') && !letterEmailTo.trim() && letterToList.length === 0) { toast.error('Enter a recipient email address'); return; }
         if (letterChannels.includes('whatsapp') && !letterWhatsappTo.trim()) { toast.error('Enter a WhatsApp number'); return; }
 
         setLetterSending(true);
@@ -4207,8 +4746,8 @@ ${f.start_para}`;
                 try {
                     const pdfB64 = await generateLetterPdfBase64();
                     if (pdfB64) {
-                        const safeRef = (letterFields.ref_no || 'Letter').replace(/[^\w.-]+/g, '_');
-                        letterPdfAttachment = { name: `Letter_${safeRef}.pdf`, content: pdfB64, type: 'application/pdf' };
+                        // Attachment file name = the editable name from Review & Send (falls back to subject, then ref no)
+                        letterPdfAttachment = { name: safePdfName(letterFileName || letterFields.subject || letterFields.ref_no), content: pdfB64, type: 'application/pdf' };
                     }
                 } catch (pdfErr) {
                     console.error('Letter PDF generation failed:', pdfErr);
@@ -4237,13 +4776,23 @@ ${f.start_para}`;
                     selected_followup_ids: selectedFollowupIds,
                     selected_quotation_ids: selectedQuotationIds,
                     selected_letter_ref_ids: selectedLetterRefIds,
+                    to_emails: letterToList,
                     cc_emails: letterCcList,
-                    whatsapp_numbers: letterWhatsappList
+                    whatsapp_numbers: letterWhatsappList,
+                    letter_ref_field_values: letterRefFieldValues,
+                    letter_ref_hidden_fields: letterRefHiddenFields,
+                    followup_cell_edits: followupCellEdits,
+                    followup_hidden_cols: followupHiddenCols,
+                    quotation_cell_edits: quotationCellEdits,
+                    quotation_hidden_cols: quotationHiddenCols,
+                    letterref_cell_edits: letterRefCellEdits,
+                    letterref_hidden_cols: letterRefHiddenCols
                 },
                 letter_html: buildLetterHtml(),
                 letter_text: buildLetterText(),
                 channels: letterChannels,
                 email_to: letterEmailTo,
+                to_emails: letterToList,
                 cc_emails: letterCcList,
                 whatsapp_to: letterWhatsappTo,
                 whatsapp_numbers: letterWhatsappList,
@@ -4324,6 +4873,7 @@ ${f.start_para}`;
             setLetterChannels(r.channels || []);
             setLetterEmailTo(r.email_to || '');
             setLetterWhatsappTo(r.whatsapp_to || '');
+            setLetterFileName('');
             setPreviousLetters([]);
 
             const lf = r.letter_fields || {};
@@ -4333,8 +4883,17 @@ ${f.start_para}`;
             setSelectedFollowupIds(lf.selected_followup_ids || []);
             setSelectedQuotationIds(lf.selected_quotation_ids || []);
             setSelectedLetterRefIds(lf.selected_letter_ref_ids || []);
+            setLetterToList(lf.to_emails || []);
             setLetterCcList(lf.cc_emails || []);
             setLetterWhatsappList(lf.whatsapp_numbers || []);
+            setLetterRefFieldValues(lf.letter_ref_field_values || {});
+            setLetterRefHiddenFields(lf.letter_ref_hidden_fields || []);
+            setFollowupCellEdits(lf.followup_cell_edits || {});
+            setFollowupHiddenCols(lf.followup_hidden_cols || []);
+            setQuotationCellEdits(lf.quotation_cell_edits || {});
+            setQuotationHiddenCols(lf.quotation_hidden_cols || []);
+            setLetterRefCellEdits(lf.letterref_cell_edits || {});
+            setLetterRefHiddenCols(lf.letterref_hidden_cols || []);
 
             setLetterFields(Object.keys(lf).length
                 ? {
@@ -4358,7 +4917,6 @@ ${f.start_para}`;
                     letterref_intro: DEFAULT_LETTERREF_INTRO
                 });
 
-            if (!logoImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_LOGO_IMG); if (d) setLogoImgDataUrl(d); }
             if (!headerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_HEADER_IMG); if (d) setHeaderImgDataUrl(d); }
             if (!footerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_FOOTER_IMG); if (d) setFooterImgDataUrl(d); }
 
@@ -4370,7 +4928,7 @@ ${f.start_para}`;
         }
     };
 
-    // Eye icon → read-only view (on-screen shows file names only)
+    // Eye icon → read-only view (on-screen shows the To/CC recipients + file names)
     const viewLetterRecord = async (recordId) => {
         const t = toast.loading('Loading letter...');
         try {
@@ -4380,6 +4938,32 @@ ${f.start_para}`;
             toast.dismiss(t);
             const atts = r.attachments || [];
             const bare = r.letter_html || '<p style="padding:20px;font-family:Arial">No letter content stored.</p>';
+
+            // ---- Recipients this letter was sent to (To + CC) ----
+            // Primary "To" sits on the record (email_to); the extra To/CC lists live in letter_fields.
+            const lf = r.letter_fields || {};
+            const toEmails = [];
+            const primaryTo = (r.email_to || '').trim();
+            if (primaryTo) toEmails.push(primaryTo);
+            const extraTo = (lf.to_emails && lf.to_emails.length) ? lf.to_emails : (r.to_emails || []);
+            extraTo.forEach(e => {
+                const ev = (e || '').trim();
+                if (ev && !toEmails.some(x => x.toLowerCase() === ev.toLowerCase())) toEmails.push(ev);
+            });
+            const ccEmails = ((lf.cc_emails && lf.cc_emails.length) ? lf.cc_emails : (r.cc_emails || []))
+                .map(e => (e || '').trim()).filter(Boolean);
+
+            const chip = (e, color) =>
+                `<span style="display:inline-block;background:${color}1a;color:${color};border-radius:4px;padding:2px 8px;margin:2px 4px 2px 0;font-size:11px;">${escapeLetterHtml(e)}</span>`;
+
+            const recipientsHtml = (toEmails.length || ccEmails.length)
+                ? `<div style="max-width:780px;margin:18px auto 0;padding-top:12px;border-top:1px solid #ddd;font-family:Arial,Helvetica,sans-serif;">
+                     <div style="font-size:12px;font-weight:700;color:#111;margin-bottom:6px;">Recipients:</div>
+                     ${toEmails.length ? `<div style="font-size:12px;margin-bottom:4px;"><span style="font-weight:700;color:#111;">To:</span> ${toEmails.map(e => chip(e, '#2f3192')).join('')}</div>` : ''}
+                     ${ccEmails.length ? `<div style="font-size:12px;"><span style="font-weight:700;color:#111;">CC:</span> ${ccEmails.map(e => chip(e, '#16a34a')).join('')}</div>` : ''}
+                   </div>`
+                : '';
+
             const namesHtml = atts.length
                 ? `<div style="max-width:780px;margin:18px auto 0;padding-top:12px;border-top:1px solid #ddd;font-family:Arial,Helvetica,sans-serif;">
                      <div style="font-size:12px;font-weight:700;color:#111;margin-bottom:6px;">Attachments (${atts.length}):</div>
@@ -4390,7 +4974,8 @@ ${f.start_para}`;
                 : '';
             setViewLetterBareHtml(bare);
             setViewLetterAttachments(atts);
-            setViewLetterHtml(bare + namesHtml);
+            setViewLetterSubject(r.subject || '');
+            setViewLetterHtml(bare + recipientsHtml + namesHtml);
         } catch (e) {
             toast.dismiss(t);
             toast.error(e.message || 'Failed to load letter');
@@ -4515,7 +5100,24 @@ ${f.start_para}`;
         if (!viewLetterBareHtml) return;
         const w = openPrintWindow();
         if (!w) return;
-        await renderAndPrint(w, viewLetterBareHtml, viewLetterAttachments, 'Letter');
+        await renderAndPrint(w, viewLetterBareHtml, viewLetterAttachments, viewLetterSubject || 'Letter');
+    };
+
+    // Save the currently-viewed (history) letter as a downloaded PDF — file name = subject.
+    const saveViewedLetterPdf = async () => {
+        if (!viewLetterBareHtml) return;
+        const t = toast.loading('Preparing PDF…');
+        try {
+            const b64 = await htmlToPdfBase64(viewLetterBareHtml);
+            toast.dismiss(t);
+            if (!b64) { toast.error('Could not generate the PDF'); return; }
+            downloadBase64Pdf(b64, safePdfName(viewLetterSubject || 'Letter'));
+            toast.success('Letter PDF saved');
+        } catch (e) {
+            toast.dismiss(t);
+            toast.error('Could not save the PDF');
+            console.error('Save viewed letter PDF error:', e);
+        }
     };
 
     const handleSaveLetterDraft = async () => {
@@ -4542,7 +5144,15 @@ ${f.start_para}`;
                     selected_quotation_ids: selectedQuotationIds,
                     selected_letter_ref_ids: selectedLetterRefIds,
                     cc_emails: letterCcList,
-                    whatsapp_numbers: letterWhatsappList
+                    whatsapp_numbers: letterWhatsappList,
+                    letter_ref_field_values: letterRefFieldValues,
+                    letter_ref_hidden_fields: letterRefHiddenFields,
+                    followup_cell_edits: followupCellEdits,
+                    followup_hidden_cols: followupHiddenCols,
+                    quotation_cell_edits: quotationCellEdits,
+                    quotation_hidden_cols: quotationHiddenCols,
+                    letterref_cell_edits: letterRefCellEdits,
+                    letterref_hidden_cols: letterRefHiddenCols
                 },
                 letter_html: buildLetterHtml(),
                 letter_text: buildLetterText(),
@@ -5560,7 +6170,7 @@ ${f.start_para}`;
                                     <div
                                         id="campaign-chips-scroll"
                                         className="flex flex-wrap gap-1.5 flex-1 min-w-0 overflow-y-auto"
-                                        style={{ maxHeight: '52px', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                                        style={{ maxHeight: '44px', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                                     >
                                         {activeCampaigns.map((campaign, idx) => {
                                             const campaignCount = customers.filter(c => {
@@ -5575,7 +6185,7 @@ ${f.start_para}`;
                                                     key={idx}
                                                     onClick={() => handleCampaignToggle(campaign)}
                                                     title={campaign}
-                                                    className={`px-2 py-0.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 flex items-center gap-1 font-bold ${selectedCampaigns.includes(campaign)
+                                                    className={`px-2 py-0.5 rounded-lg text-sm font-bold text-left break-words leading-tight max-w-full ${selectedCampaigns.includes(campaign)
                                                         ? 'text-white'
                                                         : 'text-gray-700 hover:bg-gray-50'
                                                         }`}
@@ -5614,115 +6224,148 @@ ${f.start_para}`;
                             </div>
 
                             {/* ===== RIGHT: Flag filter — fixed, never moves ===== */}
-                            <div
-                                className="border-l border-gray-200 pl-3 grid gap-0.5 content-center flex-shrink-0"
-                                style={{ gridTemplateColumns: 'repeat(5, auto)' }}
-                            >
-                                {/* All button — spans & centers across the first two rows only (left side) */}
-                                <button
-                                    onClick={() => setSelectedFlag("all")}
-                                    title="Show all customers regardless of follow-up flag"
-                                    className={`mr-1 self-center flex items-center justify-center px-2.5 py-0.5 text-sm rounded-md whitespace-nowrap font-bold transition-colors ${selectedFlag === "all"
-                                        ? "bg-[#2f3192] text-white shadow-sm"
-                                        : "text-black"
-                                        }`}
-                                    style={{ gridColumn: 1, gridRow: '1 / span 2' }}
-                                >
-                                    All - {
-                                        ["C1", "C2", "C3", "C4", "C5", "C6", "C7"]
-                                            .reduce((sum, key) => sum + (flagCounts[key] || 0), 0)
-                                    }
-                                </button>
+                            <div className="border-l border-gray-200 pl-3 flex flex-col gap-0 justify-center flex-shrink-0">
 
-                                {/* Row 1 — C1, C2, C3, C4 */}
-                                {["C1", "C2", "C3", "C4"].map((key, i) => {
-                                    const titles = {
-                                        C1: 'Follow-up required within 15 days',
-                                        C2: 'Follow-up required within 30 days',
-                                        C3: 'Follow-up required within 45 days',
-                                        C4: 'Follow-up required within 60 days',
-                                    };
-                                    return (
+                                {/* ---- Top section: All (spans 2 rows) + C1–C7 ---- */}
+                                <div className="grid gap-x-0.5 gap-y-0" style={{ gridTemplateColumns: 'repeat(5, auto)' }}>
+                                    {/* All button — spans & centers across the first two rows only (left side) */}
+                                    <button
+                                        onClick={() => setSelectedFlag("all")}
+                                        title="Show all customers regardless of follow-up flag"
+                                        className={`mr-1 self-center flex items-center justify-center px-2.5 py-0.5 text-sm rounded-md whitespace-nowrap font-bold transition-colors ${selectedFlag === "all"
+                                            ? "bg-[#2f3192] text-white shadow-sm"
+                                            : "text-black"
+                                            }`}
+                                        style={{ gridColumn: 1, gridRow: '1 / span 2' }}
+                                    >
+                                        All - {
+                                            ["C1", "C2", "C3", "C4", "C5", "C6", "C7"]
+                                                .reduce((sum, key) => sum + (flagCounts[key] || 0), 0)
+                                        }
+                                    </button>
+
+                                    {/* Row 1 — C1, C2, C3, C4 */}
+                                    {["C1", "C2", "C3", "C4"].map((key, i) => {
+                                        const titles = {
+                                            C1: 'Follow-up required within 15 days',
+                                            C2: 'Follow-up required within 30 days',
+                                            C3: 'Follow-up required within 45 days',
+                                            C4: 'Follow-up required within 60 days',
+                                        };
+                                        return (
+                                            <button
+                                                key={key}
+                                                onClick={() => setSelectedFlag(key)}
+                                                title={titles[key]}
+                                                style={{ gridColumn: i + 2, gridRow: 1 }}
+                                                className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === key
+                                                    ? "bg-[#2f3192] text-white shadow-sm"
+                                                    : "text-black hover:bg-gray-50"
+                                                    }`}
+                                            >
+                                                {key} · {flagCounts[key] || 0}
+                                            </button>
+                                        );
+                                    })}
+
+                                    {/* Row 2 — C5, C6, C7 */}
+                                    {["C5", "C6", "C7"].map((key, i) => {
+                                        const titles = {
+                                            C5: 'Follow-up required within 75 days',
+                                            C6: 'Follow-up required within 90 days',
+                                            C7: 'Follow-up required after 90+ days',
+                                        };
+                                        return (
+                                            <button
+                                                key={key}
+                                                onClick={() => setSelectedFlag(key)}
+                                                title={titles[key]}
+                                                style={{ gridColumn: i + 2, gridRow: 2 }}
+                                                className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === key
+                                                    ? "bg-[#2f3192] text-white shadow-sm"
+                                                    : "text-black hover:bg-gray-50"
+                                                    }`}
+                                            >
+                                                {key} · {flagCounts[key] || 0}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* ---- Bottom section: Status filter (independent of the flag filter above) ---- */}
+                                <div className="flex items-center gap-0.5 pb-1.5">
+                                    {/* All for statuses — resets ONLY the status filter */}
+                                    <button
+                                        onClick={() => setSelectedStatus("all")}
+                                        title="Show all records regardless of status"
+                                        className={`mr-1 flex items-center justify-center px-2.5 py-0.5 text-sm rounded-md whitespace-nowrap font-bold transition-colors ${selectedStatus === "all"
+                                            ? "bg-[#2f3192] text-white shadow-sm"
+                                            : "text-black"
+                                            }`}
+                                    >
+                                        All - {notConnectedCount + rejectedCount + wipCount + rescheduledCount + completedCountFromAPI}                                    </button>
+
+                                    {/* Divider sits ONLY above these status buttons, not over the All */}
+                                    <div className="flex items-center gap-0.5 border-t border-gray-300 pt-0.5">
                                         <button
-                                            key={key}
-                                            onClick={() => setSelectedFlag(key)}
-                                            title={titles[key]}
-                                            style={{ gridColumn: i + 2, gridRow: 1 }}
-                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === key
+                                            onClick={() => setSelectedStatus('NC')}
+                                            title="Not connected — drives with 'Not Connected' status (respects drive & branch filters)"
+                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'NC'
                                                 ? "bg-[#2f3192] text-white shadow-sm"
                                                 : "text-black hover:bg-gray-50"
                                                 }`}
                                         >
-                                            {key} · {flagCounts[key] || 0}
+                                            NC · {notConnectedCount}
                                         </button>
-                                    );
-                                })}
 
-                                {/* Row 2 — C5, C6, C7 */}
-                                {["C5", "C6", "C7"].map((key, i) => {
-                                    const titles = {
-                                        C5: 'Follow-up required within 75 days',
-                                        C6: 'Follow-up required within 90 days',
-                                        C7: 'Follow-up required after 90+ days',
-                                    };
-                                    return (
                                         <button
-                                            key={key}
-                                            onClick={() => setSelectedFlag(key)}
-                                            title={titles[key]}
-                                            style={{ gridColumn: i + 2, gridRow: 2 }}
-                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === key
+                                            onClick={() => setSelectedStatus('R')}
+                                            title="Rejected — show rejected records (respects drive & branch filters)"
+                                            style={selectedStatus === 'R'
+                                                ? { backgroundColor: '#e34019' }
+                                                : { color: '#e34019' }}
+                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'R'
+                                                ? "text-white shadow-sm"
+                                                : "hover:bg-orange-50"
+                                                }`}
+                                        >
+                                            R · {rejectedCount}
+                                        </button>
+
+                                        <span
+                                            className="px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md text-center text-green-600 cursor-default flex items-center justify-center"
+                                            title={
+                                                (currentUser?.role === 'master_admin' || currentUser?.role === 'it_admin')
+                                                    ? 'Overall company completed (from Dashboard)'
+                                                    : 'Your completed count (from My Performance)'
+                                            }
+                                        >
+                                            C · {completedCountFromAPI}
+                                        </span>
+
+                                        <button
+                                            onClick={() => setSelectedStatus('WIP')}
+                                            title="Work in Progress — drives with 'WIP' status (respects drive & branch filters)"
+                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'WIP'
                                                 ? "bg-[#2f3192] text-white shadow-sm"
                                                 : "text-black hover:bg-gray-50"
                                                 }`}
                                         >
-                                            {key} · {flagCounts[key] || 0}
+                                            WIP · {wipCount}
                                         </button>
-                                    );
-                                })}
 
-                                {/* Row 3 — NC (Not connected), R (Rejected), C (Completed, not clickable) */}
-                                <button
-                                    onClick={() => setSelectedFlag('NC')}
-                                    title="Not connected — drives with 'Not Connected' status (respects drive & branch filters)"
-                                    style={{ gridColumn: 2, gridRow: 3 }}
-                                    className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === 'NC'
-                                        ? "bg-[#2f3192] text-white shadow-sm"
-                                        : "text-black hover:bg-gray-50"
-                                        }`}
-                                >
-                                    NC · {notConnectedCount}
-                                </button>
-
-                                <button
-                                    onClick={() => setSelectedFlag('R')}
-                                    title="Rejected — show rejected records (respects drive & branch filters)"
-                                    style={{
-                                        gridColumn: 3,
-                                        gridRow: 3,
-                                        ...(selectedFlag === 'R'
-                                            ? { backgroundColor: '#e34019' }
-                                            : { color: '#e34019' })
-                                    }}
-                                    className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === 'R'
-                                        ? "text-white shadow-sm"
-                                        : "hover:bg-orange-50"
-                                        }`}
-                                >
-                                    R · {rejectedCount}
-                                </button>
-
-                                <span
-                                    style={{ gridColumn: 4, gridRow: 3 }}
-                                    className="px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md text-center text-green-600 cursor-default flex items-center justify-center"
-                                    title={
-                                        (currentUser?.role === 'master_admin' || currentUser?.role === 'it_admin')
-                                            ? 'Overall company completed (from Dashboard)'
-                                            : 'Your completed count (from My Performance)'
-                                    }
-                                >
-                                    C · {completedCountFromAPI}
-                                </span>
+                                        <button
+                                            onClick={() => setSelectedStatus('FR')}
+                                            title="Follow-up Reschedule — drives with 'Rescheduled' status (respects drive & branch filters)"
+                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'FR'
+                                                ? "bg-[#2f3192] text-white shadow-sm"
+                                                : "text-black hover:bg-gray-50"
+                                                }`}
+                                        >
+                                            FR · {rescheduledCount}
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -9025,10 +9668,15 @@ ${f.start_para}`;
                                     <DocumentTextIcon className="h-4 w-4 text-white" /> Letter
                                 </h3>
                                 <div className="flex items-center gap-2">
+                                    <button onClick={saveViewedLetterPdf}
+                                        className="px-2 py-1 bg-white text-[11px] rounded-md font-medium hover:bg-gray-100 flex items-center gap-1"
+                                        style={{ color: themeColor }}>
+                                        <ArrowDownTrayIcon className="h-3 w-3" /> Download
+                                    </button>
                                     <button onClick={printViewedLetter}
                                         className="px-2 py-1 bg-white text-[11px] rounded-md font-medium hover:bg-gray-100 flex items-center gap-1"
                                         style={{ color: themeColor }}>
-                                        <DocumentTextIcon className="h-3 w-3" /> Print / PDF
+                                        <DocumentTextIcon className="h-3 w-3" /> Print
                                     </button>
                                     <button onClick={() => setViewLetterHtml(null)}
                                         className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100">
@@ -9047,7 +9695,16 @@ ${f.start_para}`;
                 {/* Send Letter Wizard */}
                 {showLetterWizard && (
                     <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-end lg:items-center justify-center z-50 p-2 sm:p-3">
-                        <div className="bg-white rounded-xl shadow-2xl w-full lg:max-w-4xl max-h-[94vh] overflow-hidden flex flex-col">
+                        <div className="relative bg-white rounded-xl shadow-2xl w-full lg:max-w-4xl max-h-[94vh] overflow-hidden flex flex-col">
+                            {/* Loading overlay — spinning circle while the serial number is fetched */}
+                            {letterStepLoading && (
+                                <div className="absolute inset-0 z-30 bg-white/70 flex items-center justify-center">
+                                    <div className="flex flex-col items-center gap-2">
+                                        <div className="h-10 w-10 rounded-full border-4 border-gray-200 animate-spin" style={{ borderTopColor: themeColor }} />
+                                        <span className="text-[11px] font-medium text-gray-600">Loading letter…</span>
+                                    </div>
+                                </div>
+                            )}
                             {/* Header */}
                             <div className="px-4 py-3 flex justify-between items-center"
                                 style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
@@ -9122,7 +9779,7 @@ ${f.start_para}`;
                                         {selectedLetterFormat && (
                                             <div className="space-y-3">
                                                 <div className="border border-gray-200 rounded-lg p-3">
-                                                    <p className="text-[11px] font-bold text-black uppercase mb-1.5">Products</p>
+                                                    <p className="text-[11px] font-bold text-black uppercase mb-1.5">Product</p>
                                                     <div className="flex flex-wrap gap-1.5">
                                                         {(selectedLetterFormat.products || []).length === 0 && <span className="text-xs text-gray-400">None</span>}
                                                         {(selectedLetterFormat.products || []).map((p, i) => (
@@ -9133,6 +9790,37 @@ ${f.start_para}`;
                                                 <div className="border border-gray-200 rounded-lg p-3">
                                                     <p className="text-[11px] font-bold text-black uppercase mb-1.5">Reference No</p>
                                                     <span className="text-xs text-black font-mono break-all">{selectedLetterFormat.reference_no || '—'}</span>
+                                                </div>
+                                                <div className="border border-gray-200 rounded-lg p-3">
+                                                    <p className="text-[11px] font-bold text-black uppercase mb-1.5">Customer Detail Fields</p>
+                                                    {(selectedLetterFormat.customer_detail_fields || []).length === 0 ? (
+                                                        <span className="text-xs text-gray-400">None configured</span>
+                                                    ) : (
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            {selectedLetterFormat.customer_detail_fields.map((k, i) => (
+                                                                <span key={i} className="inline-flex items-center px-2 py-0.5 bg-[#2f3192]/10 text-[#2f3192] rounded text-xs font-medium">
+                                                                    {CUSTOMER_FIELD_LABELS[k] || k}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div className="border border-gray-200 rounded-lg p-3">
+                                                    <p className="text-[11px] font-bold text-black uppercase mb-1.5">Engagement Detail Fields</p>
+                                                    {(selectedLetterFormat.engagement_detail_fields || []).length === 0 ? (
+                                                        <span className="text-xs text-gray-400">None configured</span>
+                                                    ) : (
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            {selectedLetterFormat.engagement_detail_fields.map((k, i) => {
+                                                                const labels = { followup_history: 'Follow-up History', quotation_history: 'Quotation History', letter_history: 'Letter Ref', letterref: 'Letter Ref' };
+                                                                return (
+                                                                    <span key={i} className="inline-flex items-center px-2 py-0.5 bg-[#2f3192]/10 text-[#2f3192] rounded text-xs font-medium">
+                                                                        {labels[(k || '').toLowerCase()] || k}
+                                                                    </span>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
                                                 </div>
                                                 <div className="border border-gray-200 rounded-lg p-3">
                                                     <p className="text-[11px] font-bold text-black uppercase mb-1.5">Default Attachments</p>
@@ -9158,33 +9846,26 @@ ${f.start_para}`;
                                 {letterStep === 2 && (
                                     <div className="space-y-3 max-w-3xl mx-auto">
                                         <div className="border border-gray-300 rounded-lg overflow-hidden bg-white">
-                                            {/* Header: logo.png (left) + letter-header.png (right) */}
-                                            {(logoImgDataUrl || headerImgDataUrl) ? (
-                                                <div className="flex items-center justify-between gap-3 px-4 py-3 border-b-2" style={{ borderColor: themeColor }}>
-                                                    {logoImgDataUrl
-                                                        ? <img src={logoImgDataUrl} alt={COMPANY_NAME} className="h-20 w-auto object-contain" />
-                                                        : <span />}
-                                                    {headerImgDataUrl
-                                                        ? <img src={headerImgDataUrl} alt={COMPANY_FULL} className="h-20 w-auto object-contain" />
-                                                        : <span />}
-                                                </div>
+                                            {/* Header band: single full-width letterhead image */}
+                                            {headerImgDataUrl ? (
+                                                <img src={headerImgDataUrl} alt={COMPANY_FULL} className="block w-full h-auto" style={{ maxWidth: '780px', margin: '0 auto' }} />
                                             ) : (
                                                 <div className="px-4 py-3 border-b-2 text-base font-bold" style={{ borderColor: themeColor, color: themeColor }}>{COMPANY_NAME}</div>
                                             )}
 
-                                            <div className="p-4 sm:p-6">
-                                                {/* Ref No (left) + Date (left, editable) */}
-                                                <div className="space-y-1.5 mb-4">
-                                                    <div className="flex items-center gap-1 text-[11px]">
-                                                        <span className="font-semibold w-16">Ref No:</span>
+                                            <div className="px-4 sm:px-6 pt-2 pb-4 sm:pb-6">
+                                                {/* Ref No (left) + Date (right, editable) */}
+                                                <div className="flex items-start justify-between gap-3 mb-4">
+                                                    <div className="flex items-center gap-1 text-[11px] flex-1 min-w-0">
+                                                        <span className="font-semibold w-16 shrink-0">Ref No:</span>
                                                         <input value={letterFields.ref_no} readOnly disabled
-                                                            className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] flex-1 bg-gray-100 cursor-not-allowed font-mono" />
+                                                            className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] flex-1 min-w-0 bg-gray-100 cursor-not-allowed font-mono" />
                                                     </div>
-                                                    <div className="flex items-center gap-1 text-[11px]">
-                                                        <span className="font-semibold w-16">Date:</span>
+                                                    <div className="flex items-center gap-1 text-[11px] shrink-0">
+                                                        <span className="font-semibold shrink-0">Date:</span>
                                                         <input type="date" value={letterFields.date}
                                                             onChange={(e) => setLetterFields(p => ({ ...p, date: e.target.value }))}
-                                                            className="border border-gray-300 rounded px-1.5 py-0.5 text-[11px] w-40" />
+                                                            className="border border-gray-300 rounded px-1.5 py-0.5 text-[11px] w-36" />
                                                     </div>
                                                 </div>
 
@@ -9195,29 +9876,51 @@ ${f.start_para}`;
                                                         className="w-full border border-gray-200 rounded px-2 py-1 text-xs" placeholder="Customer Name" />
                                                     <textarea value={letterFields.to_address} onChange={(e) => setLetterFields(p => ({ ...p, to_address: e.target.value }))}
                                                         className="w-full border border-gray-200 rounded px-2 py-1 text-xs" rows="2" placeholder="Address" />
-                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                                                        <div>
-                                                            <label className="text-[10px] text-gray-500">Instance ID (locked)</label>
-                                                            <input value={letterFields.instance_id} readOnly disabled
-                                                                className="w-full border border-gray-200 rounded px-2 py-1 text-xs bg-gray-100 cursor-not-allowed" />
+                                                    {/* References — fields from the format master. Instance ID is locked & permanent;
+                                                        every other field is editable and can be removed from THIS letter via the ✕. */}
+                                                    <div className="pt-1">
+                                                        <label className="text-[10px] text-gray-500 font-semibold">References</label>
+                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
+                                                            {getLetterReferenceRows()
+                                                                .filter(r => !letterRefHiddenFields.includes(r.key))
+                                                                .map(r => (
+                                                                    <div key={r.key}>
+                                                                        <label className="text-[10px] text-gray-500 flex items-center justify-between">
+                                                                            <span>{r.label}</span>
+                                                                            {r.removable && (
+                                                                                <button type="button" title={`Remove "${r.label}" from this letter`}
+                                                                                    onClick={() => setLetterRefHiddenFields(prev => [...prev, r.key])}
+                                                                                    className="text-gray-400 hover:text-red-600">
+                                                                                    <XMarkIcon className="h-3 w-3" />
+                                                                                </button>
+                                                                            )}
+                                                                        </label>
+                                                                        {r.editable ? (
+                                                                            <input
+                                                                                value={letterRefFieldValue(r.key, r.value)}
+                                                                                onChange={(e) => setLetterRefFieldValues(prev => ({ ...prev, [r.key]: e.target.value }))}
+                                                                                className="w-full border border-gray-300 rounded px-2 py-1 text-xs text-black" />
+                                                                        ) : (
+                                                                            <input value={letterRefFieldValue(r.key, r.value) || '-'} readOnly disabled
+                                                                                className="w-full border border-gray-200 rounded px-2 py-1 text-xs bg-gray-100 cursor-not-allowed" />
+                                                                        )}
+                                                                    </div>
+                                                                ))}
                                                         </div>
-                                                        {isCspLetter() && getCspSubtypes() && (
-                                                            <div>
-                                                                <label className="text-[10px] text-gray-500">SR Subtype (from CSP Info)</label>
-                                                                <input value={getCspSubtypes()} readOnly disabled
-                                                                    className="w-full border border-gray-200 rounded px-2 py-1 text-xs bg-gray-100 cursor-not-allowed" />
+                                                        {getLetterReferenceRows().some(r => letterRefHiddenFields.includes(r.key)) && (
+                                                            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                                                <span className="text-[10px] text-gray-500">Removed:</span>
+                                                                {getLetterReferenceRows()
+                                                                    .filter(r => letterRefHiddenFields.includes(r.key))
+                                                                    .map(r => (
+                                                                        <button key={r.key} type="button"
+                                                                            onClick={() => setLetterRefHiddenFields(prev => prev.filter(k => k !== r.key))}
+                                                                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-dashed border-gray-300 text-[10px] text-gray-600 hover:bg-gray-50">
+                                                                            <PlusIcon className="h-2.5 w-2.5" /> {r.label}
+                                                                        </button>
+                                                                    ))}
                                                             </div>
                                                         )}
-                                                        <div>
-                                                            <label className="text-[10px] text-gray-500">Engine Model</label>
-                                                            <input value={letterFields.engine_model} onChange={(e) => setLetterFields(p => ({ ...p, engine_model: e.target.value }))}
-                                                                className="w-full border border-gray-200 rounded px-2 py-1 text-xs" />
-                                                        </div>
-                                                        <div>
-                                                            <label className="text-[10px] text-gray-500">Agreement No</label>
-                                                            <input value={letterFields.agreement_no} onChange={(e) => setLetterFields(p => ({ ...p, agreement_no: e.target.value }))}
-                                                                className="w-full border border-gray-200 rounded px-2 py-1 text-xs" />
-                                                        </div>
                                                     </div>
                                                 </div>
 
@@ -9240,80 +9943,86 @@ ${f.start_para}`;
                                                 {/* Middle: Follow-up + Quotation + Letter Ref checkboxes */}
                                                 <div className="mb-3 border border-dashed border-gray-300 rounded-lg p-3 bg-gray-50 space-y-2">
                                                     <div className="flex flex-wrap items-center gap-4">
-                                                        <label className="flex items-center gap-1.5 text-xs font-medium text-black cursor-pointer">
-                                                            <input type="checkbox" checked={includeFollowups}
-                                                                onChange={(e) => {
-                                                                    if (e.target.checked) {
-                                                                        if (formatFollowups().length === 0) {
-                                                                            toast.error('No follow-up records available to include');
-                                                                            return; // keep the box unticked
+                                                        {getAllowedEngagementToggles().followups && (<>
+                                                            <label className="flex items-center gap-1.5 text-xs font-medium text-black cursor-pointer">
+                                                                <input type="checkbox" checked={includeFollowups}
+                                                                    onChange={(e) => {
+                                                                        if (e.target.checked) {
+                                                                            if (formatFollowups().length === 0) {
+                                                                                toast.error('No follow-up records available to include');
+                                                                                return; // keep the box unticked
+                                                                            }
+                                                                            setIncludeFollowups(true);
+                                                                            setShowFollowupPicker(true);
+                                                                        } else {
+                                                                            setIncludeFollowups(false);
+                                                                            setSelectedFollowupIds([]);
                                                                         }
-                                                                        setIncludeFollowups(true);
-                                                                        setShowFollowupPicker(true);
-                                                                    } else {
-                                                                        setIncludeFollowups(false);
-                                                                        setSelectedFollowupIds([]);
-                                                                    }
-                                                                }}
-                                                                style={{ accentColor: themeColor }} />
-                                                            Include Follow-up history
-                                                        </label>
-                                                        {includeFollowups && (
-                                                            <button type="button" onClick={() => setShowFollowupPicker(true)}
-                                                                className="text-[11px] px-2 py-0.5 rounded border" style={{ color: themeColor, borderColor: themeColor }}>
-                                                                Select follow-ups ({selectedFollowupIds.length})
-                                                            </button>
-                                                        )}
+                                                                    }}
+                                                                    style={{ accentColor: themeColor }} />
+                                                                Include Follow-up history
+                                                            </label>
+                                                            {includeFollowups && (
+                                                                <button type="button" onClick={() => setShowFollowupPicker(true)}
+                                                                    className="text-[11px] px-2 py-0.5 rounded border" style={{ color: themeColor, borderColor: themeColor }}>
+                                                                    Select follow-ups ({selectedFollowupIds.length})
+                                                                </button>
+                                                            )}
+                                                        </>)}
 
-                                                        <label className="flex items-center gap-1.5 text-xs font-medium text-black cursor-pointer">
-                                                            <input type="checkbox" checked={includeQuotations}
-                                                                onChange={(e) => {
-                                                                    if (e.target.checked) {
-                                                                        if (quotationFollowups().length === 0) {
-                                                                            toast.error('No quotation records available to include');
-                                                                            return; // keep the box unticked
+                                                        {getAllowedEngagementToggles().quotations && (<>
+                                                            <label className="flex items-center gap-1.5 text-xs font-medium text-black cursor-pointer">
+                                                                <input type="checkbox" checked={includeQuotations}
+                                                                    onChange={(e) => {
+                                                                        if (e.target.checked) {
+                                                                            if (quotationFollowups().length === 0) {
+                                                                                toast.error('No quotation records available to include');
+                                                                                return; // keep the box unticked
+                                                                            }
+                                                                            setIncludeQuotations(true);
+                                                                            setShowQuotationPicker(true);
+                                                                        } else {
+                                                                            setIncludeQuotations(false);
+                                                                            setSelectedQuotationIds([]);
                                                                         }
-                                                                        setIncludeQuotations(true);
-                                                                        setShowQuotationPicker(true);
-                                                                    } else {
-                                                                        setIncludeQuotations(false);
-                                                                        setSelectedQuotationIds([]);
-                                                                    }
-                                                                }}
-                                                                style={{ accentColor: themeColor }} />
-                                                            Include Quotation
-                                                        </label>
-                                                        {includeQuotations && (
-                                                            <button type="button" onClick={() => setShowQuotationPicker(true)}
-                                                                className="text-[11px] px-2 py-0.5 rounded border" style={{ color: themeColor, borderColor: themeColor }}>
-                                                                Select quotations ({selectedQuotationIds.length})
-                                                            </button>
-                                                        )}
+                                                                    }}
+                                                                    style={{ accentColor: themeColor }} />
+                                                                Include Quotation
+                                                            </label>
+                                                            {includeQuotations && (
+                                                                <button type="button" onClick={() => setShowQuotationPicker(true)}
+                                                                    className="text-[11px] px-2 py-0.5 rounded border" style={{ color: themeColor, borderColor: themeColor }}>
+                                                                    Select quotations ({selectedQuotationIds.length})
+                                                                </button>
+                                                            )}
+                                                        </>)}
 
-                                                        <label className="flex items-center gap-1.5 text-xs font-medium text-black cursor-pointer">
-                                                            <input type="checkbox" checked={includeLetterRefs}
-                                                                onChange={(e) => {
-                                                                    if (e.target.checked) {
-                                                                        if (letterRefOptions().length === 0) {
-                                                                            toast.error('No previous letters available to include');
-                                                                            return; // keep the box unticked
+                                                        {getAllowedEngagementToggles().letterrefs && (<>
+                                                            <label className="flex items-center gap-1.5 text-xs font-medium text-black cursor-pointer">
+                                                                <input type="checkbox" checked={includeLetterRefs}
+                                                                    onChange={(e) => {
+                                                                        if (e.target.checked) {
+                                                                            if (letterRefOptions().length === 0) {
+                                                                                toast.error('No previous letters available to include');
+                                                                                return; // keep the box unticked
+                                                                            }
+                                                                            setIncludeLetterRefs(true);
+                                                                            setShowLetterRefPicker(true);
+                                                                        } else {
+                                                                            setIncludeLetterRefs(false);
+                                                                            setSelectedLetterRefIds([]);
                                                                         }
-                                                                        setIncludeLetterRefs(true);
-                                                                        setShowLetterRefPicker(true);
-                                                                    } else {
-                                                                        setIncludeLetterRefs(false);
-                                                                        setSelectedLetterRefIds([]);
-                                                                    }
-                                                                }}
-                                                                style={{ accentColor: themeColor }} />
-                                                            Include Letter Ref
-                                                        </label>
-                                                        {includeLetterRefs && (
-                                                            <button type="button" onClick={() => setShowLetterRefPicker(true)}
-                                                                className="text-[11px] px-2 py-0.5 rounded border" style={{ color: themeColor, borderColor: themeColor }}>
-                                                                Select letters ({selectedLetterRefIds.length})
-                                                            </button>
-                                                        )}
+                                                                    }}
+                                                                    style={{ accentColor: themeColor }} />
+                                                                Include Letter Ref
+                                                            </label>
+                                                            {includeLetterRefs && (
+                                                                <button type="button" onClick={() => setShowLetterRefPicker(true)}
+                                                                    className="text-[11px] px-2 py-0.5 rounded border" style={{ color: themeColor, borderColor: themeColor }}>
+                                                                    Select letters ({selectedLetterRefIds.length})
+                                                                </button>
+                                                            )}
+                                                        </>)}
                                                     </div>
                                                     {includeFollowups && (
                                                         <div className="pt-1">
@@ -9324,9 +10033,16 @@ ${f.start_para}`;
                                                                 className="w-full border border-gray-200 rounded px-2 py-1 text-[11px] leading-relaxed"
                                                                 rows="2"
                                                             />
-                                                            {selectedFollowupIds.length > 0 && (
-                                                                <p className="text-[10px] text-gray-500 mt-0.5">{selectedFollowupIds.length} follow-up(s) will be added to the letter.</p>
-                                                            )}
+                                                            {renderLetterEditTable({
+                                                                cols: LETTER_FOLLOWUP_COLS,
+                                                                hiddenCols: followupHiddenCols,
+                                                                setHiddenCols: setFollowupHiddenCols,
+                                                                rows: selectedFollowupRows(),
+                                                                rowId: (r) => r.id,
+                                                                getCell: followupCellValue,
+                                                                onCellChange: setFollowupCell,
+                                                                emptyText: 'No follow-ups selected. Use “Select follow-ups” above.'
+                                                            })}
                                                         </div>
                                                     )}
                                                     {includeQuotations && (
@@ -9338,9 +10054,16 @@ ${f.start_para}`;
                                                                 className="w-full border border-gray-200 rounded px-2 py-1 text-[11px] leading-relaxed"
                                                                 rows="2"
                                                             />
-                                                            {selectedQuotationIds.length > 0 && (
-                                                                <p className="text-[10px] text-gray-500 mt-0.5">{selectedQuotationIds.length} quotation(s) will be added to the letter.</p>
-                                                            )}
+                                                            {renderLetterEditTable({
+                                                                cols: LETTER_QUOTATION_COLS,
+                                                                hiddenCols: quotationHiddenCols,
+                                                                setHiddenCols: setQuotationHiddenCols,
+                                                                rows: selectedQuotationRows(),
+                                                                rowId: (r) => r.id,
+                                                                getCell: quotationCellValue,
+                                                                onCellChange: setQuotationCell,
+                                                                emptyText: 'No quotations selected. Use “Select quotations” above.'
+                                                            })}
                                                         </div>
                                                     )}
                                                     {includeLetterRefs && (
@@ -9352,9 +10075,16 @@ ${f.start_para}`;
                                                                 className="w-full border border-gray-200 rounded px-2 py-1 text-[11px] leading-relaxed"
                                                                 rows="2"
                                                             />
-                                                            {selectedLetterRefIds.length > 0 && (
-                                                                <p className="text-[10px] text-gray-500 mt-0.5">{selectedLetterRefIds.length} letter(s) will be added to the letter.</p>
-                                                            )}
+                                                            {renderLetterEditTable({
+                                                                cols: LETTER_REF_COLS,
+                                                                hiddenCols: letterRefHiddenCols,
+                                                                setHiddenCols: setLetterRefHiddenCols,
+                                                                rows: selectedLetterRefRows(),
+                                                                rowId: (r) => r.id,
+                                                                getCell: letterRefCellValue,
+                                                                onCellChange: setLetterRefCell,
+                                                                emptyText: 'No letters selected. Use “Select letters” above.'
+                                                            })}
                                                         </div>
                                                     )}
                                                 </div>
@@ -9418,18 +10148,36 @@ ${f.start_para}`;
                                 {letterStep === 3 && (
                                     <div className="space-y-3 max-w-3xl mx-auto">
                                         <div className="border border-gray-200 rounded-lg overflow-hidden">
-                                            <div className="px-3 py-1.5 bg-gray-50 border-b text-xs font-bold text-black flex items-center justify-between">
+                                            <div className="px-3 py-1.5 bg-gray-50 text-xs font-bold text-black flex items-center justify-between">
                                                 <span>Letter Preview</span>
-                                                <button onClick={handlePrintLetter} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] border border-gray-300 rounded hover:bg-gray-100">
-                                                    <DocumentTextIcon className="h-3 w-3" /> Print
-                                                </button>
+                                                <div className="flex items-center gap-1.5">
+                                                    <button onClick={handleSaveLetterPdf} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-white rounded hover:opacity-90" style={{ backgroundColor: themeColor }}>
+                                                        <ArrowDownTrayIcon className="h-3 w-3" /> Download
+                                                    </button>
+                                                    <button onClick={handlePrintLetter} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] border border-gray-300 rounded hover:bg-gray-100">
+                                                        <DocumentTextIcon className="h-3 w-3" /> Print
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <div className="p-2 max-h-[40vh] overflow-y-auto bg-gray-50">
+                                            <div className="p-2 max-h-[65vh] overflow-y-auto bg-gray-50">
                                                 <div dangerouslySetInnerHTML={{ __html: buildLetterHtml() }} />
                                             </div>
                                         </div>
 
                                         <div className="border border-gray-200 rounded-lg p-3 space-y-3">
+                                            <div>
+                                                <label className="text-[10px] text-gray-500">Letter file name (PDF)</label>
+                                                <div className="flex items-center gap-1">
+                                                    <input
+                                                        value={letterFileName}
+                                                        onChange={(e) => setLetterFileName(e.target.value)}
+                                                        className="flex-1 border border-gray-300 rounded-lg px-2 py-1 text-xs text-black"
+                                                        placeholder="e.g. AMC Renewal Letter"
+                                                    />
+                                                    <span className="text-[11px] text-gray-400 shrink-0">.pdf</span>
+                                                </div>
+                                                <p className="text-[10px] text-gray-400 mt-0.5">Used for the emailed PDF and the Download button.</p>
+                                            </div>
                                             <p className="text-[11px] font-bold text-black uppercase">Send Via</p>
                                             <div className="flex flex-wrap gap-2">
                                                 <label className={`flex items-center gap-1.5 px-3 py-2 border rounded-md cursor-pointer text-sm ${letterChannels.includes('email') ? 'border-[#2f3192] bg-[#2f3192]/10 text-[#2f3192]' : 'border-gray-300 text-black'}`}>
@@ -9444,10 +10192,43 @@ ${f.start_para}`;
 
                                             {letterChannels.includes('email') && (
                                                 <div className="space-y-2">
+                                                    {/* {letterMatchedGoems.length > 0 && (
+                                                        <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 bg-orange-50 border border-orange-200 rounded-lg">
+                                                            <span className="text-[10px] font-semibold text-orange-700">
+                                                                GOEM for this branch{letterMatchedGoems.length > 1 ? 's' : ''}:
+                                                            </span>
+                                                            {letterMatchedGoems.map((g, i) => (
+                                                                <span key={i} className="inline-flex items-center px-1.5 py-0.5 bg-orange-100 text-orange-800 rounded text-[11px] font-medium">
+                                                                    {g}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )} */}
                                                     <div>
                                                         <label className="text-[10px] text-gray-500">Recipient Email (To)</label>
                                                         <input value={letterEmailTo} onChange={(e) => setLetterEmailTo(e.target.value)}
                                                             className="w-full border border-gray-300 rounded-lg px-2 py-1 text-xs text-black" placeholder="customer@email.com" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] text-gray-500">Add more emails (To)</label>
+                                                        <div className="flex gap-1.5">
+                                                            <input value={letterToInput}
+                                                                onChange={(e) => setLetterToInput(e.target.value)}
+                                                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToEmail(); } }}
+                                                                className="flex-1 border border-gray-300 rounded-lg px-2 py-1 text-xs text-black" placeholder="another@email.com" />
+                                                            <button type="button" onClick={addToEmail}
+                                                                className="px-2.5 py-1 text-[11px] text-white rounded-lg" style={{ backgroundColor: themeColor }}>Add</button>
+                                                        </div>
+                                                        {letterToList.length > 0 && (
+                                                            <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                                                {letterToList.map((e, i) => (
+                                                                    <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-[11px]">
+                                                                        {e}
+                                                                        <button type="button" onClick={() => removeToEmail(i)} className="hover:text-red-600"><XMarkIcon className="h-3 w-3" /></button>
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     <div>
                                                         <label className="text-[10px] text-gray-500">Add more emails (CC)</label>
@@ -9538,10 +10319,13 @@ ${f.start_para}`;
                                 {letterStep < 3 ? (
                                     <button
                                         onClick={() => goToLetterStep(letterStep + 1)}
-                                        className="px-4 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 flex items-center gap-1.5"
+                                        disabled={letterStepLoading}
+                                        className="px-4 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 disabled:opacity-60 flex items-center gap-1.5"
                                         style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}
                                     >
-                                        Next <ChevronRightIcon className="h-3 w-3" />
+                                        {letterStepLoading
+                                            ? <><ArrowPathIcon className="h-3 w-3 animate-spin" /> Loading…</>
+                                            : <>Next <ChevronRightIcon className="h-3 w-3" /></>}
                                     </button>
                                 ) : (
                                     <button
@@ -9562,33 +10346,58 @@ ${f.start_para}`;
                 {/* Follow-up picker popup */}
                 {showFollowupPicker && (
                     <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[70] p-3">
-                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
                             <div className="px-4 py-3 flex justify-between items-center" style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
                                 <h3 className="text-sm font-semibold text-white">Select Follow-up history</h3>
                                 <button onClick={() => { setShowFollowupPicker(false); if (selectedFollowupIds.length === 0) setIncludeFollowups(false); }} className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100">
                                     <XMarkIcon className="h-4 w-4" />
                                 </button>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
+                            <div className="flex-1 overflow-hidden p-3">
                                 {formatFollowups().length === 0 ? (
                                     <p className="text-xs text-gray-500 text-center py-6">No follow-ups found for this product.</p>
                                 ) : (
-                                    <div className="space-y-1.5">
-                                        {formatFollowups().map(fu => (
-                                            <label key={fu.id} className="flex items-start gap-2 p-2 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
-                                                <input type="checkbox" checked={selectedFollowupIds.includes(fu.id)} onChange={() => toggleSelectedFollowup(fu.id)}
-                                                    className="mt-0.5" style={{ accentColor: themeColor }} />
-                                                <div className="flex-1 min-w-0 text-[11px] text-black">
-                                                    <div className="flex flex-wrap gap-x-3">
-                                                        <span><b>Date:</b> {formatDate(fu.followup_date)}</span>
-                                                        <span><b>Product:</b> {fu.campaign_service || fu.campaign_name || '-'}</span>
-                                                        <span className="capitalize"><b>Status:</b> {fu.status || '-'}</span>
-                                                        <span><b>Employee:</b> {fu.user_name || '-'}</span>
-                                                    </div>
-                                                    <div className="mt-0.5 break-words"><b>Remark:</b> {fu.followup_remark || '-'}</div>
-                                                </div>
-                                            </label>
-                                        ))}
+                                    <div className="overflow-x-auto overflow-y-auto max-h-[60vh] border border-gray-200 rounded-lg custom-scrollbar">
+                                        <table className="w-full min-w-[860px] border-collapse">
+                                            <thead className="bg-gray-50 sticky top-0 z-10">
+                                                <tr className="border-b border-gray-200">
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 w-[44px]"></th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Date</th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Drive</th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Service/Product</th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Status</th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Employee</th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Follow-up By</th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Remark</th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black whitespace-nowrap">Next Follow-up</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {formatFollowups().map(fu => {
+                                                    const checked = selectedFollowupIds.includes(fu.id);
+                                                    return (
+                                                        <tr key={fu.id}
+                                                            onClick={() => toggleSelectedFollowup(fu.id)}
+                                                            className={`cursor-pointer border-b border-gray-100 ${checked ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                                                            <td className="px-2 py-1.5 text-center border-r border-gray-100">
+                                                                <input type="checkbox" checked={checked} onChange={() => toggleSelectedFollowup(fu.id)}
+                                                                    onClick={(e) => e.stopPropagation()} style={{ accentColor: themeColor }} />
+                                                            </td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100 whitespace-nowrap">{formatDate(fu.followup_date)}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{fu.campaign_name || '-'}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{fu.campaign_service || fu.campaign_name || '-'}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100 capitalize">{_followupStatusLabel(fu.status)}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{fu.user_name || '-'}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100 capitalize">{fu.followup_by || '-'}</td>
+                                                            <td className="px-2 py-1.5 text-left text-[11px] text-black border-r border-gray-100 max-w-[220px]">
+                                                                <div className="truncate" title={fu.followup_remark || '-'}>{fu.followup_remark || '-'}</div>
+                                                            </td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black whitespace-nowrap">{formatDate(fu.next_followup_date)}</td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
                                     </div>
                                 )}
                             </div>
@@ -9606,33 +10415,50 @@ ${f.start_para}`;
                 {/* Quotation picker popup (only quotation-sent = Yes) */}
                 {showQuotationPicker && (
                     <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[70] p-3">
-                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
                             <div className="px-4 py-3 flex justify-between items-center" style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
                                 <h3 className="text-sm font-semibold text-white">Select Quotation(s)</h3>
                                 <button onClick={() => { setShowQuotationPicker(false); if (selectedQuotationIds.length === 0) setIncludeQuotations(false); }} className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100">
                                     <XMarkIcon className="h-4 w-4" />
                                 </button>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
+                            <div className="flex-1 overflow-hidden p-3">
                                 {quotationFollowups().length === 0 ? (
                                     <p className="text-xs text-gray-500 text-center py-6">No quotations found for this product.</p>
                                 ) : (
-                                    <div className="space-y-1.5">
-                                        {quotationFollowups().map(q => (
-                                            <label key={q.id} className="flex items-start gap-2 p-2 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
-                                                <input type="checkbox" checked={selectedQuotationIds.includes(q.id)} onChange={() => toggleSelectedQuotation(q.id)}
-                                                    className="mt-0.5" style={{ accentColor: themeColor }} />
-                                                <div className="flex-1 min-w-0 text-[11px] text-black">
-                                                    <div className="flex flex-wrap gap-x-3">
-                                                        <span><b>Quote No:</b> {q.quotation_no || '-'}</span>
-                                                        <span><b>Date:</b> {formatDate(q.followup_date)}</span>
-                                                        <span><b>Value:</b> {q.quotation_value ? `₹${Number(q.quotation_value).toLocaleString('en-IN')}` : '-'}</span>
-                                                        <span><b>Product:</b> {q.campaign_service || q.campaign_name || '-'}</span>
-                                                        <span><b>Employee:</b> {q.user_name || '-'}</span>
-                                                    </div>
-                                                </div>
-                                            </label>
-                                        ))}
+                                    <div className="overflow-x-auto overflow-y-auto max-h-[60vh] border border-gray-200 rounded-lg custom-scrollbar">
+                                        <table className="w-full min-w-[700px] border-collapse">
+                                            <thead className="bg-gray-50 sticky top-0 z-10">
+                                                <tr className="border-b border-gray-200">
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 w-[44px]"></th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Quote No</th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Date</th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Value</th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Product</th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black whitespace-nowrap">Employee</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {quotationFollowups().map(q => {
+                                                    const checked = selectedQuotationIds.includes(q.id);
+                                                    return (
+                                                        <tr key={q.id}
+                                                            onClick={() => toggleSelectedQuotation(q.id)}
+                                                            className={`cursor-pointer border-b border-gray-100 ${checked ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                                                            <td className="px-2 py-1.5 text-center border-r border-gray-100">
+                                                                <input type="checkbox" checked={checked} onChange={() => toggleSelectedQuotation(q.id)}
+                                                                    onClick={(e) => e.stopPropagation()} style={{ accentColor: themeColor }} />
+                                                            </td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{q.quotation_no || '-'}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100 whitespace-nowrap">{formatDate(q.followup_date)}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100 whitespace-nowrap">{q.quotation_value ? `₹${Number(q.quotation_value).toLocaleString('en-IN')}` : '-'}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{q.campaign_service || q.campaign_name || '-'}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black">{q.user_name || '-'}</td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
                                     </div>
                                 )}
                             </div>
@@ -9650,33 +10476,50 @@ ${f.start_para}`;
                 {/* Letter Ref picker popup (this customer's previously saved/sent letters) */}
                 {showLetterRefPicker && (
                     <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[70] p-3">
-                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
                             <div className="px-4 py-3 flex justify-between items-center" style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
                                 <h3 className="text-sm font-semibold text-white">Select Letter Reference(s)</h3>
                                 <button onClick={() => setShowLetterRefPicker(false)} className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100">
                                     <XMarkIcon className="h-4 w-4" />
                                 </button>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
+                            <div className="flex-1 overflow-hidden p-3">
                                 {letterRefOptions().length === 0 ? (
                                     <p className="text-xs text-gray-500 text-center py-6">No previous letters found for this customer.</p>
                                 ) : (
-                                    <div className="space-y-1.5">
-                                        {letterRefOptions().map(l => (
-                                            <label key={l.id} className="flex items-start gap-2 p-2 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
-                                                <input type="checkbox" checked={selectedLetterRefIds.includes(l.id)} onChange={() => toggleSelectedLetterRef(l.id)}
-                                                    className="mt-0.5" style={{ accentColor: themeColor }} />
-                                                <div className="flex-1 min-w-0 text-[11px] text-black">
-                                                    <div className="flex flex-wrap gap-x-3">
-                                                        <span><b>Ref No:</b> {l.ref_no || '-'}</span>
-                                                        <span><b>Format Type:</b> {l.format_type_name || '-'}</span>
-                                                        <span><b>Channels:</b> {letterRefChannelText(l)}</span>
-                                                        <span><b>Date:</b> {formatDate(l.created_at)}</span>
-                                                        <span><b>Sent By:</b> {l.sent_by_name || '-'}</span>
-                                                    </div>
-                                                </div>
-                                            </label>
-                                        ))}
+                                    <div className="overflow-x-auto overflow-y-auto max-h-[60vh] border border-gray-200 rounded-lg custom-scrollbar">
+                                        <table className="w-full min-w-[760px] border-collapse">
+                                            <thead className="bg-gray-50 sticky top-0 z-10">
+                                                <tr className="border-b border-gray-200">
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 w-[44px]"></th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Ref No</th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Format Type</th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Channels</th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Date</th>
+                                                    <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black whitespace-nowrap">Sent By</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {letterRefOptions().map(l => {
+                                                    const checked = selectedLetterRefIds.includes(l.id);
+                                                    return (
+                                                        <tr key={l.id}
+                                                            onClick={() => toggleSelectedLetterRef(l.id)}
+                                                            className={`cursor-pointer border-b border-gray-100 ${checked ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                                                            <td className="px-2 py-1.5 text-center border-r border-gray-100">
+                                                                <input type="checkbox" checked={checked} onChange={() => toggleSelectedLetterRef(l.id)}
+                                                                    onClick={(e) => e.stopPropagation()} style={{ accentColor: themeColor }} />
+                                                            </td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100 whitespace-nowrap">{l.ref_no || '-'}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{l.format_type_name || '-'}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{letterRefChannelText(l)}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100 whitespace-nowrap">{formatDate(l.created_at)}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black">{l.sent_by_name || '-'}</td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
                                     </div>
                                 )}
                             </div>

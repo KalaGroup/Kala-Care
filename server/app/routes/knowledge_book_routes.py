@@ -23,13 +23,11 @@ def get_db():
 # ---------------- ROLE HELPERS ---------------- #
 
 def _resolve_role(db: Session, user_id: Optional[str], user_role: Optional[str]) -> Optional[str]:
-    """Trust the header role if present; otherwise look it up by user_id."""
     if user_role:
         return user_role
     if user_id:
         user = db.query(User).filter(User.user_id == user_id).first()
         if user:
-            # user.role is an Enum; .value gives the string
             return user.role.value if hasattr(user.role, "value") else str(user.role)
     return None
 
@@ -54,11 +52,8 @@ async def list_folder(
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    """List subfolders + files in a folder (omit parent_id for top-level products)."""
     is_admin = _is_master_admin(db, user_id, user_role)
 
-    # If a specific (non-root) folder is requested, make sure it exists and,
-    # for non-admins, that it isn't hidden.
     if parent_id is not None:
         folder = db.query(KBFolder).filter(KBFolder.id == parent_id).first()
         if not folder:
@@ -68,7 +63,65 @@ async def list_folder(
 
     folders, files = kb.list_contents(db, parent_id, is_admin)
     breadcrumb = kb.get_breadcrumb(db, parent_id)
-    return {"success": True, "is_admin": is_admin, "breadcrumb": breadcrumb, "folders": folders, "files": files}
+    return {"success": True, "is_admin": is_admin, "breadcrumb": breadcrumb,
+            "folders": folders, "files": files}
+
+
+# ---------------- CATEGORIES ---------------- #
+
+@router.get("/categories")
+async def list_categories(db: Session = Depends(get_db)):
+    """Available to any logged-in user (used for upload + filtering)."""
+    return {"success": True, "categories": kb.list_categories(db)}
+
+
+@router.post("/categories")
+async def create_category(
+    name: str = Form(...),
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_master_admin(db, user_id, user_role)
+    cat = kb.create_category(db, name, created_by=user_id)
+    return {"success": True, "category": {"id": cat.id, "name": cat.name}}
+
+
+@router.put("/categories/{category_id}")
+async def rename_category(
+    category_id: int,
+    name: str = Form(...),
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_master_admin(db, user_id, user_role)
+    cat = kb.rename_category(db, category_id, name)
+    return {"success": True, "category": {"id": cat.id, "name": cat.name}}
+
+
+@router.delete("/categories/{category_id}")
+async def delete_category(
+    category_id: int,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_master_admin(db, user_id, user_role)
+    kb.delete_category(db, category_id)
+    return {"success": True}
+
+
+# ---------------- PRODUCTS (dropdown) ---------------- #
+
+@router.get("/products")
+async def list_products(
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_master_admin(db, user_id, user_role)
+    return {"success": True, "products": kb.list_products(db)}
 
 
 # ---------------- FOLDER WRITES (master_admin only) ---------------- #
@@ -77,25 +130,43 @@ async def list_folder(
 async def create_folder(
     name: str = Form(...),
     parent_id: Optional[int] = Form(None),
+    description: Optional[str] = Form(None),
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
     _require_master_admin(db, user_id, user_role)
-    folder = kb.create_folder(db, name, parent_id, created_by=user_id)
+    folder = kb.create_folder(db, name, parent_id, created_by=user_id, description=description)
     return {"success": True, "folder": {"id": folder.id, "name": folder.name}}
+
+
+@router.post("/folders/products")
+async def create_product_folders(
+    products: list[str] = Form(...),
+    parent_id: int = Form(...),
+    description: Optional[str] = Form(None),
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Create one folder per selected product under a section (Sales/Service)."""
+    _require_master_admin(db, user_id, user_role)
+    created = kb.create_folders_for_products(db, products, parent_id,
+                                             created_by=user_id, description=description)
+    return {"success": True, "created": [{"id": f.id, "name": f.name} for f in created]}
 
 
 @router.put("/folders/{folder_id}")
 async def rename_folder(
     folder_id: int,
     name: str = Form(...),
+    description: Optional[str] = Form(None),
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
     _require_master_admin(db, user_id, user_role)
-    folder = kb.rename_folder(db, folder_id, name)
+    folder = kb.rename_folder(db, folder_id, name, description=description)
     return {"success": True, "folder": {"id": folder.id, "name": folder.name}}
 
 
@@ -129,6 +200,8 @@ async def delete_folder(
 async def upload_files(
     folder_id: int = Form(...),
     files: list[UploadFile] = File(...),
+    description: Optional[str] = Form(None),
+    category_id: Optional[int] = Form(None),
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -136,9 +209,38 @@ async def upload_files(
     _require_master_admin(db, user_id, user_role)
     saved = []
     for f in files:
-        row = await kb.save_file(db, folder_id, f, uploaded_by=user_id)
-        saved.append({"id": row.id, "name": row.original_name, "kind": row.kind, "size_bytes": row.size_bytes})
+        row = await kb.save_file(db, folder_id, f, uploaded_by=user_id,
+                                 description=description, category_id=category_id)
+        saved.append({"id": row.id, "name": row.original_name, "kind": row.kind,
+                      "size_bytes": row.size_bytes})
     return {"success": True, "files": saved}
+
+
+@router.put("/files/{file_id}")
+async def update_file(
+    file_id: int,
+    name: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    category_id: Optional[int] = Form(None),
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_master_admin(db, user_id, user_role)
+    row = kb.update_file(db, file_id, name=name, description=description, category_id=category_id)
+    return {"success": True, "file": {"id": row.id, "name": row.original_name}}
+
+
+@router.patch("/files/{file_id}/hide")
+async def toggle_hide_file(
+    file_id: int,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_master_admin(db, user_id, user_role)
+    row = kb.toggle_hide_file(db, file_id)
+    return {"success": True, "file": {"id": row.id, "is_hidden": bool(row.is_hidden)}}
 
 
 @router.delete("/files/{file_id}")
@@ -157,13 +259,23 @@ async def delete_file(
 
 @router.get("/files/{file_id}/view")
 async def view_file(file_id: int, db: Session = Depends(get_db)):
-    """Serve the file inline from the database (for image/video/pdf previews)."""
     row = kb.get_file(db, file_id)
     if row.data is None:
         raise HTTPException(status_code=404, detail="File data is missing")
     media_type = row.content_type or mimetypes.guess_type(row.original_name or "")[0] or "application/octet-stream"
     return Response(content=row.data, media_type=media_type)
 
+@router.get("/files/all")
+async def list_all_files(
+    category_id: Optional[int] = None,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Flat list of all categorised files across folders (for the All Files tab)."""
+    is_admin = _is_master_admin(db, user_id, user_role)
+    return {"success": True, "is_admin": is_admin,
+            "files": kb.list_all_files(db, is_admin, category_id)}
 
 @router.get("/files/{file_id}/download")
 async def download_file(file_id: int, db: Session = Depends(get_db)):
@@ -172,11 +284,8 @@ async def download_file(file_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="File data is missing")
     media_type = row.content_type or mimetypes.guess_type(row.original_name or "")[0] or "application/octet-stream"
     filename = (row.original_name or "download").replace('"', "")
-    return Response(
-        content=row.data,
-        media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return Response(content=row.data, media_type=media_type,
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @router.get("/folders/{folder_id}/download")
@@ -186,13 +295,8 @@ async def download_folder(
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    """Download a whole folder (and its subtree) as one .zip.
-    Any logged-in user can use it; non-admins won't get hidden subfolders."""
     is_admin = _is_master_admin(db, user_id, user_role)
     name, buffer = kb.build_folder_zip(db, folder_id, is_admin)
     safe = (name or "folder").replace('"', "").strip() or "folder"
-    return StreamingResponse(
-        buffer,
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{safe}.zip"'},
-    )
+    return StreamingResponse(buffer, media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{safe}.zip"'})

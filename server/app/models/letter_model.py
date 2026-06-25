@@ -8,9 +8,9 @@ class LetterSendRecord(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    ref_no = Column(String(100), nullable=False, index=True)      # e.g. KC/2026-27/01
-    financial_year = Column(String(20), nullable=True)            # e.g. 2026-27
-    sequence_number = Column(Integer, nullable=True)              # per instance per FY
+    ref_no = Column(String(100), nullable=False, index=True)      
+    financial_year = Column(String(20), nullable=True)           
+    sequence_number = Column(Integer, nullable=True)             
 
     instance_id = Column(String(100), nullable=True, index=True)
     customer_id = Column(Integer, nullable=True, index=True)
@@ -30,7 +30,7 @@ class LetterSendRecord(Base):
     email_to = Column(String(255), nullable=True)
     whatsapp_to = Column(String(100), nullable=True)
 
-    status = Column(String(50), default="sent")   # sent / partial / failed / draft
+    status = Column(String(50), default="sent")   
     error_message = Column(Text, nullable=True)
 
     sent_by_id = Column(String(100), nullable=True)
