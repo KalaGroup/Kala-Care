@@ -460,12 +460,62 @@ def verify_office_expense(
         db.close()
 
 
+@router.put("/{expense_id}/verification-status")
+def set_office_expense_verification_status(
+    expense_id: int,
+    payload: VerificationStatusRequest,
+    updated_by_name: str = Query(""),
+    updated_by_id: str = Query(""),
+):
+    """Set verification status directly (Pending / Verified / Unverified).
+    Used by the Unverify checkbox. Unlike /verify (which only toggles
+    Verified<->Pending), this can set the 'Unverified' state. Verifier fields are
+    cleared whenever the record leaves the Verified state."""
+    if payload.status not in ('Pending', 'Verified', 'Unverified'):
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    db = get_db_session()
+    try:
+        expense = db.query(OfficeExpense).filter(
+            OfficeExpense.id == expense_id,
+            OfficeExpense.is_deleted == False
+        ).first()
+        if not expense:
+            raise HTTPException(status_code=404, detail="Expense not found")
+
+        expense.verification_status = payload.status
+        if payload.status == 'Verified':
+            expense.verified_by_name = updated_by_name or None
+            expense.verified_by_id = updated_by_id or None
+            expense.verified_at = datetime.now(timezone.utc)
+        else:
+            # Leaving Verified (Pending or Unverified) -> clear verifier fields
+            expense.verified_by_name = None
+            expense.verified_by_id = None
+            expense.verified_at = None
+
+        db.commit()
+        db.refresh(expense)
+        return expense.to_dict()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
+
+
 # ==================== SUBMIT VERIFIED TO HISTORY ====================
 
 class SubmitToHistoryRequest(BaseModel):
     expense_ids: List[int]
     submitted_by_name: str
     submitted_by_id: str
+
+class VerificationStatusRequest(BaseModel):
+    status: str  # 'Pending' | 'Verified' | 'Unverified'
 
 @router.post("/submit-to-history")
 def submit_verified_to_history(request: SubmitToHistoryRequest):

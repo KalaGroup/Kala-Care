@@ -85,6 +85,7 @@ class CampaignLetterFormat(Base):
     products = Column(JSON, default=[])                 # e.g. ["Battery", "Oil"] - one or more products for this letter type
     reference_no = Column(String(255), nullable=True)   # e.g. "KCGL/26-27/Battery,Oil/BranchCode/serial no"
     serial_start = Column(String(50), nullable=True, default='1')   # starting serial number for letters
+    expiry_date = Column(DateTime, nullable=True)       # date after which this format should not be used (optional)
     note = Column(Text, nullable=True)                  # optional internal note about this format
 
     default_attachments = Column(JSON, default=[])      # [{"name","content","type","size"}, ...]
@@ -96,7 +97,7 @@ class CampaignLetterFormat(Base):
     # Structure: [
     #   {
     #     "branch_codes": ["420435_1", "420435_2"],  # [] means applies to all remaining
-    #     "goem_oem": "CUMMINS",                     # null means all GOEMs
+    #     "goem_oems": ["CUMMINS", "ASHOK LEYLAND"], # [] means all GOEMs (one or more)
     #     "to_emails": ["a@b.com"],
     #     "cc_emails": ["c@d.com"]
     #   }, ...
@@ -141,7 +142,8 @@ class BranchEmailMaster(Base):
     id = Column(Integer, primary_key=True, index=True)
     branch_code = Column(String(50), nullable=False, unique=True, index=True)
     branch_name = Column(String(255), nullable=False)
-    email = Column(String(255), nullable=True)          # nullable — user may leave blank
+    email = Column(String(255), nullable=True)          # kept for backward compatibility (first email)
+    emails = Column(JSON, default=[])                   # list of emails per branch (multi-email)
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)        

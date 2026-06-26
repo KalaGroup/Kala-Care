@@ -181,6 +181,7 @@ const ALL_COLUMNS = [
   { key: 'total_amount', label: 'Total Amount', width: 85 },
   { key: 'ho_remark', label: 'HO Remark', width: 130 },
   { key: 'verification_status', label: 'Verify', width: 70 },
+  { key: 'unverify_status', label: 'Unverify', width: 70 },
 ];
 
 const OE_TABLE_COLS = [
@@ -220,6 +221,7 @@ const DEFAULT_COL_ORDER = [
   'sr_reach_at_site_lat_long',
   'sr_closed_date',
   'sr_status',
+  'unverify_status', // Unverify — pinned to end
 ];
 
 const COL_MAP = Object.fromEntries(ALL_COLUMNS.map(c => [c.key, c]));
@@ -480,7 +482,7 @@ const HOExpense = () => {
   const [recordsReachDateFrom, setRecordsReachDateFrom] = useState('');
   const [recordsReachDateTo, setRecordsReachDateTo] = useState('');
   const [recordsTwoWayKmFilter, setRecordsTwoWayKmFilter] = useState(''); // '' | '10' | '30' | ... | '500'
-  const [engineerDetailTab, setEngineerDetailTab] = useState('pending'); // 'pending' | 'verified'
+  const [engineerDetailTab, setEngineerDetailTab] = useState('pending'); // 'pending' | 'verified' | 'unverified'
 
   /* ── Excel-style column filters (Task Status + SR Type) ── */
   const [activeColumnFilter, setActiveColumnFilter] = useState(null);
@@ -672,9 +674,10 @@ const HOExpense = () => {
   const [billWisePeriodRecords, setBillWisePeriodRecords] = useState([]);
   const [loadingBillWisePeriodRecords, setLoadingBillWisePeriodRecords] = useState(false);
   const [billWiseVerificationStatus, setBillWiseVerificationStatus] = useState({});
+  const [billWiseUnverifyStatus, setBillWiseUnverifyStatus] = useState({}); // { id: true } when marked Unverified
   const [billWiseSavingStates, setBillWiseSavingStates] = useState({});
   const [submittingBillWiseToHistory, setSubmittingBillWiseToHistory] = useState(false);
-  const [billWiseTab, setBillWiseTab] = useState('pending'); // 'pending' | 'verified'
+  const [billWiseTab, setBillWiseTab] = useState('pending'); // 'pending' | 'verified' | 'unverified'
 
   // ─── Sales & BM (merged Sales + KM Wise), voucher-wise like Service Engineer ───
   const [loadingSalesBM, setLoadingSalesBM] = useState(false);
@@ -689,7 +692,7 @@ const HOExpense = () => {
   const [salesBMTimers, setSalesBMTimers] = useState({});
   const [submittingSalesBM, setSubmittingSalesBM] = useState(false);
   const [salesBMKmFilter, setSalesBMKmFilter] = useState('');
-  const [salesBMTab, setSalesBMTab] = useState('pending'); // 'pending' | 'verified'
+  const [salesBMTab, setSalesBMTab] = useState('pending'); // 'pending' | 'verified' | 'unverified'
   const [salesBMDA, setSalesBMDA] = useState({});          // { recordId: 'manual DA' }
 
   // Loading states for KM and Expense
@@ -1099,6 +1102,30 @@ const HOExpense = () => {
       console.error('Error updating verification:', error);
       toast.error('Failed to update verification status');
       setVerificationStatus(prev => ({ ...prev, [recordId]: currentStatus }));
+    } finally {
+      setSavingStates(prev => ({ ...prev, [recordId]: false }));
+    }
+  };
+
+  // HO marks a record as "Unverified" (rejected) → moves it to the Unverify tab.
+  // Toggling off returns it to Pending. Mutually exclusive with Verify.
+  const handleUnverifyToggle = async (recordId, currentlyUnverified) => {
+    const newStatus = currentlyUnverified ? 'Pending' : 'Unverified';
+    setSavingStates(prev => ({ ...prev, [recordId]: true }));
+    try {
+      await axios.put(`${API_BASE_URL}/tada-ho/engineer-records/${recordId}`, {
+        verification_status: newStatus,
+      });
+      setEngineerRecords(prev => prev.map(r =>
+        r.id === recordId ? { ...r, verification_status: newStatus } : r
+      ));
+      if (newStatus === 'Unverified') {
+        setVerificationStatus(prev => ({ ...prev, [recordId]: false }));
+      }
+      toast.success(newStatus === 'Unverified' ? 'Marked as unverified!' : 'Moved back to pending!', { duration: 1500 });
+    } catch (error) {
+      console.error('Error updating unverify status:', error);
+      toast.error('Failed to update status');
     } finally {
       setSavingStates(prev => ({ ...prev, [recordId]: false }));
     }
@@ -1911,10 +1938,13 @@ const HOExpense = () => {
       const records = res.data || [];
       setBillWisePeriodRecords(records);
       const verify = {};
+      const unverify = {};
       records.forEach(r => {
         verify[r.id] = r.verification_status === 'Verified';
+        unverify[r.id] = r.verification_status === 'Unverified';
       });
       setBillWiseVerificationStatus(verify);
+      setBillWiseUnverifyStatus(unverify);
     } catch (e) {
       console.error(e);
       toast.error('Failed to load Bill Wise records');
@@ -1927,17 +1957,49 @@ const HOExpense = () => {
   const handleBillWiseVerificationToggle = async (recordId, currentStatus) => {
     const newStatus = !currentStatus;
     setBillWiseVerificationStatus(prev => ({ ...prev, [recordId]: newStatus }));
+    if (newStatus) setBillWiseUnverifyStatus(prev => ({ ...prev, [recordId]: false }));
     setBillWiseSavingStates(prev => ({ ...prev, [recordId]: true }));
     try {
       await axios.put(`${API_BASE_URL}/tada-bill-wise/records/${recordId}/update`, {
         verification_status: newStatus ? 'Verified' : 'Pending',
       });
+      const applied = newStatus ? 'Verified' : 'Pending';
       setBillWisePeriodRecords(prev => prev.map(r =>
-        r.id === recordId ? { ...r, verification_status: newStatus ? 'Verified' : 'Pending' } : r
+        r.id === recordId ? { ...r, verification_status: applied } : r
       ));
-      toast.success(newStatus ? 'Verified!' : 'Unverified!', { duration: 1000 });
+      setSelectedBillWiseEngineer(prev => prev ? {
+        ...prev,
+        records: (prev.records || []).map(r => r.id === recordId ? { ...r, verification_status: applied } : r),
+      } : prev);
+      toast.success(newStatus ? 'Verified!' : 'Moved to pending!', { duration: 1000 });
     } catch {
       setBillWiseVerificationStatus(prev => ({ ...prev, [recordId]: currentStatus }));
+      toast.error('Failed to update');
+    } finally {
+      setBillWiseSavingStates(prev => ({ ...prev, [recordId]: false }));
+    }
+  };
+
+  // Mark a Bill Wise record as "Unverified" → moves it to the Unverify tab.
+  const handleBillWiseUnverifyToggle = async (recordId, currentlyUnverified) => {
+    const newStatus = currentlyUnverified ? 'Pending' : 'Unverified';
+    setBillWiseUnverifyStatus(prev => ({ ...prev, [recordId]: !currentlyUnverified }));
+    if (!currentlyUnverified) setBillWiseVerificationStatus(prev => ({ ...prev, [recordId]: false }));
+    setBillWiseSavingStates(prev => ({ ...prev, [recordId]: true }));
+    try {
+      await axios.put(`${API_BASE_URL}/tada-bill-wise/records/${recordId}/update`, {
+        verification_status: newStatus,
+      });
+      setBillWisePeriodRecords(prev => prev.map(r =>
+        r.id === recordId ? { ...r, verification_status: newStatus } : r
+      ));
+      setSelectedBillWiseEngineer(prev => prev ? {
+        ...prev,
+        records: (prev.records || []).map(r => r.id === recordId ? { ...r, verification_status: newStatus } : r),
+      } : prev);
+      toast.success(newStatus === 'Unverified' ? 'Marked unverified!' : 'Back to pending!', { duration: 1000 });
+    } catch {
+      setBillWiseUnverifyStatus(prev => ({ ...prev, [recordId]: currentlyUnverified }));
       toast.error('Failed to update');
     } finally {
       setBillWiseSavingStates(prev => ({ ...prev, [recordId]: false }));
@@ -2008,8 +2070,13 @@ const HOExpense = () => {
         const records = res.data || [];
         setBillWisePeriodRecords(records);
         const verify = {};
-        records.forEach(r => { verify[r.id] = r.verification_status === 'Verified'; });
+        const unverify = {};
+        records.forEach(r => {
+          verify[r.id] = r.verification_status === 'Verified';
+          unverify[r.id] = r.verification_status === 'Unverified';
+        });
         setBillWiseVerificationStatus(verify);
+        setBillWiseUnverifyStatus(unverify);
         if (curType && curName) {
           const map = {};
           records.forEach(r => {
@@ -2254,9 +2321,30 @@ const HOExpense = () => {
       });
       setSalesBMRecords(prev => prev.map(r =>
         r.id === recordId ? { ...r, verification_status: newStatus ? 'Verified' : 'Pending' } : r));
-      toast.success(newStatus ? 'Verified!' : 'Unverified!', { duration: 1000 });
+      toast.success(newStatus ? 'Verified!' : 'Moved to pending!', { duration: 1000 });
     } catch {
       setSalesBMVerify(prev => ({ ...prev, [recordId]: currentStatus }));
+      toast.error('Failed to update');
+    } finally {
+      setSalesBMSaving(prev => ({ ...prev, [recordId]: false }));
+    }
+  };
+
+  // Mark a Sales & BM record as "Unverified" → moves it to the Unverify tab.
+  const handleSalesBMUnverifyToggle = async (recordId, currentlyUnverified) => {
+    const newStatus = currentlyUnverified ? 'Pending' : 'Unverified';
+    setSalesBMSaving(prev => ({ ...prev, [recordId]: true }));
+    try {
+      await axios.put(`${API_BASE_URL}/tada-salesbm/records/${recordId}/update`, {
+        verification_status: newStatus,
+      });
+      setSalesBMRecords(prev => prev.map(r =>
+        r.id === recordId ? { ...r, verification_status: newStatus } : r));
+      if (newStatus === 'Unverified') {
+        setSalesBMVerify(prev => ({ ...prev, [recordId]: false }));
+      }
+      toast.success(newStatus === 'Unverified' ? 'Marked unverified!' : 'Back to pending!', { duration: 1000 });
+    } catch {
       toast.error('Failed to update');
     } finally {
       setSalesBMSaving(prev => ({ ...prev, [recordId]: false }));
@@ -2342,12 +2430,15 @@ const HOExpense = () => {
   };
 
   const tabSalesBMRecords = useMemo(() => filteredSalesBMRecords.filter(r => {
-    const v = r.verification_status === 'Verified';
-    return salesBMTab === 'verified' ? v : !v;
+    const status = r.verification_status;
+    if (salesBMTab === 'verified') return status === 'Verified';
+    if (salesBMTab === 'unverified') return status === 'Unverified';
+    return status !== 'Verified' && status !== 'Unverified'; // pending
   }), [filteredSalesBMRecords, salesBMTab]);
 
-  const salesBMPendingCount = filteredSalesBMRecords.filter(r => r.verification_status !== 'Verified').length;
+  const salesBMPendingCount = filteredSalesBMRecords.filter(r => r.verification_status !== 'Verified' && r.verification_status !== 'Unverified').length;
   const salesBMVerifiedCount = filteredSalesBMRecords.filter(r => r.verification_status === 'Verified').length;
+  const salesBMUnverifiedCount = filteredSalesBMRecords.filter(r => r.verification_status === 'Unverified').length;
   const salesBMTabTotal = tabSalesBMRecords.reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0);
 
   const loadEngineerDetails = async (engineerUid, engineerName, branchCode) => {
@@ -3069,6 +3160,27 @@ const HOExpense = () => {
       );
     }
 
+    if (key === 'unverify_status') {
+      const isUnverified = record.verification_status === 'Unverified';
+      const isSaving = savingStates[record.id];
+      return (
+        <div className="flex justify-center items-center gap-1">
+          <input
+            type="checkbox"
+            checked={isUnverified}
+            onChange={() => handleUnverifyToggle(record.id, isUnverified)}
+            className="w-4 h-4 cursor-pointer accent-red-600"
+          />
+          {isSaving && (
+            <svg className="animate-spin h-3 w-3 text-red-500" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          )}
+        </div>
+      );
+    }
+
     const val = record[key];
     const displayStr = (val !== null && val !== undefined) ? String(val) : '-';
 
@@ -3361,8 +3473,13 @@ const HOExpense = () => {
 
   const tabFilteredEngineerRecords = useMemo(() => {
     return filteredEngineerRecords.filter(r => {
-      const isVerified = r.verification_status === 'Verified';
-      const tabMatch = engineerDetailTab === 'verified' ? isVerified : !isVerified;
+      const status = r.verification_status;
+      const isVerified = status === 'Verified';
+      const isUnverified = status === 'Unverified';
+      let tabMatch;
+      if (engineerDetailTab === 'verified') tabMatch = isVerified;
+      else if (engineerDetailTab === 'unverified') tabMatch = isUnverified;
+      else tabMatch = !isVerified && !isUnverified; // pending
       if (!tabMatch) return false;
       if (engineerTaskStatusFilter.size > 0 && !engineerTaskStatusFilter.has(String(r.task_status || '').trim())) {
         return false;
@@ -3724,7 +3841,7 @@ const HOExpense = () => {
             </div>
           </div>
           <br/><br/>
-          <span style="color:#dc2626; font-size:12px;">This action cannot be undone!</span>
+          <span style="color:#ea580c; font-size:12px;">This action cannot be undone!</span>
         `,
         icon: 'question',
         showCancelButton: true,
@@ -4794,6 +4911,17 @@ const HOExpense = () => {
                         >
                           Verified ({salesBMVerifiedCount})
                         </button>
+                        <button
+                          onClick={() => setSalesBMTab('unverified')}
+                          className="px-3 py-1 text-[11px] font-semibold rounded-md transition-all border"
+                          style={{
+                            backgroundColor: salesBMTab === 'unverified' ? '#ea580c' : '#f9fafb',
+                            color: salesBMTab === 'unverified' ? 'white' : '#374151',
+                            borderColor: salesBMTab === 'unverified' ? '#ea580c' : '#e5e7eb',
+                          }}
+                        >
+                          Unverified ({salesBMUnverifiedCount})
+                        </button>
 
                         <span className="mx-1 h-5 w-px bg-gray-300" />
 
@@ -4904,14 +5032,15 @@ const HOExpense = () => {
                       ) : (
                         /* ── RECORDS DETAIL (HO edit + verify) ── */
                         <div className="overflow-auto" style={{ maxHeight: '550px', scrollbarWidth: 'thin' }}>
-                          <table className="w-full border-collapse border border-gray-200" style={{ minWidth: '2100px' }}>
+                          <table className="w-full border-collapse border border-gray-200" style={{ minWidth: '2170px' }}>
                             <thead className="sticky top-0 z-20"><tr style={{ backgroundColor: '#f0f1ff' }}>
-                              {[['Verify', 60, true], ['Sr.', 45], ['Date', 90], ['SR/Inv/Engine No.', 150], ['Customer', 160], ['Location', 140], ['KM 2-Way', 80], ['HO Corrected KM', 110], ['Rate', 70], ['DA', 90], ['Amount', 95], ['HO Remark', 150], ['Work Description', 180], ['Labour Sale Exp.', 120], ['Part Sale Exp.', 120], ['Remark', 150], ['Status', 90]].map(([l, w, sticky], i) =>
+                              {[['Verify', 60, true], ['Sr.', 45], ['Date', 90], ['SR/Inv/Engine No.', 150], ['Customer', 160], ['Location', 140], ['KM 2-Way', 80], ['HO Corrected KM', 110], ['Rate', 70], ['DA', 90], ['Amount', 95], ['HO Remark', 150], ['Work Description', 180], ['Labour Sale Exp.', 120], ['Part Sale Exp.', 120], ['Remark', 150], ['Status', 90], ['Unverify', 70]].map(([l, w, sticky], i) =>
                                 <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border border-gray-200 uppercase text-center" style={{ minWidth: `${w}px`, backgroundColor: '#f0f1ff', ...(sticky && { position: 'sticky', left: 0, zIndex: 30, boxShadow: '2px 0 4px -2px rgba(0,0,0,0.1)' }) }}>{l}</th>)}
                             </tr></thead>
                             <tbody>
                               {tabSalesBMRecords.map((rec, idx) => {
                                 const isVerified = salesBMVerify[rec.id] ?? (rec.verification_status === 'Verified');
+                                const isUnverified = rec.verification_status === 'Unverified';
                                 const corr = salesBMCorr[rec.id] !== undefined ? salesBMCorr[rec.id] : (rec.ho_corrected_km || '');
                                 const rem = salesBMRemark[rec.id] !== undefined ? salesBMRemark[rec.id] : (rec.ho_remark || '');
                                 const daVal = salesBMDA[rec.id] !== undefined && salesBMDA[rec.id] !== '' ? salesBMDA[rec.id] : (rec.da || '');
@@ -4965,7 +5094,10 @@ const HOExpense = () => {
                                     <td className="px-2 py-0.5 border border-gray-200 text-[11px] text-center">{rec.part_sale_expected || '-'}</td>
                                     <td className="px-2 py-0.5 border border-gray-200 text-[11px]"><div className="truncate" title={rec.remark}>{rec.remark || '-'}</div></td>
                                     <td className="px-2 py-0.5 border border-gray-200 text-center">
-                                      <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold ${isVerified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{isVerified ? 'Verified' : 'Pending'}</span>
+                                      <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold ${isUnverified ? 'bg-red-100 text-red-800' : isVerified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{isUnverified ? 'Unverified' : isVerified ? 'Verified' : 'Pending'}</span>
+                                    </td>
+                                    <td className="px-2 py-0.5 border border-gray-200 text-center">
+                                      <input type="checkbox" checked={isUnverified} onChange={() => handleSalesBMUnverifyToggle(rec.id, isUnverified)} className="w-4 h-4 cursor-pointer accent-red-600" title="Mark as Unverified" />
                                     </td>
                                   </tr>
                                 );
@@ -4979,7 +5111,7 @@ const HOExpense = () => {
                               <td className="px-2 py-1.5 text-[11px] font-bold text-center border border-gray-200" style={{ color: themeColor }}>
                                 ₹{salesBMTabTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </td>
-                              <td colSpan={6} className="border border-gray-200" />
+                              <td colSpan={7} className="border border-gray-200" />
                             </tr></tfoot>
                           </table>
                         </div>
@@ -5353,6 +5485,7 @@ const HOExpense = () => {
                             { key: 'remark', l: 'Remark', w: 160 },
                             { key: 'work_status', l: 'Work Status', w: 110 },
                             { key: '_status', l: 'Status', w: 90 },
+                            { key: '_unverify', l: 'Unverify', w: 70 },
                           ]
                           : [
                             { key: '_verify', l: 'Verify', w: 60, sticky: true },
@@ -5372,13 +5505,20 @@ const HOExpense = () => {
                             { key: 'task_end_date', l: 'Task End Date', w: 110 },
                             { key: 'bill_submitted', l: 'Bill Submitted Status', w: 130 },
                             { key: '_status', l: 'Status', w: 90 },
+                            { key: '_unverify', l: 'Unverify', w: 70 },
                           ];
                         const minW = cols.reduce((s, c) => s + c.w, 0);
                         const amountColIdx = cols.findIndex(c => c.key === '_amount');
                         const isVerifiedRow = (r) => billWiseVerificationStatus[r.id] ?? (r.verification_status === 'Verified');
-                        const tabRows = rows.filter(r => billWiseTab === 'verified' ? isVerifiedRow(r) : !isVerifiedRow(r));
-                        const pendingCount = rows.filter(r => !isVerifiedRow(r)).length;
+                        const isUnverifiedRow = (r) => billWiseUnverifyStatus[r.id] ?? (r.verification_status === 'Unverified');
+                        const tabRows = rows.filter(r => {
+                          if (billWiseTab === 'verified') return isVerifiedRow(r);
+                          if (billWiseTab === 'unverified') return isUnverifiedRow(r);
+                          return !isVerifiedRow(r) && !isUnverifiedRow(r); // pending
+                        });
+                        const pendingCount = rows.filter(r => !isVerifiedRow(r) && !isUnverifiedRow(r)).length;
                         const verifiedCount = rows.filter(r => isVerifiedRow(r)).length;
+                        const unverifiedCount = rows.filter(r => isUnverifiedRow(r)).length;
                         const total = rows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
                         const verifiedTotal = rows.reduce((s, r) => isVerifiedRow(r) ? s + (parseFloat(r.amount) || 0) : s, 0);
                         const tabTotal = tabRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
@@ -5408,6 +5548,17 @@ const HOExpense = () => {
                               >
                                 Verified ({verifiedCount})
                               </button>
+                              <button
+                                onClick={() => setBillWiseTab('unverified')}
+                                className="px-3 py-1 text-[11px] font-semibold rounded-md transition-all border"
+                                style={{
+                                  backgroundColor: billWiseTab === 'unverified' ? '#ea580c' : '#f9fafb',
+                                  color: billWiseTab === 'unverified' ? 'white' : '#374151',
+                                  borderColor: billWiseTab === 'unverified' ? '#ea580c' : '#e5e7eb',
+                                }}
+                              >
+                                Unverified ({unverifiedCount})
+                              </button>
 
                               <span className="mx-1 h-5 w-px bg-gray-300" />
 
@@ -5416,7 +5567,7 @@ const HOExpense = () => {
                                 <span className="text-[10px] font-bold text-gray-800">{tabRows.length}</span>
                               </div>
                               <div className="flex items-center gap-1 px-2 py-1 rounded bg-blue-50 border border-blue-100">
-                                <span className="text-[9px] font-bold text-blue-600 uppercase">{billWiseTab === 'verified' ? 'Verified Amount:' : 'Pending Amount:'}</span>
+                                <span className="text-[9px] font-bold text-blue-600 uppercase">{billWiseTab === 'verified' ? 'Verified Amount:' : billWiseTab === 'unverified' ? 'Unverified Amount:' : 'Pending Amount:'}</span>
                                 <span className="text-[10px] font-bold text-blue-800">₹{tabTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                               </div>
                             </div>
@@ -5440,8 +5591,9 @@ const HOExpense = () => {
                                 <tbody>
                                   {tabRows.map((rec, idx) => {
                                     const isVerified = billWiseVerificationStatus[rec.id] ?? (rec.verification_status === 'Verified');
+                                    const isUnverified = billWiseUnverifyStatus[rec.id] ?? (rec.verification_status === 'Unverified');
                                     const isSaving = billWiseSavingStates[rec.id];
-                                    const rowBg = isVerified ? '#f0fdf4' : '#ffffff';
+                                    const rowBg = isUnverified ? '#fef2f2' : isVerified ? '#f0fdf4' : '#ffffff';
                                     return (
                                       <tr key={rec.id} className={`transition-colors ${isVerified ? 'bg-green-50/40' : 'hover:bg-blue-50/30'}`} style={{ height: '34px' }}>
                                         {cols.map((c, ci) => {
@@ -5481,9 +5633,22 @@ const HOExpense = () => {
                                           if (c.key === '_status') {
                                             return (
                                               <td key={ci} className="px-2 py-0.5 border border-gray-300 text-center">
-                                                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold whitespace-nowrap ${isVerified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                                                  {isVerified ? 'Verified' : 'Pending'}
+                                                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold whitespace-nowrap ${isUnverified ? 'bg-red-100 text-red-800' : isVerified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                                                  {isUnverified ? 'Unverified' : isVerified ? 'Verified' : 'Pending'}
                                                 </span>
+                                              </td>
+                                            );
+                                          }
+                                          if (c.key === '_unverify') {
+                                            return (
+                                              <td key={ci} className="px-2 py-0.5 border border-gray-300 text-center">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={isUnverified}
+                                                  onChange={() => handleBillWiseUnverifyToggle(rec.id, isUnverified)}
+                                                  className="w-4 h-4 cursor-pointer accent-red-600"
+                                                  title="Mark as Unverified"
+                                                />
                                               </td>
                                             );
                                           }
@@ -5502,7 +5667,7 @@ const HOExpense = () => {
                                 <tfoot className="sticky bottom-0">
                                   <tr style={{ backgroundColor: '#f0f1ff' }}>
                                     <td className="border border-gray-300" style={{ position: 'sticky', left: 0, zIndex: 25, backgroundColor: '#f0f1ff', boxShadow: '2px 0 4px -2px rgba(0,0,0,0.1)' }} />
-                                    <td colSpan={amountColIdx - 1} className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border border-gray-300">{billWiseTab === 'verified' ? 'Verified Total' : 'Pending Total'}</td>
+                                    <td colSpan={amountColIdx - 1} className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border border-gray-300">{billWiseTab === 'verified' ? 'Verified Total' : billWiseTab === 'unverified' ? 'Unverified Total' : 'Pending Total'}</td>
                                     <td className="px-2 py-1.5 text-[11px] font-bold text-center border border-gray-300" style={{ color: themeColor }}>
                                       ₹{tabTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </td>
@@ -5593,8 +5758,11 @@ const HOExpense = () => {
                               case 'sr_no':
                                 return idx + 1; // running number, same as on screen
                               case 'verification_status':
-                                return (verificationStatus[record.id] || record.verification_status === 'Verified')
-                                  ? 'Verified' : 'Pending';
+                                return record.verification_status === 'Verified' ? 'Verified'
+                                  : record.verification_status === 'Unverified' ? 'Unverified'
+                                    : 'Pending';
+                              case 'unverify_status':
+                                return record.verification_status === 'Unverified' ? 'Yes' : '';
                               case 'ho_corrected_km':
                                 return localKMCorrections[record.id] !== undefined
                                   ? localKMCorrections[record.id]
@@ -5664,8 +5832,9 @@ const HOExpense = () => {
                   const currentEng = engineerSummary.find(e => e.engineer_uid === selectedEngineerDetail?.uid);
 
                   // Tab-specific stats — respect both Task Status and SR Type filters so tab counts match visible rows
-                  const pendingCount = filteredEngineerRecords.filter(r => r.verification_status !== 'Verified' && matchEngineerColumnFilters(r)).length;
+                  const pendingCount = filteredEngineerRecords.filter(r => r.verification_status !== 'Verified' && r.verification_status !== 'Unverified' && matchEngineerColumnFilters(r)).length;
                   const verifiedCount = filteredEngineerRecords.filter(r => r.verification_status === 'Verified' && matchEngineerColumnFilters(r)).length;
+                  const unverifiedCount = filteredEngineerRecords.filter(r => r.verification_status === 'Unverified' && matchEngineerColumnFilters(r)).length;
 
                   const tabRecords = tabFilteredEngineerRecords;
                   const tabCount = tabRecords.length;
@@ -5716,6 +5885,17 @@ const HOExpense = () => {
                         }}
                       >
                         Verified ({verifiedCount})
+                      </button>
+                      <button
+                        onClick={() => setEngineerDetailTab('unverified')}
+                        className="px-3 py-1 text-[11px] font-semibold rounded-md transition-all border"
+                        style={{
+                          backgroundColor: engineerDetailTab === 'unverified' ? '#ea580c' : '#f9fafb',
+                          color: engineerDetailTab === 'unverified' ? 'white' : '#374151',
+                          borderColor: engineerDetailTab === 'unverified' ? '#ea580c' : '#e5e7eb',
+                        }}
+                      >
+                        Unverified ({unverifiedCount})
                       </button>
 
                       <span className="mx-1 h-5 w-px bg-gray-300" />
@@ -5787,7 +5967,7 @@ const HOExpense = () => {
                       </div>
                       <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-blue-50 border border-blue-100">
                         <span className="text-[9px] font-bold text-blue-600 uppercase">
-                          {isVerifiedTab ? 'Verified Amount:' : 'Pending Amount:'}
+                          {engineerDetailTab === 'verified' ? 'Verified Amount:' : engineerDetailTab === 'unverified' ? 'Unverified Amount:' : 'Pending Amount:'}
                         </span>
                         <span className="text-[10px] font-bold text-blue-800">
                           ₹{tabAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -5950,7 +6130,7 @@ const HOExpense = () => {
                           className="px-3 py-1 text-white text-[10px] font-bold rounded-lg disabled:opacity-40 transition-colors"
                           style={{
                             background: engineerDetailTab === 'verified'
-                              ? 'linear-gradient(135deg, #dc2626, #b91c1c)'
+                              ? 'linear-gradient(135deg, #ea580c, #b91c1c)'
                               : 'linear-gradient(135deg, #059669, #047857)'
                           }}
                         >
@@ -6031,7 +6211,7 @@ const HOExpense = () => {
                         className="px-4 py-1.5 text-white text-xs font-semibold rounded-lg transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{
                           background: engineerDetailTab === 'verified'
-                            ? 'linear-gradient(135deg, #dc2626, #b91c1c)'
+                            ? 'linear-gradient(135deg, #ea580c, #b91c1c)'
                             : `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})`
                         }}
                       >

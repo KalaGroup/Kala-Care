@@ -23,7 +23,8 @@ import {
   EnvelopeIcon,
   ChatBubbleLeftRightIcon,
   PaperClipIcon,
-  EyeIcon
+  EyeIcon,
+  TrashIcon
 } from '@heroicons/react/24/outline';
 import CampaignCustomersFollowupModal from '../components/CampaignCustomersFollowupModal';
 
@@ -168,10 +169,11 @@ const Campaign = () => {
 
   // Branch Email Master
   const [showBranchEmailMaster, setShowBranchEmailMaster] = useState(false);
-  const [branchEmails, setBranchEmails] = useState([]);
+  const [branchEmails, setBranchEmails] = useState([]);          // [{ code, name, emails: [] }]
   const [branchEmailsLoading, setBranchEmailsLoading] = useState(false);
   const [branchEmailsSaving, setBranchEmailsSaving] = useState(false);
   const [branchEmailErrors, setBranchEmailErrors] = useState({});
+  const [branchEmailInputs, setBranchEmailInputs] = useState({}); // { [code]: 'typing...' }
 
   const BRANCH_LIST = [
     { code: '420435_1', name: 'Ch.Sambhaji Nagar' },
@@ -194,6 +196,7 @@ const Campaign = () => {
     format_type_name: '',
     products: [],
     reference_no: '',
+    expiry_date: '',
     default_attachments: [],
     start_para: '',
     end_para: ''
@@ -206,13 +209,14 @@ const Campaign = () => {
   const blankRule = () => ({
     _key: Date.now() + Math.random(),
     branch_codes: [],
-    goem_oem: '',
+    goem_oems: [],
     to_emails: [],
     cc_emails: [],
     _toInput: '',
     _ccInput: '',
     _toError: '',
     _ccError: '',
+    _goemSelect: '',
   });
 
   const [recipientRules, setRecipientRules] = useState([]);
@@ -1477,20 +1481,22 @@ const Campaign = () => {
     (rules || []).map(r => ({
       _key: Date.now() + Math.random(),
       branch_codes: r.branch_codes || [],
-      goem_oem: r.goem_oem || '',
+      // backward compatible: old rules stored a single goem_oem string
+      goem_oems: r.goem_oems || (r.goem_oem ? [r.goem_oem] : []),
       to_emails: r.to_emails || [],
       cc_emails: r.cc_emails || [],
       _toInput: '',
       _ccInput: '',
       _toError: '',
       _ccError: '',
+      _goemSelect: '',
     }));
 
   // Convert UI rules → clean DB payload (strip temp fields)
   const uiRulesToDbRules = (rules) =>
     rules.map(r => ({
       branch_codes: r.branch_codes || [],
-      goem_oem: r.goem_oem || null,
+      goem_oems: r.goem_oems || [],
       to_emails: r.to_emails || [],
       cc_emails: r.cc_emails || [],
     }));
@@ -1540,6 +1546,22 @@ const Campaign = () => {
     ));
   };
 
+  const addGoemToRule = (ruleKey) => {
+    setRecipientRules(prev => prev.map(r => {
+      if (r._key !== ruleKey) return r;
+      const goem = (r._goemSelect || '').trim();
+      if (!goem) return r;
+      if (r.goem_oems.includes(goem)) return { ...r, _goemSelect: '' };
+      return { ...r, goem_oems: [...r.goem_oems, goem], _goemSelect: '' };
+    }));
+  };
+
+  const removeGoemFromRule = (ruleKey, goem) => {
+    setRecipientRules(prev => prev.map(r =>
+      r._key !== ruleKey ? r : { ...r, goem_oems: r.goem_oems.filter(g => g !== goem) }
+    ));
+  };
+
   const addRecipientRule = () => {
     setRecipientRules(prev => [...prev, blankRule()]);
   };
@@ -1581,14 +1603,18 @@ const Campaign = () => {
       const data = await response.json();
       // Merge DB data with BRANCH_LIST so all 14 branches always show
       const emailMap = {};
-      data.forEach(row => { emailMap[row.branch_code] = row.email || ''; });
+      data.forEach(row => {
+        // backward compatible: old rows had a single `email`
+        emailMap[row.branch_code] = (row.emails && row.emails.length > 0)
+          ? row.emails
+          : (row.email ? [row.email] : []);
+      });
       setBranchEmails(
-        BRANCH_LIST.map(b => ({ ...b, email: emailMap[b.code] || '' }))
+        BRANCH_LIST.map(b => ({ ...b, emails: emailMap[b.code] || [] }))
       );
     } catch (err) {
       toast.error(err.message || 'Failed to load branch emails');
-      // Still show all branches with empty emails on error
-      setBranchEmails(BRANCH_LIST.map(b => ({ ...b, email: '' })));
+      setBranchEmails(BRANCH_LIST.map(b => ({ ...b, emails: [] })));
     } finally {
       setBranchEmailsLoading(false);
     }
@@ -1597,6 +1623,7 @@ const Campaign = () => {
   const openBranchEmailMaster = () => {
     setShowBranchEmailMaster(true);
     setBranchEmailErrors({});
+    setBranchEmailInputs({});
     fetchBranchEmails();
   };
 
@@ -1605,9 +1632,9 @@ const Campaign = () => {
     return /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(email.trim());
   };
 
-  const handleBranchEmailChange = (code, value) => {
-    setBranchEmails(prev => prev.map(b => b.code === code ? { ...b, email: value } : b));
-    // Live validation
+  const handleBranchEmailInputChange = (code, value) => {
+    setBranchEmailInputs(prev => ({ ...prev, [code]: value }));
+    // Live validation of what's being typed
     if (value && !validateEmail(value)) {
       setBranchEmailErrors(prev => ({ ...prev, [code]: 'Invalid email address' }));
     } else {
@@ -1615,13 +1642,35 @@ const Campaign = () => {
     }
   };
 
+  const addBranchEmail = (code) => {
+    const value = (branchEmailInputs[code] || '').trim();
+    if (!value) return;
+    if (!validateEmail(value)) {
+      setBranchEmailErrors(prev => ({ ...prev, [code]: 'Invalid email address' }));
+      return;
+    }
+    setBranchEmails(prev => prev.map(b => {
+      if (b.code !== code) return b;
+      if (b.emails.includes(value.toLowerCase())) return b; // no duplicates
+      return { ...b, emails: [...b.emails, value.toLowerCase()] };
+    }));
+    setBranchEmailInputs(prev => ({ ...prev, [code]: '' }));
+    setBranchEmailErrors(prev => { const n = { ...prev }; delete n[code]; return n; });
+  };
+
+  const removeBranchEmail = (code, email) => {
+    setBranchEmails(prev => prev.map(b =>
+      b.code !== code ? b : { ...b, emails: b.emails.filter(e => e !== email) }
+    ));
+  };
+
   const handleSaveBranchEmails = async () => {
-    // Validate all before saving
+    // Chips are validated on add, but double-check before saving
     const errors = {};
     branchEmails.forEach(b => {
-      if (b.email && !validateEmail(b.email)) {
-        errors[b.code] = 'Invalid email address';
-      }
+      b.emails.forEach(em => {
+        if (em && !validateEmail(em)) errors[b.code] = 'Invalid email address';
+      });
     });
     if (Object.keys(errors).length > 0) {
       setBranchEmailErrors(errors);
@@ -1636,7 +1685,7 @@ const Campaign = () => {
         entries: branchEmails.map(b => ({
           branch_code: b.code,
           branch_name: b.name,
-          email: b.email.trim() || null
+          emails: b.emails
         }))
       };
       const response = await fetch(`${API_BASE_URL}/v1/campaigns/branch-email-master/bulk-save`, {
@@ -1653,7 +1702,7 @@ const Campaign = () => {
       if (result.errors && result.errors.length > 0) {
         toast.error(`Saved ${result.saved} branches. ${result.errors.length} failed.`);
       } else {
-        toast.success(`✅ Saved ${result.saved} branch email${result.saved !== 1 ? 's' : ''} successfully!`);
+        toast.success(`✅ Saved ${result.saved} branch${result.saved !== 1 ? 'es' : ''} successfully!`);
       }
     } catch (err) {
       toast.dismiss(saveToast);
@@ -1670,6 +1719,7 @@ const Campaign = () => {
       products: [],
       reference_no: '',
       serial_start: '1',
+      expiry_date: '',
       note: '',
       customer_detail_fields: ['instance_id'],
       engagement_detail_fields: [],
@@ -1696,6 +1746,8 @@ const Campaign = () => {
       products: product ? [product] : [],
       reference_no: fmt.reference_no || buildReferenceNo(product, fmt.id),
       serial_start: fmt.serial_start || '1',
+      expiry_date: fmt.expiry_date ? fmt.expiry_date.split('T')[0] : '',
+      _originalExpiry: fmt.expiry_date ? fmt.expiry_date.split('T')[0] : '',
       note: fmt.note || '',
       customer_detail_fields: fmt.customer_detail_fields || [],
       engagement_detail_fields: fmt.engagement_detail_fields || [],
@@ -1859,6 +1911,18 @@ const Campaign = () => {
       return;
     }
 
+    // Block past expiry dates — but allow an already-saved past date to remain
+    // untouched (e.g. a format that was set to a future date and has since expired,
+    // now being edited for some other reason).
+    if (
+      letterFormatData.expiry_date &&
+      isPastDate(letterFormatData.expiry_date) &&
+      letterFormatData.expiry_date !== letterFormatData._originalExpiry
+    ) {
+      toast.error('Expiry Date cannot be a past date. Please select today or a future date.');
+      return;
+    }
+
     setLetterFormatSaving(true);
     const isEdit = !!letterFormatData.id;
     const saveToast = toast.loading(isEdit ? 'Updating format...' : 'Saving format...');
@@ -1872,6 +1936,7 @@ const Campaign = () => {
           ? (letterFormatData.reference_no || buildReferenceNo(product, letterFormatData.id))
           : '',
         serial_start: letterFormatData.serial_start || '1',
+        expiry_date: letterFormatData.expiry_date || null,
         note: letterFormatData.note || '',
         customer_detail_fields: ['instance_id', ...((letterFormatData.customer_detail_fields || []).filter(f => f !== 'instance_id'))],
         engagement_detail_fields: letterFormatData.engagement_detail_fields || [],
@@ -1910,6 +1975,40 @@ const Campaign = () => {
       toast.error(err.message || 'Failed to save format');
     } finally {
       setLetterFormatSaving(false);
+    }
+  };
+
+  const handleDeleteLetterFormat = async (fmt) => {
+    const result = await Swal.fire({
+      title: 'Delete Format?',
+      html: `Are you sure you want to delete <b>"${fmt.format_type_name}"</b>?<br/>` +
+        `<span style="color:#ef4444;font-size:12px;">This action cannot be undone.</span>`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#6b7280',
+      confirmButtonText: 'Yes, Delete',
+      cancelButtonText: 'Cancel',
+      reverseButtons: true,
+    });
+    if (!result.isConfirmed) return;
+
+    const delToast = toast.loading('Deleting format...');
+    try {
+      const response = await fetch(`${API_BASE_URL}/v1/campaigns/letter-master/formats/${fmt.id}`, {
+        method: 'DELETE',
+        headers: { ...getUserHeaders() }
+      });
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to delete format');
+      }
+      setLetterFormats(prev => prev.filter(f => f.id !== fmt.id));
+      toast.dismiss(delToast);
+      toast.success('Format deleted successfully!');
+    } catch (err) {
+      toast.dismiss(delToast);
+      toast.error(err.message || 'Failed to delete format');
     }
   };
 
@@ -3505,16 +3604,17 @@ const Campaign = () => {
                 ) : (
                   <div className="relative border border-gray-200 rounded-lg overflow-hidden">
                     <div className="overflow-x-auto overflow-y-auto max-h-[55vh] custom-scrollbar">
-                      <table className="text-xs" style={{ minWidth: '1000px', width: '100%', tableLayout: 'fixed' }}>
+                      <table className="text-xs" style={{ minWidth: '1120px', width: '100%', tableLayout: 'fixed' }}>
                         <colgroup>
                           <col style={{ width: '150px' }} />
                           <col style={{ width: '100px' }} />
-                          <col style={{ width: '160px' }} />
-                          <col style={{ width: '180px' }} />
-                          <col style={{ width: '110px' }} />
-                          <col style={{ width: '120px' }} />
-                          <col style={{ width: '100px' }} />
-                          <col style={{ width: '80px' }} />
+                          <col style={{ width: '150px' }} />
+                          <col style={{ width: '170px' }} />
+                          <col style={{ width: '105px' }} />
+                          <col style={{ width: '105px' }} />
+                          <col style={{ width: '115px' }} />
+                          <col style={{ width: '95px' }} />
+                          <col style={{ width: '95px' }} />
                         </colgroup>
                         <thead className="sticky top-0 z-10">
                           <tr className="text-center text-black" style={{ backgroundColor: themeShades.light }}>
@@ -3522,6 +3622,7 @@ const Campaign = () => {
                             <th className="px-3 py-2.5 font-semibold text-center border-b border-gray-200 whitespace-nowrap">Products</th>
                             <th className="px-3 py-2.5 font-semibold text-center border-b border-gray-200 whitespace-nowrap">Description</th>
                             <th className="px-3 py-2.5 font-semibold text-center border-b border-gray-200 whitespace-nowrap">Reference No</th>
+                            <th className="px-3 py-2.5 font-semibold text-center border-b border-gray-200 whitespace-nowrap">Expiry Date</th>
                             <th className="px-3 py-2.5 font-semibold text-center border-b border-gray-200 whitespace-nowrap">Customer Details</th>
                             <th className="px-3 py-2.5 font-semibold text-center border-b border-gray-200 whitespace-nowrap">Engagement Details</th>
                             <th className="px-3 py-2.5 font-semibold text-center border-b border-gray-200 whitespace-nowrap">Attachments</th>
@@ -3584,6 +3685,17 @@ const Campaign = () => {
                                 )}
                               </td>
 
+                              {/* Expiry Date */}
+                              <td className="px-3 py-2.5 text-center">
+                                {fmt.expiry_date ? (
+                                  <span className="text-[11px] text-gray-700 whitespace-nowrap">
+                                    {formatDate(fmt.expiry_date)}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </td>
+
                               {/* Customer Details count */}
                               <td className="px-3 py-2.5 text-center">
                                 {(() => {
@@ -3637,6 +3749,13 @@ const Campaign = () => {
                                     title="Edit format"
                                   >
                                     <PencilIcon className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteLetterFormat(fmt)}
+                                    className="p-1 text-black hover:text-red-600 hover:bg-red-50 rounded-md transition-all"
+                                    title="Delete format"
+                                  >
+                                    <TrashIcon className="h-3.5 w-3.5" />
                                   </button>
                                 </div>
                               </td>
@@ -3725,24 +3844,53 @@ const Campaign = () => {
                                 <span className="text-black font-medium">{branch.name}</span>
                               </td>
 
-                              {/* Email Input */}
+                              {/* Email Input (multiple) */}
                               <td className="px-3 py-2">
-                                <div className="flex flex-col gap-0.5">
-                                  <input
-                                    type="email"
-                                    value={branch.email}
-                                    onChange={(e) => handleBranchEmailChange(branch.code, e.target.value)}
-                                    placeholder="e.g. branch@example.com"
-                                    disabled={branchEmailsSaving}
-                                    className={`w-full border rounded-md px-2.5 py-1.5 text-xs focus:ring-2 transition-all bg-white text-black ${branchEmailErrors[branch.code]
+                                <div className="flex flex-col gap-1">
+                                  <div className="flex gap-1.5">
+                                    <input
+                                      type="email"
+                                      value={branchEmailInputs[branch.code] || ''}
+                                      onChange={(e) => handleBranchEmailInputChange(branch.code, e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          addBranchEmail(branch.code);
+                                        }
+                                      }}
+                                      placeholder="e.g. branch@example.com"
+                                      disabled={branchEmailsSaving}
+                                      className={`flex-1 border rounded-md px-2.5 py-1.5 text-xs focus:ring-2 transition-all bg-white text-black ${branchEmailErrors[branch.code]
                                         ? 'border-red-400 focus:ring-red-300'
-                                        : branch.email
-                                          ? 'border-green-400 focus:ring-green-300'
-                                          : 'border-gray-300 focus:ring-[#2f3192]/30'
-                                      }`}
-                                  />
+                                        : 'border-gray-300 focus:ring-[#2f3192]/30'
+                                        }`}
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => addBranchEmail(branch.code)}
+                                      disabled={branchEmailsSaving || !(branchEmailInputs[branch.code] || '').trim()}
+                                      className="px-2.5 py-1.5 text-xs text-white rounded-md transition-all disabled:opacity-50"
+                                      style={{ background: themeColor }}
+                                    >
+                                      Add
+                                    </button>
+                                  </div>
                                   {branchEmailErrors[branch.code] && (
                                     <span className="text-[10px] text-red-500">{branchEmailErrors[branch.code]}</span>
+                                  )}
+                                  {branch.emails.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1 mt-0.5">
+                                      {branch.emails.map(em => (
+                                        <span key={em} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-[11px]">
+                                          {em}
+                                          <button type="button" onClick={() => removeBranchEmail(branch.code, em)}>
+                                            <XMarkIcon className="h-3 w-3 hover:text-blue-600" />
+                                          </button>
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] text-gray-400">No emails added</span>
                                   )}
                                 </div>
                               </td>
@@ -3758,20 +3906,20 @@ const Campaign = () => {
               {/* Footer */}
               <div className="px-4 lg:px-5 py-3 border-t bg-white flex items-center justify-between gap-3">
                 <p className="text-xs text-gray-500">
-                  {branchEmails.filter(b => b.email).length} of {branchEmails.length} branches have emails
+                  {branchEmails.filter(b => b.emails.length > 0).length} of {branchEmails.length} branches have emails
                 </p>
                 <div className="flex gap-2">
                   <button
                     onClick={() => !branchEmailsSaving && setShowBranchEmailMaster(false)}
                     disabled={branchEmailsSaving}
-                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-black hover:bg-gray-50 transition-all disabled:opacity-50"
+                    className="px-4 py-1 border border-gray-300 rounded-md text-sm font-medium text-black hover:bg-gray-50 transition-all disabled:opacity-50"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleSaveBranchEmails}
-                    disabled={branchEmailsSaving || branchEmailsLoading || Object.keys(branchEmailErrors).length > 0}
-                    className="px-4 py-2 text-white font-medium rounded-md text-sm hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    disabled={branchEmailsSaving || branchEmailsLoading}
+                    className="px-4 py-1 text-white font-medium rounded-md text-sm hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     style={{ background: `linear-gradient(135deg, #335478, #2f3192)` }}
                   >
                     {branchEmailsSaving ? (
@@ -3920,6 +4068,32 @@ const Campaign = () => {
                     disabled={letterFormatSaving}
                     required
                   />
+                </div>
+
+                {/* 3b) Expiry Date */}
+                <div>
+                  <label className="block text-xs font-semibold text-black mb-1">
+                    Expiry Date <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={letterFormatData.expiry_date || ''}
+                    onChange={(e) => {
+                      const newExpiry = e.target.value;
+                      if (newExpiry && isPastDate(newExpiry)) {
+                        toast.error('Expiry Date cannot be a past date. Please select today or a future date.');
+                        return;
+                      }
+                      setLetterFormatData({ ...letterFormatData, expiry_date: newExpiry });
+                    }}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
+                    style={{ '--tw-ring-color': themeColor }}
+                    disabled={letterFormatSaving}
+                  />
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Date after which this letter format should no longer be used. Cannot be a past date.
+                  </p>
                 </div>
 
                 {/* 4) Customer Detail Fields — checkboxes */}
@@ -4089,23 +4263,50 @@ const Campaign = () => {
                               )}
                             </div>
 
-                            {/* GOEM dropdown */}
+                            {/* GOEM multi-select */}
                             <div>
                               <label className="block text-[11px] font-semibold text-black mb-1">
-                                GOEM / OEM Filter <span className="text-gray-400 font-normal">(optional — leave blank for all)</span>
+                                GOEM / OEM Filter <span className="text-gray-400 font-normal">(optional — add one or more; leave empty for all)</span>
                               </label>
-                              <select
-                                value={rule.goem_oem}
-                                onChange={(e) => updateRuleField(rule._key, 'goem_oem', e.target.value)}
-                                className="w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-xs bg-white text-black focus:ring-2 transition-all"
-                                style={{ '--tw-ring-color': themeColor }}
-                                disabled={letterFormatSaving}
-                              >
-                                <option value="">— All GOEMs —</option>
-                                {goemOemList.map(g => (
-                                  <option key={g} value={g}>{g}</option>
-                                ))}
-                              </select>
+                              <div className="flex gap-1.5 mb-1.5">
+                                <select
+                                  value={rule._goemSelect || ''}
+                                  onChange={(e) => updateRuleField(rule._key, '_goemSelect', e.target.value)}
+                                  className="flex-1 border border-gray-300 rounded-md px-2.5 py-1.5 text-xs bg-white text-black focus:ring-2 transition-all"
+                                  style={{ '--tw-ring-color': themeColor }}
+                                  disabled={letterFormatSaving}
+                                >
+                                  <option value="">— Select GOEM —</option>
+                                  {goemOemList
+                                    .filter(g => !rule.goem_oems.includes(g))
+                                    .map(g => (
+                                      <option key={g} value={g}>{g}</option>
+                                    ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() => addGoemToRule(rule._key)}
+                                  className="px-2.5 py-1.5 text-xs text-white rounded-md transition-all disabled:opacity-50"
+                                  style={{ background: themeColor }}
+                                  disabled={letterFormatSaving || !rule._goemSelect}
+                                >
+                                  Add
+                                </button>
+                              </div>
+                              {rule.goem_oems.length > 0 ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {rule.goem_oems.map(g => (
+                                    <span key={g} className="inline-flex items-center gap-1 px-2 py-0.5 bg-orange-100 text-orange-700 rounded text-[11px] font-medium">
+                                      {g}
+                                      <button type="button" onClick={() => removeGoemFromRule(rule._key, g)}>
+                                        <XMarkIcon className="h-3 w-3 hover:text-orange-900" />
+                                      </button>
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-[10px] text-gray-400">No GOEM filter — applies to all GOEMs</p>
+                              )}
                             </div>
 
                             {/* To emails */}
@@ -4217,18 +4418,17 @@ const Campaign = () => {
                             <button
                               type="button"
                               onClick={addRecipientRule}
-                              className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 border border-dashed rounded-md text-xs font-medium transition-all ${
-                                isDisabled
-                                  ? 'border-gray-200 text-gray-300 cursor-not-allowed bg-gray-50'
-                                  : 'border-[#2f3192] text-[#2f3192] hover:bg-[#2f3192]/5 cursor-pointer'
-                              }`}
+                              className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 border border-dashed rounded-md text-xs font-medium transition-all ${isDisabled
+                                ? 'border-gray-200 text-gray-300 cursor-not-allowed bg-gray-50'
+                                : 'border-[#2f3192] text-[#2f3192] hover:bg-[#2f3192]/5 cursor-pointer'
+                                }`}
                               disabled={isDisabled}
                               title={
                                 allBranchesClaimed
                                   ? 'All branches have been assigned to existing rules'
                                   : hasOpenRule
-                                  ? 'A rule with no branch selected already covers all remaining branches'
-                                  : 'Add another branch rule'
+                                    ? 'A rule with no branch selected already covers all remaining branches'
+                                    : 'Add another branch rule'
                               }
                             >
                               <PlusIcon className="h-3.5 w-3.5" />
@@ -4281,11 +4481,11 @@ const Campaign = () => {
                 {/* Actions */}
                 <div className="flex gap-3 pt-1">
                   <button type="button" onClick={() => !letterFormatSaving && setShowLetterFormatForm(false)} disabled={letterFormatSaving}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-black hover:bg-gray-50 transition-all disabled:opacity-50">
+                    className="flex-1 px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-black hover:bg-gray-50 transition-all disabled:opacity-50">
                     Cancel
                   </button>
                   <button type="submit" disabled={letterFormatSaving || !letterFormatData.format_type_name.trim()}
-                    className="flex-1 text-white font-medium rounded-md py-2 text-sm hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    className="flex-1 text-white font-medium rounded-md py-1 text-sm hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
                     {letterFormatSaving ? (<><ArrowPathIcon className="h-4 w-4 animate-spin" /> Saving...</>) : 'Save Format'}
                   </button>
@@ -4371,6 +4571,14 @@ const Campaign = () => {
                 <div>
                   <p className="text-xs font-semibold text-black mb-1.5">Format Type Name</p>
                   <span className="text-sm text-black">{viewingLetterFormat.format_type_name || '—'}</span>
+                </div>
+
+                {/* Expiry Date */}
+                <div>
+                  <p className="text-xs font-semibold text-black mb-1.5">Expiry Date</p>
+                  <span className="text-sm text-black">
+                    {viewingLetterFormat.expiry_date ? formatDate(viewingLetterFormat.expiry_date) : '—'}
+                  </span>
                 </div>
 
                 {/* Customer Detail Fields */}
@@ -4474,11 +4682,14 @@ const Campaign = () => {
                                 );
                               })
                             )}
-                            {rule.goem_oem && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-[10px] font-medium">
-                                GOEM: {rule.goem_oem}
+                            {(rule.goem_oems && rule.goem_oems.length > 0
+                              ? rule.goem_oems
+                              : (rule.goem_oem ? [rule.goem_oem] : [])
+                            ).map(g => (
+                              <span key={g} className="inline-flex items-center px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-[10px] font-medium">
+                                GOEM: {g}
                               </span>
-                            )}
+                            ))}
                           </div>
                           {(rule.to_emails || []).length > 0 && (
                             <div className="flex flex-wrap items-center gap-1">

@@ -24,8 +24,9 @@ const LocalVendorBillHO = ({
   const [records, setRecords] = useState([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [verifyMap, setVerifyMap] = useState({});
+  const [unverifyMap, setUnverifyMap] = useState({}); // { id: true } when marked Unverified
   const [savingMap, setSavingMap] = useState({});
-  const [tab, setTab] = useState('pending');
+  const [tab, setTab] = useState('pending'); // 'pending' | 'verified' | 'unverified'
   const [submitting, setSubmitting] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
 
@@ -53,8 +54,13 @@ const LocalVendorBillHO = ({
       });
       setRecords(data || []);
       const v = {};
-      (data || []).forEach(r => { v[r.id] = r.verification_status === 'Verified'; });
+      const u = {};
+      (data || []).forEach(r => {
+        v[r.id] = r.verification_status === 'Verified';
+        u[r.id] = r.verification_status === 'Unverified';
+      });
       setVerifyMap(v);
+      setUnverifyMap(u);
     } catch {
       toast.error('Failed to load voucher records');
     } finally {
@@ -79,12 +85,37 @@ const LocalVendorBillHO = ({
       );
       const verified = data.verification_status === 'Verified';
       setVerifyMap(prev => ({ ...prev, [id]: verified }));
+      if (verified) setUnverifyMap(prev => ({ ...prev, [id]: false }));
       setRecords(prev => prev.map(r => r.id === id
         ? { ...r, verification_status: data.verification_status, verified_by_name: data.verified_by_name }
         : r));
-      toast.success(verified ? 'Verified!' : 'Unverified!', { duration: 1000 });
+      toast.success(verified ? 'Verified!' : 'Moved to pending!', { duration: 1000 });
     } catch {
       setVerifyMap(prev => ({ ...prev, [id]: current }));
+      toast.error('Failed to update');
+    } finally {
+      setSavingMap(prev => ({ ...prev, [id]: false }));
+    }
+  };
+
+  // Mark a bill as "Unverified" → moves it to the Unverify tab. Toggling off
+  // returns it to Pending. Mutually exclusive with Verify. The /verify route only
+  // toggles Verified↔Pending, so this calls the status-setting route.
+  const toggleUnverify = async (id, currentlyUnverified) => {
+    const newStatus = currentlyUnverified ? 'Pending' : 'Unverified';
+    setUnverifyMap(prev => ({ ...prev, [id]: !currentlyUnverified }));
+    if (!currentlyUnverified) setVerifyMap(prev => ({ ...prev, [id]: false }));
+    setSavingMap(prev => ({ ...prev, [id]: true }));
+    try {
+      await axios.put(
+        `${API_BASE_URL}/lvb/bills/${id}/verification-status`,
+        { status: newStatus },
+        { params: { updated_by_name: user?.name || 'HO', updated_by_id: String(user?.user_id || user?.id || '') } }
+      );
+      setRecords(prev => prev.map(r => r.id === id ? { ...r, verification_status: newStatus } : r));
+      toast.success(newStatus === 'Unverified' ? 'Marked unverified!' : 'Back to pending!', { duration: 1000 });
+    } catch {
+      setUnverifyMap(prev => ({ ...prev, [id]: currentlyUnverified }));
       toast.error('Failed to update');
     } finally {
       setSavingMap(prev => ({ ...prev, [id]: false }));
@@ -123,11 +154,17 @@ const LocalVendorBillHO = ({
     [groups, branchFilter]
   );
   const tabRecords = useMemo(
-    () => records.filter(r => tab === 'verified' ? r.verification_status === 'Verified' : r.verification_status !== 'Verified'),
+    () => records.filter(r => {
+      const s = r.verification_status;
+      if (tab === 'verified') return s === 'Verified';
+      if (tab === 'unverified') return s === 'Unverified';
+      return s !== 'Verified' && s !== 'Unverified'; // pending
+    }),
     [records, tab]
   );
-  const pendingCount = records.filter(r => r.verification_status !== 'Verified').length;
+  const pendingCount = records.filter(r => r.verification_status !== 'Verified' && r.verification_status !== 'Unverified').length;
   const verifiedCount = records.filter(r => r.verification_status === 'Verified').length;
+  const unverifiedCount = records.filter(r => r.verification_status === 'Unverified').length;
   const tabTotal = tabRecords.reduce((s, r) => s + parseFloat(r.payment_amount || 0), 0);
   const verifiedTotal = records.filter(r => r.verification_status === 'Verified').reduce((s, r) => s + parseFloat(r.payment_amount || 0), 0);
 
@@ -262,6 +299,11 @@ const LocalVendorBillHO = ({
               style={{ backgroundColor: tab === 'verified' ? '#059669' : '#f9fafb', color: tab === 'verified' ? 'white' : '#374151', borderColor: tab === 'verified' ? '#059669' : '#e5e7eb' }}>
               Verified ({verifiedCount})
             </button>
+            <button onClick={() => setTab('unverified')}
+              className="px-3 py-1 text-[11px] font-semibold rounded-md border"
+              style={{ backgroundColor: tab === 'unverified' ? '#ea580c' : '#f9fafb', color: tab === 'unverified' ? 'white' : '#374151', borderColor: tab === 'unverified' ? '#ea580c' : '#e5e7eb' }}>
+              Unverified ({unverifiedCount})
+            </button>
             <span className="mx-1 h-5 w-px bg-gray-300" />
             <div className="flex items-center gap-1 px-2 py-1 rounded bg-blue-50 border border-blue-100">
               <span className="text-[9px] font-bold text-blue-600 uppercase">Tab Total:</span>
@@ -317,18 +359,19 @@ const LocalVendorBillHO = ({
         ) : loadingRecords ? (
           <div className="text-center py-16"><Spin color={themeColor} /><p className="text-xs text-gray-500 mt-2">Loading records…</p></div>
         ) : (
-          <table className="border-collapse w-full" style={{ minWidth: '1900px' }}>
+          <table className="border-collapse w-full" style={{ minWidth: '1970px' }}>
             <thead className="sticky top-0 z-10"><tr style={{ backgroundColor: '#f0f1ff' }}>
-              {['Verify', 'Sr.', 'Invoice Date', 'Vendor Name', 'GST No.', 'Invoice No.', 'Customer Name', 'Cust. Invoice No.', 'SR No.', 'Cust. Invoice Amt (₹)', 'Line Work Amt (₹)', 'Shop Name', 'Description', 'Amount (₹)', 'Remark', 'Verified By', 'Status'].map((c, i) => (
+              {['Verify', 'Sr.', 'Invoice Date', 'Vendor Name', 'GST No.', 'Invoice No.', 'Customer Name', 'Cust. Invoice No.', 'SR No.', 'Cust. Invoice Amt (₹)', 'Line Work Amt (₹)', 'Shop Name', 'Description', 'Amount (₹)', 'Remark', 'Verified By', 'Status', 'Unverify'].map((c, i) => (
                 <th key={i} className="px-2 py-1.5 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 last:border-r-0 uppercase text-center whitespace-nowrap" style={{ backgroundColor: '#f0f1ff' }}>{c}</th>
               ))}
             </tr></thead>
             <tbody className="divide-y divide-gray-100">
               {tabRecords.map((rec, idx) => {
                 const isVerified = verifyMap[rec.id] ?? (rec.verification_status === 'Verified');
+                const isUnverified = unverifyMap[rec.id] ?? (rec.verification_status === 'Unverified');
                 const isSaving = savingMap[rec.id];
                 return (
-                  <tr key={rec.id} className={`transition-colors ${isVerified ? 'bg-green-50/40' : 'hover:bg-blue-50/30'}`} style={{ height: '34px' }}>
+                  <tr key={rec.id} className={`transition-colors ${isUnverified ? 'bg-red-50/40' : isVerified ? 'bg-green-50/40' : 'hover:bg-blue-50/30'}`} style={{ height: '34px' }}>
                     <td className="px-2 py-0.5 border-r border-gray-100 text-center">
                       <div className="flex items-center justify-center gap-1">
                         <input type="checkbox" checked={isVerified} onChange={() => toggleVerify(rec.id, isVerified)} className="w-4 h-4 cursor-pointer" />
@@ -355,19 +398,28 @@ const LocalVendorBillHO = ({
                     <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] font-bold text-center whitespace-nowrap">{inr(rec.payment_amount)}</td>
                     <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center"><div className="truncate" title={rec.remark}>{rec.remark || '-'}</div></td>
                     <td className="px-2 py-0.5 border-r border-gray-100 text-[11px] text-center font-semibold text-emerald-700"><div className="truncate" title={rec.verified_by_name}>{rec.verified_by_name || '-'}</div></td>
-                    <td className="px-2 py-0.5 text-center">
-                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${isVerified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                        {isVerified ? 'Verified' : 'Pending'}
+                    <td className="px-2 py-0.5 border-r border-gray-100 text-center">
+                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${isUnverified ? 'bg-red-100 text-red-800' : isVerified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                        {isUnverified ? 'Unverified' : isVerified ? 'Verified' : 'Pending'}
                       </span>
+                    </td>
+                    <td className="px-2 py-0.5 text-center">
+                      <input
+                        type="checkbox"
+                        checked={isUnverified}
+                        onChange={() => toggleUnverify(rec.id, isUnverified)}
+                        className="w-4 h-4 cursor-pointer accent-red-600"
+                        title="Mark as Unverified"
+                      />
                     </td>
                   </tr>
                 );
               })}
             </tbody>
             <tfoot className="sticky bottom-0"><tr style={{ backgroundColor: '#f0f1ff' }}>
-              <td colSpan={13} className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border-t-2 border-gray-200">{tab === 'verified' ? 'Verified Total' : 'Pending Total'}</td>
+              <td colSpan={13} className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border-t-2 border-gray-200">{tab === 'verified' ? 'Verified Total' : tab === 'unverified' ? 'Unverified Total' : 'Pending Total'}</td>
               <td className="px-2 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200 whitespace-nowrap" style={{ color: themeColor }}>{inr(tabTotal)}</td>
-              <td colSpan={3} className="border-t-2 border-gray-200" />
+              <td colSpan={4} className="border-t-2 border-gray-200" />
             </tr></tfoot>
           </table>
         )}

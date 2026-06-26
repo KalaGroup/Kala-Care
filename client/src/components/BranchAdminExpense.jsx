@@ -6401,7 +6401,7 @@ const BranchAdminExpense = () => {
                           Object.values(tadaSelected).filter(Boolean).length === 0
                         }
                         className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-white text-[11px] font-bold rounded-lg shadow-sm hover:shadow-md transition-all whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
-                        style={{ background: 'linear-gradient(135deg, #dc2626, #b91c1c)' }}
+                        style={{ background: 'linear-gradient(135deg, #ea580c, #b91c1c)' }}
                         title={!isAdmin && !isUploadAllowed() ? getUploadRestrictionMessage() : 'Send selected verified rows to HO'}
                       >
                         {submittingTadaTemp
@@ -6942,7 +6942,7 @@ const BranchAdminExpense = () => {
                             onClick={handleSubmitSalesBmToHo}
                             disabled={submittingSalesBmToHo || Object.values(salesBmDraftSelected).filter(Boolean).length === 0 || (!isAdmin && !isUploadAllowed())}
                             className="inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-bold rounded-md shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
-                            style={{ background: 'linear-gradient(135deg, #dc2626, #b91c1c)' }}
+                            style={{ background: 'linear-gradient(135deg, #ea580c, #b91c1c)' }}
                             title={!isAdmin && !isUploadAllowed() ? getUploadRestrictionMessage() : 'Submit selected to HO'}
                           >
                             {submittingSalesBmToHo ? 'Submitting…' : `Submit to HO (${Object.values(salesBmDraftSelected).filter(Boolean).length})`}
@@ -6996,7 +6996,7 @@ const BranchAdminExpense = () => {
                             onClick={handleSubmitBillWiseToHo}
                             disabled={submittingBillWiseToHo || Object.values(billWiseDraftSelected).filter(Boolean).length === 0 || (!isAdmin && !isUploadAllowed())}
                             className="inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-bold rounded-md shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
-                            style={{ background: 'linear-gradient(135deg, #dc2626, #b91c1c)' }}
+                            style={{ background: 'linear-gradient(135deg, #ea580c, #b91c1c)' }}
                             title={!isAdmin && !isUploadAllowed() ? getUploadRestrictionMessage() : 'Submit selected to HO'}
                           >
                             {submittingBillWiseToHo ? 'Submitting…' : `Submit to HO (${Object.values(billWiseDraftSelected).filter(Boolean).length})`}
@@ -9449,7 +9449,7 @@ const BranchAdminExpense = () => {
                       handleCloseCustomerDetail();
                     }}
                     className="inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-bold rounded-lg shadow-sm hover:shadow-md transition-all"
-                    style={{ background: 'linear-gradient(135deg, #dc2626, #b91c1c)' }}
+                    style={{ background: 'linear-gradient(135deg, #ea580c, #b91c1c)' }}
                   >
                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}

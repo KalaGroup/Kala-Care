@@ -246,9 +246,12 @@ def get_user_csp_sr_count(
 # ==================== Letter Master (Letter Format) endpoints ====================
 
 @router.get("/letter-master/formats", response_model=List[campaign_schema.LetterFormatResponse])
-def get_all_letter_formats(db: Session = Depends(get_db)):
+def get_all_letter_formats(
+    include_expired: bool = Query(True, description="Include formats past their expiry date"),
+    db: Session = Depends(get_db)
+):
     controller = CampaignController(db)
-    return controller.get_all_letter_formats()
+    return controller.get_all_letter_formats(include_expired=include_expired)
 
 @router.get("/letter-master/formats/{format_id}", response_model=campaign_schema.LetterFormatResponse)
 def get_letter_format(format_id: int, db: Session = Depends(get_db)):

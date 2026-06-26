@@ -839,13 +839,36 @@ class CampaignController:
 
 # ==================== Letter Master (Letter Format) ====================
 
-    def get_all_letter_formats(self):
+    def get_all_letter_formats(self, include_expired: bool = True):
         from app.models.campaign_model import CampaignLetterFormat
-        return (
+
+        formats = (
             self.db.query(CampaignLetterFormat)
             .order_by(CampaignLetterFormat.created_at.desc())
             .all()
         )
+
+        # Admin page (include_expired=True) -> return everything as before.
+        if include_expired:
+            return formats
+
+        # Send Letter wizard (include_expired=False) -> drop EXPIRED formats.
+        # expiry_date = "date after which this format should not be used", so a
+        # format stays usable up to AND including its expiry date. Formats with
+        # no expiry_date are always kept.
+        today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        result = []
+        for f in formats:
+            if f.expiry_date:
+                exp = f.expiry_date
+                if isinstance(exp, datetime):
+                    exp = exp.replace(hour=0, minute=0, second=0, microsecond=0)
+                else:
+                    exp = datetime.combine(exp, datetime.min.time())
+                if exp < today:
+                    continue  # expired -> skip
+            result.append(f)
+        return result
 
     def get_distinct_goem_oem(self) -> List[str]:
         """Return all distinct non-null goem_oem values from asset_detailed."""
@@ -1015,20 +1038,26 @@ class CampaignController:
 
         for entry in data.entries:
             try:
+                # Prefer the new multi-email list; fall back to single email for old clients
+                emails = entry.emails if entry.emails else ([entry.email] if entry.email else [])
+                primary_email = emails[0] if emails else None
+
                 existing = (
                     self.db.query(BranchEmailMaster)
                     .filter(BranchEmailMaster.branch_code == entry.branch_code)
                     .first()
                 )
                 if existing:
-                    existing.email = entry.email
+                    existing.emails = emails
+                    existing.email = primary_email          # keep single column in sync (backward compat)
                     existing.branch_name = entry.branch_name
                     existing.updated_at = datetime.utcnow()
                 else:
                     row = BranchEmailMaster(
                         branch_code=entry.branch_code,
                         branch_name=entry.branch_name,
-                        email=entry.email
+                        emails=emails,
+                        email=primary_email
                     )
                     self.db.add(row)
                 saved += 1

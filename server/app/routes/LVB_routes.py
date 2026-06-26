@@ -356,11 +356,61 @@ def verify_bill(
         db.close()
 
 
+@router.put("/bills/{bill_id}/verification-status")
+def set_bill_verification_status(
+    bill_id: int,
+    payload: VerificationStatusRequest,
+    updated_by_name: str = Query(""),
+    updated_by_id: str = Query(""),
+):
+    """Set verification status directly (Pending / Verified / Unverified).
+    Used by the Unverify checkbox. Unlike /verify (which only toggles
+    Verified<->Pending), this can set the 'Unverified' state. Verifier fields are
+    cleared whenever the bill leaves the Verified state."""
+    if payload.status not in ('Pending', 'Verified', 'Unverified'):
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    db = get_db()
+    try:
+        bill = db.query(LocalVendorBill).filter(
+            LocalVendorBill.id == bill_id,
+            LocalVendorBill.is_deleted == False
+        ).first()
+        if not bill:
+            raise HTTPException(status_code=404, detail="Bill not found")
+
+        bill.verification_status = payload.status
+        if payload.status == 'Verified':
+            bill.verified_by_name = updated_by_name or None
+            bill.verified_by_id = updated_by_id or None
+            bill.verified_at = datetime.now()
+        else:
+            # Leaving Verified (Pending or Unverified) -> clear verifier fields
+            bill.verified_by_name = None
+            bill.verified_by_id = None
+            bill.verified_at = None
+
+        db.commit()
+        db.refresh(bill)
+        return bill.to_dict()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
+
+
 # Submit verified bills to history
 class SubmitToHistoryRequest(BaseModel):
     bill_ids: List[int]
     submitted_by_name: str
     submitted_by_id: str
+
+class VerificationStatusRequest(BaseModel):
+    status: str  # 'Pending' | 'Verified' | 'Unverified'
 
 @router.post("/bills/submit-to-history")
 def submit_to_history(payload: SubmitToHistoryRequest):

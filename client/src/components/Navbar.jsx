@@ -526,7 +526,7 @@ function Navbar({ children }) {
       const left = window.screenX + Math.max(0, (window.outerWidth - w) / 2);
       const top = window.screenY + Math.max(0, (window.outerHeight - h) / 2);
       window.open(
-        '/knowledge-book',
+        '/knowledge-book?popup=1',
         'knowledgeBankPopup',
         `popup=yes,width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=yes`
       );
@@ -851,6 +851,25 @@ function Navbar({ children }) {
   // Don't render navbar if no user
   if (!user) {
     return <>{children}</>;
+  }
+
+  // When Knowledge Bank opens in its own Chrome popup window, render ONLY the
+  // page — no sidebar/header/modals. Detected two ways so it keeps working even
+  // if the user navigates inside the popup:
+  //   1. the ?popup=1 flag we add to the popup URL, and
+  //   2. the window name ("knowledgeBankPopup"), preserved across navigations.
+  const isKnowledgeBankPopup =
+    window.name === 'knowledgeBankPopup' ||
+    new URLSearchParams(location.search).get('popup') === '1';
+
+  if (isKnowledgeBankPopup) {
+    return (
+      <main className="flex flex-col h-screen overflow-auto bg-[#EEEEEE]">
+        <div className="flex-1 py-2 overflow-y-auto">
+          {children}
+        </div>
+      </main>
+    );
   }
 
   // Get user initials for avatar

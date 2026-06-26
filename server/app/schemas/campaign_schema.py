@@ -117,11 +117,21 @@ class AssetValidationResponse(BaseModel):
     total_invalid: int
 
 class RecipientRule(BaseModel):
-    """One To/CC rule for a set of branch codes + optional GOEM filter."""
+    """One To/CC rule for a set of branch codes + optional GOEM filter(s)."""
     branch_codes: List[str] = []      # empty = applies to all remaining/unmatched branches
-    goem_oem: Optional[str] = None    # None = all GOEMs
+    goem_oems: List[str] = []         # empty = all GOEMs; can contain one or more GOEMs
     to_emails: List[str] = []
     cc_emails: List[str] = []
+
+    @field_validator('goem_oems', mode='before')
+    @classmethod
+    def _goems_none_to_list(cls, v):
+        # backward compatible: accept an old single goem_oem string too
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [v] if v.strip() else []
+        return [str(g).strip() for g in v if g and str(g).strip()]
 
     @field_validator('to_emails', 'cc_emails', mode='before')
     @classmethod
@@ -141,6 +151,7 @@ class LetterFormatBase(BaseModel):
     products: List[str] = []
     reference_no: Optional[str] = None
     serial_start: Optional[str] = '1'
+    expiry_date: Optional[datetime] = None
     note: Optional[str] = None
     default_attachments: List[Dict[str, Any]] = []
     customer_detail_fields: List[str] = []
@@ -179,6 +190,7 @@ class LetterFormatUpdate(BaseModel):
     products: Optional[List[str]] = None
     reference_no: Optional[str] = None
     serial_start: Optional[str] = None
+    expiry_date: Optional[datetime] = None
     note: Optional[str] = None
     default_attachments: Optional[List[Dict[str, Any]]] = None
     customer_detail_fields: Optional[List[str]] = None
@@ -202,24 +214,35 @@ class LetterFormatResponse(LetterFormatBase):
 # ==================== Branch Email Master ====================
 
 class BranchEmailEntry(BaseModel):
-    """Single branch email entry for bulk save payload."""
+    """Single branch email entry for bulk save payload (multi-email)."""
     branch_code: str
     branch_name: str
-    email: Optional[str] = None
+    emails: List[str] = []
+    email: Optional[str] = None      # kept for backward compatibility
+
+    @field_validator('emails', mode='before')
+    @classmethod
+    def validate_emails(cls, v):
+        if not v:
+            return []
+        import re
+        pattern = r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$'
+        cleaned = []
+        for e in v:
+            if not e or not str(e).strip():
+                continue
+            e2 = str(e).strip()
+            if not re.match(pattern, e2):
+                raise ValueError(f"'{e2}' is not a valid email address")
+            cleaned.append(e2.lower())
+        return cleaned
 
     @field_validator('email', mode='before')
     @classmethod
     def validate_email(cls, v):
-        if v is None or v == '':
+        if v is None or str(v).strip() == '':
             return None
-        v = str(v).strip()
-        if v == '':
-            return None
-        import re
-        pattern = r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$'
-        if not re.match(pattern, v):
-            raise ValueError(f"'{v}' is not a valid email address")
-        return v.lower()
+        return str(v).strip().lower()
 
     @field_validator('branch_code', mode='before')
     @classmethod
@@ -238,9 +261,15 @@ class BranchEmailResponse(BaseModel):
     id: int
     branch_code: str
     branch_name: str
+    emails: List[str] = []
     email: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    @field_validator('emails', mode='before')
+    @classmethod
+    def _emails_none_to_list(cls, v):
+        return v or []
 
     class Config:
         from_attributes = True

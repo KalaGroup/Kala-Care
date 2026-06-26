@@ -1123,7 +1123,7 @@ const BranchOE = ({
                                 onClick={handleSubmitOeTempToMain}
                                 disabled={submittingOeTemp || (!isAdmin && !isUploadAllowed()) || Object.values(oeTempSelected).filter(Boolean).length === 0}
                                 className="px-3 py-1.5 text-white text-[10px] font-bold rounded-lg disabled:opacity-40 flex items-center gap-1"
-                                style={{ background: 'linear-gradient(135deg, #dc2626, #b91c1c)' }}
+                                style={{ background: 'linear-gradient(135deg, #ea580c, #b91c1c)' }}
                                 title={!isAdmin && !isUploadAllowed() ? getUploadRestrictionMessage() : ''}
                             >
                                 {submittingOeTemp

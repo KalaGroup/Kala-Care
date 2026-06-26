@@ -214,6 +214,16 @@ const CustomerEng = () => {
     const DEFAULT_FOLLOWUP_INTRO = 'As part of our ongoing service engagement, our team has been in regular touch with you regarding the above. A summary of our recent follow-up(s) is provided below for your kind reference:';
     const DEFAULT_QUOTATION_INTRO = 'In line with your requirement, we have prepared and submitted the following quotation(s) for your kind consideration and approval:';
     const DEFAULT_LETTERREF_INTRO = 'For your kind reference, please find below the details of the letter(s) previously issued to you in connection with the above:';
+    // CSP-only "Service Cycle" (KOEL preventive-maintenance) block shown after the start para.
+    // Intro is editable; the table starts pre-filled with these KOEL rows and the user can
+    // edit any cell, remove a row, or add blank rows.
+    const DEFAULT_SERVICE_CYCLE_INTRO =
+        'KOEL Preventive Maintenance Guidelines\nAs per KOEL guidelines, the preventive maintenance schedule is as follows:';
+    const SERVICE_CYCLE_COLS = [
+        { key: 'service_type', label: 'Service Type' },
+        { key: 'schedule', label: 'Schedule' },
+        { key: 'remarks', label: 'Remarks' },
+    ];
 
     const [showLetterWizard, setShowLetterWizard] = useState(false);
     const [letterStep, setLetterStep] = useState(1);   // 1=Format, 2=Letter, 3=Review & Send
@@ -245,6 +255,9 @@ const CustomerEng = () => {
     const [includeLetterRefs, setIncludeLetterRefs] = useState(false);
     const [showLetterRefPicker, setShowLetterRefPicker] = useState(false);
     const [selectedLetterRefIds, setSelectedLetterRefIds] = useState([]);
+    // CSP-only Service Cycle (KOEL preventive-maintenance) inclusion + editable rows
+    const [includeServiceCycle, setIncludeServiceCycle] = useState(false);
+    const [serviceCycleRows, setServiceCycleRows] = useState([]);
 
     // Send channels + multi-recipient (extra emails go to CC, extra numbers each get the message)
     const [letterChannels, setLetterChannels] = useState([]);
@@ -265,7 +278,9 @@ const CustomerEng = () => {
         // editable intro lines shown above the follow-up / quotation / letter-ref tables
         followup_intro: DEFAULT_FOLLOWUP_INTRO,
         quotation_intro: DEFAULT_QUOTATION_INTRO,
-        letterref_intro: DEFAULT_LETTERREF_INTRO
+        letterref_intro: DEFAULT_LETTERREF_INTRO,
+        // CSP-only service-cycle intro (KOEL preventive-maintenance block)
+        service_cycle_intro: DEFAULT_SERVICE_CYCLE_INTRO
     });
 
     // ---- Step-2 editable References (Customer Detail Fields) ----
@@ -3660,6 +3675,72 @@ const CustomerEng = () => {
         img.src = src;
     });
 
+    // Returns page-cut Y positions on a rendered canvas that DON'T slice through
+    // content. It scans upward from each fixed page boundary for a "near-blank"
+    // row (a blank gap, or the thin padding row next to a table border that only
+    // has the vertical cell borders), so a table row is never cut in half.
+    const computeSafePageCuts = (canvas, sliceHpx) => {
+        const W = canvas.width, H = canvas.height;
+        if (sliceHpx >= H) return [0, H];
+
+        let data;
+        try {
+            data = canvas.getContext('2d').getImageData(0, 0, W, H).data;
+        } catch (e) {
+            // tainted canvas -> fall back to fixed slicing
+            const out = [0]; let t = 0;
+            while (t + sliceHpx < H) { t += sliceHpx; out.push(t); }
+            out.push(H); return out;
+        }
+
+        const BUSY = Math.floor(W * 0.04);              // > this many dark px = "busy" row
+        const BLANK_LIMIT = Math.max(2, Math.floor(W * 0.02)); // allow thin vertical borders
+        const darkInRow = (y) => {
+            const base = y * W * 4; let dark = 0;
+            for (let x = 0; x < W; x++) {
+                const i = base + x * 4;
+                if (data[i] < 235 || data[i + 1] < 235 || data[i + 2] < 235) {
+                    if (++dark > BUSY) return dark;     // early-out
+                }
+            }
+            return dark;
+        };
+
+        const cuts = [0];
+        let top = 0;
+        while (top + sliceHpx < H) {
+            const proposed = top + sliceHpx;
+            const minY = top + Math.floor(sliceHpx * 0.65); // never shrink a page below 65%
+            let cut = proposed;
+            for (let y = proposed; y >= minY; y--) {
+                if (darkInRow(y) <= BLANK_LIMIT) { cut = y; break; }
+            }
+            if (cut <= top) cut = proposed;             // safety: never go backwards
+            cuts.push(cut);
+            top = cut;
+        }
+        cuts.push(H);
+        return cuts;
+    };
+
+    // True when a rendered slice canvas is essentially all-white (used to drop blank
+    // pages so the history letter never shows an empty page between content).
+    const sliceLooksBlank = (cnv) => {
+        try {
+            const d = cnv.getContext('2d').getImageData(0, 0, cnv.width, cnv.height).data;
+            const need = Math.max(20, Math.floor(cnv.width * cnv.height * 0.0002));
+            let dark = 0;
+            for (let i = 0; i < d.length; i += 4) {
+                if (d[i] < 235 || d[i + 1] < 235 || d[i + 2] < 235) {
+                    if (++dark > need) return false;
+                }
+            }
+            return true;
+        } catch (e) {
+            return false; // tainted canvas -> can't tell, keep the page
+        }
+    };
+
     // Renders the CURRENT letter HTML to a real multi-page A4 PDF and returns it
     // as base64 (no data: prefix) — ready to attach to the email.
     // The footer band is NOT part of the flowed content; it is stamped at the
@@ -3709,13 +3790,15 @@ const CustomerEng = () => {
             const H = canvas.height;
             const pxPerMm = W / pageW;                       // body is rendered at full page width
             const sliceHpx = Math.max(1, Math.floor(contentH * pxPerMm));  // body px per page
-            const totalPages = Math.max(1, Math.ceil(H / sliceHpx));
+            // Cut the body at safe points so a table row is never sliced in half.
+            const cuts = computeSafePageCuts(canvas, sliceHpx);
 
-            for (let p = 0; p < totalPages; p++) {
+            for (let p = 0; p < cuts.length - 1; p++) {
                 if (p > 0) pdf.addPage();
 
-                const sourceY = p * sliceHpx;
-                const thisSliceHpx = Math.min(sliceHpx, H - sourceY);
+                const sourceY = cuts[p];
+                const thisSliceHpx = cuts[p + 1] - sourceY;
+                if (thisSliceHpx <= 0) continue;
 
                 const c = document.createElement('canvas');
                 c.width = W;
@@ -3741,6 +3824,195 @@ const CustomerEng = () => {
         }
     };
 
+    // Render any letter BODY html (no bands in the flow) to a multi-page A4 PDF (base64),
+    // stamping the header band on top + footer band on bottom of EVERY page, cutting pages
+    // on safe rows so tables never split. Shared by the wizard download AND the history
+    // download so their output is identical.
+    const generateBandedPdfFromHtml = async (bodyHtml) => {
+        if (!window.html2canvas) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+        if (!window.jspdf) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+
+        // Make sure the bands are available (load locally if state hasn't filled yet)
+        let headerUrl = headerImgDataUrl, footerUrl = footerImgDataUrl;
+        if (!headerUrl) { headerUrl = await loadImageAsDataUrl(LETTER_HEADER_IMG); if (headerUrl) setHeaderImgDataUrl(headerUrl); }
+        if (!footerUrl) { footerUrl = await loadImageAsDataUrl(LETTER_FOOTER_IMG); if (footerUrl) setFooterImgDataUrl(footerUrl); }
+
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const pageW = pdf.internal.pageSize.getWidth();
+        const pageH = pdf.internal.pageSize.getHeight();
+
+        let headerH = 0, footerH = 0;
+        if (headerUrl) { try { const h = await loadHtmlImage(headerUrl); if (h.width) headerH = pageW * (h.height / h.width); } catch (e) { headerH = 0; } }
+        if (footerUrl) { try { const f = await loadHtmlImage(footerUrl); if (f.width) footerH = pageW * (f.height / f.width); } catch (e) { footerH = 0; } }
+        const SAFE_MM = 4;
+        const contentTop = headerH;
+        const contentH = Math.max(20, pageH - headerH - footerH - SAFE_MM);
+
+        const holder = document.createElement('div');
+        holder.style.position = 'fixed';
+        holder.style.left = '-10000px';
+        holder.style.top = '0';
+        holder.style.width = '780px';
+        holder.style.background = '#ffffff';
+        holder.innerHTML = bodyHtml;
+        document.body.appendChild(holder);
+
+        const imgs = Array.from(holder.querySelectorAll('img'));
+        await Promise.all(imgs.map(im => im.complete ? Promise.resolve()
+            : new Promise(res => { im.onload = res; im.onerror = res; })));
+
+        try {
+            const canvas = await window.html2canvas(holder, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+            const W = canvas.width, H = canvas.height;
+            const pxPerMm = W / pageW;
+            const sliceHpx = Math.max(1, Math.floor(contentH * pxPerMm));
+            const cuts = computeSafePageCuts(canvas, sliceHpx);
+
+            let firstPage = true;
+            for (let p = 0; p < cuts.length - 1; p++) {
+                const sourceY = cuts[p];
+                const thisSliceHpx = cuts[p + 1] - sourceY;
+                if (thisSliceHpx <= 0) continue;
+
+                const c = document.createElement('canvas');
+                c.width = W;
+                c.height = thisSliceHpx;
+                const ctx = c.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, c.width, c.height);
+                ctx.drawImage(canvas, 0, sourceY, W, thisSliceHpx, 0, 0, W, thisSliceHpx);
+
+                // Drop completely blank slices so there's no empty page in the middle.
+                if (sliceLooksBlank(c)) continue;
+
+                if (!firstPage) pdf.addPage();
+                firstPage = false;
+
+                const sliceData = c.toDataURL('image/jpeg', 0.92);
+                const sliceHmm = thisSliceHpx / pxPerMm;
+                pdf.addImage(sliceData, 'JPEG', 0, contentTop, pageW, sliceHmm);
+                if (headerUrl && headerH > 0) pdf.addImage(headerUrl, 'PNG', 0, 0, pageW, headerH);
+                if (footerUrl && footerH > 0) pdf.addImage(footerUrl, 'PNG', 0, pageH - footerH, pageW, footerH);
+            }
+            // If every slice was blank, keep the single initial page with just the bands.
+            if (firstPage) {
+                if (headerUrl && headerH > 0) pdf.addImage(headerUrl, 'PNG', 0, 0, pageW, headerH);
+                if (footerUrl && footerH > 0) pdf.addImage(footerUrl, 'PNG', 0, pageH - footerH, pageW, footerH);
+            }
+            return pdf.output('datauristring').split(',')[1];
+        } finally {
+            document.body.removeChild(holder);
+        }
+    };
+
+    // Print any letter BODY html (no bands in the flow) as real A4 pages with the header band
+    // pinned to the top and footer band pinned to the bottom of EVERY page, cutting on safe
+    // rows so tables never split, then appending attachment pages. Shared by the wizard print
+    // AND the history print so both look identical.
+    const printBandedHtml = async (w, bodyHtml, attachments, titleText) => {
+        const t = toast.loading('Preparing letter…');
+        let holder = null;
+        try {
+            if (!window.html2canvas) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+
+            let headerUrl = headerImgDataUrl, footerUrl = footerImgDataUrl;
+            if (!headerUrl) { headerUrl = await loadImageAsDataUrl(LETTER_HEADER_IMG); if (headerUrl) setHeaderImgDataUrl(headerUrl); }
+            if (!footerUrl) { footerUrl = await loadImageAsDataUrl(LETTER_FOOTER_IMG); if (footerUrl) setFooterImgDataUrl(footerUrl); }
+
+            const LETTER_W = 780;
+            const PAGE_W_MM = 210;
+            const PAGE_H_MM = 297;
+            const SAFE_MM = 4;
+
+            let headerMm = 0, footerMm = 0;
+            if (headerUrl) { try { const h = await loadHtmlImage(headerUrl); if (h.width) headerMm = PAGE_W_MM * (h.height / h.width); } catch (e) { headerMm = 0; } }
+            if (footerUrl) { try { const f = await loadHtmlImage(footerUrl); if (f.width) footerMm = PAGE_W_MM * (f.height / f.width); } catch (e) { footerMm = 0; } }
+            const bodyRegionMm = Math.max(40, PAGE_H_MM - headerMm - footerMm - SAFE_MM);
+
+            holder = document.createElement('div');
+            holder.style.position = 'fixed';
+            holder.style.left = '-10000px';
+            holder.style.top = '0';
+            holder.style.width = `${LETTER_W}px`;
+            holder.style.background = '#ffffff';
+            holder.innerHTML = bodyHtml;
+            document.body.appendChild(holder);
+
+            const innerImgs = Array.from(holder.querySelectorAll('img'));
+            await Promise.all(innerImgs.map(im => im.complete ? Promise.resolve()
+                : new Promise(res => { im.onload = res; im.onerror = res; })));
+
+            const canvas = await window.html2canvas(holder, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+            document.body.removeChild(holder);
+            holder = null;
+
+            const pxPerMm = canvas.width / PAGE_W_MM;
+            const sliceHpx = Math.max(1, Math.floor(bodyRegionMm * pxPerMm));
+            const cuts = computeSafePageCuts(canvas, sliceHpx);
+
+            const headerHtml = (headerUrl && headerMm > 0)
+                ? `<img src="${headerUrl}" style="position:absolute;top:0;left:0;width:${PAGE_W_MM}mm;height:${headerMm}mm;display:block;" />`
+                : '';
+            const footerHtml = (footerUrl && footerMm > 0)
+                ? `<img src="${footerUrl}" style="position:absolute;bottom:0;left:0;width:${PAGE_W_MM}mm;height:${footerMm}mm;display:block;" />`
+                : '';
+
+            // First collect only NON-blank slices so we never print an empty page.
+            const slices = [];
+            for (let p = 0; p < cuts.length - 1; p++) {
+                const sourceY = cuts[p];
+                const thisSliceHpx = cuts[p + 1] - sourceY;
+                if (thisSliceHpx <= 0) continue;
+                const c = document.createElement('canvas');
+                c.width = canvas.width;
+                c.height = thisSliceHpx;
+                const ctx = c.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, c.width, c.height);
+                ctx.drawImage(canvas, 0, sourceY, canvas.width, thisSliceHpx, 0, 0, canvas.width, thisSliceHpx);
+                if (sliceLooksBlank(c)) continue;
+                slices.push({ data: c.toDataURL('image/jpeg', 0.92), hmm: thisSliceHpx / pxPerMm });
+            }
+
+            const pageDivs = slices.map((s, idx) => `
+                    <div style="position:relative;width:${PAGE_W_MM}mm;height:${PAGE_H_MM}mm;background:#fff;overflow:hidden;page-break-after:${idx < slices.length - 1 ? 'always' : 'auto'};">
+                        ${headerHtml}
+                        <img src="${s.data}" style="position:absolute;top:${headerMm}mm;left:0;width:${PAGE_W_MM}mm;height:${s.hmm}mm;display:block;" />
+                        ${footerHtml}
+                    </div>`);
+            const pagesHtml = pageDivs.join('');
+
+            let attHtml = '';
+            try { attHtml = await buildAttachmentPrintHtmlAsync(attachments); } catch (e) { attHtml = ''; }
+
+            toast.dismiss(t);
+            if (!w || w.closed) return;
+            try { w.document.title = escapeLetterHtml(titleText || 'Letter'); } catch (e) { }
+            w.document.body.style.margin = '0';
+            w.document.body.innerHTML =
+                `<style>@page{size:A4;margin:0;}html,body{margin:0;padding:0;}img{display:block;}</style>
+             ${pagesHtml}${attHtml}`;
+
+            const doPrint = () => { try { w.focus(); w.print(); } catch (e) { } };
+            const imgs = w.document.images;
+            const total = imgs.length;
+            if (total === 0) { setTimeout(doPrint, 250); return; }
+            let done = 0;
+            const check = () => { done++; if (done >= total) setTimeout(doPrint, 300); };
+            for (let i = 0; i < total; i++) {
+                const im = imgs[i];
+                if (im.complete) check(); else { im.onload = check; im.onerror = check; }
+            }
+        } catch (e) {
+            toast.dismiss(t);
+            try { if (holder) document.body.removeChild(holder); } catch (err) { }
+            try { if (w && !w.closed) w.close(); } catch (err) { }
+            toast.error('Could not prepare the letter for printing');
+            console.error('Print banded letter error:', e);
+        }
+    };
+
     // Short cover note used as the EMAIL BODY (the full letter rides along as the PDF).
     const buildLetterCoverHtml = () => {
         const f = letterFields;
@@ -3751,9 +4023,10 @@ const CustomerEng = () => {
 </div>`;
     };
 
-    // True when the selected format's product is CSP (subtype then shows right after Instance ID)
+    // True when the selected format's product is CSP — match is now "contains CSP"
+    // (product name trimmed + upper-cased, so "CSP", "CSP Renewal", "KOEL CSP" all qualify).
     const isCspLetter = () =>
-        (selectedLetterFormat?.products || []).some(p => (p || '').trim().toUpperCase() === 'CSP');
+        (selectedLetterFormat?.products || []).some(p => (p || '').trim().toUpperCase().includes('CSP'));
 
     // Unique SR subtype(s) for this customer, taken from the CSP Info box.
     // Shown after the Instance ID in CSP letters only.
@@ -3761,6 +4034,14 @@ const CustomerEng = () => {
         if (!cspInfo || cspInfo.length === 0) return '';
         const subs = [...new Set(cspInfo.map(r => (r.sr_subtype || '').trim()).filter(Boolean))];
         return subs.join(', ');
+    };
+
+    // Unique SR number(s) for this customer, taken from the CSP Info box.
+    // Shown right after the SR Subtype in CSP letters only.
+    const getCspSrNumbers = () => {
+        if (!cspInfo || cspInfo.length === 0) return '';
+        const nums = [...new Set(cspInfo.map(r => (r.sr_number || '').trim()).filter(Boolean))];
+        return nums.join(', ');
     };
 
     const applyLetterPlaceholders = (tpl, v) =>
@@ -3798,7 +4079,8 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     const fetchLetterFormatsForWizard = async () => {
         setLetterFormatsLoading(true);
         try {
-            const res = await fetch(`${API_BASE_URL}/v1/campaigns/letter-master/formats`);
+            // include_expired=false -> backend hides formats past their expiry date
+            const res = await fetch(`${API_BASE_URL}/v1/campaigns/letter-master/formats?include_expired=false`);
             if (!res.ok) throw new Error('Failed to load letter formats');
             const data = await res.json();
             setWizardLetterFormats(data);
@@ -3830,6 +4112,8 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         setIncludeLetterRefs(false);
         setSelectedLetterRefIds([]);
         setShowLetterRefPicker(false);
+        setIncludeServiceCycle(false);
+        setServiceCycleRows([]);
         setLetterToList([]);
         setLetterToInput('');
         setLetterMatchedGoems([]);
@@ -3943,7 +4227,8 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
             // Keep any wording the user already edited; otherwise fall back to the defaults
             followup_intro: (prev.followup_intro && prev.followup_intro.trim()) ? prev.followup_intro : DEFAULT_FOLLOWUP_INTRO,
             quotation_intro: (prev.quotation_intro && prev.quotation_intro.trim()) ? prev.quotation_intro : DEFAULT_QUOTATION_INTRO,
-            letterref_intro: (prev.letterref_intro && prev.letterref_intro.trim()) ? prev.letterref_intro : DEFAULT_LETTERREF_INTRO
+            letterref_intro: (prev.letterref_intro && prev.letterref_intro.trim()) ? prev.letterref_intro : DEFAULT_LETTERREF_INTRO,
+            service_cycle_intro: (prev.service_cycle_intro && prev.service_cycle_intro.trim()) ? prev.service_cycle_intro : DEFAULT_SERVICE_CYCLE_INTRO
         }));
     };
 
@@ -4138,10 +4423,19 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
             const isInstance = k === 'instance_id';
             rows.push({ key: k, label: map[k].label, value: map[k].value, editable: !isInstance, removable: !isInstance });
         });
-        if (isCspLetter() && getCspSubtypes()) {
-            const cspRow = { key: 'csp_subtype', label: 'SR Subtype', value: getCspSubtypes(), editable: true, removable: true };
-            const idx = rows.findIndex(r => r.key === 'instance_id');
-            if (idx >= 0) rows.splice(idx + 1, 0, cspRow); else rows.unshift(cspRow);
+        if (isCspLetter()) {
+            // Insert SR Subtype then SR Number (both from the CSP Info box) right after Instance ID.
+            const cspRows = [];
+            if (getCspSubtypes()) {
+                cspRows.push({ key: 'csp_subtype', label: 'SR Subtype', value: getCspSubtypes(), editable: true, removable: true });
+            }
+            if (getCspSrNumbers()) {
+                cspRows.push({ key: 'csp_sr_number', label: 'SR Number', value: getCspSrNumbers(), editable: true, removable: true });
+            }
+            if (cspRows.length > 0) {
+                const idx = rows.findIndex(r => r.key === 'instance_id');
+                if (idx >= 0) rows.splice(idx + 1, 0, ...cspRows); else rows.unshift(...cspRows);
+            }
         }
         return rows;
     };
@@ -4215,31 +4509,57 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         );
     };
 
-    const buildFollowupLetterHtml = () => {
-        const items = selectedFollowupRows();
-        const cols = visibleFollowupCols();
-        if (items.length === 0 || cols.length === 0) return '';
-        const th = cols.map(c => `<th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">${escapeLetterHtml(c.label)}</th>`).join('');
-        const rows = items.map(fu => `<tr>${cols.map(c => `<td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(followupCellValue(fu, c.key))}</td>`).join('')}</tr>`).join('');
-        return `<div style="margin-top:12px;font-size:13px;line-height:1.7;">${escapeLetterHtml(letterFields.followup_intro)}</div>
-      <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:11px;">
-        <thead><tr style="background:#f3f4f6;">${th}</tr></thead>
-        <tbody>${rows}</tbody>
-      </table>`;
+    // ==================== Letter table builder (centered cells) ====================
+    // html2canvas (PDF / print / emailed PDF) ignores `vertical-align:middle` and
+    // `height:100%` inside a <td>, so the grid is built from flex ROWS of flex CELLS instead
+    // of a <table>: each row is `display:flex` (cells auto-stretch to the row height) and
+    // each cell centers its own text with align-items/justify-content:center. Renders the
+    // same in the browser AND in html2canvas.
+    //
+    // Each column shares a per-key weight (flex-grow). That keeps columns LINED UP across
+    // every row while giving wider columns (Remark, Service/Product…) more room, so short
+    // values stay on ONE line and the rows stay compact instead of wrapping to 2 lines.
+    const LETTER_COL_WEIGHTS = {
+        date: 1.1, drive: 1.3, status: 1.4, product: 1.4, employee: 1.3, mode: 1.1, remark: 2.2,
+        quote_no: 1.2, value: 1.1,
+        ref_no: 1.2, format: 1.6, channels: 1.4, sent_by: 1.2,
+        // CSP service-cycle table
+        service_type: 1.4, schedule: 2.2, remarks: 2.2,
+    };
+    const buildLetterTableHtml = (intro, cols, rows, getCell) => {
+        if (rows.length === 0 || cols.length === 0) return '';
+        const B = '#e5e7eb';
+        const cellStyle = (key, last) => {
+            const w = LETTER_COL_WEIGHTS[key] || 1;
+            return `flex:${w} 1 0;min-width:0;display:flex;align-items:center;justify-content:center;` +
+                `text-align:center;padding:3px 6px 8px;box-sizing:border-box;line-height:1.3;` +
+                `word-break:break-word;overflow-wrap:anywhere;${last ? '' : `border-right:1px solid ${B};`}`;
+        };
+        const headerCells = cols.map((c, i) =>
+            `<div style="${cellStyle(c.key, i === cols.length - 1)}font-weight:bold;">${escapeLetterHtml(c.label)}</div>`
+        ).join('');
+        const bodyRows = rows.map((row, ri) =>
+            `<div style="display:flex;${ri === rows.length - 1 ? '' : `border-bottom:1px solid ${B};`}">` +
+            cols.map((c, i) =>
+                `<div style="${cellStyle(c.key, i === cols.length - 1)}">${escapeLetterHtml(getCell(row, c.key))}</div>`
+            ).join('') +
+            `</div>`
+        ).join('');
+        return `<div style="margin-top:12px;font-size:13px;line-height:1.7;">${escapeLetterHtml(intro)}</div>
+      <div style="margin-top:8px;font-size:11px;border:1px solid ${B};">
+        <div style="display:flex;background:#f3f4f6;border-bottom:1px solid ${B};">${headerCells}</div>
+        ${bodyRows}
+      </div>`;
     };
 
-    const buildQuotationLetterHtml = () => {
-        const items = selectedQuotationRows();
-        const cols = visibleQuotationCols();
-        if (items.length === 0 || cols.length === 0) return '';
-        const th = cols.map(c => `<th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">${escapeLetterHtml(c.label)}</th>`).join('');
-        const rows = items.map(q => `<tr>${cols.map(c => `<td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(quotationCellValue(q, c.key))}</td>`).join('')}</tr>`).join('');
-        return `<div style="margin-top:12px;font-size:13px;line-height:1.7;">${escapeLetterHtml(letterFields.quotation_intro)}</div>
-      <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:11px;">
-        <thead><tr style="background:#f3f4f6;">${th}</tr></thead>
-        <tbody>${rows}</tbody>
-      </table>`;
-    };
+    const buildFollowupLetterHtml = () =>
+        buildLetterTableHtml(letterFields.followup_intro, visibleFollowupCols(), selectedFollowupRows(), followupCellValue);
+
+    const buildQuotationLetterHtml = () =>
+        buildLetterTableHtml(letterFields.quotation_intro, visibleQuotationCols(), selectedQuotationRows(), quotationCellValue);
+
+    const buildLetterRefHtml = () =>
+        buildLetterTableHtml(letterFields.letterref_intro, visibleLetterRefCols(), selectedLetterRefRows(), letterRefCellValue);
 
     const buildFollowupLetterText = () => {
         const items = selectedFollowupRows();
@@ -4249,6 +4569,7 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         items.forEach((fu, i) => { out += `\n${i + 1}. ` + cols.map(c => `${c.label}: ${followupCellValue(fu, c.key)}`).join(' | '); });
         return out;
     };
+
     const buildQuotationLetterText = () => {
         const items = selectedQuotationRows();
         const cols = visibleQuotationCols();
@@ -4265,26 +4586,66 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         return chs.map(c => (c === 'email' ? 'Email' : c === 'whatsapp' ? 'WhatsApp' : c)).join(', ');
     };
 
-    // Table: Ref No | Format Type | Channels | Date | Sent By — Ref No + Date locked; columns removable
-    const buildLetterRefHtml = () => {
-        const items = selectedLetterRefRows();
-        const cols = visibleLetterRefCols();
-        if (items.length === 0 || cols.length === 0) return '';
-        const th = cols.map(c => `<th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">${escapeLetterHtml(c.label)}</th>`).join('');
-        const rows = items.map(l => `<tr>${cols.map(c => `<td style="border:1px solid #e5e7eb;padding:4px 6px;">${escapeLetterHtml(letterRefCellValue(l, c.key))}</td>`).join('')}</tr>`).join('');
-        return `<div style="margin-top:12px;font-size:13px;line-height:1.7;">${escapeLetterHtml(letterFields.letterref_intro)}</div>
-      <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:11px;">
-        <thead><tr style="background:#f3f4f6;">${th}</tr></thead>
-        <tbody>${rows}</tbody>
-      </table>`;
-    };
-
     const buildLetterRefText = () => {
         const items = selectedLetterRefRows();
         const cols = visibleLetterRefCols();
         if (items.length === 0 || cols.length === 0) return '';
         let out = `\n\n${letterFields.letterref_intro}`;
         items.forEach((l, i) => { out += `\n${i + 1}. ` + cols.map(c => `${c.label}: ${letterRefCellValue(l, c.key)}`).join(' | '); });
+        return out;
+    };
+
+    // ==================== CSP-only Service Cycle (KOEL preventive maintenance) ====================
+    const setServiceCycleCell = (idx, key, value) =>
+        setServiceCycleRows(prev => prev.map((r, i) => (i === idx ? { ...r, [key]: value } : r)));
+    const addServiceCycleRow = () =>
+        setServiceCycleRows(prev => [...prev, { service_type: '', schedule: '', remarks: '' }]);
+    const removeServiceCycleRow = (idx) =>
+        setServiceCycleRows(prev => prev.filter((_, i) => i !== idx));
+
+    // Drop fully-blank rows from the letter (keeps anything with at least one filled cell).
+    const nonEmptyServiceCycleRows = () =>
+        serviceCycleRows.filter(r =>
+            (r.service_type || '').trim() || (r.schedule || '').trim() || (r.remarks || '').trim()
+        );
+
+    // Left-aligned flex table (html2canvas/PDF-safe; pre-wrapped cells so multi-line Remarks render).
+    const buildServiceCycleHtml = () => {
+        const rows = nonEmptyServiceCycleRows();
+        if (rows.length === 0) return '';
+        const B = '#e5e7eb';
+        const cellStyle = (key, last) => {
+            const w = LETTER_COL_WEIGHTS[key] || 1;
+            // No top padding; keep bottom padding (9px) so the last line never touches the
+            // row border in html2canvas (PDF / print), which ignores vertical centering.
+            return `flex:${w} 1 0;min-width:0;display:flex;align-items:flex-start;justify-content:flex-start;` +
+                `text-align:left;padding:0 8px 9px;box-sizing:border-box;line-height:1.5;white-space:pre-wrap;` +
+                `word-break:break-word;overflow-wrap:anywhere;${last ? '' : `border-right:1px solid ${B};`}`;
+        };
+        const headerCells = SERVICE_CYCLE_COLS.map((c, i) =>
+            `<div style="${cellStyle(c.key, i === SERVICE_CYCLE_COLS.length - 1)}font-weight:bold;">${escapeLetterHtml(c.label)}</div>`
+        ).join('');
+        const bodyRows = rows.map((row, ri) =>
+            `<div style="display:flex;${ri === rows.length - 1 ? '' : `border-bottom:1px solid ${B};`}">` +
+            SERVICE_CYCLE_COLS.map((c, i) =>
+                `<div style="${cellStyle(c.key, i === SERVICE_CYCLE_COLS.length - 1)}">${escapeLetterHtml(row[c.key] || '')}</div>`
+            ).join('') +
+            `</div>`
+        ).join('');
+        return `<div style="margin-top:12px;font-size:13px;line-height:1.7;white-space:pre-wrap;">${escapeLetterHtml(letterFields.service_cycle_intro)}</div>
+      <div style="margin-top:8px;font-size:11px;border:1px solid ${B};">
+        <div style="display:flex;background:#f3f4f6;border-bottom:1px solid ${B};">${headerCells}</div>
+        ${bodyRows}
+      </div>`;
+    };
+
+    const buildServiceCycleText = () => {
+        const rows = nonEmptyServiceCycleRows();
+        if (rows.length === 0) return '';
+        let out = `\n\n${letterFields.service_cycle_intro}`;
+        rows.forEach((r, i) => {
+            out += `\n${i + 1}. Service Type: ${r.service_type || '-'} | Schedule: ${r.schedule || '-'} | Remarks: ${(r.remarks || '-').replace(/\n/g, ' ')}`;
+        });
         return out;
     };
 
@@ -4357,10 +4718,23 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     // "References" inner HTML — built from the editable rows, skipping any the user removed
     const buildReferencesHtml = () => {
         const rows = getLetterReferenceRows().filter(r => !letterRefHiddenFields.includes(r.key));
-        const parts = [];
-        rows.forEach(r => { const v = letterRefFieldValue(r.key, r.value); if (v) parts.push(`${escapeLetterHtml(r.label)}: ${escapeLetterHtml(v)}`); });
-        if (parts.length === 0) return '';
-        return `<div style="margin-top:6px;color:#333;font-size:12px;"><strong>References:</strong> ${parts.join(' &nbsp;|&nbsp; ')}</div>`;
+        const cells = [];
+        rows.forEach(r => {
+            const v = letterRefFieldValue(r.key, r.value);
+            if (v) cells.push(
+                `<td style="padding:2px 8px 2px 0;vertical-align:top;white-space:nowrap;"><strong>${escapeLetterHtml(r.label)}:</strong></td>` +
+                `<td style="padding:2px 18px 2px 0;vertical-align:top;">${escapeLetterHtml(v)}</td>`
+            );
+        });
+        if (cells.length === 0) return '';
+        let trs = '';
+        for (let i = 0; i < cells.length; i += 2) {
+            trs += `<tr>${cells[i]}${cells[i + 1] || '<td></td><td></td>'}</tr>`;
+        }
+        return `<div style="margin-top:6px;color:#333;font-size:12px;">
+      <div style="font-weight:bold;margin-bottom:2px;">References:</div>
+      <table style="border-collapse:collapse;font-size:12px;">${trs}</table>
+    </div>`;
     };
 
     const buildReferencesText = () => {
@@ -4436,6 +4810,8 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
 
     const buildLetterHtml = (pinFooter = false, omitFooter = false, omitHeader = false) => {
         const f = letterFields;
+        // CSP-only service-cycle table sits right after the start paragraph.
+        const serviceCycleBlock = includeServiceCycle ? buildServiceCycleHtml() : '';
         const followupBlock = includeFollowups ? buildFollowupLetterHtml() : '';
         const quotationBlock = includeQuotations ? buildQuotationLetterHtml() : '';
         const letterrefBlock = includeLetterRefs ? buildLetterRefHtml() : '';
@@ -4474,6 +4850,7 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
 
     <div style="margin-top:10px;font-size:13px;line-height:1.7;white-space:pre-wrap;">${escapeLetterHtml(f.start_para)}</div>
 
+    ${serviceCycleBlock}
     ${followupBlock}
     ${quotationBlock}
     ${letterrefBlock}
@@ -4502,6 +4879,7 @@ Subject: ${f.subject}
 Dear Sir/Madam,
 
 ${f.start_para}`;
+        if (includeServiceCycle) out += buildServiceCycleText();
         if (includeFollowups) out += buildFollowupLetterText();
         if (includeQuotations) out += buildQuotationLetterText();
         if (includeLetterRefs) out += buildLetterRefText();
@@ -4557,7 +4935,9 @@ ${f.start_para}`;
             // Captured-pixels ↔ mm relationship: the canvas width == PAGE_W_MM across the page.
             const pxPerMm = canvas.width / PAGE_W_MM;
             const sliceHpx = Math.max(1, Math.floor(bodyRegionMm * pxPerMm));  // body px per page
-            const totalPages = Math.max(1, Math.ceil(canvas.height / sliceHpx));
+            // Safe cuts so a table row is never split across two pages.
+            const cuts = computeSafePageCuts(canvas, sliceHpx);
+            const totalPages = cuts.length - 1;
 
             const headerHtml = (headerImgDataUrl && headerMm > 0)
                 ? `<img src="${headerImgDataUrl}" style="position:absolute;top:0;left:0;width:${PAGE_W_MM}mm;height:${headerMm}mm;display:block;" />`
@@ -4569,8 +4949,9 @@ ${f.start_para}`;
             // One real A4 page (in mm) per div: header pinned top, body slice between bands, footer pinned bottom.
             const pageDivs = [];
             for (let p = 0; p < totalPages; p++) {
-                const sourceY = p * sliceHpx;
-                const thisSliceHpx = Math.min(sliceHpx, canvas.height - sourceY);
+                const sourceY = cuts[p];
+                const thisSliceHpx = cuts[p + 1] - sourceY;
+                if (thisSliceHpx <= 0) continue;
                 const c = document.createElement('canvas');
                 c.width = canvas.width;
                 c.height = thisSliceHpx;
@@ -4667,18 +5048,25 @@ ${f.start_para}`;
             const pdf = new jsPDF('p', 'mm', 'a4');
             const pageW = pdf.internal.pageSize.getWidth();
             const pageH = pdf.internal.pageSize.getHeight();
-            const imgW = pageW;
-            const imgH = (canvas.height * imgW) / canvas.width;
-            const imgData = canvas.toDataURL('image/jpeg', 0.92);
-            let heightLeft = imgH;
-            let position = 0;
-            pdf.addImage(imgData, 'JPEG', 0, position, imgW, imgH);
-            heightLeft -= pageH;
-            while (heightLeft > 0) {
-                position -= pageH;
-                pdf.addPage();
-                pdf.addImage(imgData, 'JPEG', 0, position, imgW, imgH);
-                heightLeft -= pageH;
+            const pxPerMm = canvas.width / pageW;
+            const sliceHpx = Math.max(1, Math.floor(pageH * pxPerMm));
+
+            // Safe cuts so a table row is never split across two pages.
+            const cuts = computeSafePageCuts(canvas, sliceHpx);
+            for (let p = 0; p < cuts.length - 1; p++) {
+                if (p > 0) pdf.addPage();
+                const sourceY = cuts[p];
+                const thisSliceHpx = cuts[p + 1] - sourceY;
+                if (thisSliceHpx <= 0) continue;
+
+                const c = document.createElement('canvas');
+                c.width = canvas.width;
+                c.height = thisSliceHpx;
+                const cx = c.getContext('2d');
+                cx.fillStyle = '#ffffff';
+                cx.fillRect(0, 0, c.width, c.height);
+                cx.drawImage(canvas, 0, sourceY, canvas.width, thisSliceHpx, 0, 0, canvas.width, thisSliceHpx);
+                pdf.addImage(c.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, pageW, thisSliceHpx / pxPerMm);
             }
             return pdf.output('datauristring').split(',')[1];
         } finally {
@@ -4773,9 +5161,12 @@ ${f.start_para}`;
                     include_followups: includeFollowups,
                     include_quotations: includeQuotations,
                     include_letter_refs: includeLetterRefs,
+                    include_service_cycle: includeServiceCycle,
+                    service_cycle_rows: serviceCycleRows,
                     selected_followup_ids: selectedFollowupIds,
                     selected_quotation_ids: selectedQuotationIds,
                     selected_letter_ref_ids: selectedLetterRefIds,
+                    customer_detail_fields: getSelectedCustomerDetailKeys(),
                     to_emails: letterToList,
                     cc_emails: letterCcList,
                     whatsapp_numbers: letterWhatsappList,
@@ -4862,7 +5253,8 @@ ${f.start_para}`;
                 reference_no: '',
                 default_attachments: [],
                 start_para: '',
-                end_para: ''
+                end_para: '',
+                customer_detail_fields: (r.letter_fields || {}).customer_detail_fields || []
             };
             setSelectedLetterFormat(fmt);
             setEditingLetterRecordId(r.id);
@@ -4880,6 +5272,8 @@ ${f.start_para}`;
             setIncludeFollowups(!!lf.include_followups);
             setIncludeQuotations(!!lf.include_quotations);
             setIncludeLetterRefs(!!lf.include_letter_refs);
+            setIncludeServiceCycle(!!lf.include_service_cycle);
+            setServiceCycleRows(Array.isArray(lf.service_cycle_rows) ? lf.service_cycle_rows : []);
             setSelectedFollowupIds(lf.selected_followup_ids || []);
             setSelectedQuotationIds(lf.selected_quotation_ids || []);
             setSelectedLetterRefIds(lf.selected_letter_ref_ids || []);
@@ -4905,7 +5299,8 @@ ${f.start_para}`;
                     start_para: lf.start_para || r.letter_body || '', end_para: lf.end_para || '',
                     followup_intro: lf.followup_intro || DEFAULT_FOLLOWUP_INTRO,
                     quotation_intro: lf.quotation_intro || DEFAULT_QUOTATION_INTRO,
-                    letterref_intro: lf.letterref_intro || DEFAULT_LETTERREF_INTRO
+                    letterref_intro: lf.letterref_intro || DEFAULT_LETTERREF_INTRO,
+                    service_cycle_intro: lf.service_cycle_intro || DEFAULT_SERVICE_CYCLE_INTRO
                 }
                 : {
                     ref_no: r.ref_no, date: new Date().toISOString().split('T')[0], to_name: '', to_address: '',
@@ -4914,7 +5309,8 @@ ${f.start_para}`;
                     start_para: r.letter_body || '', end_para: '',
                     followup_intro: DEFAULT_FOLLOWUP_INTRO,
                     quotation_intro: DEFAULT_QUOTATION_INTRO,
-                    letterref_intro: DEFAULT_LETTERREF_INTRO
+                    letterref_intro: DEFAULT_LETTERREF_INTRO,
+                    service_cycle_intro: DEFAULT_SERVICE_CYCLE_INTRO
                 });
 
             if (!headerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_HEADER_IMG); if (d) setHeaderImgDataUrl(d); }
@@ -4928,6 +5324,26 @@ ${f.start_para}`;
         }
     };
 
+    // Stored letters keep the rendered letter PDF as the FIRST attachment (see handleSendLetter).
+    // For history Print/Download we render the letter body ourselves, so this strips that leading
+    // letter-PDF entry and returns only the genuine extra attachments — preventing the letter
+    // from printing a second time.
+    const stripEmbeddedLetterPdf = (attachments, subject) => {
+        const atts = attachments || [];
+        if (atts.length === 0) return atts;
+        const wanted = (safePdfName(subject || 'Letter') || '').toLowerCase();
+        const first = atts[0] || {};
+        const firstName = (first.name || '').toLowerCase();
+        const firstType = (first.type || '').toLowerCase();
+        const isPdf = firstType === 'application/pdf' || firstName.endsWith('.pdf');
+        // Treat the first item as the embedded letter if it's a PDF whose name matches the
+        // letter's file name, OR a PDF that simply looks like the generated letter ("letter"/ref).
+        if (isPdf && (firstName === wanted || firstName.includes('letter') || (subject && firstName.includes(String(subject).toLowerCase().slice(0, 12))))) {
+            return atts.slice(1);
+        }
+        return atts;
+    };
+
     // Eye icon → read-only view (on-screen shows the To/CC recipients + file names)
     const viewLetterRecord = async (recordId) => {
         const t = toast.loading('Loading letter...');
@@ -4936,7 +5352,9 @@ ${f.start_para}`;
             if (!res.ok) throw new Error('Failed to load letter');
             const r = await res.json();
             toast.dismiss(t);
-            const atts = r.attachments || [];
+            // Drop the embedded letter PDF (kept as the first attachment when sent) so the
+            // listed attachments are only the genuine extra files.
+            const atts = stripEmbeddedLetterPdf(r.attachments || [], r.subject || '');
             const bare = r.letter_html || '<p style="padding:20px;font-family:Arial">No letter content stored.</p>';
 
             // ---- Recipients this letter was sent to (To + CC) ----
@@ -5082,7 +5500,14 @@ ${f.start_para}`;
         try { w.document.title = titleText || 'Letter'; } catch (e) { /* ignore */ }
         const body = w.document.body;
         body.style.margin = '0';
-        body.innerHTML = `<div style="max-width:780px;margin:0 auto;">${letterBodyHtml}</div>${attHtml}`;
+        body.innerHTML = `<style>
+            @page { size:A4; margin:0; }
+            img { display:block; max-width:100%; }
+            table { width:100%; border-collapse:collapse; page-break-inside:auto; }
+            tr, td, th { page-break-inside:avoid; }
+            thead { display:table-header-group; }
+        </style>
+        <div style="max-width:780px;margin:0 auto;">${letterBodyHtml}</div>${attHtml}`;
         const doPrint = () => { try { w.focus(); w.print(); } catch (e) { /* ignore */ } };
         const imgs = w.document.images;
         const total = imgs.length;
@@ -5100,7 +5525,11 @@ ${f.start_para}`;
         if (!viewLetterBareHtml) return;
         const w = openPrintWindow();
         if (!w) return;
-        await renderAndPrint(w, viewLetterBareHtml, viewLetterAttachments, viewLetterSubject || 'Letter');
+        // Strip the inline letterhead/footer bands from the stored HTML, then re-stamp them
+        // per page (same as the Send Letter wizard) so the output looks identical.
+        const body = viewLetterBareHtml.replace(/<img\b[^>]*?(?:max-width\s*:\s*780px|width\s*:\s*100%)[^>]*?>/gi, '');
+        const realAtts = stripEmbeddedLetterPdf(viewLetterAttachments, viewLetterSubject);
+        await printBandedHtml(w, body, realAtts, viewLetterSubject || 'Letter');
     };
 
     // Save the currently-viewed (history) letter as a downloaded PDF — file name = subject.
@@ -5108,7 +5537,9 @@ ${f.start_para}`;
         if (!viewLetterBareHtml) return;
         const t = toast.loading('Preparing PDF…');
         try {
-            const b64 = await htmlToPdfBase64(viewLetterBareHtml);
+            // Strip inline bands, then render with per-page bands (matches the wizard download).
+            const body = viewLetterBareHtml.replace(/<img\b[^>]*?(?:max-width\s*:\s*780px|width\s*:\s*100%)[^>]*?>/gi, '');
+            const b64 = await generateBandedPdfFromHtml(body);
             toast.dismiss(t);
             if (!b64) { toast.error('Could not generate the PDF'); return; }
             downloadBase64Pdf(b64, safePdfName(viewLetterSubject || 'Letter'));
@@ -5140,9 +5571,12 @@ ${f.start_para}`;
                     include_followups: includeFollowups,
                     include_quotations: includeQuotations,
                     include_letter_refs: includeLetterRefs,
+                    include_service_cycle: includeServiceCycle,
+                    service_cycle_rows: serviceCycleRows,
                     selected_followup_ids: selectedFollowupIds,
                     selected_quotation_ids: selectedQuotationIds,
                     selected_letter_ref_ids: selectedLetterRefIds,
+                    customer_detail_fields: getSelectedCustomerDetailKeys(),
                     cc_emails: letterCcList,
                     whatsapp_numbers: letterWhatsappList,
                     letter_ref_field_values: letterRefFieldValues,
@@ -8025,10 +8459,10 @@ ${f.start_para}`;
                             {isAdmin && (
                                 <button
                                     onClick={openLetterWizard}
-                                    className="px-2 py-1 text-[11px] text-white rounded-lg hover:opacity-90 transition-all flex items-center gap-1.5"
-                                    style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}
+                                    className="px-2 py-1 sm:px-2 sm:py-1.5 text-[11px] sm:text-xs text-white rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-1.5"
+                                    style={{ background: `linear-gradient(135deg, #f59e0b, #d97706)` }}
                                 >
-                                    <PaperAirplaneIcon className="h-2.5 w-2.5" />
+                                    <PaperAirplaneIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                                     Send Letter
                                 </button>
                             )}
@@ -9940,6 +10374,110 @@ ${f.start_para}`;
                                                         className="w-full border border-gray-200 rounded px-2 py-2 text-xs leading-relaxed" style={{ minHeight: '120px' }} />
                                                 </div>
 
+                                                {/* CSP-only: Service Cycle (KOEL preventive-maintenance) — shown right after the start para */}
+                                                {(isCspLetter() || includeServiceCycle) && (
+                                                    <div className="mb-3 border border-dashed border-gray-300 rounded-lg p-3 bg-gray-50 space-y-2">
+                                                        <label className="flex items-center gap-1.5 text-xs font-medium text-black cursor-pointer">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={includeServiceCycle}
+                                                                onChange={(e) => {
+                                                                    if (e.target.checked) {
+                                                                        setIncludeServiceCycle(true);
+                                                                        // Start with ONE blank row the first time it's enabled
+                                                                        setServiceCycleRows(prev => (prev && prev.length > 0)
+                                                                            ? prev
+                                                                            : [{ service_type: '', schedule: '', remarks: '' }]);
+                                                                    } else {
+                                                                        setIncludeServiceCycle(false);
+                                                                    }
+                                                                }}
+                                                                style={{ accentColor: themeColor }}
+                                                            />
+                                                            Include Service Cycle
+                                                        </label>
+
+                                                        {includeServiceCycle && (
+                                                            <div className="pt-1">
+                                                                <label className="text-[10px] text-gray-500">Intro text (editable)</label>
+                                                                <textarea
+                                                                    value={letterFields.service_cycle_intro}
+                                                                    onChange={(e) => setLetterFields(p => ({ ...p, service_cycle_intro: e.target.value }))}
+                                                                    className="w-full border border-gray-200 rounded px-2 py-1 text-[11px] leading-relaxed"
+                                                                    rows="2"
+                                                                />
+
+                                                                <div className="mt-1 overflow-x-auto border border-gray-200 rounded-lg">
+                                                                    <table className="w-full text-[11px]">
+                                                                        <thead className="bg-gray-100">
+                                                                            <tr>
+                                                                                {SERVICE_CYCLE_COLS.map(c => (
+                                                                                    <th key={c.key} className="px-2 py-1 text-left font-semibold text-black border-r border-gray-200 whitespace-nowrap">
+                                                                                        {c.label}
+                                                                                    </th>
+                                                                                ))}
+                                                                                <th className="px-2 py-1 text-center font-semibold text-black w-[40px]"></th>
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {serviceCycleRows.map((row, idx) => (
+                                                                                <tr key={idx} className="border-t border-gray-100 align-top">
+                                                                                    <td className="px-1.5 py-1 border-r border-gray-100">
+                                                                                        <input
+                                                                                            value={row.service_type}
+                                                                                            onChange={(e) => setServiceCycleCell(idx, 'service_type', e.target.value)}
+                                                                                            className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-[11px] text-black"
+                                                                                            placeholder="e.g. B Check"
+                                                                                        />
+                                                                                    </td>
+                                                                                    <td className="px-1.5 py-1 border-r border-gray-100">
+                                                                                        <textarea
+                                                                                            value={row.schedule}
+                                                                                            onChange={(e) => setServiceCycleCell(idx, 'schedule', e.target.value)}
+                                                                                            className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-[11px] text-black resize-y"
+                                                                                            rows="2"
+                                                                                            placeholder="e.g. Each 500 hours or 12 months"
+                                                                                        />
+                                                                                    </td>
+                                                                                    <td className="px-1.5 py-1 border-r border-gray-100">
+                                                                                        <textarea
+                                                                                            value={row.remarks}
+                                                                                            onChange={(e) => setServiceCycleCell(idx, 'remarks', e.target.value)}
+                                                                                            className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-[11px] text-black resize-y"
+                                                                                            rows="2"
+                                                                                            placeholder="Remarks"
+                                                                                        />
+                                                                                    </td>
+                                                                                    <td className="px-1.5 py-1 text-center">
+                                                                                        <button type="button" title="Remove this row"
+                                                                                            onClick={() => removeServiceCycleRow(idx)}
+                                                                                            className="text-gray-400 hover:text-red-600">
+                                                                                            <XMarkIcon className="h-3.5 w-3.5" />
+                                                                                        </button>
+                                                                                    </td>
+                                                                                </tr>
+                                                                            ))}
+                                                                            {serviceCycleRows.length === 0 && (
+                                                                                <tr>
+                                                                                    <td colSpan="4" className="px-2 py-2 text-center text-[10px] text-gray-400">
+                                                                                        No rows. Click "Add Row" to start.
+                                                                                    </td>
+                                                                                </tr>
+                                                                            )}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+
+                                                                <button type="button" onClick={addServiceCycleRow}
+                                                                    className="mt-1.5 inline-flex items-center gap-1 px-2 py-1 text-[11px] text-white rounded-md hover:opacity-90"
+                                                                    style={{ backgroundColor: themeColor }}>
+                                                                    <PlusIcon className="h-3 w-3" /> Add Row
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+
                                                 {/* Middle: Follow-up + Quotation + Letter Ref checkboxes */}
                                                 <div className="mb-3 border border-dashed border-gray-300 rounded-lg p-3 bg-gray-50 space-y-2">
                                                     <div className="flex flex-wrap items-center gap-4">
@@ -10180,11 +10718,11 @@ ${f.start_para}`;
                                             </div>
                                             <p className="text-[11px] font-bold text-black uppercase">Send Via</p>
                                             <div className="flex flex-wrap gap-2">
-                                                <label className={`flex items-center gap-1.5 px-3 py-2 border rounded-md cursor-pointer text-sm ${letterChannels.includes('email') ? 'border-[#2f3192] bg-[#2f3192]/10 text-[#2f3192]' : 'border-gray-300 text-black'}`}>
+                                                <label className={`flex items-center gap-1.5 px-3 py-1 border rounded-md cursor-pointer text-sm ${letterChannels.includes('email') ? 'border-[#2f3192] bg-[#2f3192]/10 text-[#2f3192]' : 'border-gray-300 text-black'}`}>
                                                     <input type="checkbox" className="hidden" checked={letterChannels.includes('email')} onChange={() => toggleLetterSendChannel('email')} />
                                                     <EnvelopeIcon className="h-4 w-4" /> Email
                                                 </label>
-                                                <label className={`flex items-center gap-1.5 px-3 py-2 border rounded-md cursor-pointer text-sm ${letterChannels.includes('whatsapp') ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-300 text-black'}`}>
+                                                <label className={`flex items-center gap-1.5 px-3 py-1 border rounded-md cursor-pointer text-sm ${letterChannels.includes('whatsapp') ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-300 text-black'}`}>
                                                     <input type="checkbox" className="hidden" checked={letterChannels.includes('whatsapp')} onChange={() => toggleLetterSendChannel('whatsapp')} />
                                                     <ChatBubbleLeftRightIcon className="h-4 w-4" /> WhatsApp
                                                 </label>
