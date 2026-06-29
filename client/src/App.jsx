@@ -16,6 +16,7 @@ import ExDashboard from './pages/ExDashboard';
 import MOMTracking from './pages/MOMTracking';
 import SalseANDFinance from './pages/SalseANDFinance';
 import KnowledgeBook from './pages/KnowledgeBook';
+import QuotationInfoSheet from './pages/QuotationInfoSheet';
 
 // Helper function to check if user is any type of admin
 const isAdmin = (role) => {
@@ -213,6 +214,13 @@ function Layout() {
       <Route path="/campaigns" element={
         <ProtectedRoute allowedRoles={['master_admin', 'it_admin']}>
           <Campaign />
+        </ProtectedRoute>
+      } />
+
+      {/* Quotation Info Sheet Page - ONLY master_admin can access */}
+      <Route path="/quotation-info-sheet" element={
+        <ProtectedRoute allowedRoles={['master_admin']}>
+          <QuotationInfoSheet />
         </ProtectedRoute>
       } />
 

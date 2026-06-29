@@ -101,11 +101,16 @@ def create_campaign(
         None,
         description="IDs of active same-product campaigns to transfer assets from (these get set to inactive)"
     ),
+    transfer_statuses: Optional[List[str]] = Query(
+        None,
+        description="Last-follow-up statuses to transfer: wip, rescheduled, rejected, "
+                    "not_connected, pending. If omitted, all of these are transferred."
+    ),
     db: Session = Depends(get_db)
 ):
     controller = CampaignController(db)
     user_data = get_user_from_request(request)
-    return controller.create_campaign(campaign, user_data, transfer_from_campaign_ids)
+    return controller.create_campaign(campaign, user_data, transfer_from_campaign_ids, transfer_statuses)
 
 @router.get("/active/by-service")
 def get_active_campaigns_by_service(

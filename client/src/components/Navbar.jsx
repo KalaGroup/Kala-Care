@@ -28,7 +28,8 @@ import {
   BookOpenIcon,
   BuildingOffice2Icon,
   EyeIcon,
-  PencilSquareIcon
+  PencilSquareIcon,
+  DocumentTextIcon
 } from '@heroicons/react/24/outline';
 import { CiFlag1 } from "react-icons/ci";
 
@@ -661,6 +662,13 @@ function Navbar({ children }) {
         icon: CiFlag1,
         description: 'Create & track drives',
         allowedRoles: ['master_admin', 'it_admin']
+      },
+      {
+        path: '/quotation-info-sheet',
+        name: 'Quotation Info Sheet',
+        icon: DocumentTextIcon,
+        description: 'View quotation information',
+        allowedRoles: ['master_admin']
       }
     ];
 

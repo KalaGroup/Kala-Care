@@ -187,7 +187,8 @@ class CampaignController:
         return campaign
     
     def create_campaign(self, campaign: campaign_schema.CampaignCreate, user_data: dict = None,
-                        transfer_from_campaign_ids: Optional[List[int]] = None) -> Campaign:
+                        transfer_from_campaign_ids: Optional[List[int]] = None,
+                        transfer_statuses: Optional[List[str]] = None) -> Campaign:
         # Check if service exists
         service = self.db.query(CampaignService).filter(CampaignService.name == campaign.service).first()
         if not service:
@@ -197,9 +198,19 @@ class CampaignController:
         combined_assets = list(campaign.asset_numbers or [])
 
         # TRANSFER ASSETS FROM USER-SELECTED CAMPAIGNS (SAME PRODUCT ONLY).
-        # Name is no longer used. The user picks which active same-product
-        # campaigns to pull assets from; each selected one is set to inactive.
+        # The user picks which active same-product campaigns to pull from AND
+        # which last-follow-up statuses to carry over. Only assets whose most
+        # recent follow-up status is in `transfer_statuses` move. Each selected
+        # source campaign is set to inactive regardless of how many matched.
         if transfer_from_campaign_ids:
+            # Which statuses to carry over. If the caller sends nothing, default
+            # to every transferable status (everything except 'completed').
+            allowed_statuses = {
+                (s or '').strip().lower() for s in transfer_statuses
+            } if transfer_statuses else {
+                'wip', 'rescheduled', 'rejected', 'not_connected', 'pending'
+            }
+
             source_campaigns = self.db.query(Campaign).filter(
                 Campaign.id.in_(transfer_from_campaign_ids),
                 Campaign.service == campaign.service,   # safety: same product only
@@ -207,7 +218,16 @@ class CampaignController:
             ).all()
 
             for src in source_campaigns:
-                combined_assets.extend(src.asset_numbers or [])
+                src_assets = src.asset_numbers or []
+                status_map = self._get_asset_last_status_map(src.id, src_assets)
+
+                # Pull only assets whose last status is one the user selected
+                matching = [
+                    a for a in src_assets
+                    if status_map.get(str(a), 'pending') in allowed_statuses
+                ]
+                combined_assets.extend(matching)
+
                 src.status = 'inactive'
                 src.updated_at = datetime.utcnow()
                 self.db.add(src)
@@ -255,6 +275,38 @@ class CampaignController:
         self.db.refresh(db_campaign)
 
         return db_campaign
+
+    def _get_asset_last_status_map(self, campaign_id: int, asset_numbers: List[str]) -> Dict[str, str]:
+        """
+        For each asset (instance_id) in a campaign, return the status of its
+        MOST RECENT follow-up for THIS campaign. Assets with no follow-up yet
+        are reported as 'pending'.
+        Status values come from the FollowUp model:
+        'wip', 'rescheduled', 'rejected', 'not_connected', 'completed', 'pending'.
+        """
+        from app.models.engagement_model import FollowUp
+
+        status_map = {str(a): 'pending' for a in (asset_numbers or [])}
+        if not status_map:
+            return status_map
+
+        followups = (
+            self.db.query(FollowUp)
+            .filter(FollowUp.campaign_id == campaign_id)
+            .order_by(FollowUp.followup_date.desc())
+            .all()
+        )
+
+        seen = set()
+        for f in followups:
+            cid = f.customer_instance_id
+            if not cid or cid in seen:
+                continue
+            if cid in status_map:
+                status_map[cid] = (f.status or 'pending').strip().lower()
+                seen.add(cid)
+
+        return status_map    
     
     def update_campaign(self, campaign_id: int, campaign: campaign_schema.CampaignUpdate, user_data: dict = None) -> Campaign:
         db_campaign = self.get_campaign(campaign_id)
@@ -322,27 +374,43 @@ class CampaignController:
         return db_campaign
 
     def get_active_campaigns_by_service(self, service: str) -> List[Dict[str, Any]]:
-            """
-            Active campaigns for a given product/service.
-            Used by the 'transfer assets' picker shown when creating a new campaign
-            for a product that already has active campaigns.
-            """
-            campaigns = self.db.query(Campaign).filter(
-                Campaign.service == service,
-                Campaign.status == 'active'
-            ).order_by(Campaign.created_at.desc()).all()
-    
-            return [
-                {
-                    "id": c.id,
-                    "name": c.name,
-                    "asset_count": len(c.asset_numbers or []),
-                    "start_date": c.start_date.isoformat() if c.start_date else None,
-                    "end_date": c.end_date.isoformat() if c.end_date else None,
-                    "created_by_name": c.created_by_name,
-                }
-                for c in campaigns
-            ]        
+        """
+        Active campaigns for a given product/service.
+        Used by the 'transfer assets' picker shown when creating a new campaign
+        for a product that already has active campaigns.
+
+        Each campaign also carries a `status_breakdown` — how many of its assets
+        currently sit in each last-follow-up status. This drives the status
+        checkboxes in the transfer modal so the user can carry over only the
+        assets in the statuses they care about.
+        """
+        campaigns = self.db.query(Campaign).filter(
+            Campaign.service == service,
+            Campaign.status == 'active'
+        ).order_by(Campaign.created_at.desc()).all()
+
+        BUCKETS = ('wip', 'rescheduled', 'rejected', 'not_connected', 'pending', 'completed')
+
+        result = []
+        for c in campaigns:
+            assets = c.asset_numbers or []
+            status_map = self._get_asset_last_status_map(c.id, assets)
+
+            breakdown = {b: 0 for b in BUCKETS}
+            for st in status_map.values():
+                key = st if st in breakdown else 'pending'
+                breakdown[key] += 1
+
+            result.append({
+                "id": c.id,
+                "name": c.name,
+                "asset_count": len(assets),
+                "start_date": c.start_date.isoformat() if c.start_date else None,
+                "end_date": c.end_date.isoformat() if c.end_date else None,
+                "created_by_name": c.created_by_name,
+                "status_breakdown": breakdown,
+            })
+        return result        
     
     def delete_campaign(self, campaign_id: int):
         from app.models.engagement_model import FollowUp

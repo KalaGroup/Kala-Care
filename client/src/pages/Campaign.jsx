@@ -58,6 +58,17 @@ const colorOptions = [
   { value: '#660185', label: 'Red', class: 'bg-[#660185]' },
 ];
 
+// Transfer status options — mapped to FollowUp.status values.
+// 'completed' is intentionally NOT transferable.
+const TRANSFER_STATUS_OPTIONS = [
+  { value: 'wip', label: 'Work in Progress', short: 'WIP', badge: 'bg-blue-100 text-blue-700' },
+  { value: 'rescheduled', label: 'Followup Reschedule', short: 'FR', badge: 'bg-amber-100 text-amber-700' },
+  { value: 'rejected', label: 'Rejected', short: 'R', badge: 'bg-red-100 text-red-700' },
+  { value: 'not_connected', label: 'Not Connected', short: 'NC', badge: 'bg-gray-200 text-gray-700' },
+  { value: 'pending', label: 'Pending (no status)', short: 'P', badge: 'bg-purple-100 text-purple-700' },
+];
+const ALL_TRANSFER_STATUS_VALUES = TRANSFER_STATUS_OPTIONS.map(o => o.value);
+
 // Financial-year string like "26-27" (Indian FY starts in April).
 // You can hardcode return '26-27' instead if you want it fixed.
 const getFinancialYear = () => {
@@ -152,6 +163,10 @@ const Campaign = () => {
     description: ''
   });
   const [editServiceLoading, setEditServiceLoading] = useState(false);
+
+  // Which last-follow-up statuses to carry over during transfer.
+  // All transferable statuses are selected by default.
+  const [selectedTransferStatuses, setSelectedTransferStatuses] = useState(ALL_TRANSFER_STATUS_VALUES);
 
   // ==================== Letter Master states ====================
   const LETTER_ATTACHMENT_EXTS = ['mp4', 'jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'xlsx', 'xls', 'csv'];
@@ -284,6 +299,23 @@ const Campaign = () => {
     setSelectedCampaignForModal(campaign);
     setShowFollowupModal(true);
   };
+
+  const toggleTransferStatus = (value) => {
+    setSelectedTransferStatuses(prev =>
+      prev.includes(value) ? prev.filter(s => s !== value) : [...prev, value]
+    );
+  };
+
+  // Total assets that will actually move, given selected drives + statuses.
+  const transferableCount = useMemo(() => {
+    let total = 0;
+    for (const c of transferCandidates) {
+      if (!selectedTransferIds.includes(c.id)) continue;
+      const bd = c.status_breakdown || {};
+      for (const st of selectedTransferStatuses) total += bd[st] || 0;
+    }
+    return total;
+  }, [transferCandidates, selectedTransferIds, selectedTransferStatuses]);
 
   // On mount: if we already have cached data for the current filter, show it
   // instantly and skip the blocking fetch. Otherwise fetch normally.
@@ -1204,8 +1236,6 @@ const Campaign = () => {
     await submitCampaign([]);
   };
 
-  // Actually creates the drive. `transferIds` are the active same-product drives
-  // the user chose to pull assets from; the backend inactivates them.
   const submitCampaign = async (transferIds = []) => {
     setCreateLoading(true);
     const createToast = toast.loading('Creating drive...');
@@ -1223,12 +1253,17 @@ const Campaign = () => {
         scripts: newCampaign.scripts
       };
 
-      // Pass the selected source drives as repeated query params.
+      // Build query params: which drives to pull from + which statuses to carry over.
       let url = `${API_BASE_URL}/v1/campaigns/`;
+      const qsParts = [];
       if (transferIds.length > 0) {
-        const qs = transferIds.map(id => `transfer_from_campaign_ids=${id}`).join('&');
-        url += `?${qs}`;
+        transferIds.forEach(id => qsParts.push(`transfer_from_campaign_ids=${id}`));
+        // statuses are guaranteed non-empty here (button is disabled otherwise)
+        selectedTransferStatuses.forEach(st =>
+          qsParts.push(`transfer_statuses=${encodeURIComponent(st)}`)
+        );
       }
+      if (qsParts.length > 0) url += `?${qsParts.join('&')}`;
 
       const response = await fetch(url, {
         method: 'POST',
@@ -1280,8 +1315,7 @@ const Campaign = () => {
         toast.success('Drive created successfully!');
       }
 
-      // Transferred drives are now inactive — quietly resync so they drop out
-      // of the active list and counts stay correct.
+      // Transferred drives are now inactive — quietly resync.
       fetchCampaignsLazy({ background: true });
       fetchStats();
     } catch (err) {
@@ -2077,6 +2111,7 @@ const Campaign = () => {
     setShowTransferModal(false);
     setTransferCandidates([]);
     setSelectedTransferIds([]);
+    setSelectedTransferStatuses(ALL_TRANSFER_STATUS_VALUES);
   };
 
   const getStatusBadgeClass = (status) => {
@@ -2794,7 +2829,8 @@ const Campaign = () => {
           </div>
         )}
 
-        {/* Transfer Assets Modal — choose which active same-product drives to pull from */}
+        {/* Transfer Assets Modal — choose active same-product drives + which
+            statuses to pull assets from. Selected drives are set to inactive. */}
         {showTransferModal && (
           <div className="fixed inset-0 flex items-end lg:items-center justify-center z-[70] p-3">
             <div
@@ -2822,10 +2858,42 @@ const Campaign = () => {
                   <p className="text-xs text-blue-800">
                     The product <span className="font-semibold">"{newCampaign.service}"</span> already has{' '}
                     <span className="font-semibold">{transferCandidates.length}</span> active drive
-                    {transferCandidates.length > 1 ? 's' : ''}. Select the drive(s) whose asset numbers
-                    you want to transfer into this new drive.{' '}
+                    {transferCandidates.length > 1 ? 's' : ''}. Select the drive(s) and the asset
+                    statuses you want to carry into this new drive.{' '}
                     <span className="font-semibold">Selected drives will be set to inactive.</span>
                   </p>
+                </div>
+
+                {/* Status filter — which last-follow-up statuses to carry over */}
+                <div className="border border-gray-200 rounded-lg p-3 mb-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-semibold text-black">Transfer assets with status:</p>
+                    <span className="text-[11px] text-gray-500">{selectedTransferStatuses.length} selected</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
+                    {TRANSFER_STATUS_OPTIONS.map(opt => (
+                      <label key={opt.value} className="flex items-center gap-1.5 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={selectedTransferStatuses.includes(opt.value)}
+                          onChange={() => toggleTransferStatus(opt.value)}
+                          className="rounded border-gray-300"
+                          style={{ accentColor: themeColor }}
+                          disabled={createLoading}
+                        />
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${opt.badge}`}>
+                          {opt.short}
+                        </span>
+                        <span className="text-xs text-black group-hover:text-[#2f3192] transition-colors">{opt.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-2">
+                    Status comes from each asset's latest follow-up in the source drive. Completed assets are never transferred.
+                  </p>
+                  {selectedTransferIds.length > 0 && selectedTransferStatuses.length === 0 && (
+                    <p className="text-[11px] text-red-500 mt-1">Select at least one status to transfer.</p>
+                  )}
                 </div>
 
                 {/* Select all */}
@@ -2852,6 +2920,8 @@ const Campaign = () => {
                 <div className="space-y-2 max-h-72 overflow-y-auto custom-scrollbar pr-1">
                   {transferCandidates.map(c => {
                     const checked = selectedTransferIds.includes(c.id);
+                    const bd = c.status_breakdown || {};
+                    const thisMovable = selectedTransferStatuses.reduce((sum, st) => sum + (bd[st] || 0), 0);
                     return (
                       <label
                         key={c.id}
@@ -2881,6 +2951,38 @@ const Campaign = () => {
                             {c.start_date && <span>Start: {formatDate(c.start_date)}</span>}
                             {c.created_by_name && <span>By: {c.created_by_name}</span>}
                           </div>
+
+                          {/* Per-status breakdown */}
+                          <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                            {TRANSFER_STATUS_OPTIONS.map(opt => {
+                              const n = bd[opt.value] || 0;
+                              if (n === 0) return null;
+                              const active = selectedTransferStatuses.includes(opt.value);
+                              return (
+                                <span
+                                  key={opt.value}
+                                  className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${opt.badge} ${active ? '' : 'opacity-40 line-through'}`}
+                                  title={`${opt.label}: ${n}${active ? '' : ' (excluded)'}`}
+                                >
+                                  {opt.short} {n}
+                                </span>
+                              );
+                            })}
+                            {(bd.completed || 0) > 0 && (
+                              <span
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 text-green-600 opacity-70"
+                                title={`Completed — not transferred: ${bd.completed}`}
+                              >
+                                ✓ {bd.completed} kept
+                              </span>
+                            )}
+                          </div>
+
+                          {checked && (
+                            <p className="text-[11px] mt-1 font-medium" style={{ color: themeColor }}>
+                              {thisMovable} asset{thisMovable !== 1 ? 's' : ''} will move from this drive
+                            </p>
+                          )}
                         </div>
                       </label>
                     );
@@ -2898,7 +3000,7 @@ const Campaign = () => {
                 </button>
                 <button
                   onClick={() => submitCampaign(selectedTransferIds)}
-                  disabled={createLoading}
+                  disabled={createLoading || (selectedTransferIds.length > 0 && selectedTransferStatuses.length === 0)}
                   className="flex-1 text-white font-medium rounded-md py-2 text-sm hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}
                 >
@@ -2906,7 +3008,7 @@ const Campaign = () => {
                     <><ArrowPathIcon className="h-4 w-4 animate-spin" /> Creating...</>
                   ) : (
                     selectedTransferIds.length > 0
-                      ? `Transfer & Create (${selectedTransferIds.length})`
+                      ? `Transfer & Create (${transferableCount})`
                       : 'Create Without Transfer'
                   )}
                 </button>

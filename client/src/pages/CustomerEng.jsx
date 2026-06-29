@@ -6599,44 +6599,66 @@ ${f.start_para}`;
                                 {/* Vertical divider */}
                                 <div className="w-px bg-gray-200 flex-shrink-0" />
 
-                                {/* Campaign chips — wrap row by row top to bottom, scrollable, with ↑↓ arrow */}
+                                {/* Campaign chips — LATEST first, shown as vertical PAIRS so the grid reads
+                                    column-by-column (latest top-left), wrapping into new 2-row bands. Scrollable + ↑↓ */}
                                 <div className="flex items-center gap-1 flex-1 min-w-0">
                                     <div
                                         id="campaign-chips-scroll"
                                         className="flex flex-wrap gap-1.5 flex-1 min-w-0 overflow-y-auto"
-                                        style={{ maxHeight: '44px', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                                        style={{ maxHeight: '56px', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                                     >
-                                        {activeCampaigns.map((campaign, idx) => {
-                                            const campaignCount = customers.filter(c => {
-                                                if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
-                                                    if (String(c.branch_id) !== String(userBranch)) return false;
-                                                }
-                                                return c.campaigns?.includes(campaign);
-                                            }).length;
-                                            const color = campaignColors[campaign] || '#406093';
-                                            return (
-                                                <button
-                                                    key={idx}
-                                                    onClick={() => handleCampaignToggle(campaign)}
-                                                    title={campaign}
-                                                    className={`px-2 py-0.5 rounded-lg text-sm font-bold text-left break-words leading-tight max-w-full ${selectedCampaigns.includes(campaign)
-                                                        ? 'text-white'
-                                                        : 'text-gray-700 hover:bg-gray-50'
-                                                        }`}
-                                                    style={selectedCampaigns.includes(campaign) ? { backgroundColor: color } : {}}
-                                                >
-                                                    {campaign} - {campaignCount}
-                                                </button>
-                                            );
-                                        })}
+                                        {(() => {
+                                            // Order LATEST → OLDEST by drive id (highest id = newest).
+                                            // If activeCampaigns already arrives oldest→latest, replace this
+                                            // whole sort with: const ordered = [...activeCampaigns].reverse();
+                                            const ordered = [...activeCampaigns].sort((a, b) => {
+                                                const idA = campaignShortNameMap[a]?.id ?? -Infinity;
+                                                const idB = campaignShortNameMap[b]?.id ?? -Infinity;
+                                                return idB - idA;
+                                            });
+
+                                            // Chunk into vertical pairs: [latest, 2nd], [3rd, 4th], ...
+                                            const pairs = [];
+                                            for (let i = 0; i < ordered.length; i += 2) pairs.push(ordered.slice(i, i + 2));
+
+                                            const renderChip = (campaign) => {
+                                                const campaignCount = customers.filter(c => {
+                                                    if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
+                                                        if (String(c.branch_id) !== String(userBranch)) return false;
+                                                    }
+                                                    return c.campaigns?.includes(campaign);
+                                                }).length;
+                                                const color = campaignColors[campaign] || '#406093';
+                                                return (
+                                                    <button
+                                                        key={campaign}
+                                                        onClick={() => handleCampaignToggle(campaign)}
+                                                        title={campaign}
+                                                        className={`px-2 py-0.5 rounded-lg text-sm font-bold text-left break-words leading-tight max-w-full ${selectedCampaigns.includes(campaign)
+                                                            ? 'text-white'
+                                                            : 'text-gray-700 hover:bg-gray-50'
+                                                            }`}
+                                                        style={selectedCampaigns.includes(campaign) ? { backgroundColor: color } : {}}
+                                                    >
+                                                        {campaign} - {campaignCount}
+                                                    </button>
+                                                );
+                                            };
+
+                                            return pairs.map((pair, idx) => (
+                                                <div key={idx} className="flex flex-col gap-1.5 flex-shrink-0">
+                                                    {pair.map(renderChip)}
+                                                </div>
+                                            ));
+                                        })()}
                                     </div>
 
-                                    {/* Single ↑↓ scroll button pair */}
+                                    {/* Single ↑↓ scroll button pair (scrolls one 2-row band at a time) */}
                                     <div className="flex flex-col gap-0.5 flex-shrink-0">
                                         <button
                                             onClick={() => {
                                                 const el = document.getElementById('campaign-chips-scroll');
-                                                if (el) el.scrollBy({ top: -40, behavior: 'smooth' });
+                                                if (el) el.scrollBy({ top: -56, behavior: 'smooth' });
                                             }}
                                             className="p-0.5 rounded hover:bg-gray-100 text-gray-400"
                                             title="Scroll up"
@@ -6646,7 +6668,7 @@ ${f.start_para}`;
                                         <button
                                             onClick={() => {
                                                 const el = document.getElementById('campaign-chips-scroll');
-                                                if (el) el.scrollBy({ top: 40, behavior: 'smooth' });
+                                                if (el) el.scrollBy({ top: 56, behavior: 'smooth' });
                                             }}
                                             className="p-0.5 rounded hover:bg-gray-100 text-gray-400"
                                             title="Scroll down"
