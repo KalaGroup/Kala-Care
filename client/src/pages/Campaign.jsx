@@ -80,6 +80,11 @@ const getFinancialYear = () => {
   return `${yy(startYear)}-${yy(startYear + 1)}`;
 };
 
+// CSP detection: any product whose name contains "csp" (case-insensitive)
+// counts as CSP — e.g. "CSP", "CSP Battery", "Oil CSP".
+const isCspService = (service) =>
+  !!service && String(service).toLowerCase().includes('csp');
+
 // Required columns and field mapping for the SP Info (CSP) file
 const SP_INFO_REQUIRED_COLUMNS = [
   'ZONE NAME', 'SD ID', 'SD NAME', 'BRANCH ID', 'BRANCH NAME', 'GOEM OEM',
@@ -112,6 +117,17 @@ const SP_INFO_COLUMN_MAP = {
   'SR INSTALLATION SITE ADDRESS': 'sr_installation_site_address',
   'OIL CHANGE FLAG': 'oil_change_flag'
 };
+
+// CSP-only Service Cycle (KOEL preventive-maintenance) defaults for Letter Master.
+// Mirrors the Send Letter wizard so a CSP format can ship its own default rows.
+const DEFAULT_SERVICE_CYCLE_INTRO =
+  'KOEL Preventive Maintenance Guidelines\nAs per KOEL guidelines, the preventive maintenance schedule is as follows:';
+const SERVICE_CYCLE_COLS = [
+  { key: 'service_type', label: 'Service Type' },
+  { key: 'schedule', label: 'Schedule' },
+  { key: 'remarks', label: 'Remarks' },
+];
+const blankServiceCycleRow = () => ({ service_type: '', schedule: '', remarks: '' });
 
 const Campaign = () => {
   const [showCampaignForm, setShowCampaignForm] = useState(false);
@@ -214,7 +230,11 @@ const Campaign = () => {
     expiry_date: '',
     default_attachments: [],
     start_para: '',
-    end_para: ''
+    end_para: '',
+    // CSP-only Service Cycle defaults
+    include_service_cycle: false,
+    service_cycle_intro: DEFAULT_SERVICE_CYCLE_INTRO,
+    service_cycle_rows: []
   });
 
   const [goemOemList, setGoemOemList] = useState([]);
@@ -1292,7 +1312,7 @@ const Campaign = () => {
         }
       }
 
-      if (newCampaign.service === 'CSP' && spInfoData.length > 0) {
+      if (isCspService(newCampaign.service) && spInfoData.length > 0) {
         await uploadSpInfo(data.id);
       }
 
@@ -1386,7 +1406,7 @@ const Campaign = () => {
         }
       }
 
-      if (editCampaignData.service === 'CSP' && spInfoData.length > 0) {
+      if (isCspService(editCampaignData.service) && spInfoData.length > 0) {
         await uploadSpInfo(data.id);
       }
 
@@ -1395,6 +1415,9 @@ const Campaign = () => {
       setShowEditCampaign(false);
       setSelectedCampaign(null);
       setPendingBranchUpdates([]);
+      // Reset CSP Info File state so it never carries into the next drive.
+      setSpInfoFile(null);
+      setSpInfoData([]);
       toast.dismiss(editToast);
       toast.success('Drive updated successfully!');
 
@@ -1759,7 +1782,10 @@ const Campaign = () => {
       engagement_detail_fields: [],
       default_attachments: [],
       start_para: '',
-      end_para: ''
+      end_para: '',
+      include_service_cycle: false,
+      service_cycle_intro: DEFAULT_SERVICE_CYCLE_INTRO,
+      service_cycle_rows: []
     });
     setRecipientRules([]);
     setShowRecipientForm(false);
@@ -1787,7 +1813,11 @@ const Campaign = () => {
       engagement_detail_fields: fmt.engagement_detail_fields || [],
       default_attachments: fmt.default_attachments || [],
       start_para: fmt.start_para || '',
-      end_para: fmt.end_para || ''
+      end_para: fmt.end_para || '',
+      // CSP-only Service Cycle defaults
+      include_service_cycle: !!fmt.include_service_cycle,
+      service_cycle_intro: fmt.service_cycle_intro || DEFAULT_SERVICE_CYCLE_INTRO,
+      service_cycle_rows: Array.isArray(fmt.service_cycle_rows) ? fmt.service_cycle_rows : []
     });
     setRecipientRules(dbRulesToUiRules(fmt.default_recipients || []));
     setShowRecipientForm((fmt.default_recipients || []).length > 0);
@@ -1844,12 +1874,38 @@ const Campaign = () => {
   // Only ONE product per letter format. Selecting a product (or "Select
   // Product" to clear) rebuilds the reference number.
   const selectLetterProduct = (productName) => {
+    setLetterFormatData(prev => {
+      const csp = isCspService(productName);
+      return {
+        ...prev,
+        products: productName ? [productName] : [],
+        reference_no: buildReferenceNo(productName, prev.id),
+        // Leaving CSP -> switch Service Cycle off so a non-CSP format never carries it
+        include_service_cycle: csp ? prev.include_service_cycle : false
+      };
+    });
+  };
+
+  // ----- CSP-only Service Cycle row editing (Letter Master defaults) -----
+  const setServiceCycleCell = (idx, key, value) =>
     setLetterFormatData(prev => ({
       ...prev,
-      products: productName ? [productName] : [],
-      reference_no: buildReferenceNo(productName, prev.id)
+      service_cycle_rows: (prev.service_cycle_rows || []).map((r, i) =>
+        i === idx ? { ...r, [key]: value } : r
+      )
     }));
-  };
+
+  const addServiceCycleRow = () =>
+    setLetterFormatData(prev => ({
+      ...prev,
+      service_cycle_rows: [...(prev.service_cycle_rows || []), blankServiceCycleRow()]
+    }));
+
+  const removeServiceCycleRow = (idx) =>
+    setLetterFormatData(prev => ({
+      ...prev,
+      service_cycle_rows: (prev.service_cycle_rows || []).filter((_, i) => i !== idx)
+    }));
 
   const CUSTOMER_DETAIL_OPTIONS = [
     { value: 'instance_id', label: 'Instance ID' },
@@ -1963,6 +2019,13 @@ const Campaign = () => {
 
     try {
       const product = letterFormatData.products[0] || '';
+      const isCsp = isCspService(product);
+      // Keep only non-blank rows, and only for a CSP product with the toggle on.
+      const cleanServiceCycleRows = (isCsp && letterFormatData.include_service_cycle)
+        ? (letterFormatData.service_cycle_rows || []).filter(r =>
+          (r.service_type || '').trim() || (r.schedule || '').trim() || (r.remarks || '').trim()
+        )
+        : [];
       const payload = {
         format_type_name: letterFormatData.format_type_name.trim(),
         products: product ? [product] : [],
@@ -1977,7 +2040,11 @@ const Campaign = () => {
         default_recipients: uiRulesToDbRules(recipientRules),
         default_attachments: letterFormatData.default_attachments,
         start_para: letterFormatData.start_para || '',
-        end_para: letterFormatData.end_para || ''
+        end_para: letterFormatData.end_para || '',
+        // CSP-only Service Cycle defaults
+        include_service_cycle: isCsp ? !!letterFormatData.include_service_cycle : false,
+        service_cycle_intro: letterFormatData.service_cycle_intro || DEFAULT_SERVICE_CYCLE_INTRO,
+        service_cycle_rows: cleanServiceCycleRows
       };
 
       const url = isEdit
@@ -2079,6 +2146,10 @@ const Campaign = () => {
       scripts: campaign.scripts || []
     });
     setImportedFile(null);
+    // Clear any CSP Info File left over from a previous create/edit so it can't
+    // be uploaded against the drive being opened now.
+    setSpInfoFile(null);
+    setSpInfoData([]);
     setShowEditCampaign(true);          // open instantly
     validateAssets(campaign.asset_numbers || []); // validate in background (shows the spinner)
   };
@@ -2229,7 +2300,7 @@ const Campaign = () => {
 
   // Skeleton loader component for campaigns
   const CampaignSkeleton = () => (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col h-[300px] animate-pulse">
+    <div className="bg-white rounded-xl shadow-md overflow-hidden flex flex-col h-[280px] animate-pulse">
       <div className="px-3 py-2.5 bg-gray-200 shrink-0">
         <div className="h-5 bg-gray-300 rounded w-3/4"></div>
       </div>
@@ -2487,7 +2558,16 @@ const Campaign = () => {
                   <label className="block text-xs font-semibold text-black mb-1">Service/Product *</label>
                   <select
                     value={newCampaign.service}
-                    onChange={(e) => setNewCampaign({ ...newCampaign, service: e.target.value })}
+                    onChange={(e) => {
+                      const nextService = e.target.value;
+                      setNewCampaign({ ...newCampaign, service: nextService });
+                      // Leaving CSP -> drop any loaded CSP Info File so it can
+                      // never be uploaded against a non-CSP drive.
+                      if (!isCspService(nextService)) {
+                        setSpInfoFile(null);
+                        setSpInfoData([]);
+                      }
+                    }}
                     className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
                     style={{ '--tw-ring-color': themeColor }}
                     disabled={createLoading}
@@ -2630,8 +2710,8 @@ const Campaign = () => {
                   )}
                 </div>
 
-                {/* SP Info Upload Section - only for CSP product */}
-                {newCampaign.service === 'CSP' && (
+                {/* SP Info Upload Section - only for CSP products (name contains "csp") */}
+                {isCspService(newCampaign.service) && (
                   <div className="border border-dashed border-gray-300 rounded-lg p-4">
                     <label className="block text-xs font-semibold text-black mb-1.5">
                       Upload CSP Info File (CSP) — columns must match the CSP Info format
@@ -3056,7 +3136,15 @@ const Campaign = () => {
                   <label className="block text-xs font-semibold text-black mb-1">Service/Product *</label>
                   <select
                     value={editCampaignData.service}
-                    onChange={(e) => setEditCampaignData({ ...editCampaignData, service: e.target.value })}
+                    onChange={(e) => {
+                      const nextService = e.target.value;
+                      setEditCampaignData({ ...editCampaignData, service: nextService });
+                      // Leaving CSP -> drop any loaded CSP Info File.
+                      if (!isCspService(nextService)) {
+                        setSpInfoFile(null);
+                        setSpInfoData([]);
+                      }
+                    }}
                     className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
                     style={{ '--tw-ring-color': themeColor }}
                     disabled={editLoading}
@@ -3198,8 +3286,8 @@ const Campaign = () => {
                   )}
                 </div>
 
-                {/* SP Info Upload Section for Edit - only for CSP product */}
-                {editCampaignData.service === 'CSP' && (
+                {/* SP Info Upload Section for Edit - only for CSP products (name contains "csp") */}
+                {isCspService(editCampaignData.service) && (
                   <div className="border border-dashed border-gray-300 rounded-lg p-4">
                     <label className="block text-xs font-semibold text-black mb-1.5">
                       Upload SP Info File (CSP) — re-uploading updates rows by Instance ID
@@ -4242,6 +4330,127 @@ const Campaign = () => {
                   />
                 </div>
 
+                {/* 5b) CSP-only Service Cycle — shows ONLY when the selected product contains "csp".
+                    Ships default Service Cycle rows used by the Send Letter wizard. */}
+                {isCspService(letterFormatData.products[0]) && (
+                  <div className="border border-dashed border-gray-300 rounded-lg p-3 bg-gray-50 space-y-2">
+                    <label className="flex items-center gap-2 text-xs font-semibold text-black cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!letterFormatData.include_service_cycle}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setLetterFormatData(prev => ({
+                              ...prev,
+                              include_service_cycle: true,
+                              // seed ONE default row the first time it's enabled
+                              service_cycle_rows: (prev.service_cycle_rows && prev.service_cycle_rows.length > 0)
+                                ? prev.service_cycle_rows
+                                : [blankServiceCycleRow()]
+                            }));
+                          } else {
+                            setLetterFormatData(prev => ({ ...prev, include_service_cycle: false }));
+                          }
+                        }}
+                        className="rounded border-gray-300"
+                        style={{ accentColor: themeColor }}
+                        disabled={letterFormatSaving}
+                      />
+                      Include Service Cycle <span className="text-gray-400 font-normal">(CSP only)</span>
+                    </label>
+
+                    {letterFormatData.include_service_cycle && (
+                      <div className="pt-1 space-y-2">
+                        <div>
+                          <label className="block text-[11px] text-gray-500 mb-0.5">Intro text (editable)</label>
+                          <textarea
+                            value={letterFormatData.service_cycle_intro}
+                            onChange={(e) => setLetterFormatData({ ...letterFormatData, service_cycle_intro: e.target.value })}
+                            className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[12px] leading-relaxed bg-white text-black"
+                            rows={2}
+                            disabled={letterFormatSaving}
+                          />
+                        </div>
+
+                        <div className="overflow-x-auto border border-gray-200 rounded-lg bg-white">
+                          <table className="w-full text-[11px]">
+                            <thead className="bg-gray-100">
+                              <tr>
+                                {SERVICE_CYCLE_COLS.map(c => (
+                                  <th key={c.key} className="px-2 py-1 text-left font-semibold text-black border-r border-gray-200 whitespace-nowrap">
+                                    {c.label}
+                                  </th>
+                                ))}
+                                <th className="px-2 py-1 text-center font-semibold text-black w-[40px]"></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(letterFormatData.service_cycle_rows || []).map((row, idx) => (
+                                <tr key={idx} className="border-t border-gray-100 align-top">
+                                  <td className="px-1.5 py-1 border-r border-gray-100">
+                                    <input
+                                      value={row.service_type}
+                                      onChange={(e) => setServiceCycleCell(idx, 'service_type', e.target.value)}
+                                      className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-[11px] text-black"
+                                      placeholder="e.g. B Check"
+                                      disabled={letterFormatSaving}
+                                    />
+                                  </td>
+                                  <td className="px-1.5 py-1 border-r border-gray-100">
+                                    <textarea
+                                      value={row.schedule}
+                                      onChange={(e) => setServiceCycleCell(idx, 'schedule', e.target.value)}
+                                      className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-[11px] text-black resize-y"
+                                      rows={2}
+                                      placeholder="e.g. Each 500 hours or 12 months"
+                                      disabled={letterFormatSaving}
+                                    />
+                                  </td>
+                                  <td className="px-1.5 py-1 border-r border-gray-100">
+                                    <textarea
+                                      value={row.remarks}
+                                      onChange={(e) => setServiceCycleCell(idx, 'remarks', e.target.value)}
+                                      className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-[11px] text-black resize-y"
+                                      rows={2}
+                                      placeholder="Remarks"
+                                      disabled={letterFormatSaving}
+                                    />
+                                  </td>
+                                  <td className="px-1.5 py-1 text-center">
+                                    <button type="button" title="Remove this row"
+                                      onClick={() => removeServiceCycleRow(idx)}
+                                      className="text-gray-400 hover:text-red-600"
+                                      disabled={letterFormatSaving}>
+                                      <XMarkIcon className="h-3.5 w-3.5" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                              {(letterFormatData.service_cycle_rows || []).length === 0 && (
+                                <tr>
+                                  <td colSpan="4" className="px-2 py-2 text-center text-[10px] text-gray-400">
+                                    No rows. Click "Add Row" to start.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <button type="button" onClick={addServiceCycleRow}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-white rounded-md hover:opacity-90 disabled:opacity-50"
+                          style={{ backgroundColor: themeColor }}
+                          disabled={letterFormatSaving}>
+                          <PlusIcon className="h-3 w-3" /> Add Row
+                        </button>
+                        <p className="text-[11px] text-gray-500">
+                          These default rows appear in the Send Letter wizard for CSP letters and can still be edited there per customer.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* 6) Engagement Details — checkboxes (after start paragraph) */}
                 <div className="border border-gray-200 rounded-lg p-3">
                   <label className="block text-xs font-semibold text-black mb-2">
@@ -4727,6 +4936,40 @@ const Campaign = () => {
                   </div>
                 </div>
 
+                {/* Service Cycle (CSP only) */}
+                {viewingLetterFormat.include_service_cycle && (
+                  <div>
+                    <p className="text-xs font-semibold text-black mb-1.5">Service Cycle (CSP)</p>
+                    {viewingLetterFormat.service_cycle_intro && (
+                      <p className="text-[12px] text-gray-600 whitespace-pre-wrap mb-1.5">{viewingLetterFormat.service_cycle_intro}</p>
+                    )}
+                    {(viewingLetterFormat.service_cycle_rows || []).length === 0 ? (
+                      <span className="text-sm text-gray-400">No rows configured</span>
+                    ) : (
+                      <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                        <table className="w-full text-[11px]">
+                          <thead className="bg-gray-100">
+                            <tr>
+                              {SERVICE_CYCLE_COLS.map(c => (
+                                <th key={c.key} className="px-2 py-1 text-left font-semibold text-black border-r border-gray-200 whitespace-nowrap">{c.label}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {viewingLetterFormat.service_cycle_rows.map((row, idx) => (
+                              <tr key={idx} className="border-t border-gray-100 align-top">
+                                <td className="px-2 py-1 border-r border-gray-100 text-black">{row.service_type || '-'}</td>
+                                <td className="px-2 py-1 border-r border-gray-100 text-black whitespace-pre-wrap">{row.schedule || '-'}</td>
+                                <td className="px-2 py-1 border-r border-gray-100 text-black whitespace-pre-wrap">{row.remarks || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Engagement Detail Fields */}
                 <div>
                   <p className="text-xs font-semibold text-black mb-1.5">Engagement Details</p>
@@ -4864,115 +5107,118 @@ const Campaign = () => {
           )}
 
           {/* Show campaigns progressively — first batch instantly, rest stream in */}
-          {!loading && visibleCampaigns.map(campaign => (
+          {!loading && visibleCampaigns.map((campaign, index) => (
             <div
               key={campaign.id}
-              className="bg-white rounded-xl shadow-lg overflow-hidden transition-all hover:shadow-xl flex flex-col h-[300px] animate-fadeIn"
+              className="animate-cardIn"
+              style={{ animationDelay: `${(index % 8) * 70}ms` }}
             >
-              <div className="px-3 py-2.5 flex justify-between items-center shrink-0" style={{ backgroundColor: campaign.color || themeColor }}>
-                <h3
-                  className="font-semibold text-white text-sm lg:text-base truncate pr-2 hover:underline cursor-pointer"
-                  onClick={() => handleCampaignClick(campaign)}
-                >
-                  {campaign.name}
-                </h3>
-                <div className="flex items-center gap-1 shrink-0">
-                  <span className={`px-2 py-0.5 rounded-full text-xs capitalize ${getStatusBadgeClass(campaign.status)}`}>
-                    {campaign.status}
-                  </span>
-                  <button
-                    onClick={(e) => openEditModal(campaign, e)}
-                    className="p-1 text-white hover:bg-white/20 rounded-md transition-all"
-                    title="Edit drive"
+              <div className="group bg-white rounded-xl shadow-md overflow-hidden flex flex-col h-[250px] transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl">
+                <div className="px-3 py-2 flex justify-between items-center shrink-0" style={{ backgroundColor: campaign.color || themeColor }}>
+                  <h3
+                    className="font-semibold text-white text-sm lg:text-base truncate pr-2 hover:underline cursor-pointer"
+                    onClick={() => handleCampaignClick(campaign)}
                   >
-                    <PencilIcon className="h-3.5 w-3.5" />
-                  </button>
-                  {campaign.status === 'inactive' && (
+                    {campaign.name}
+                  </h3>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className={`px-2 py-0.5 rounded-full text-xs capitalize ${getStatusBadgeClass(campaign.status)}`}>
+                      {campaign.status}
+                    </span>
                     <button
-                      onClick={(e) => { e.stopPropagation(); openDeleteCampaignConfirm(campaign); }}
+                      onClick={(e) => openEditModal(campaign, e)}
                       className="p-1 text-white hover:bg-white/20 rounded-md transition-all"
-                      title="Delete drive"
+                      title="Edit drive"
                     >
-                      <XMarkIcon className="h-3.5 w-3.5" />
+                      <PencilIcon className="h-3.5 w-3.5" />
                     </button>
-                  )}
+                    {campaign.status === 'inactive' && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openDeleteCampaignConfirm(campaign); }}
+                        className="p-1 text-white hover:bg-white/20 rounded-md transition-all"
+                        title="Delete drive"
+                      >
+                        <XMarkIcon className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              <div className="flex-1 overflow-y-auto p-3">
-                <div className="mb-3">
-                  <p className="text-sm text-black break-words whitespace-pre-wrap">
-                    {campaign.description || 'No description provided'}
-                  </p>
-                </div>
-
-                {campaign.scripts && campaign.scripts.length > 0 && (
+                <div className="flex-1 overflow-y-auto p-3">
                   <div className="mb-3">
-                    <p className="text-xs font-semibold text-black mb-1">Scripts ({campaign.scripts?.length || 0}):</p>
-                    <div className="flex flex-wrap gap-2">
-                      {campaign.scripts?.slice(0, 2).map((script, idx) => (
-                        <div key={idx} className="flex items-center gap-1.5 text-xs text-black">
-                          <DocumentIcon className="h-3 w-3 text-red-500 shrink-0" />
-                          <span className="truncate max-w-[150px]">{script.name}</span>
-                        </div>
-                      ))}
-                      {campaign.scripts?.length > 2 && (
-                        <p className="text-xs text-black">+{campaign.scripts.length - 2} more</p>
-                      )}
+                    <p className="text-sm text-black break-words whitespace-pre-wrap">
+                      {campaign.description || 'No description provided'}
+                    </p>
+                  </div>
+
+                  {campaign.scripts && campaign.scripts.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs font-semibold text-black mb-1">Scripts ({campaign.scripts?.length || 0}):</p>
+                      <div className="flex flex-wrap gap-2">
+                        {campaign.scripts?.slice(0, 2).map((script, idx) => (
+                          <div key={idx} className="flex items-center gap-1.5 text-xs text-black">
+                            <DocumentIcon className="h-3 w-3 text-red-500 shrink-0" />
+                            <span className="truncate max-w-[150px]">{script.name}</span>
+                          </div>
+                        ))}
+                        {campaign.scripts?.length > 2 && (
+                          <p className="text-xs text-black">+{campaign.scripts.length - 2} more</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {campaign.created_by_name && (
+                    <div className="mb-2 text-xs text-black">
+                      Created by: {campaign.created_by_name} {campaign.created_by_id && `(ID: ${campaign.created_by_id})`}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    <div className="flex items-center gap-1.5 text-sm min-w-0">
+                      <CalendarIcon className="h-3.5 w-3.5 shrink-0" style={{ color: themeColor }} />
+                      <span className="text-black truncate">
+                        Start: {formatDate(campaign.start_date)}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-sm min-w-0">
+                      <ClockIcon className="h-3.5 w-3.5 shrink-0" style={{ color: themeColor }} />
+                      <span className="text-black truncate">
+                        End: {campaign.end_date ? formatDate(campaign.end_date) : 'Ongoing'}
+                      </span>
                     </div>
                   </div>
-                )}
 
-                {campaign.created_by_name && (
-                  <div className="mb-2 text-xs text-black">
-                    Created by: {campaign.created_by_name} {campaign.created_by_id && `(ID: ${campaign.created_by_id})`}
-                  </div>
-                )}
+                  <div className="flex items-center justify-between pt-3 border-t mt-auto">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium px-2 py-1 bg-blue-100 text-blue-800 rounded-full truncate max-w-[120px]">
+                        {campaign.service}
+                      </span>
+                    </div>
 
-                <div className="grid grid-cols-2 gap-3 mb-3">
-                  <div className="flex items-center gap-1.5 text-sm min-w-0">
-                    <CalendarIcon className="h-3.5 w-3.5 shrink-0" style={{ color: themeColor }} />
-                    <span className="text-black truncate">
-                      Start: {formatDate(campaign.start_date)}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-sm min-w-0">
-                    <ClockIcon className="h-3.5 w-3.5 shrink-0" style={{ color: themeColor }} />
-                    <span className="text-black truncate">
-                      End: {campaign.end_date ? formatDate(campaign.end_date) : 'Ongoing'}
-                    </span>
-                  </div>
-                </div>
+                    <div className="flex items-center gap-3 ml-auto">
+                      <button
+                        onClick={(e) => openFollowupModal(campaign, e)}
+                        className="px-2 py-1 text-xs font-medium text-white bg-[#2f3192] rounded-md hover:bg-[#2f3192]/90 transition-all whitespace-nowrap"
+                        title="View customer follow-ups"
+                      >
+                        View All
+                      </button>
 
-                <div className="flex items-center justify-between pt-3 border-t mt-auto">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium px-2 py-1 bg-blue-100 text-blue-800 rounded-full truncate max-w-[120px]">
-                      {campaign.service}
-                    </span>
-                  </div>
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1 text-sm text-black" title="Pending Follow-ups">
+                          <UserGroupIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
+                          <span>
+                            {campaignCounts[campaign.id]?.pending !== undefined
+                              ? campaignCounts[campaign.id].pending
+                              : campaign.asset_numbers?.length || 0}
+                          </span>
+                        </div>
 
-                  <div className="flex items-center gap-3 ml-auto">
-                    <button
-                      onClick={(e) => openFollowupModal(campaign, e)}
-                      className="px-2 py-1 text-xs font-medium text-white bg-[#2f3192] rounded-md hover:bg-[#2f3192]/90 transition-all whitespace-nowrap"
-                      title="View customer follow-ups"
-                    >
-                      View All
-                    </button>
-
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-1 text-sm text-black" title="Pending Follow-ups">
-                        <UserGroupIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
-                        <span>
-                          {campaignCounts[campaign.id]?.pending !== undefined
-                            ? campaignCounts[campaign.id].pending
-                            : campaign.asset_numbers?.length || 0}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-1 text-sm text-green-600" title="Completed Follow-ups">
-                        <CheckCircleIcon className="h-3.5 w-3.5" />
-                        <span>{campaignCounts[campaign.id]?.completed || 0}</span>
+                        <div className="flex items-center gap-1 text-sm text-green-600" title="Completed Follow-ups">
+                          <CheckCircleIcon className="h-3.5 w-3.5" />
+                          <span>{campaignCounts[campaign.id]?.completed || 0}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -5088,19 +5334,20 @@ const Campaign = () => {
           scrollbar-width: thin;
         }
 
-        @keyframes fadeIn {
-          from {
+        @keyframes cardIn {
+          0% {
             opacity: 0;
-            transform: translateY(10px);
+            transform: translateY(18px) scale(0.96);
           }
-          to {
+          100% {
             opacity: 1;
-            transform: translateY(0);
+            transform: translateY(0) scale(1);
           }
         }
 
-        .animate-fadeIn {
-          animation: fadeIn 0.2s ease-out forwards;
+        .animate-cardIn {
+          opacity: 0;
+          animation: cardIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
         }
       `}</style>
     </div>

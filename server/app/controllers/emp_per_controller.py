@@ -2732,6 +2732,166 @@ class EmployeePerformanceController:
             return {"total": 0, "followups": []}      
 
     @staticmethod
+    async def get_user_letter_count(db: Session, user_id: str):
+        """
+        Cheap COUNT of letters sent BY this user (for the dashboard card),
+        split by status so the card can show Sent / Draft separately.
+        """
+        try:
+            from app.models.letter_model import LetterSendRecord
+            row = db.query(
+                func.count(LetterSendRecord.id).label('total'),
+                func.sum(case((func.lower(LetterSendRecord.status) == 'sent', 1), else_=0)).label('sent'),
+                func.sum(case((func.lower(LetterSendRecord.status) == 'draft', 1), else_=0)).label('draft'),
+            ).filter(
+                LetterSendRecord.sent_by_id == user_id
+            ).first()
+            return {
+                "count": int(row.total or 0),
+                "sent": int(row.sent or 0),
+                "draft": int(row.draft or 0),
+            }
+        except Exception as e:
+            print(f"Error in get_user_letter_count: {str(e)}")
+            return {"count": 0, "sent": 0, "draft": 0}
+
+    @staticmethod
+    async def get_user_letter_records(db: Session, user_id: str):
+        """
+        All letters sent BY a specific user.
+        PERF: selects ONLY light columns — letter_html / letter_body / letter_fields /
+        attachments are intentionally NOT fetched (they can be huge base64/HTML blobs).
+        Customer name/phone/branch are pulled in ONE batched IN() query.
+        """
+        try:
+            from app.models.letter_model import LetterSendRecord
+            from app.models.customer_model import Customer
+
+            rows = db.query(
+                LetterSendRecord.id,
+                LetterSendRecord.ref_no,
+                LetterSendRecord.financial_year,
+                LetterSendRecord.sequence_number,
+                LetterSendRecord.instance_id,
+                LetterSendRecord.customer_id,
+                LetterSendRecord.format_type_name,
+                LetterSendRecord.subject,
+                LetterSendRecord.channels,
+                LetterSendRecord.sent_email,
+                LetterSendRecord.sent_whatsapp,
+                LetterSendRecord.email_to,
+                LetterSendRecord.email_cc,          # NEW — only if your model has this column (see note below)
+                LetterSendRecord.whatsapp_to,
+                LetterSendRecord.attachments,       # NEW — needed to read the file names
+                LetterSendRecord.status,
+                LetterSendRecord.error_message,
+                LetterSendRecord.sent_by_id,
+                LetterSendRecord.sent_by_name,
+                LetterSendRecord.created_at,
+            ).filter(
+                LetterSendRecord.sent_by_id == user_id
+            ).order_by(LetterSendRecord.created_at.desc()).all()
+
+            if not rows:
+                return {"total": 0, "letters": []}
+
+            # Batch customer lookup (one indexed IN query)
+            instance_ids = list({r.instance_id for r in rows if r.instance_id})
+            customer_map = {}
+            if instance_ids:
+                for c in db.query(
+                    Customer.instance_id, Customer.customer_name,
+                    Customer.phone_number, Customer.branch_id
+                ).filter(Customer.instance_id.in_(instance_ids)).all():
+                    customer_map[c.instance_id] = c
+
+            letters = []
+            for idx, r in enumerate(rows, 1):
+                cust = customer_map.get(r.instance_id)
+
+                # File NAMES only — drop the heavy base64 `content` before sending to the UI
+                attachment_names = [
+                    (a.get("name") if isinstance(a, dict) else a)
+                    for a in (r.attachments or [])
+                    if (a.get("name") if isinstance(a, dict) else a)
+                ]
+
+                letters.append({
+                    "s_no": idx,
+                    "id": r.id,
+                    "ref_no": r.ref_no or "-",
+                    "financial_year": r.financial_year or "-",
+                    "sequence_number": r.sequence_number,
+                    "instance_id": r.instance_id or "-",
+                    "customer_id": r.customer_id,
+                    "customer_name": cust.customer_name if cust else "-",
+                    "phone_number": cust.phone_number if cust else "-",
+                    "branch_id": cust.branch_id if cust else "-",
+                    "format_type_name": r.format_type_name or "-",
+                    "subject": r.subject or "-",
+                    "channels": r.channels or [],
+                    "sent_email": bool(r.sent_email),
+                    "sent_whatsapp": bool(r.sent_whatsapp),
+                    "email_to": r.email_to or "-",
+                    "email_cc": r.email_cc or "-",          # NEW — only if your model has email_cc
+                    "whatsapp_to": r.whatsapp_to or "-",
+                    "attachment_names": attachment_names,    # NEW
+                    "status": r.status or "-",
+                    "error_message": r.error_message or "",
+                    "sent_by_name": r.sent_by_name or "-",
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                })
+
+            return {"total": len(letters), "letters": letters}
+
+        except Exception as e:
+            print(f"Error in get_user_letter_records: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {"total": 0, "letters": []}
+
+    @staticmethod
+    async def get_user_letter_html(db: Session, user_id: str, letter_id: int):
+        """
+        Return ONE letter's stored HTML (+ ref_no/subject) so the FRONTEND renders it
+        to a properly-formatted PDF (same letterhead as the Send Letter feature).
+        Verifies the letter belongs to this user (blocks viewing someone else's letter
+        by changing the id in the URL). Returns a dict or None.
+        """
+        try:
+            from app.models.letter_model import LetterSendRecord   # same path as get_user_letter_records
+
+            rec = db.query(
+                LetterSendRecord.ref_no,
+                LetterSendRecord.subject,
+                LetterSendRecord.letter_html,
+                LetterSendRecord.letter_body,
+            ).filter(
+                LetterSendRecord.id == letter_id,
+                LetterSendRecord.sent_by_id == user_id          # ownership check
+            ).first()
+
+            if not rec:
+                return None
+
+            html = rec.letter_html
+            if not html or not str(html).strip():
+                body = (rec.letter_body or '').replace('\n', '<br/>')
+                html = f"<div style='font-family:Arial;padding:24px;'><h3>{rec.subject or ''}</h3><div>{body}</div></div>"
+
+            return {
+                "ref_no": rec.ref_no or f"letter_{letter_id}",
+                "subject": rec.subject or "",
+                "letter_html": str(html),
+            }
+
+        except Exception as e:
+            print(f"Error in get_user_letter_html: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    @staticmethod
     async def get_asset_lookup(db: Session, instance_id: str):
         """
         Lookup goem_oem and segment from asset_detailed by instance_id (asset number).
@@ -2961,3 +3121,193 @@ class EmployeePerformanceController:
             import traceback
             traceback.print_exc()
             return {"date": target_date or "", "total_sessions": 0, "rows": []}                        
+
+    @staticmethod
+    async def get_all_branches_letter_counts(db: Session):
+        """
+        Letter status counts grouped by the SENDER's branch, for ALL branches at once.
+        ONE join (LetterSendRecord -> User on sent_by_id) — no per-branch round trips.
+        Returns { branch_code: {total, sent, draft, failed} }.
+        """
+        try:
+            from app.models.letter_model import LetterSendRecord
+            from app.models.user_model import User
+
+            rows = db.query(
+                User.branch.label('branch'),
+                LetterSendRecord.status.label('status'),
+                func.count(LetterSendRecord.id).label('cnt')
+            ).select_from(LetterSendRecord).join(
+                User, User.user_id == LetterSendRecord.sent_by_id
+            ).group_by(User.branch, LetterSendRecord.status).all()
+
+            result = {}
+            for branch, status_val, cnt in rows:
+                if not branch:
+                    continue
+                c = int(cnt or 0)
+                b = result.setdefault(branch, {"total": 0, "sent": 0, "draft": 0, "failed": 0})
+                b["total"] += c
+                s = (status_val or 'sent').lower()
+                if s in b:
+                    b[s] += c   # any other status (e.g. 'pending') still counts toward total
+            return result
+        except Exception as e:
+            print(f"Error in get_all_branches_letter_counts: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {}
+
+    @staticmethod
+    async def get_branch_letter_records(db: Session, branch_code: str):
+        """
+        All letters sent by users whose PRIMARY branch is `branch_code`.
+        PERF: light columns ONLY (no letter_html / letter_body / letter_fields blobs).
+        Customer name/phone batched (chunked IN()); sender name resolved from users.
+        """
+        try:
+            from app.models.letter_model import LetterSendRecord
+            from app.models.user_model import User
+            from app.models.customer_model import Customer
+
+            # Users in this branch (id -> name) in ONE query
+            branch_users = db.query(User.user_id, User.name).filter(
+                User.branch == branch_code
+            ).all()
+            if not branch_users:
+                return {"total": 0, "sent": 0, "draft": 0, "letters": []}
+
+            user_name_map = {u.user_id: u.name for u in branch_users}
+            branch_user_ids = list(user_name_map.keys())   # a branch has few users -> safe IN()
+
+            rows = db.query(
+                LetterSendRecord.id,
+                LetterSendRecord.ref_no,
+                LetterSendRecord.instance_id,
+                LetterSendRecord.customer_id,
+                LetterSendRecord.format_type_name,
+                LetterSendRecord.subject,
+                LetterSendRecord.channels,
+                LetterSendRecord.sent_email,
+                LetterSendRecord.sent_whatsapp,
+                LetterSendRecord.email_to,
+                LetterSendRecord.email_cc,
+                LetterSendRecord.whatsapp_to,
+                LetterSendRecord.attachments,
+                LetterSendRecord.status,
+                LetterSendRecord.sent_by_id,
+                LetterSendRecord.sent_by_name,
+                LetterSendRecord.created_at,
+            ).filter(
+                LetterSendRecord.sent_by_id.in_(branch_user_ids)
+            ).order_by(LetterSendRecord.created_at.desc()).all()
+
+            if not rows:
+                return {"total": 0, "sent": 0, "draft": 0, "letters": []}
+
+            # Batch customer lookup — chunked to stay under SQL Server's 2100-param limit
+            instance_ids = list({r.instance_id for r in rows if r.instance_id})
+            customer_map = {}
+            if instance_ids:
+                CHUNK = 500
+                for i in range(0, len(instance_ids), CHUNK):
+                    part = instance_ids[i:i + CHUNK]
+                    for c in db.query(
+                        Customer.instance_id, Customer.customer_name,
+                        Customer.phone_number, Customer.branch_id
+                    ).filter(Customer.instance_id.in_(part)).all():
+                        customer_map[c.instance_id] = c
+
+            letters, sent_count, draft_count = [], 0, 0
+            for idx, r in enumerate(rows, 1):
+                cust = customer_map.get(r.instance_id)
+                s = (r.status or 'sent').lower()
+                if s == 'sent':
+                    sent_count += 1
+                elif s == 'draft':
+                    draft_count += 1
+
+                # File NAMES only — never the heavy base64 content
+                attachment_names = [
+                    (a.get("name") if isinstance(a, dict) else a)
+                    for a in (r.attachments or [])
+                    if (a.get("name") if isinstance(a, dict) else a)
+                ]
+
+                letters.append({
+                    "s_no": idx,
+                    "id": r.id,
+                    "ref_no": r.ref_no or "-",
+                    "instance_id": r.instance_id or "-",
+                    "customer_id": r.customer_id,
+                    "customer_name": cust.customer_name if cust else "-",
+                    "phone_number": cust.phone_number if cust else "-",
+                    "branch_id": cust.branch_id if cust else "-",
+                    "format_type_name": r.format_type_name or "-",
+                    "subject": r.subject or "-",
+                    "channels": r.channels or [],
+                    "sent_email": bool(r.sent_email),
+                    "sent_whatsapp": bool(r.sent_whatsapp),
+                    "email_to": r.email_to or "-",
+                    "email_cc": r.email_cc or "-",
+                    "whatsapp_to": r.whatsapp_to or "-",
+                    "attachment_names": attachment_names,
+                    "status": r.status or "-",
+                    "sent_by_id": r.sent_by_id or "-",
+                    "sent_by_name": user_name_map.get(r.sent_by_id) or r.sent_by_name or "-",
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                })
+
+            return {"total": len(letters), "sent": sent_count, "draft": draft_count, "letters": letters}
+
+        except Exception as e:
+            print(f"Error in get_branch_letter_records: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {"total": 0, "sent": 0, "draft": 0, "letters": []}
+
+    @staticmethod
+    async def get_branch_letter_html(db: Session, branch_code: str, letter_id: int):
+        """
+        Return ONE letter's stored HTML, but ONLY if its sender belongs to `branch_code`
+        (lets a branch/master admin view letters from their branch; blocks other branches).
+        The frontend renders this HTML to a banded PDF.
+        """
+        try:
+            from app.models.letter_model import LetterSendRecord
+            from app.models.user_model import User
+
+            rec = db.query(
+                LetterSendRecord.ref_no,
+                LetterSendRecord.subject,
+                LetterSendRecord.letter_html,
+                LetterSendRecord.letter_body,
+                LetterSendRecord.sent_by_id,
+            ).filter(LetterSendRecord.id == letter_id).first()
+
+            if not rec:
+                return None
+
+            # Branch ownership check — sender must be in this branch
+            in_branch = db.query(User.user_id).filter(
+                User.user_id == rec.sent_by_id,
+                User.branch == branch_code
+            ).first()
+            if not in_branch:
+                return None
+
+            html = rec.letter_html
+            if not html or not str(html).strip():
+                body = (rec.letter_body or '').replace('\n', '<br/>')
+                html = f"<div style='font-family:Arial;padding:24px;'><h3>{rec.subject or ''}</h3><div>{body}</div></div>"
+
+            return {
+                "ref_no": rec.ref_no or f"letter_{letter_id}",
+                "subject": rec.subject or "",
+                "letter_html": str(html),
+            }
+        except Exception as e:
+            print(f"Error in get_branch_letter_html: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None            

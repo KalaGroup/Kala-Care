@@ -107,6 +107,11 @@ class CampaignLetterFormat(Base):
     start_para = Column(Text, nullable=True)            # opening paragraph of the letter
     end_para = Column(Text, nullable=True)              # closing paragraph of the letter
 
+    # CSP-only Service Cycle (KOEL preventive maintenance) defaults
+    include_service_cycle = Column(Boolean, default=False)
+    service_cycle_intro = Column(Text, nullable=True)
+    service_cycle_rows = Column(JSON, default=[])       # [{"service_type","schedule","remarks"}, ...]
+
     created_by_id = Column(String(100), nullable=True)
     created_by_name = Column(String(255), nullable=True)
 

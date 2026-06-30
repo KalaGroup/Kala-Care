@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from sqlalchemy.orm import Session
 from typing import Optional, List
 
@@ -118,7 +118,7 @@ async def get_customer_with_edit_info(
 @router.get("/edited-customers", response_model=List[dict])
 async def get_all_edited_customers(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100000, ge=1, le=100000),
     db: Session = Depends(get_db)
 ):
     """
@@ -200,3 +200,35 @@ async def compare_original_and_edited(
         "last_edited_at": result['last_edited_at'],
         "total_edits": result['total_edits']
     }
+
+@router.patch("/history/{history_id}/done")
+async def update_edit_history_done(
+    history_id: int,
+    is_done: bool = Body(True, embed=True),
+    db: Session = Depends(get_db)
+):
+    """Mark a CDB-update row as done / not done."""
+    controller = EditCustomerController(db)
+    entry = controller.set_edit_history_done(history_id, is_done)
+    if not entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Edit history entry not found"
+        )
+    return {"success": True, "id": entry.id, "is_done": bool(entry.is_done)}
+
+
+@router.patch("/history/{history_id}/soft-delete")
+async def soft_delete_edit_history_row(
+    history_id: int,
+    db: Session = Depends(get_db)
+):
+    """Soft delete a CDB-update row: stays in DB, hidden from the table."""
+    controller = EditCustomerController(db)
+    entry = controller.soft_delete_edit_history(history_id)
+    if not entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Edit history entry not found"
+        )
+    return {"success": True, "id": entry.id}    

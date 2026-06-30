@@ -18,6 +18,7 @@ import { Bar, Pie, Line } from 'react-chartjs-2';
 import MyPerformance from '../components/MyPerformance';
 import CampaignCustomersFollowupModal from '../components/CampaignCustomersFollowupModal';
 import BranchCustomersModal from '../components/BranchCustomersModal';
+import BranchLetterReportModal from '../components/BranchLetterReportModal';
 import OtherFollowupModal from '../components/OtherFollowupModal';
 import EmployeeCampaignProgress from '../components/EmployeeCampaignProgress';
 import EmployeeActivityModal from '../components/EmployeeActivityModal';
@@ -185,6 +186,10 @@ const Dashboard = () => {
     const [selectedEmployeeForProgress, setSelectedEmployeeForProgress] = useState(null);
     const [selectedBranchForModal, setSelectedBranchForModal] = useState(null);
     const [showBranchCustomersModal, setShowBranchCustomersModal] = useState(false);
+    // ── Branch-wise Letter Report (letters grouped by sender's branch) ──
+    const [branchLetterCounts, setBranchLetterCounts] = useState({});
+    const [showBranchLetterModal, setShowBranchLetterModal] = useState(false);
+    const [selectedBranchForLetters, setSelectedBranchForLetters] = useState(null);
     const [summaryStats, setSummaryStats] = useState(null);
     const [canExport, setCanExport] = useState(false);
     const [showEmployeeTimeModal, setShowEmployeeTimeModal] = useState(false);
@@ -353,7 +358,7 @@ const Dashboard = () => {
                 summaryStats?.rejected_assets || 0,
                 summaryStats?.not_connected_assets || 0
             ],
-            backgroundColor: ['rgba(34, 197, 94, 0.85)', 'rgba(234, 179, 8, 0.85)', 'rgba(168, 85, 247, 0.85)', 'rgba(220, 100, 40, 0.85)','rgba(107, 114, 128, 0.85)'],
+            backgroundColor: ['rgba(34, 197, 94, 0.85)', 'rgba(234, 179, 8, 0.85)', 'rgba(168, 85, 247, 0.85)', 'rgba(220, 100, 40, 0.85)', 'rgba(107, 114, 128, 0.85)'],
             borderColor: ['#22c55e', '#eab308', '#a855f7', '#dc6428', '#6b7280'],
             borderWidth: 2
         }]
@@ -613,6 +618,19 @@ const Dashboard = () => {
         }
     }, [activeTab, userData, timePeriod, customStartDate, customEndDate]);
 
+    // Branch letter counts — loaded when the Branch Overview tab is active (one call).
+    // NOTE: fetchBranchLetterCounts is defined LATER in this component, so it is
+    // intentionally NOT in the dependency array — referencing it here would throw
+    // "Cannot access 'fetchBranchLetterCounts' before initialization". It is read at
+    // call-time inside the effect body (which runs after render, where the function is
+    // fully defined) — same pattern as the other tab-loading effects above.
+    useEffect(() => {
+        if (activeTab === 'branches' && userData && (isMasterAdmin || isITAdmin || isBranchAdmin)) {
+            fetchBranchLetterCounts();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab, userData, isMasterAdmin, isITAdmin, isBranchAdmin]);
+
     // Load employee progress tab data when activated
     useEffect(() => {
         if (activeTab === 'branch-report' && userData && (isMasterAdmin || isITAdmin || isBranchAdmin)) {
@@ -690,6 +708,20 @@ const Dashboard = () => {
                 console.error(`Error fetching allocation summary for branch ${branchCode}:`, error);
                 setAllocationSummary(prev => ({ ...prev, [branchCode]: null }));
             }
+        }
+    }, [userData]);
+
+    // ONE grouped call -> letter counts for ALL branches (grouped by sender's branch).
+    // Not time-filtered; fetched when the Branch Overview tab is active.
+    const fetchBranchLetterCounts = useCallback(async () => {
+        const signal = abortControllerRef.current?.signal;
+        try {
+            const payload = { user_id: userData.user_id || userData.id, name: userData.name, role: userData.role, branch: userData.branch };
+            const res = await axios.post(`${API_BASE_URL}/performance/branch-letter-counts`, payload, { signal });
+            if (isMounted.current) setBranchLetterCounts(res.data?.counts || {});
+        } catch (error) {
+            if (axios.isCancel(error) || error.name === 'CanceledError') return;
+            if (isMounted.current) console.error('Error fetching branch letter counts:', error);
         }
     }, [userData]);
 
@@ -944,6 +976,11 @@ const Dashboard = () => {
     const handleBranchNameClick = (branch) => {
         setSelectedBranchForModal(branch);
         setShowBranchCustomersModal(true);
+    };
+
+    const handleOpenBranchLetters = (branch) => {
+        setSelectedBranchForLetters(branch);
+        setShowBranchLetterModal(true);
     };
 
     // Set up scroll synchronization for Activity Frequency tab
@@ -3931,7 +3968,7 @@ const Dashboard = () => {
                 {/* Branch Overview Tab */}
                 {activeTab === 'branches' && (isMasterAdmin || isITAdmin || isBranchAdmin) && shouldLoadTab('branches') && (
                     <div>
-                        <div className="grid grid-cols-1 gap-2">
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden divide-y divide-gray-200">
                             {branchPerformance.length > 0 ? (
                                 sortedBranchPerformanceMemo.map((branch) => {
                                     const isLoading = branchStatsLoading[branch.branch];
@@ -3960,7 +3997,7 @@ const Dashboard = () => {
 
                                     if (isLoading || !engagedData || !remainingData) {
                                         return (
-                                            <div key={branch.branch} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                                            <div key={branch.branch}>
                                                 <div className="px-5 py-3 border-b border-gray-100">
                                                     <div className="flex items-center justify-between">
                                                         <h3 className="text-base font-semibold text-black">
@@ -3982,13 +4019,13 @@ const Dashboard = () => {
                                     }
 
                                     return (
-                                        <div key={branch.branch} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow">
+                                        <div key={branch.branch} className="hover:bg-gray-50/40 transition-colors">
                                             {/* Branch Header - Clickable */}
                                             <div
                                                 className="px-3 py-2 cursor-pointer hover:bg-gray-50 transition-colors border-b border-gray-100"
                                                 onClick={() => handleBranchNameClick(branch)}
                                             >
-                                                <div className="flex items-center justify-between">
+                                                <div className="flex items-center justify-between gap-3">
                                                     <div>
                                                         <h3 className="text-base font-semibold text-[#2f3192] underline hover:font-bold transition-colors">
                                                             {getBranchDisplayName(branch.branch)}
@@ -3997,19 +4034,38 @@ const Dashboard = () => {
                                                             {totalCampaigns} Active Drives
                                                         </p>
                                                     </div>
-                                                    <div className="text-center">
-                                                        <p className="text-xs text-blackgray-500">Employees</p>
-                                                        <p className="text-xl font-bold text-gray-900">{branch.total_employees}</p>
+                                                    <div className="flex items-center gap-4">
+                                                        {/* Letter Report — stopPropagation so the branch modal doesn't also open */}
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); handleOpenBranchLetters(branch); }}
+                                                            className="px-3 py-1.5 rounded-lg text-white text-xs font-medium hover:opacity-90 transition-opacity flex items-center gap-1.5 whitespace-nowrap"
+                                                            style={{ backgroundColor: themeColor }}
+                                                            title="View all letters sent from this branch"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                                            </svg>
+                                                            <span>Letter Report</span>
+                                                            <span className="ml-1 inline-flex items-center gap-1">
+                                                                <span className="bg-white/20 rounded px-1.5 py-0.5" title="Sent">Send: {branchLetterCounts[branch.branch]?.sent || 0}</span>
+                                                                <span className="bg-white/20 rounded px-1.5 py-0.5" title="Draft">Draft: {branchLetterCounts[branch.branch]?.draft || 0}</span>
+                                                            </span>
+                                                        </button>
+                                                        <div className="text-center">
+                                                            <p className="text-xs text-blackgray-500">Employees</p>
+                                                            <p className="text-xl font-bold text-gray-900">{branch.total_employees}</p>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
 
                                             {/* Stats Cards - EXACT SAME AS BranchCustomersModal */}
                                             <div className="px-3 py-2 bg-gradient-to-r from-gray-50 to-white">
-                                                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                                                {/* One combined box — sections separated by vertical lines */}
+                                                <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-gray-300">
 
-                                                    {/* 1st Card - Branch Allocation Summary */}
-                                                    <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3">
+                                                    {/* 1st Section - Branch Allocation Summary */}
+                                                    <div className="flex-1 p-3">
                                                         <h3 className="text-[11px] font-semibold text-black uppercase mb-2">
                                                             Customers Allocated to Branch
                                                         </h3>
@@ -4020,7 +4076,7 @@ const Dashboard = () => {
                                                         ) : (
                                                             <div className="flex items-center justify-between">
                                                                 <div className="w-[30%] flex justify-center">
-                                                                    <p className="text-lg font-bold text-black">
+                                                                    <p className="text-2xl font-bold text-black">
                                                                         {allocationData?.total_allocated_customers?.toLocaleString() || 0}
                                                                     </p>
                                                                 </div>
@@ -4045,8 +4101,8 @@ const Dashboard = () => {
                                                         )}
                                                     </div>
 
-                                                    {/* 2nd Card - Total Branch Assets */}
-                                                    <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3">
+                                                    {/* 2nd Section - Total Branch Assets */}
+                                                    <div className="flex-1 p-3">
                                                         <h3 className="text-[11px] font-semibold text-black uppercase mb-2">
                                                             Assets Allocated to Branch
                                                         </h3>
@@ -4056,7 +4112,6 @@ const Dashboard = () => {
                                                                     {totalBranchAssets.toLocaleString()}
                                                                 </p>
                                                             </div>
-
                                                             <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
                                                             <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
                                                                 <div className="flex flex-row justify-between items-baseline">
@@ -4068,26 +4123,26 @@ const Dashboard = () => {
                                                                 <div className="flex flex-row justify-between items-baseline">
                                                                     <span>Remaining:</span>
                                                                     <span className="font-bold text-lg whitespace-nowrap">
-                                                                        {(totalBranchAssets - totalEngagedCustomers).toLocaleString()}  {/* ← Fix */}
+                                                                        {(totalBranchAssets - totalEngagedCustomers).toLocaleString()}
                                                                     </span>
                                                                 </div>
                                                             </div>
                                                         </div>
                                                     </div>
 
-                                                    {/* 3rd Card - Engaged Campaign Assets */}
-                                                    <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3">
+                                                    {/* 3rd Section - Engaged Campaign Assets (wider) */}
+                                                    <div className="flex-[1.4] p-3">
                                                         <h3 className="text-[11px] font-semibold text-black uppercase mb-2">
                                                             Assets Attended
                                                         </h3>
                                                         <div className="flex items-center justify-between">
-                                                            <div className="w-[30%] flex justify-center">
+                                                            <div className="w-[25%] flex justify-center">
                                                                 <p className="text-2xl font-bold text-black">
                                                                     {totalEngagedCustomers.toLocaleString()}
                                                                 </p>
                                                             </div>
                                                             <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
-                                                            <div className="w-[60%] grid grid-cols-3 gap-x-2 gap-y-1 text-xs font-semibold place-items-center">
+                                                            <div className="w-[65%] grid grid-cols-3 gap-x-2 gap-y-1 text-xs font-semibold place-items-center">
                                                                 <div>
                                                                     W: <span className="font-bold text-base text-black">
                                                                         {totalWip.toLocaleString()}
@@ -4117,8 +4172,8 @@ const Dashboard = () => {
                                                         </div>
                                                     </div>
 
-                                                    {/* 4th Card - Performance */}
-                                                    <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3">
+                                                    {/* 4th Section - Performance */}
+                                                    <div className="flex-1 p-3">
                                                         <h3 className="text-[11px] font-semibold text-black uppercase mb-2">
                                                             Performance
                                                         </h3>
@@ -4150,7 +4205,7 @@ const Dashboard = () => {
                                     );
                                 })
                             ) : (
-                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
+                                <div className="p-12 text-center">
                                     <svg className="w-20 h-20 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                                     </svg>
@@ -6100,6 +6155,16 @@ const Dashboard = () => {
                 preloadedRemaining={selectedBranchForModal ? branchRemainingData[selectedBranchForModal.branch] : null}
                 preloadedAllocation={selectedBranchForModal ? allocationSummary[selectedBranchForModal.branch] : null}
                 canExportProp={canExport}
+            />
+
+            <BranchLetterReportModal
+                isOpen={showBranchLetterModal}
+                onClose={() => { setShowBranchLetterModal(false); setSelectedBranchForLetters(null); }}
+                branch={selectedBranchForLetters}
+                branchDisplayName={selectedBranchForLetters ? getBranchDisplayName(selectedBranchForLetters.branch) : ''}
+                apiBaseUrl={API_BASE_URL}
+                userData={userData}
+                canExport={canExport}
             />
             <OtherFollowupModal
                 isOpen={showOtherFollowupModal}

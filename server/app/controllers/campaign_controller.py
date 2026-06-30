@@ -11,6 +11,15 @@ from app.schemas import campaign_schema
 class CampaignController:
     def __init__(self, db: Session):
         self.db = db
+
+    @staticmethod
+    def _is_csp_service(service: Optional[str]) -> bool:
+        """
+        A product counts as a CSP product if its name contains 'csp'
+        (case-insensitive) — e.g. 'CSP', 'CSP Battery', 'Oil CSP'.
+        Central definition so every CSP check stays consistent.
+        """
+        return bool(service) and 'csp' in str(service).lower()
     
     # ==================== Asset Validation ====================
     
@@ -316,6 +325,14 @@ class CampaignController:
             service = self.db.query(CampaignService).filter(CampaignService.name == campaign.service).first()
             if not service:
                 raise HTTPException(status_code=400, detail=f"Service '{campaign.service}' does not exist")
+
+            # CSP -> non-CSP: clean up CSP Info rows so a non-CSP drive is never
+            # left with orphaned entries in campaign_csp_info.
+            if self._is_csp_service(db_campaign.service) and not self._is_csp_service(campaign.service):
+                from app.models.campaign_model import CampaignCSPInfo
+                self.db.query(CampaignCSPInfo).filter(
+                    CampaignCSPInfo.campaign_id == campaign_id
+                ).delete(synchronize_session=False)
         
         update_data = campaign.model_dump(exclude_unset=True)
         
@@ -413,42 +430,40 @@ class CampaignController:
         return result        
     
     def delete_campaign(self, campaign_id: int):
+        import logging
         from app.models.engagement_model import FollowUp
-        from app.models.campaign_model import CampaignCSPInfo
 
         db_campaign = self.get_campaign(campaign_id)
 
-        # Block deletion if this campaign is already used somewhere else:
-        # any follow-up activity OR any CSP SR rows that reference this campaign.
-        in_use = (
-            self.db.query(FollowUp).filter(FollowUp.campaign_id == campaign_id).first()
-            or self.db.query(CampaignCSPInfo).filter(CampaignCSPInfo.campaign_id == campaign_id).first()
+        # Only a logged follow-up blocks deletion. Select just the id.
+        followup_exists = (
+            self.db.query(FollowUp.id)
+            .filter(FollowUp.campaign_id == campaign_id)
+            .first()
         )
-
-        if in_use:
-            # Return a warning (NOT an error) so the frontend can show a friendly message
+        if followup_exists:
             return {
                 "deleted": False,
                 "warning": True,
-                "message": "Campaign is already in use and cannot be removed"
+                "message": "Drive is already in use and cannot be removed"
             }
 
         try:
             self.db.delete(db_campaign)
             self.db.commit()
-        except Exception:
-            # Safety net for any DB-level constraint we didn't catch above
+        except Exception as e:
             self.db.rollback()
-            return {
-                "deleted": False,
-                "warning": True,
-                "message": "Campaign is already in use and cannot be removed"
-            }
+            # Surface the real reason instead of masking every error as "in use".
+            logging.exception("Failed to delete campaign %s", campaign_id)
+            raise HTTPException(
+                status_code=409,
+                detail=f"Could not delete drive: {str(e)}"
+            )
 
         return {
             "deleted": True,
             "warning": False,
-            "message": "Campaign deleted successfully"
+            "message": "Drive deleted successfully"
         }
     
     def update_campaign_status(self, campaign_id: int, status: str):
@@ -637,8 +652,21 @@ class CampaignController:
         Insert/update SP Info rows for a campaign, keyed by instance_id.
         If the same instance_id appears more than once in the upload,
         the row whose SR TYPE is 'CSP' is preferred.
+
+        GUARD: rows are only ever written for a CSP campaign (service name
+        contains 'csp'). This stops a non-CSP drive from getting rows in
+        campaign_csp_info even if the client calls this endpoint by mistake.
         """
         from app.models.campaign_model import CampaignCSPInfo
+
+        campaign = self.db.query(Campaign).filter(Campaign.id == campaign_id).first()
+        if not campaign:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        if not self._is_csp_service(campaign.service):
+            raise HTTPException(
+                status_code=400,
+                detail="CSP Info can only be uploaded for a CSP product (its name must contain 'CSP')."
+            )
 
         results = {"inserted": 0, "updated": 0, "skipped": 0}
 
@@ -799,7 +827,7 @@ class CampaignController:
     def get_open_csp_campaigns(self) -> List[Dict[str, Any]]:
         """Active CSP campaigns the user can add an SR into."""
         campaigns = self.db.query(Campaign).filter(
-            Campaign.service == 'CSP',
+            Campaign.service.ilike('%csp%'),
             Campaign.status == 'active'
         ).order_by(Campaign.created_at.desc()).all()
 
@@ -820,7 +848,7 @@ class CampaignController:
         campaign = self.db.query(Campaign).filter(Campaign.id == campaign_id).first()
         if not campaign:
             raise HTTPException(status_code=404, detail="Campaign not found")
-        if campaign.service != 'CSP':
+        if not self._is_csp_service(campaign.service):
             raise HTTPException(status_code=400, detail="Selected campaign is not a CSP campaign")
 
         # Asset number and instance_id are the same thing
@@ -982,6 +1010,8 @@ class CampaignController:
         payload["default_attachments"] = payload.get("default_attachments") or []
         payload["products"] = payload.get("products") or []
         payload["default_recipients"] = payload.get("default_recipients") or []
+        payload["service_cycle_rows"] = payload.get("service_cycle_rows") or []
+        payload["include_service_cycle"] = bool(payload.get("include_service_cycle"))
 
         # Default serial_start to '1' if not provided
         if not payload.get("serial_start"):
@@ -1016,7 +1046,8 @@ class CampaignController:
 
         # Ensure JSON list fields are never set to None
         for list_field in ("customer_detail_fields", "engagement_detail_fields",
-                           "default_attachments", "products", "default_recipients"):
+                           "default_attachments", "products", "default_recipients",
+                           "service_cycle_rows"):
             if list_field in update_data and update_data[list_field] is None:
                 update_data[list_field] = []
 

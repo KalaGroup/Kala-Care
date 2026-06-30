@@ -1,2 +1,11 @@
-ALTER TABLE campaign_letter_formats ADD expiry_date DATETIME NULL;
-ALTER TABLE branch_email_master      ADD emails     NVARCHAR(MAX) NULL;
+ALTER TABLE campaign_letter_formats
+ADD include_service_cycle TINYINT DEFAULT 0,
+    service_cycle_intro TEXT NULL,
+    service_cycle_rows NVARCHAR(MAX) NULL;
+
+
+ALTER TABLE customer_edit_history ADD is_done BIT NOT NULL DEFAULT 0;
+ALTER TABLE customer_edit_history ADD is_deleted BIT NOT NULL DEFAULT 0;
+
+ALTER TABLE letter_send_records
+ADD email_cc VARCHAR(500) NULL;

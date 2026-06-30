@@ -28,6 +28,7 @@ class LetterSendRecord(Base):
     sent_email = Column(Boolean, default=False)
     sent_whatsapp = Column(Boolean, default=False)
     email_to = Column(String(255), nullable=True)
+    email_cc = Column(String(500), nullable=True)   # NEW — comma-separated CC addresses
     whatsapp_to = Column(String(100), nullable=True)
 
     status = Column(String(50), default="sent")   

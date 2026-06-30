@@ -159,6 +159,9 @@ class LetterFormatBase(BaseModel):
     default_recipients: List[Dict[str, Any]] = []
     start_para: Optional[str] = None
     end_para: Optional[str] = None
+    include_service_cycle: Optional[bool] = False
+    service_cycle_intro: Optional[str] = None
+    service_cycle_rows: Optional[List[Dict[str, Any]]] = []
 
     @field_validator("products", mode="before")
     @classmethod
@@ -198,6 +201,9 @@ class LetterFormatUpdate(BaseModel):
     default_recipients: Optional[List[Dict[str, Any]]] = None
     start_para: Optional[str] = None
     end_para: Optional[str] = None
+    include_service_cycle: Optional[bool] = False
+    service_cycle_intro: Optional[str] = None
+    service_cycle_rows: Optional[List[Dict[str, Any]]] = []
 
 
 class LetterFormatResponse(LetterFormatBase):

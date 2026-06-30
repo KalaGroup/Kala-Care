@@ -16,7 +16,9 @@ import ExDashboard from './pages/ExDashboard';
 import MOMTracking from './pages/MOMTracking';
 import SalseANDFinance from './pages/SalseANDFinance';
 import KnowledgeBook from './pages/KnowledgeBook';
-import QuotationInfoSheet from './pages/QuotationInfoSheet';
+//added by nik
+import MaintenanceSchedule from './pages/MaintenanceSchedule';
+import MaintenanceReports from './pages/MaintenanceReports';
 
 // Helper function to check if user is any type of admin
 const isAdmin = (role) => {
@@ -217,10 +219,17 @@ function Layout() {
         </ProtectedRoute>
       } />
 
-      {/* Quotation Info Sheet Page - ONLY master_admin can access */}
-      <Route path="/quotation-info-sheet" element={
-        <ProtectedRoute allowedRoles={['master_admin']}>
-          <QuotationInfoSheet />
+      {/* Maintenance Check Schedule */}
+      <Route path="/maintenance-schedule" element={
+        <ProtectedRoute allowedRoles={['master_admin', 'it_admin', 'branch_admin', 'employee']}>
+          <MaintenanceSchedule />
+        </ProtectedRoute>
+      } />
+
+      {/* Maintenance Reports — separate page */}
+      <Route path="/maintenance-reports" element={
+        <ProtectedRoute allowedRoles={['master_admin', 'it_admin']}>
+          <MaintenanceReports />
         </ProtectedRoute>
       } />
 

@@ -14,5 +14,6 @@ bcrypt
 argon2-cffi
 pyodbc
 pytz
+xhtml2pdf
 
 pyinstaller

@@ -35,8 +35,6 @@ CREATE INDEX idx_users_branch ON users(branch);
 
 
 
-
-
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_customers_branch_instance')
     CREATE INDEX idx_customers_branch_instance ON customers(branch_id, instance_id);
 
@@ -100,3 +98,6 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_campaigns_status' AND ob
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_customers_customer_name' AND object_id=OBJECT_ID('customers'))
     CREATE INDEX IX_customers_customer_name ON customers (customer_name);
+
+
+CREATE NONCLUSTERED INDEX IX_letter_send_records_sent_by_id ON letter_send_records (sent_by_id);    

@@ -71,6 +71,12 @@ const CDBUpdateTable = ({ user, showToast }) => {
     const [dateFilter, setDateFilter] = useState('all');
     const [showDateDropdown, setShowDateDropdown] = useState(false);
 
+    // Export permission — Master Admin is always allowed, others need can_export
+    const canExport = user && (user.role === 'master_admin' || user.can_export);
+
+    // Count of pending (not done) records in the current filtered view
+    const pendingCount = filteredHistories.filter(h => !h.is_done).length;
+
     // Helper to highlight search term in text
     const highlightText = (text, search) => {
         if (!search || !text || text === '-') return text;
@@ -184,7 +190,8 @@ const CDBUpdateTable = ({ user, showToast }) => {
         setLoading(true);
         try {
             const response = await axios.get(`${API_BASE_URL}/v1/edit-customer/edited-customers`, {
-                headers: { 'user-id': user.user_id }
+                headers: { 'user-id': user.user_id },
+                params: { skip: 0, limit: 100000 }   // fetch ALL records, not just 100
             });
 
             if (response.data) {
@@ -206,9 +213,19 @@ const CDBUpdateTable = ({ user, showToast }) => {
                             user_id: edit.user_id,
                             user_name: edit.user_name || '-',
                             edited_at: edit.edited_at,
-                            edit_count: edit.edit_count
+                            edit_count: edit.edit_count,
+                            is_done: edit.is_done || false   // done status from backend
                         });
                     });
+                });
+
+                // Default order: sort by edited date, latest first
+                flattenedData.sort((a, b) => {
+                    const dateA = parseUTCDate(a.edited_at);
+                    const dateB = parseUTCDate(b.edited_at);
+                    if (!dateA) return 1;   // rows without a date go last
+                    if (!dateB) return -1;
+                    return dateB - dateA;   // newest → oldest
                 });
 
                 setEditHistories(flattenedData);
@@ -218,6 +235,49 @@ const CDBUpdateTable = ({ user, showToast }) => {
             showToast('error', err.response?.data?.detail || 'Failed to fetch edit histories');
         } finally {
             setLoading(false);
+        }
+    };
+
+    // Toggle the "done" checkbox (persists to backend)
+    const handleToggleDone = async (historyId, currentStatus) => {
+        try {
+            await axios.patch(
+                `${API_BASE_URL}/v1/edit-customer/history/${historyId}/done`,
+                { is_done: !currentStatus },
+                { headers: { 'user-id': user.user_id } }
+            );
+            setEditHistories(prev =>
+                prev.map(h => (h.id === historyId ? { ...h, is_done: !currentStatus } : h))
+            );
+        } catch (err) {
+            showToast('error', err.response?.data?.detail || 'Failed to update status');
+        }
+    };
+
+    // Soft delete: row stays in DB, just removed from this table
+    const handleSoftDelete = async (historyId) => {
+        const result = await Swal.fire({
+            title: 'Remove from list?',
+            text: 'This record will be hidden from the table but kept in the database.',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#EF4444',
+            cancelButtonColor: '#6B7280',
+            confirmButtonText: 'Yes, remove',
+            cancelButtonText: 'Cancel'
+        });
+        if (!result.isConfirmed) return;
+
+        try {
+            await axios.patch(
+                `${API_BASE_URL}/v1/edit-customer/history/${historyId}/soft-delete`,
+                {},
+                { headers: { 'user-id': user.user_id } }
+            );
+            setEditHistories(prev => prev.filter(h => h.id !== historyId));
+            showToast('success', 'Record removed from list');
+        } catch (err) {
+            showToast('error', err.response?.data?.detail || 'Failed to remove record');
         }
     };
 
@@ -384,6 +444,9 @@ const CDBUpdateTable = ({ user, showToast }) => {
                 );
             }
 
+            // Push done records to the bottom (latest-first date order kept within each group)
+            filtered.sort((a, b) => (a.is_done === b.is_done ? 0 : a.is_done ? 1 : -1));
+
             setFilteredHistories(filtered);
         }
     }, [searchTerm, dateFilter, editHistories]);
@@ -438,6 +501,57 @@ const CDBUpdateTable = ({ user, showToast }) => {
         } catch (err) {
             console.error('Export error:', err);
             showToast('error', 'Failed to export CDB Update history');
+        }
+    };
+
+    // Export ONLY pending (not done) records from the current filtered view
+    const exportNotDoneToExcel = () => {
+        try {
+            const notDone = filteredHistories.filter(h => !h.is_done);
+
+            if (notDone.length === 0) {
+                showToast('error', 'No pending records to export');
+                return;
+            }
+
+            const exportData = notDone.map((history, idx) => ({
+                'Serial No.': idx + 1,
+                'Instance ID': history.instance_id,
+                'Original Name': history.original_customer_name,
+                'Original Phone': history.original_phone_number,
+                'Original Email': history.original_email,
+                'Original Location': history.original_location,
+                'Edited Name': history.edited_customer_name,
+                'Edited Phone': history.edited_phone_number,
+                'Edited Email': history.edited_email,
+                'Edited Location': history.edited_location,
+                'Edited By': history.user_name,
+                'Edited By ID': history.user_id,
+                'Edited At': formatUTCDate(history.edited_at),
+                'Status': 'Pending'
+            }));
+
+            const ws = XLSX.utils.json_to_sheet(exportData);
+            const colWidths = [];
+            const headers = Object.keys(exportData[0] || {});
+            headers.forEach(header => {
+                let maxLength = header.length;
+                exportData.forEach(row => {
+                    const value = String(row[header] || '');
+                    maxLength = Math.max(maxLength, value.length);
+                });
+                colWidths.push({ wch: Math.min(maxLength + 2, 50) });
+            });
+            ws['!cols'] = colWidths;
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'CDB Update - Pending');
+            const fileName = `cdb_update_pending_${new Date().toISOString().split('T')[0]}_${dateFilter}.xlsx`;
+            XLSX.writeFile(wb, fileName);
+            showToast('success', `Exported ${notDone.length} pending record(s)`);
+        } catch (err) {
+            console.error('Export error:', err);
+            showToast('error', 'Failed to export pending records');
         }
     };
 
@@ -573,13 +687,26 @@ const CDBUpdateTable = ({ user, showToast }) => {
                         )}
                     </div>
 
-                    <button
-                        onClick={exportToExcel}
-                        className="flex items-center justify-center space-x-1 bg-green-500 hover:bg-green-600 text-white px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-sm hover:shadow flex-shrink-0"
-                    >
-                        <MdOutlineFileUpload className="text-xs" />
-                        <span>Export</span>
-                    </button>
+                    {canExport && (
+                        <>
+                            <button
+                                onClick={exportToExcel}
+                                className="flex items-center justify-center space-x-1 bg-green-500 hover:bg-green-600 text-white px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-sm hover:shadow flex-shrink-0"
+                            >
+                                <MdOutlineFileUpload className="text-xs" />
+                                <span>Export</span>
+                            </button>
+
+                            <button
+                                onClick={exportNotDoneToExcel}
+                                disabled={pendingCount === 0}
+                                className={`flex items-center justify-center space-x-1 bg-green-500 hover:bg-green-600 text-white px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-sm hover:shadow flex-shrink-0 ${pendingCount === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            >
+                                <MdOutlineFileUpload className="text-xs" />
+                                <span>Export Pending ({pendingCount})</span>
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -619,6 +746,7 @@ const CDBUpdateTable = ({ user, showToast }) => {
                         <table className="border-collapse" style={{ minWidth: '100%', width: 'max-content' }}>
                             <thead className="bg-gray-50 sticky top-0 z-10">
                                 <tr>
+                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Done</th>
                                     <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">S.No</th>
                                     <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Instance ID</th>
                                     <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Original Name</th>
@@ -630,12 +758,25 @@ const CDBUpdateTable = ({ user, showToast }) => {
                                     <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Edited Email</th>
                                     <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Edited Location</th>
                                     <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Edited By</th>
-                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap">Edited At</th>
+                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Edited At</th>
+                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
                                 {filteredHistories.map((history, idx) => (
-                                    <tr key={history.id} className="hover:bg-gray-50 transition-colors">
+                                    <tr
+                                        key={history.id}
+                                        className={`transition-colors ${history.is_done ? 'bg-green-50 hover:bg-green-100' : 'hover:bg-gray-50'}`}
+                                    >
+                                        <td className="px-2 py-1 text-center border-r border-gray-200 whitespace-nowrap">
+                                            <input
+                                                type="checkbox"
+                                                checked={!!history.is_done}
+                                                onChange={() => handleToggleDone(history.id, history.is_done)}
+                                                className="w-4 h-4 accent-[#2f3192] cursor-pointer"
+                                                title={history.is_done ? 'Mark as not done' : 'Mark as done'}
+                                            />
+                                        </td>
                                         <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200 whitespace-nowrap">{idx + 1}</td>
                                         <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200 whitespace-nowrap">{highlightText(history.instance_id, searchTerm)}</td>
                                         <td className="px-2 py-1 text-left text-xs text-black border-r border-gray-200 whitespace-nowrap">{highlightText(history.original_customer_name, searchTerm)}</td>
@@ -650,7 +791,16 @@ const CDBUpdateTable = ({ user, showToast }) => {
                                             {highlightText(history.user_name, searchTerm)}
                                             <span className="text-gray-400 text-[10px] block">{history.user_id}</span>
                                         </td>
-                                        <td className="px-2 py-1 text-center text-xs text-black whitespace-nowrap">{formatUTCDate(history.edited_at)}</td>
+                                        <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200 whitespace-nowrap">{formatUTCDate(history.edited_at)}</td>
+                                        <td className="px-2 py-1 text-center whitespace-nowrap">
+                                            <button
+                                                onClick={() => handleSoftDelete(history.id)}
+                                                className="p-1 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
+                                                title="Remove from list (soft delete)"
+                                            >
+                                                <FaTrash className="text-xs" />
+                                            </button>
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>

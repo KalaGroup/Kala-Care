@@ -194,6 +194,8 @@ class EditCustomerController:
                     "user_id": h.user_id,
                     "user_name": h.user_name,
                     "edit_count": h.edit_count,
+                    "is_done": bool(h.is_done),
+                    "is_deleted": bool(h.is_deleted),
                     "edited_data": {
                         "customer_name": h.edited_customer_name,
                         "phone_number": h.edited_phone_number,
@@ -203,6 +205,7 @@ class EditCustomerController:
                     }
                 }
                 for h in history
+                if not h.is_deleted  # hide soft-deleted rows
             ],
             "last_edited_by": last_editor,
             "last_edited_at": latest_edit.last_edited_at if latest_edit else None,
@@ -211,20 +214,48 @@ class EditCustomerController:
     
     def get_all_edited_customers(self, skip: int = 0, limit: int = 100) -> List[Dict[str, Any]]:
         """
-        Get all customers that have been edited, with their edit info
+        Get all customers that have been edited, with their edit info.
+        Soft-deleted rows (is_deleted = True) are excluded.
         """
-        # Get all distinct customer_ids from edit history
-        edited_customer_ids = self.db.query(CustomerEditHistory.customer_id).distinct().all()
+        # Only customer_ids that still have at least one non-deleted edit row
+        edited_customer_ids = self.db.query(CustomerEditHistory.customer_id).filter(
+            CustomerEditHistory.is_deleted == False
+        ).distinct().all()
         edited_customer_ids = [c[0] for c in edited_customer_ids]
         
         result = []
         for customer_id in edited_customer_ids:
             customer_info = self.get_customer_with_edit_info(customer_id)
-            if customer_info:
+            # keep only customers that still have visible history
+            if customer_info and customer_info['edit_history']:
                 result.append(customer_info)
         
         return result[skip:skip + limit]
     
+    def set_edit_history_done(self, history_id: int, is_done: bool) -> Optional[CustomerEditHistory]:
+        """Mark an edit-history row as done / not done."""
+        entry = self.db.query(CustomerEditHistory).filter(
+            CustomerEditHistory.id == history_id
+        ).first()
+        if not entry:
+            return None
+        entry.is_done = is_done
+        self.db.commit()
+        self.db.refresh(entry)
+        return entry
+
+    def soft_delete_edit_history(self, history_id: int) -> Optional[CustomerEditHistory]:
+        """Soft delete: keep the row in the DB but hide it from the frontend."""
+        entry = self.db.query(CustomerEditHistory).filter(
+            CustomerEditHistory.id == history_id
+        ).first()
+        if not entry:
+            return None
+        entry.is_deleted = True
+        self.db.commit()
+        self.db.refresh(entry)
+        return entry
+
     def _get_last_email_send_date(self) -> Optional[datetime]:
         """Get the last date when email was sent"""
         try:

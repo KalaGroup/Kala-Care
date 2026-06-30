@@ -79,6 +79,8 @@ function Navbar({ children }) {
   const [showTerminologyModal, setShowTerminologyModal] = useState(false);
   const [expenseDropdownOpen, setExpenseDropdownOpen] = useState(false);
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
+  const [partInfoDropdownOpen, setPartInfoDropdownOpen] = useState(false);   // ← added
+
   // Drive List modal
   const [showDriveNamesModal, setShowDriveNamesModal] = useState(false);
   const [driveCampaigns, setDriveCampaigns] = useState([]);
@@ -273,6 +275,7 @@ function Navbar({ children }) {
       setEngagementDropdownOpen(false);
       setExpenseDropdownOpen(false);
       setBranchDropdownOpen(false);
+      setPartInfoDropdownOpen(false);   // ← added
     }
   }, [sidebarOpen]);
 
@@ -662,13 +665,6 @@ function Navbar({ children }) {
         icon: CiFlag1,
         description: 'Create & track drives',
         allowedRoles: ['master_admin', 'it_admin']
-      },
-      {
-        path: '/quotation-info-sheet',
-        name: 'Quotation Info Sheet',
-        icon: DocumentTextIcon,
-        description: 'View quotation information',
-        allowedRoles: ['master_admin']
       }
     ];
 
@@ -756,6 +752,16 @@ function Navbar({ children }) {
     return location.pathname === '/customer-engagement' ||
       location.pathname === '/customer-engagement-2';
   };
+
+  // ← added
+  const partDetailItems = [
+    { path: '/maintenance-schedule', name: 'Part Detail Info' },
+    { path: '/maintenance-reports', name: 'Reports' },
+  ];
+
+  const isPartInfoActive = () =>
+    location.pathname === '/maintenance-schedule' ||
+    location.pathname === '/maintenance-reports';
 
   // Master Admin / IT Admin always have access.
   // Branch Admin and Employee need explicit permission (can_access_expense)
@@ -1053,7 +1059,7 @@ function Navbar({ children }) {
                             </span>
                           </span>
                         </th>
-                         <th
+                        <th
                           onClick={() => toggleDriveSort('description')}
                           className="px-3 py-2 font-semibold whitespace-nowrap border border-gray-300 cursor-pointer select-none hover:bg-black/5"
                           title="Sort by drive description"
@@ -1401,6 +1407,126 @@ function Navbar({ children }) {
                 `}
               </style>
               <NavLinks items={mainNavItems} collapsed={!sidebarOpen} />
+
+              {/* Part Detail Info — visible ONLY to master/IT admin.
+                  Branch admin and employee do not see this section at all. */}
+              {isMasterOrITAdmin && (
+                sidebarOpen ? (
+                  <div className="mt-0">
+                    <button
+                      onClick={() => setPartInfoDropdownOpen(!partInfoDropdownOpen)}
+                      onMouseEnter={() => setHoveredItem('part-detail-info')}
+                      onMouseLeave={() => setHoveredItem(null)}
+                      className={`
+          w-full group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200
+          ${isPartInfoActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
+        `}
+                      style={{
+                        backgroundColor: (isPartInfoActive() || partInfoDropdownOpen) ? themeShades.light : 'transparent'
+                      }}
+                    >
+                      <ClipboardDocumentListIcon
+                        className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
+                        style={{
+                          color: isPartInfoActive() ? themeColor :
+                            hoveredItem === 'part-detail-info' ? themeColor : '#6B7280'
+                        }}
+                      />
+                      <span className="flex-1 text-sm font-medium truncate text-left text-black">
+                        Part Detail Info
+                      </span>
+                      {partInfoDropdownOpen ? (
+                        <ChevronUpIcon className="h-2.5 w-2.5 text-black" />
+                      ) : (
+                        <ChevronDownIcon className="h-2.5 w-2.5 text-black" />
+                      )}
+                    </button>
+
+                    {(partInfoDropdownOpen || isPartInfoActive()) && (
+                      <div className="ml-5 mt-1 space-y-0.5 border-l border-gray-200 pl-1.5">
+                        {partDetailItems.map((item) => (
+                          <NavLink
+                            key={item.path}
+                            to={item.path}
+                            onClick={() => {
+                              if (isMobile) setSidebarOpen(false);
+                            }}
+                            className={({ isActive }) =>
+                              `group relative flex items-center gap-1 px-1 py-1 rounded-md transition-all duration-200 text-sm ${isActive
+                                ? 'text-black font-medium'
+                                : 'text-black hover:text-black'
+                              }`
+                            }
+                            style={({ isActive }) => ({
+                              backgroundColor: isActive ? themeShades.light : 'transparent',
+                              color: isActive ? 'black' : undefined
+                            })}
+                          >
+                            {({ isActive }) => (
+                              <>
+                                <div
+                                  className="w-1 h-1 rounded-full"
+                                  style={{
+                                    backgroundColor: isActive ? 'black' : '#D1D5DB'
+                                  }}
+                                />
+                                <span className="flex-1 truncate">{item.name}</span>
+                              </>
+                            )}
+                          </NavLink>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* Collapsed mode */
+                  <div className="relative mt-2">
+                    <button
+                      onClick={() => setPartInfoDropdownOpen(!partInfoDropdownOpen)}
+                      className="w-full group relative flex items-center justify-center px-2 py-1.5 rounded-lg transition-all duration-200"
+                      title="Part Detail Info"
+                    >
+                      <ClipboardDocumentListIcon
+                        className="h-3.5 w-3.5 transition-all duration-200"
+                        style={{ color: '#6B7280' }}
+                      />
+                      <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
+                        Part Detail Info
+                        <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
+                      </div>
+                    </button>
+
+                    {(partInfoDropdownOpen || isPartInfoActive()) && (
+                      <div className="absolute left-full top-0 ml-2 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50">
+                        {partDetailItems.map((item) => (
+                          <NavLink
+                            key={item.path}
+                            to={item.path}
+                            onClick={() => {
+                              setPartInfoDropdownOpen(false);
+                              if (isMobile) setSidebarOpen(false);
+                            }}
+                            className={({ isActive }) =>
+                              `block px-2 py-1.5 text-sm transition-colors ${isActive
+                                ? 'text-black font-medium'
+                                : 'text-black hover:text-black hover:bg-gray-50'
+                              }`
+                            }
+                            style={({ isActive }) => ({
+                              color: isActive ? 'black' : undefined,
+                              backgroundColor: isActive ? themeShades.light : 'transparent'
+                            })}
+                          >
+                            {item.name}
+                          </NavLink>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              )}
+
+              {/* Customer Engagement Dropdown */}
 
               {/* Customer Engagement Dropdown */}
               {sidebarOpen ? (

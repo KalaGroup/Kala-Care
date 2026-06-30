@@ -1220,3 +1220,133 @@ async def employee_time_report(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )        
+
+@router.post("/my-performance/letter-count")
+async def get_my_letter_count(
+    user_info: UserInfo,
+    db: Session = Depends(get_db)
+):
+    """Cheap count of letters sent by the logged-in user (for the card)."""
+    try:
+        user_id = user_info.user_id
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID not found")
+        return await emp_per_controller.EmployeePerformanceController.get_user_letter_count(db, user_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/my-performance/letter-records")
+async def get_my_letter_records(
+    user_info: UserInfo,
+    db: Session = Depends(get_db)
+):
+    """All letters sent by the logged-in user (lazy — called only when the box opens)."""
+    try:
+        user_id = user_info.user_id
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID not found")
+        return await emp_per_controller.EmployeePerformanceController.get_user_letter_records(db, user_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in letter-records endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))        
+
+@router.get("/my-performance/letter-pdf/{letter_id}")
+async def get_my_letter_pdf(
+    letter_id: int,
+    user_id: str = Query(...),
+    db: Session = Depends(get_db)
+):
+    """Return one of THIS user's letters as HTML (the frontend renders it to a PDF)."""
+    try:
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID not found")
+
+        data = await emp_per_controller.EmployeePerformanceController.get_user_letter_html(
+            db, user_id, letter_id
+        )
+        if data is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Letter not found")
+        return data
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in letter-pdf endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))        
+
+@router.post("/branch-letter-counts")
+async def get_branch_letter_counts(
+    user_info: UserInfo,
+    db: Session = Depends(get_db)
+):
+    """Letter counts grouped by sender branch for ALL branches (admin only) — one call."""
+    try:
+        if not is_admin(user_info.role):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can view branch letter counts")
+        counts = await emp_per_controller.EmployeePerformanceController.get_all_branches_letter_counts(db)
+        # branch_admin only sees their own branch
+        if user_info.role.lower() == 'branch_admin' and user_info.branch:
+            counts = {user_info.branch: counts.get(user_info.branch, {"total": 0, "sent": 0, "draft": 0, "failed": 0})}
+        return {"counts": counts}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/branch-letter-records/{branch_code}")
+async def get_branch_letter_records(
+    branch_code: str,
+    user_info: UserInfo,
+    db: Session = Depends(get_db)
+):
+    """All letters sent by users in a branch (lazy — admin only)."""
+    try:
+        if not is_admin(user_info.role):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can view branch letters")
+        if user_info.role.lower() == 'branch_admin' and branch_code != user_info.branch:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Branch admins can only view their own branch")
+        return await emp_per_controller.EmployeePerformanceController.get_branch_letter_records(db, branch_code)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in branch-letter-records endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/branch-letter-pdf/{branch_code}/{letter_id}")
+async def get_branch_letter_pdf(
+    branch_code: str,
+    letter_id: int,
+    user_id: str = Query(...),
+    role: str = Query(...),
+    branch: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Return one branch letter as HTML (frontend renders the PDF). Admin only."""
+    try:
+        if not is_admin(role):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can view branch letters")
+        if role.lower() == 'branch_admin' and branch_code != branch:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Branch admins can only view their own branch")
+        data = await emp_per_controller.EmployeePerformanceController.get_branch_letter_html(db, branch_code, letter_id)
+        if data is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Letter not found")
+        return data
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in branch-letter-pdf endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))        

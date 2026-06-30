@@ -3511,6 +3511,26 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     setSelectedLetterFormat(fmt);
     setLetterAttachments((fmt.default_attachments || []).map(a => ({ ...a })));
 
+    // CSP-only Service Cycle defaults, seeded from the Letter Master format.
+    // Pre-load the format's default rows so they're ready, but DO NOT auto-tick
+    // the "Include Service Cycle" box — the table stays hidden until the user
+    // actually clicks the checkbox.
+    const fmtCycleRows = Array.isArray(fmt.service_cycle_rows) ? fmt.service_cycle_rows : [];
+    setIncludeServiceCycle(false);
+    if (fmt.include_service_cycle && fmtCycleRows.length > 0) {
+      setServiceCycleRows(fmtCycleRows.map(r => ({
+        service_type: r.service_type || '',
+        schedule: r.schedule || '',
+        remarks: r.remarks || ''
+      })));
+    } else {
+      setServiceCycleRows([]);
+    }
+    // Use the format's intro line when provided; otherwise keep the existing/default one
+    if (fmt.service_cycle_intro && fmt.service_cycle_intro.trim()) {
+      setLetterFields(p => ({ ...p, service_cycle_intro: fmt.service_cycle_intro }));
+    }
+
     // Re-fetch the sequence/ref using this format's serial_start
     if (customerDetails?.instance_id && fmt?.id) {
       try {
@@ -4072,31 +4092,33 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     // CSP service-cycle table
     service_type: 1.4, schedule: 2.2, remarks: 2.2,
   };
+
   const buildLetterTableHtml = (intro, cols, rows, getCell) => {
     if (rows.length === 0 || cols.length === 0) return '';
     const B = '#e5e7eb';
-    const cellStyle = (key, last) => {
-      const w = LETTER_COL_WEIGHTS[key] || 1;
-      return `flex:${w} 1 0;min-width:0;display:flex;align-items:center;justify-content:center;` +
-        `text-align:center;padding:3px 6px 8px;box-sizing:border-box;line-height:1.3;` +
-        `word-break:break-word;overflow-wrap:anywhere;${last ? '' : `border-right:1px solid ${B};`}`;
-    };
-    const headerCells = cols.map((c, i) =>
-      `<div style="${cellStyle(c.key, i === cols.length - 1)}font-weight:bold;">${escapeLetterHtml(c.label)}</div>`
+    // Real <table> + vertical-align:middle. html2canvas (PDF/print) honors
+    // vertical-align on table cells but NOT align-items on flex, so cells now
+    // center identically in the on-screen preview AND the printed/downloaded PDF.
+    const totalW = cols.reduce((s, c) => s + (LETTER_COL_WEIGHTS[c.key] || 1), 0);
+    const colgroup = `<colgroup>${cols.map(c =>
+      `<col style="width:${(((LETTER_COL_WEIGHTS[c.key] || 1) / totalW) * 100).toFixed(3)}%" />`
+    ).join('')}</colgroup>`;
+    const baseTd = `border:1px solid ${B};padding:2px 8px 8px;text-align:center;vertical-align:middle;` +
+      `line-height:1.3;word-break:break-word;overflow-wrap:anywhere;`;
+    const headerCells = cols.map(c =>
+      `<td style="${baseTd}background:#f3f4f6;font-weight:bold;">${escapeLetterHtml(c.label)}</td>`
     ).join('');
-    const bodyRows = rows.map((row, ri) =>
-      `<div style="display:flex;${ri === rows.length - 1 ? '' : `border-bottom:1px solid ${B};`}">` +
-      cols.map((c, i) =>
-        `<div style="${cellStyle(c.key, i === cols.length - 1)}">${escapeLetterHtml(getCell(row, c.key))}</div>`
-      ).join('') +
-      `</div>`
+    const bodyRows = rows.map(row =>
+      `<tr>${cols.map(c => `<td style="${baseTd}">${escapeLetterHtml(getCell(row, c.key))}</td>`).join('')}</tr>`
     ).join('');
     return `<div style="margin-top:12px;font-size:13px;line-height:1.7;">${escapeLetterHtml(intro)}</div>
-      <div style="margin-top:8px;font-size:11px;border:1px solid ${B};">
-        <div style="display:flex;background:#f3f4f6;border-bottom:1px solid ${B};">${headerCells}</div>
+      <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:11px;margin-top:8px;">
+        ${colgroup}
+        <tr>${headerCells}</tr>
         ${bodyRows}
-      </div>`;
+      </table>`;
   };
+
   const buildFollowupLetterHtml = () =>
     buildLetterTableHtml(letterFields.followup_intro, visibleFollowupCols(), selectedFollowupRows(), followupCellValue);
   const buildQuotationLetterHtml = () =>
@@ -4132,8 +4154,8 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
   // ==================== CSP-only Service Cycle (KOEL preventive maintenance) ====================
   const setServiceCycleCell = (idx, key, value) =>
     setServiceCycleRows(prev => prev.map((r, i) => (i === idx ? { ...r, [key]: value } : r)));
-  const addServiceCycleRow = () =>
-    setServiceCycleRows(prev => [...prev, { service_type: '', schedule: '', remarks: '' }]);
+  // "Add Row" was removed from the wizard — rows now come only from the Letter
+  // Master format defaults — so addServiceCycleRow is no longer needed.
   const removeServiceCycleRow = (idx) =>
     setServiceCycleRows(prev => prev.filter((_, i) => i !== idx));
 
@@ -4143,34 +4165,30 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
       (r.service_type || '').trim() || (r.schedule || '').trim() || (r.remarks || '').trim()
     );
 
-  // Left-aligned flex table (html2canvas/PDF-safe; pre-wrapped cells so multi-line Remarks render).
   const buildServiceCycleHtml = () => {
     const rows = nonEmptyServiceCycleRows();
     if (rows.length === 0) return '';
     const B = '#e5e7eb';
-    const cellStyle = (key, last) => {
-      const w = LETTER_COL_WEIGHTS[key] || 1;
-      // Extra bottom padding (9px) so the last text line never touches the row border
-      // in html2canvas (PDF / print), which ignores vertical centering inside a cell.
-      return `flex:${w} 1 0;min-width:0;display:flex;align-items:flex-start;justify-content:flex-start;` +
-        `text-align:left;padding:5px 8px 9px;box-sizing:border-box;line-height:1.5;white-space:pre-wrap;` +
-        `word-break:break-word;overflow-wrap:anywhere;${last ? '' : `border-right:1px solid ${B};`}`;
-    };
-    const headerCells = SERVICE_CYCLE_COLS.map((c, i) =>
-      `<div style="${cellStyle(c.key, i === SERVICE_CYCLE_COLS.length - 1)}font-weight:bold;">${escapeLetterHtml(c.label)}</div>`
+    // Real <table> + vertical-align:middle so cells center the same in the preview AND
+    // the html2canvas PDF/print. Left-aligned with pre-wrap for multi-line Remarks.
+    const totalW = SERVICE_CYCLE_COLS.reduce((s, c) => s + (LETTER_COL_WEIGHTS[c.key] || 1), 0);
+    const colgroup = `<colgroup>${SERVICE_CYCLE_COLS.map(c =>
+      `<col style="width:${(((LETTER_COL_WEIGHTS[c.key] || 1) / totalW) * 100).toFixed(3)}%" />`
+    ).join('')}</colgroup>`;
+    const baseTd = `border:1px solid ${B};padding:2px 8px 8px;text-align:left;vertical-align:middle;` +
+      `line-height:1.5;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;`;
+    const headerCells = SERVICE_CYCLE_COLS.map(c =>
+      `<td style="${baseTd}background:#f3f4f6;font-weight:bold;">${escapeLetterHtml(c.label)}</td>`
     ).join('');
-    const bodyRows = rows.map((row, ri) =>
-      `<div style="display:flex;${ri === rows.length - 1 ? '' : `border-bottom:1px solid ${B};`}">` +
-      SERVICE_CYCLE_COLS.map((c, i) =>
-        `<div style="${cellStyle(c.key, i === SERVICE_CYCLE_COLS.length - 1)}">${escapeLetterHtml(row[c.key] || '')}</div>`
-      ).join('') +
-      `</div>`
+    const bodyRows = rows.map(row =>
+      `<tr>${SERVICE_CYCLE_COLS.map(c => `<td style="${baseTd}">${escapeLetterHtml(row[c.key] || '')}</td>`).join('')}</tr>`
     ).join('');
     return `<div style="margin-top:12px;font-size:13px;line-height:1.7;white-space:pre-wrap;">${escapeLetterHtml(letterFields.service_cycle_intro)}</div>
-      <div style="margin-top:8px;font-size:11px;border:1px solid ${B};">
-        <div style="display:flex;background:#f3f4f6;border-bottom:1px solid ${B};">${headerCells}</div>
+      <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:11px;margin-top:8px;">
+        ${colgroup}
+        <tr>${headerCells}</tr>
         ${bodyRows}
-      </div>`;
+      </table>`;
   };
 
   const buildServiceCycleText = () => {
@@ -4637,8 +4655,10 @@ ${f.start_para}`;
 
       const lf = r.letter_fields || {};
       const toEmails = [];
-      const primaryTo = (r.email_to || '').trim();
-      if (primaryTo) toEmails.push(primaryTo);
+      // email_to may now be a comma-separated list (customer + extra To addresses)
+      (r.email_to || '').split(',').map(e => e.trim()).filter(Boolean).forEach(e => {
+        if (!toEmails.some(x => x.toLowerCase() === e.toLowerCase())) toEmails.push(e);
+      });
       const extraTo = (lf.to_emails && lf.to_emails.length) ? lf.to_emails : (r.to_emails || []);
       extraTo.forEach(e => {
         const ev = (e || '').trim();
@@ -7602,7 +7622,7 @@ ${f.start_para}`;
               {isAdmin && (
                 <button
                   onClick={openLetterWizard}
-                  className="px-2 py-1 sm:px-2 sm:py-1.5 text-[11px] sm:text-xs text-white rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-1.5"
+                  className="px-2 py-1 sm:px-2 sm:py-1.5 text-[11px] sm:text-xs text-black font-semibold rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-1.5"
                   style={{ background: `linear-gradient(135deg, #f59e0b, #d97706)` }}
                 >
                   <PaperAirplaneIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -9617,17 +9637,7 @@ ${f.start_para}`;
                               <input
                                 type="checkbox"
                                 checked={includeServiceCycle}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setIncludeServiceCycle(true);
-                                    // Start with ONE blank row the first time it's enabled
-                                    setServiceCycleRows(prev => (prev && prev.length > 0)
-                                      ? prev
-                                      : [{ service_type: '', schedule: '', remarks: '' }]);
-                                  } else {
-                                    setIncludeServiceCycle(false);
-                                  }
-                                }}
+                                onChange={(e) => setIncludeServiceCycle(e.target.checked)}
                                 style={{ accentColor: themeColor }}
                               />
                               Include Service Cycle
@@ -9696,19 +9706,13 @@ ${f.start_para}`;
                                       {serviceCycleRows.length === 0 && (
                                         <tr>
                                           <td colSpan="4" className="px-2 py-2 text-center text-[10px] text-gray-400">
-                                            No rows. Click "Add Row" to start.
+                                            No service cycle rows for this format. Set them in Letter Master.
                                           </td>
                                         </tr>
                                       )}
                                     </tbody>
                                   </table>
                                 </div>
-
-                                <button type="button" onClick={addServiceCycleRow}
-                                  className="mt-1.5 inline-flex items-center gap-1 px-2 py-1 text-[11px] text-white rounded-md hover:opacity-90"
-                                  style={{ backgroundColor: themeColor }}>
-                                  <PlusIcon className="h-3 w-3" /> Add Row
-                                </button>
                               </div>
                             )}
                           </div>

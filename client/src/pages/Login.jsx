@@ -23,6 +23,7 @@ const Login = () => {
     const abortControllerRef = useRef(null);
     const slideIntervalRef = useRef(null);
     const bannersFetchedRef = useRef(false);
+    const [hoverZone, setHoverZone] = useState(null); // 'left' | 'center' | 'right' | null
 
     useEffect(() => {
         const user = sessionStorage.getItem('user');
@@ -84,34 +85,59 @@ const Login = () => {
         fetchBanners();
     }, [fetchBanners]);
 
-    // Replace the existing auto-slide useEffect (around line 85-100) with this:
+    // Auto-slide with hover-zone control:
+    //   • no hover         → auto-advance forward (5s)
+    //   • hover LEFT side  → advance backward / previous (2.5s)
+    //   • hover RIGHT side → advance forward / next (2.5s)
+    //   • hover CENTER     → pause (no switching)
     useEffect(() => {
-        if (sliderImages.length > 0) {
-            // Clear existing interval
+        if (sliderImages.length === 0) return;
+
+        // Clear any existing interval
+        if (slideIntervalRef.current) {
+            clearInterval(slideIntervalRef.current);
+        }
+
+        // Center hover → stop the slider completely
+        if (hoverZone === 'center') {
+            return;
+        }
+
+        // Direction: left = -1 (previous), right / no-hover = +1 (next)
+        const direction = hoverZone === 'left' ? -1 : 1;
+
+        // Browse a bit quicker when actively hovering a side
+        const intervalTime = (hoverZone === 'left' || hoverZone === 'right') ? 2500 : 5000;
+
+        slideIntervalRef.current = setInterval(() => {
+            setCurrentSlide((prev) => {
+                return (prev + direction + sliderImages.length) % sliderImages.length;
+            });
+        }, intervalTime);
+
+        return () => {
             if (slideIntervalRef.current) {
                 clearInterval(slideIntervalRef.current);
             }
-
-            slideIntervalRef.current = setInterval(() => {
-                setCurrentSlide((prev) => {
-                    // This will always loop: 0,1,2,0,1,2,0,1,2...
-                    return (prev + 1) % sliderImages.length;
-                });
-            }, 5000);
-
-            return () => {
-                if (slideIntervalRef.current) {
-                    clearInterval(slideIntervalRef.current);
-                }
-            };
-        }
-    }, [sliderImages.length]);
+        };
+    }, [sliderImages.length, hoverZone]);
 
     // Handle input changes
     const handleChange = (e) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
         setError('');
+    };
+
+    // Detect which third of the slider the mouse is over
+    const handleSliderHover = (e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;   // mouse X inside the slider
+        const third = rect.width / 3;
+
+        const zone = x < third ? 'left' : x > third * 2 ? 'right' : 'center';
+        // Only update when the zone actually changes (avoids re-renders on every pixel)
+        setHoverZone(prev => (prev === zone ? prev : zone));
     };
 
     const handleLogin = async (e) => {
@@ -229,6 +255,8 @@ const Login = () => {
                 <div
                     className="hidden lg:block lg:w-2/3 xl:w-[70%] relative overflow-hidden rounded-2xl md:rounded-3xl shadow-2xl min-h-[500px] md:min-h-[600px] lg:min-h-[80vh] xl:min-h-[85vh] group animate-fadeIn"
                     style={{ backgroundColor: `${themeColor}10` }}
+                    onMouseMove={handleSliderHover}
+                    onMouseLeave={() => setHoverZone(null)}
                 >
                     <div className="absolute inset-0">
                         {sliderImages.length === 0 && (

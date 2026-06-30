@@ -2771,6 +2771,23 @@ class EngagementController:
         to_extra = payload.get('to_emails') or []           # additional emails -> To
         whatsapp_extra = payload.get('whatsapp_numbers') or []  # additional WhatsApp numbers
 
+        # Stored recipient strings (comma-separated):
+        #   email_to = customer email + every manually-added "To" address
+        #   email_cc = every "CC" address (dropping anything already in To)
+        # Each list is de-duplicated case-insensitively, keeping first-seen spelling.
+        def _join_emails(items):
+            seen, out = set(), []
+            for e in items:
+                e = (e or '').strip()
+                if e and e.lower() not in seen:
+                    seen.add(e.lower())
+                    out.append(e)
+            return ", ".join(out)
+
+        email_to_combined = _join_emails([email_to] + list(to_extra))
+        _to_lower = {e.strip().lower() for e in ([email_to] + list(to_extra)) if e and e.strip()}
+        email_cc_combined = _join_emails([e for e in cc_emails if (e or '').strip().lower() not in _to_lower])
+
         if 'email' in channels:
             if not email_to and not to_extra:
                 errors.append("No recipient email address")
@@ -2817,7 +2834,8 @@ class EngagementController:
             existing.channels = channels
             existing.sent_email = sent_email
             existing.sent_whatsapp = sent_whatsapp
-            existing.email_to = email_to or None
+            existing.email_to = email_to_combined or None
+            existing.email_cc = email_cc_combined or None
             existing.whatsapp_to = whatsapp_to or None
             existing.status = status_val
             existing.error_message = "; ".join(errors) or None
@@ -2841,7 +2859,8 @@ class EngagementController:
                 channels=channels,
                 sent_email=sent_email,
                 sent_whatsapp=sent_whatsapp,
-                email_to=email_to or None,
+                email_to=email_to_combined or None,
+                email_cc=email_cc_combined or None,
                 whatsapp_to=whatsapp_to or None,
                 status=status_val,
                 error_message="; ".join(errors) or None,

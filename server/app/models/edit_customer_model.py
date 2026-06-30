@@ -39,6 +39,12 @@ class CustomerEditHistory(Base):
         onupdate=text("GETDATE()")
     )
     edit_count = Column(Integer, default=1)
-    
+
+    # Mark a record as "done" (frontend checkbox)
+    is_done = Column(Boolean, default=False, server_default=text("0"), nullable=False)
+
+    # Soft delete: row stays in DB, just hidden from the frontend table
+    is_deleted = Column(Boolean, default=False, server_default=text("0"), nullable=False)
+
     def __repr__(self):
         return f"<CustomerEditHistory {self.id}: Customer {self.customer_id}>"
