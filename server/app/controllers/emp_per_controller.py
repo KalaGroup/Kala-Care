@@ -2743,6 +2743,8 @@ class EmployeePerformanceController:
                 func.count(LetterSendRecord.id).label('total'),
                 func.sum(case((func.lower(LetterSendRecord.status) == 'sent', 1), else_=0)).label('sent'),
                 func.sum(case((func.lower(LetterSendRecord.status) == 'draft', 1), else_=0)).label('draft'),
+                # Letters whose Format Type name starts with "CSP" (e.g. warranty-lapse CSP letters)
+                func.sum(case((func.lower(LetterSendRecord.format_type_name).like('csp%'), 1), else_=0)).label('csp'),
             ).filter(
                 LetterSendRecord.sent_by_id == user_id
             ).first()
@@ -2750,10 +2752,11 @@ class EmployeePerformanceController:
                 "count": int(row.total or 0),
                 "sent": int(row.sent or 0),
                 "draft": int(row.draft or 0),
+                "csp": int(row.csp or 0),
             }
         except Exception as e:
             print(f"Error in get_user_letter_count: {str(e)}")
-            return {"count": 0, "sent": 0, "draft": 0}
+            return {"count": 0, "sent": 0, "draft": 0, "csp": 0}
 
     @staticmethod
     async def get_user_letter_records(db: Session, user_id: str):

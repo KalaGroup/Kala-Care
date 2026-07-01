@@ -422,6 +422,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const [letterCount, setLetterCount] = useState(0);            // card value (cheap count, fetched on mount)
     const [letterSentCount, setLetterSentCount] = useState(0);    // sent letters count
     const [letterDraftCount, setLetterDraftCount] = useState(0);  // draft letters count
+    const [cspLetterCount, setCspLetterCount] = useState(0);      // CSP letters count (Format Type starts with "CSP")
+    const [letterCspOnly, setLetterCspOnly] = useState(false);    // when true, the letter modal shows ONLY CSP letters
     const [letterSearchTerm, setLetterSearchTerm] = useState('');
     const [letterDebouncedSearch, setLetterDebouncedSearch] = useState('');
     const [letterStatusFilter, setLetterStatusFilter] = useState('all'); // all | sent | draft
@@ -924,11 +926,13 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             setLetterCount(res.data?.count || 0);
             setLetterSentCount(res.data?.sent || 0);
             setLetterDraftCount(res.data?.draft || 0);
+            setCspLetterCount(res.data?.csp || 0);
         } catch (e) {
             console.error('Error fetching letter count:', e);
             setLetterCount(0);
             setLetterSentCount(0);
             setLetterDraftCount(0);
+            setCspLetterCount(0);
         }
     }, [userData]);
 
@@ -953,6 +957,20 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
     const handleOpenLetterModal = () => {
         setShowLetterModal(true);
+        setLetterCspOnly(false);
+        setLetterSearchTerm('');
+        setLetterDebouncedSearch('');
+        setLetterStatusFilter('all');
+        setLetterFromDate('');
+        setLetterToDate('');
+        setLetterVisibleCount(50);
+        fetchLetterRecords();
+    };
+
+    // Letter For Warranty Lapse card → same letter modal, pre-filtered to CSP letters only.
+    const handleOpenCspLetterModal = () => {
+        setShowLetterModal(true);
+        setLetterCspOnly(true);
         setLetterSearchTerm('');
         setLetterDebouncedSearch('');
         setLetterStatusFilter('all');
@@ -974,6 +992,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         const list = letterData.letters || [];
         const t = letterDebouncedSearch.trim().toLowerCase();
         return list.filter(l => {
+            // CSP-only mode (Letter For Warranty Lapse card): keep letters whose
+            // Format Type name starts with "CSP".
+            if (letterCspOnly && !(l.format_type_name || '').toLowerCase().startsWith('csp')) return false;
             if (letterStatusFilter !== 'all' && (l.status || '').toLowerCase() !== letterStatusFilter) return false;
             if (letterFromDate || letterToDate) {
                 const key = istDateKey(l.created_at);
@@ -995,7 +1016,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             }
             return true;
         });
-    }, [letterData.letters, letterDebouncedSearch, letterStatusFilter, letterFromDate, letterToDate]);
+    }, [letterData.letters, letterDebouncedSearch, letterStatusFilter, letterFromDate, letterToDate, letterCspOnly]);
 
     // Fetch the letter's stored HTML, render it to a properly-formatted PDF
     // (same letterhead bands as the Send Letter feature), then show it.
@@ -2419,19 +2440,19 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     </div>
                 </div>
                 <div
-                    onClick={() => setShowCancelledCspModal(true)}
+                    onClick={handleOpenCspLetterModal}
                     className="group relative bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all text-center cursor-pointer flex flex-col justify-between min-h-[90px]"
                 >
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>
                         Letter For Warranty Lapse
                     </h3>
                     <p className="text-lg sm:text-xl font-bold text-black mt-1">
-                        —
+                        {cspLetterCount}
                     </p>
 
                     <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
                         <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
-                            Coming soon
+                            Click to view CSP letters sent
                             <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-black"></div>
                         </div>
                     </div>
@@ -3876,11 +3897,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                             >
                                 <div>
                                     <h3 className="text-base font-semibold text-white">
-                                        Letter Report — {userData?.name || 'User'}
+                                        {letterCspOnly ? 'CSP Letters' : 'Letter Report'} — {userData?.name || 'User'}
                                     </h3>
                                     <p className="text-[11px] text-white/80 mt-0.5">
                                         Showing {Math.min(letterVisibleCount, filteredLetters.length)} of {filteredLetters.length} letter(s)
-                                        {letterData.total ? ` • ${letterData.total} total sent` : ''}
+                                        {!letterCspOnly && letterData.total ? ` • ${letterData.total} total sent` : ''}
                                     </p>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">

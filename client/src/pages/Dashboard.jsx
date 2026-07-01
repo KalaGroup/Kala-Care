@@ -2392,6 +2392,10 @@ const Dashboard = () => {
                 if (isMounted.current) { setBranchEmployees([]); setBranchEmployeesLoading(false); }
                 return;
             }
+
+            // Tracks if any request was cancelled (e.g. user switched tabs mid-load)
+            let wasCancelled = false;
+
             try {
                 if (isMounted.current) { setBranchEmployeesLoading(true); setError(null); setBranchEmployees([]); }
                 const fetchPromises = branchCodes.map(async (branchCode) => {
@@ -2407,7 +2411,8 @@ const Dashboard = () => {
                         const response = await axios.post(url, payload, { signal });
                         return response.data.map(emp => ({ ...emp, branch: branchCode }));
                     } catch (err) {
-                        if (axios.isCancel(err) || err.name === 'CanceledError') return [];
+                        // Mark cancellation so an aborted fetch is never read as "no data"
+                        if (axios.isCancel(err) || err.name === 'CanceledError') { wasCancelled = true; return []; }
                         console.error(`Error fetching branch ${branchCode}:`, err);
                         return [];
                     }
@@ -2415,15 +2420,25 @@ const Dashboard = () => {
 
                 // Fetch ALL branches in parallel
                 const results = await Promise.all(fetchPromises);
+
+                // 🔑 BUG FIX: if this fetch was aborted (tab switch), stop here BEFORE
+                // touching state. Otherwise every cancelled request returns [] and the
+                // empty result is mistaken for "no employees found", which sets the
+                // global error -> the whole page is replaced by the full-screen error box.
+                if (signal?.aborted || wasCancelled) return;
+
                 const allEmployees = results.flat();
                 const sorted = allEmployees.sort((a, b) => {
                     const rateA = a.total_followups > 0 ? (a.completed_count / a.total_followups) : 0;
                     const rateB = b.total_followups > 0 ? (b.completed_count / b.total_followups) : 0;
                     return rateB - rateA;
                 });
+
                 if (isMounted.current) {
+                    // Just set the data. Do NOT call setError on an empty result — the
+                    // table already shows a graceful "No employees found for selected
+                    // branches" empty state when branchEmployees is [].
                     setBranchEmployees(sorted);
-                    if (sorted.length === 0 && branchCodes.length > 0) setError('No employees found for selected branches');
                 }
             } catch (error) {
                 if (axios.isCancel(error) || error.name === 'CanceledError') return;
@@ -2432,7 +2447,9 @@ const Dashboard = () => {
                     setError(error.response?.data?.detail || error.message);
                 }
             } finally {
-                if (isMounted.current) setBranchEmployeesLoading(false);
+                // Only clear the spinner if THIS fetch wasn't aborted — a newer fetch
+                // now owns the loading state.
+                if (isMounted.current && !signal?.aborted && !wasCancelled) setBranchEmployeesLoading(false);
             }
         };
 
