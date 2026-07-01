@@ -690,21 +690,26 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                         </p>
                                     </div>
                                     <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
-                                    <div className="w-[60%] grid grid-cols-3 gap-x-2 gap-y-1 text-xs font-semibold place-items-center">
-                                        <div>
-                                            W: <span className="font-bold text-base text-black">{totalWip.toLocaleString()}</span>
+                                    <div className="w-[60%] grid grid-cols-3 gap-x-4 gap-y-1 text-xs font-semibold justify-items-start">
+                                        <div className="flex items-baseline gap-1">
+                                            <span className="w-8 shrink-0">WIP:</span>
+                                            <span className="font-bold text-base text-black">{totalWip.toLocaleString()}</span>
                                         </div>
-                                        <div>
-                                            FR: <span className="font-bold text-base text-black">{totalFR.toLocaleString()}</span>
+                                        <div className="flex items-baseline gap-1">
+                                            <span className="w-8 shrink-0">FR:</span>
+                                            <span className="font-bold text-base text-black">{totalFR.toLocaleString()}</span>
                                         </div>
-                                        <div>
-                                            R: <span className="font-bold text-base text-black">{totalRejected.toLocaleString()}</span>
+                                        <div className="flex items-baseline gap-1">
+                                            <span className="w-8 shrink-0">R:</span>
+                                            <span className="font-bold text-base text-black">{totalRejected.toLocaleString()}</span>
                                         </div>
-                                        <div>
-                                            NC: <span className="font-bold text-base text-black">{totalNotConnected.toLocaleString()}</span>
+                                        <div className="flex items-baseline gap-1">
+                                            <span className="w-8 shrink-0">NC:</span>
+                                            <span className="font-bold text-base text-black">{totalNotConnected.toLocaleString()}</span>
                                         </div>
-                                        <div>
-                                            C: <span className="font-bold text-base text-black">{totalCompleted.toLocaleString()}</span>
+                                        <div className="flex items-baseline gap-1">
+                                            <span className="w-8 shrink-0">C:</span>
+                                            <span className="font-bold text-base text-black">{totalCompleted.toLocaleString()}</span>
                                         </div>
                                     </div>
                                 </div>

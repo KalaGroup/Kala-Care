@@ -72,8 +72,8 @@ const MaintenanceReports = () => {
                 {/* ===== Tabs ===== */}
                 <div className="flex items-center gap-1.5 mb-4 border-b border-gray-200">
                     {[
-                        { id: 'coverage', label: 'Service Coverage', Icon: Squares2X2Icon },
-                        { id: 'activity', label: 'Search Activity', Icon: ClockIcon },
+                        { id: 'coverage', label: 'Service Applicability', Icon: Squares2X2Icon },
+                        { id: 'activity', label: 'Search Activity Count', Icon: ClockIcon },
                     ].map(({ id, label, Icon }) => (
                         <button key={id} onClick={() => setTab(id)}
                             className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-[13px] font-semibold border-b-2 -mb-px transition ${tab === id ? 'border-current' : 'border-transparent text-gray-500 hover:text-gray-700'}`}

@@ -80,6 +80,7 @@ function Navbar({ children }) {
   const [expenseDropdownOpen, setExpenseDropdownOpen] = useState(false);
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
   const [partInfoDropdownOpen, setPartInfoDropdownOpen] = useState(false);   // ← added
+  const [engagementMastersDropdownOpen, setEngagementMastersDropdownOpen] = useState(false);   // ← added
 
   // Drive List modal
   const [showDriveNamesModal, setShowDriveNamesModal] = useState(false);
@@ -276,6 +277,7 @@ function Navbar({ children }) {
       setExpenseDropdownOpen(false);
       setBranchDropdownOpen(false);
       setPartInfoDropdownOpen(false);   // ← added
+      setEngagementMastersDropdownOpen(false);   // ← added
     }
   }, [sidebarOpen]);
 
@@ -644,27 +646,6 @@ function Navbar({ children }) {
         icon: HomeIcon,
         description: 'View your dashboard',
         allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
-      },
-      {
-        path: '/import',
-        name: 'Data - Upload',
-        icon: CloudArrowUpIcon,
-        description: 'Upload customer data',
-        allowedRoles: ['master_admin', 'it_admin']
-      },
-      {
-        path: '/customers',
-        name: 'Customers Data Bouquet',
-        icon: UserGroupIcon,
-        description: 'Manage your clients',
-        allowedRoles: ['master_admin', 'it_admin']
-      },
-      {
-        path: '/campaigns',
-        name: 'Drive Creation',
-        icon: CiFlag1,
-        description: 'Create & track drives',
-        allowedRoles: ['master_admin', 'it_admin']
       }
     ];
 
@@ -681,6 +662,54 @@ function Navbar({ children }) {
   };
 
   const mainNavItems = getMainNavItems();
+
+  // Engagement Masters dropdown items — master/IT admin only.
+  // (Moved out of the flat main nav into one grouped dropdown.)
+  const getEngagementMastersItems = () => {
+    const allItems = [
+      {
+        path: '/import',
+        name: 'Data - Upload',
+        icon: CloudArrowUpIcon,
+        description: 'Upload customer data',
+        allowedRoles: ['master_admin', 'it_admin']
+      },
+      {
+        path: '/customers',
+        name: 'Customers Data Hub',
+        icon: UserGroupIcon,
+        description: 'Manage your clients',
+        allowedRoles: ['master_admin', 'it_admin']
+      },
+      {
+        path: '/campaigns',
+        name: 'Drive Creation',
+        icon: CiFlag1,
+        description: 'Create & track drives',
+        allowedRoles: ['master_admin', 'it_admin']
+      }
+    ];
+
+    // Keep the same restricted-user hiding the old flat nav used.
+    const hiddenUserIds = (import.meta.env.VITE_RESTRICTED_USER_IDS || '')
+      .split(',')
+      .map(id => id.trim())
+      .filter(Boolean);
+    const restrictedPaths = ['/import', '/campaigns'];
+    return allItems.filter(item => {
+      if (hiddenUserIds.includes(String(user?.user_id)) && restrictedPaths.includes(item.path)) {
+        return false;
+      }
+      return item.allowedRoles.includes(user?.role);
+    });
+  };
+
+  const engagementMastersItems = getEngagementMastersItems();
+
+  const isEngagementMastersActive = () =>
+    location.pathname === '/import' ||
+    location.pathname === '/customers' ||
+    location.pathname === '/campaigns';
 
   // Customer Engagement dropdown items
   const engagementItems = [
@@ -755,8 +784,8 @@ function Navbar({ children }) {
 
   // ← added
   const partDetailItems = [
-    { path: '/maintenance-schedule', name: 'Part Detail Info' },
-    { path: '/maintenance-reports', name: 'Reports' },
+    { path: '/maintenance-schedule', name: 'Quotation Template' },
+    { path: '/maintenance-reports', name: 'Activity Reports' },
   ];
 
   const isPartInfoActive = () =>
@@ -792,7 +821,7 @@ function Navbar({ children }) {
           onMouseEnter={() => setHoveredItem(item.path)}
           onMouseLeave={() => setHoveredItem(null)}
           className={({ isActive }) =>
-            `group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200 ${isActive
+            `group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200 min-w-full w-max ${isActive
               ? 'text-gray-900 font-medium'
               : 'text-black hover:text-gray-900'
             } ${collapsed ? 'justify-center' : ''}`
@@ -818,7 +847,7 @@ function Navbar({ children }) {
 
               {!collapsed && (
                 <>
-                  <span className="flex-1 text-sm font-medium truncate">
+                  <span className="flex-1 text-sm font-medium whitespace-nowrap">
                     {item.name}
                   </span>
                 </>
@@ -1395,18 +1424,165 @@ function Navbar({ children }) {
             </button>
           )}
 
-          {/* Main Navigation - Scrollable Area with Fixed Bottom Info Button */}
-          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            {/* Scrollable Navigation Links */}
-            <div className="flex-1 overflow-y-auto py-3 px-3 scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+          {/* Main Navigation - Scrollable Area with Fixed Bottom Info Button.
+              Expanded: clip so the horizontal scroll stays inside. Collapsed:
+              let overflow show so click-open flyout submenus can pop out over
+              the page instead of being clipped at the narrow sidebar edge. */}
+          <div className={`flex-1 flex flex-col min-h-0 ${sidebarOpen ? 'overflow-hidden' : 'overflow-visible'}`}>
+            {/* Scrollable Navigation Links.
+                Expanded: vertical (top↕bottom) scroll only — horizontal scroll is
+                disabled (overflow-x hidden). Collapsed: overflow visible so the
+                click-open flyout submenus can escape the narrow sidebar. */}
+            <div
+              className={`flex-1 min-h-0 ${sidebarOpen ? 'overflow-y-auto overflow-x-hidden nav-scroll' : 'overflow-visible'}`}
+              style={{ scrollbarWidth: sidebarOpen ? 'thin' : 'none' }}
+            >
               <style>
                 {`
-                  .scrollbar-hide::-webkit-scrollbar {
-                    display: none;
+                  /* Thin vertical (top↕bottom) scrollbar only — shown when the
+                     sidebar is expanded. No horizontal scrollbar. */
+                  .nav-scroll::-webkit-scrollbar {
+                    width: 7px;
+                  }
+                  .nav-scroll::-webkit-scrollbar-track {
+                    background: transparent;
+                  }
+                  .nav-scroll::-webkit-scrollbar-thumb {
+                    background: #cbd5e1;
+                    border-radius: 7px;
+                  }
+                  .nav-scroll::-webkit-scrollbar-thumb:hover {
+                    background: #94a3b8;
                   }
                 `}
               </style>
+              {/* Inner content wrapper. Expanded → min-w-full w-max so each row's
+                  active highlight spans the full row width; the outer handles
+                  vertical scrolling (horizontal is clipped, no bar).
+                  Collapsed → no clipping so flyouts can escape the sidebar. */}
+              <div
+                className={`py-3 ${sidebarOpen ? 'min-w-full w-max pl-3 pr-6' : 'overflow-visible w-full px-2'}`}
+              >
               <NavLinks items={mainNavItems} collapsed={!sidebarOpen} />
+
+              {/* Engagement Masters — master/IT admin only. Groups Data-Upload,
+                  Customers Data Bouquet and Drive Creation under one dropdown. */}
+              {isMasterOrITAdmin && engagementMastersItems.length > 0 && (
+                sidebarOpen ? (
+                  <div className="mt-0">
+                    <button
+                      onClick={() => setEngagementMastersDropdownOpen(!engagementMastersDropdownOpen)}
+                      onMouseEnter={() => setHoveredItem('engagement-masters')}
+                      onMouseLeave={() => setHoveredItem(null)}
+                      className={`
+                        min-w-full w-max group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200
+                        ${isEngagementMastersActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
+                      `}
+                      style={{
+                        backgroundColor: (isEngagementMastersActive() || engagementMastersDropdownOpen) ? themeShades.light : 'transparent'
+                      }}
+                    >
+                      <TableCellsIcon
+                        className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
+                        style={{
+                          color: isEngagementMastersActive() ? themeColor :
+                            hoveredItem === 'engagement-masters' ? themeColor : '#6B7280'
+                        }}
+                      />
+                      <span className="flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
+                        Engagement Masters
+                      </span>
+                      {engagementMastersDropdownOpen ? (
+                        <ChevronUpIcon className="h-2.5 w-2.5 text-black" />
+                      ) : (
+                        <ChevronDownIcon className="h-2.5 w-2.5 text-black" />
+                      )}
+                    </button>
+
+                    {(engagementMastersDropdownOpen || isEngagementMastersActive()) && (
+                      <div className="ml-5 mt-1 space-y-0.5 border-l border-gray-200 pl-1.5">
+                        {engagementMastersItems.map((item) => (
+                          <NavLink
+                            key={item.path}
+                            to={item.path}
+                            onClick={() => { if (isMobile) setSidebarOpen(false); }}
+                            className={({ isActive }) =>
+                              `group relative flex items-center gap-1.5 px-1 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
+                                ? 'text-gray-900 font-medium'
+                                : 'text-black hover:text-gray-900'
+                              }`
+                            }
+                            style={({ isActive }) => ({
+                              backgroundColor: isActive ? themeShades.light : 'transparent',
+                              color: isActive ? themeColor : undefined
+                            })}
+                          >
+                            {({ isActive }) => (
+                              <>
+                                <item.icon
+                                  className="h-3.5 w-3.5 flex-shrink-0 transition-all duration-200"
+                                  style={{ color: isActive ? themeColor : '#6B7280' }}
+                                />
+                                <span className="flex-1 whitespace-nowrap">{item.name}</span>
+                              </>
+                            )}
+                          </NavLink>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* Collapsed mode */
+                  <div className="relative mt-2 group/flyout">
+                    <button
+                      onClick={() => setEngagementMastersDropdownOpen(!engagementMastersDropdownOpen)}
+                      className="w-full group relative flex items-center justify-center px-2 py-1.5 rounded-lg transition-all duration-200"
+                      title="Engagement Masters"
+                    >
+                      <TableCellsIcon
+                        className="h-3.5 w-3.5 transition-all duration-200"
+                        style={{ color: isEngagementMastersActive() ? themeColor : '#6B7280' }}
+                      />
+                      {/* Tooltip removed — the hover flyout already shows the submenu. */}
+                    </button>
+
+                    {/* Hover the icon to reveal this submenu; hidden otherwise.
+                        The before-bridge keeps hover continuous across the gap. */}
+                    <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
+                        {engagementMastersItems.map((item) => (
+                          <NavLink
+                            key={item.path}
+                            to={item.path}
+                            onClick={() => {
+                              setEngagementMastersDropdownOpen(false);
+                              if (isMobile) setSidebarOpen(false);
+                            }}
+                            className={({ isActive }) =>
+                              `flex items-center gap-2 px-2 py-1.5 text-sm transition-colors ${isActive
+                                ? 'text-gray-900 font-medium'
+                                : 'text-black hover:text-gray-900 hover:bg-gray-50'
+                              }`
+                            }
+                            style={({ isActive }) => ({
+                              color: isActive ? themeColor : undefined,
+                              backgroundColor: isActive ? themeShades.light : 'transparent'
+                            })}
+                          >
+                            {({ isActive }) => (
+                              <>
+                                <item.icon
+                                  className="h-3.5 w-3.5 flex-shrink-0"
+                                  style={{ color: isActive ? themeColor : '#6B7280' }}
+                                />
+                                <span className="truncate">{item.name}</span>
+                              </>
+                            )}
+                          </NavLink>
+                        ))}
+                      </div>
+                  </div>
+                )
+              )}
 
               {/* Part Detail Info — visible ONLY to master/IT admin.
                   Branch admin and employee do not see this section at all. */}
@@ -1418,7 +1594,7 @@ function Navbar({ children }) {
                       onMouseEnter={() => setHoveredItem('part-detail-info')}
                       onMouseLeave={() => setHoveredItem(null)}
                       className={`
-          w-full group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200
+          min-w-full w-max group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200
           ${isPartInfoActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
         `}
                       style={{
@@ -1432,7 +1608,7 @@ function Navbar({ children }) {
                             hoveredItem === 'part-detail-info' ? themeColor : '#6B7280'
                         }}
                       />
-                      <span className="flex-1 text-sm font-medium truncate text-left text-black">
+                      <span className="flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
                         Part Detail Info
                       </span>
                       {partInfoDropdownOpen ? (
@@ -1452,7 +1628,7 @@ function Navbar({ children }) {
                               if (isMobile) setSidebarOpen(false);
                             }}
                             className={({ isActive }) =>
-                              `group relative flex items-center gap-1 px-1 py-1 rounded-md transition-all duration-200 text-sm ${isActive
+                              `group relative flex items-center gap-1 px-1 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
                                 ? 'text-black font-medium'
                                 : 'text-black hover:text-black'
                               }`
@@ -1470,7 +1646,7 @@ function Navbar({ children }) {
                                     backgroundColor: isActive ? 'black' : '#D1D5DB'
                                   }}
                                 />
-                                <span className="flex-1 truncate">{item.name}</span>
+                                <span className="flex-1 whitespace-nowrap">{item.name}</span>
                               </>
                             )}
                           </NavLink>
@@ -1480,7 +1656,7 @@ function Navbar({ children }) {
                   </div>
                 ) : (
                   /* Collapsed mode */
-                  <div className="relative mt-2">
+                  <div className="relative mt-2 group/flyout">
                     <button
                       onClick={() => setPartInfoDropdownOpen(!partInfoDropdownOpen)}
                       className="w-full group relative flex items-center justify-center px-2 py-1.5 rounded-lg transition-all duration-200"
@@ -1490,14 +1666,11 @@ function Navbar({ children }) {
                         className="h-3.5 w-3.5 transition-all duration-200"
                         style={{ color: '#6B7280' }}
                       />
-                      <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
-                        Part Detail Info
-                        <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
-                      </div>
+                      {/* Tooltip removed — the hover flyout already shows the submenu. */}
                     </button>
 
-                    {(partInfoDropdownOpen || isPartInfoActive()) && (
-                      <div className="absolute left-full top-0 ml-2 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50">
+                    {/* Hover the icon to reveal this submenu; hidden otherwise. */}
+                    <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
                         {partDetailItems.map((item) => (
                           <NavLink
                             key={item.path}
@@ -1521,7 +1694,6 @@ function Navbar({ children }) {
                           </NavLink>
                         ))}
                       </div>
-                    )}
                   </div>
                 )
               )}
@@ -1536,7 +1708,7 @@ function Navbar({ children }) {
                     onMouseEnter={() => setHoveredItem('customer-engagement')}
                     onMouseLeave={() => setHoveredItem(null)}
                     className={`
-        w-full group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200
+        min-w-full w-max group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200
         ${isEngagementActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
       `}
                     style={{
@@ -1550,7 +1722,7 @@ function Navbar({ children }) {
                           hoveredItem === 'customer-engagement' ? 'black' : 'black'
                       }}
                     />
-                    <span className="flex-1 text-sm font-medium truncate text-left text-black">
+                    <span className="flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
                       Customer Engagement
                     </span>
                     {engagementDropdownOpen ? (
@@ -1569,10 +1741,10 @@ function Navbar({ children }) {
                         <button
                           type="button"
                           onClick={() => { setShowDriveNamesModal(true); if (isMobile) setSidebarOpen(false); }}
-                          className="w-full group relative flex items-center gap-1 px-1 py-1 rounded-md transition-all duration-200 text-sm text-black hover:text-black hover:bg-gray-50"
+                          className="min-w-full w-max group relative flex items-center gap-1 px-1 py-1 rounded-md transition-all duration-200 text-sm text-black hover:text-black hover:bg-gray-50"
                         >
                           <div className="w-1 h-1 rounded-full" style={{ backgroundColor: '#D1D5DB' }} />
-                          <span className="flex-1 truncate text-left">Drive List Info</span>
+                          <span className="flex-1 whitespace-nowrap text-left">Drive List Info</span>
                         </button>
                       )}
 
@@ -1584,7 +1756,7 @@ function Navbar({ children }) {
                             if (isMobile) setSidebarOpen(false);
                           }}
                           className={({ isActive }) =>
-                            `group relative flex items-center gap-1 px-1 py-1 rounded-md transition-all duration-200 text-sm ${isActive
+                            `group relative flex items-center gap-1 px-1 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
                               ? 'text-black font-medium'
                               : 'text-black hover:text-black'
                             }`
@@ -1602,7 +1774,7 @@ function Navbar({ children }) {
                                   backgroundColor: isActive ? 'black' : '#D1D5DB'
                                 }}
                               />
-                              <span className="flex-1 truncate">{item.name}</span>
+                              <span className="flex-1 whitespace-nowrap">{item.name}</span>
                             </>
                           )}
                         </NavLink>
@@ -1612,7 +1784,7 @@ function Navbar({ children }) {
                 </div>
               ) : (
                 /* Collapsed mode */
-                <div className="relative mt-2">
+                <div className="relative mt-2 group/flyout">
                   <button
                     onClick={() => setEngagementDropdownOpen(!engagementDropdownOpen)}
                     className="w-full group relative flex items-center justify-center px-2 py-1.5 rounded-lg transition-all duration-200"
@@ -1624,14 +1796,11 @@ function Navbar({ children }) {
                         color: 'black'
                       }}
                     />
-                    <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
-                      Customer Engagement
-                      <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
-                    </div>
+                    {/* Tooltip removed — the hover flyout already shows the submenu. */}
                   </button>
 
-                  {(engagementDropdownOpen || isEngagementActive()) && (
-                    <div className="absolute left-full top-0 ml-2 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50">
+                  {/* Hover the icon to reveal this submenu; hidden otherwise. */}
+                  <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
                       {/* Drive List Info — opens the modal (not a route); shown first.
                           Master Admin / IT Admin only. */}
                       {isMasterOrITAdmin && (
@@ -1671,7 +1840,6 @@ function Navbar({ children }) {
                         </NavLink>
                       ))}
                     </div>
-                  )}
                 </div>
               )}
 
@@ -1685,7 +1853,7 @@ function Navbar({ children }) {
                         onMouseEnter={() => setHoveredItem('expense-tracking')}
                         onMouseLeave={() => setHoveredItem(null)}
                         className={`
-            w-full group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200
+            min-w-full w-max group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200
             ${isExpenseActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
           `}
                         style={{
@@ -1699,7 +1867,7 @@ function Navbar({ children }) {
                               hoveredItem === 'expense-tracking' ? 'black' : 'black'
                           }}
                         />
-                        <span className="flex-1 text-sm font-medium truncate text-left text-black">
+                        <span className="flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
                           Expense Tracking
                         </span>
                         {expenseDropdownOpen ? (
@@ -1720,7 +1888,7 @@ function Navbar({ children }) {
                                 if (isMobile) setSidebarOpen(false);
                               }}
                               className={({ isActive }) =>
-                                `group relative flex items-center gap-1 px-1 py-1 rounded-md transition-all duration-200 text-sm ${isActive
+                                `group relative flex items-center gap-1 px-1 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
                                   ? 'text-black font-medium'
                                   : 'text-black hover:text-black'
                                 }`
@@ -1738,7 +1906,7 @@ function Navbar({ children }) {
                                       backgroundColor: isActive ? 'black' : '#D1D5DB'
                                     }}
                                   />
-                                  <span className="flex-1 truncate">{item.name}</span>
+                                  <span className="flex-1 whitespace-nowrap">{item.name}</span>
                                 </>
                               )}
                             </NavLink>
@@ -1748,7 +1916,7 @@ function Navbar({ children }) {
                     </div>
                   ) : (
                     /* Collapsed mode */
-                    <div className="relative mt-2">
+                    <div className="relative mt-2 group/flyout">
                       <button
                         onClick={() => setExpenseDropdownOpen(!expenseDropdownOpen)}
                         className="w-full group relative flex items-center justify-center px-2 py-1.5 rounded-lg transition-all duration-200"
@@ -1760,14 +1928,11 @@ function Navbar({ children }) {
                             color: 'black'
                           }}
                         />
-                        <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
-                          Expense Tracking
-                          <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
-                        </div>
+                        {/* Tooltip removed — the hover flyout already shows the submenu. */}
                       </button>
 
-                      {(expenseDropdownOpen || isExpenseActive()) && (
-                        <div className="absolute left-full top-0 ml-2 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50">
+                      {/* Hover the icon to reveal this submenu; hidden otherwise. */}
+                      <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
                           {expenseTrackingItems.map((item) => (
                             <NavLink
                               key={item.path}
@@ -1791,7 +1956,6 @@ function Navbar({ children }) {
                             </NavLink>
                           ))}
                         </div>
-                      )}
                     </div>
                   )}
                 </div>
@@ -1810,7 +1974,7 @@ function Navbar({ children }) {
                           onMouseEnter={() => setHoveredItem(item.path)}
                           onMouseLeave={() => setHoveredItem(null)}
                           className={({ isActive }) =>
-                            `group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200 ${isActive
+                            `group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200 min-w-full w-max ${isActive
                               ? 'text-gray-900 font-medium'
                               : 'text-black hover:text-gray-900'
                             }`
@@ -1829,7 +1993,7 @@ function Navbar({ children }) {
                                     hoveredItem === item.path ? themeColor : '#6B7280'
                                 }}
                               />
-                              <span className="flex-1 text-sm font-medium truncate">
+                              <span className="flex-1 text-sm font-medium whitespace-nowrap">
                                 {item.name}
                               </span>
                             </>
@@ -1866,6 +2030,7 @@ function Navbar({ children }) {
                   )}
                 </div>
               )}
+              </div>
             </div>
 
             {/* Fixed Info Button at Bottom of White Section - Non-scrollable */}

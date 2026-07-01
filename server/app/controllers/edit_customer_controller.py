@@ -421,26 +421,34 @@ class EditCustomerController:
             
             # Create email
             subject = f"Customer Edit History Report - {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
-            
-            msg = MIMEMultipart('alternative')
+
+            # Root MUST be 'mixed' so the CSV is a real attachment in Outlook.
+            # A 'multipart/alternative' root makes Outlook treat the CSV as an
+            # alternative *body* and hide it (Gmail is lenient, which is why it
+            # showed there but not in Outlook).
+            msg = MIMEMultipart('mixed')
             msg['Subject'] = subject
             msg['From'] = from_email
             msg['To'] = ', '.join(recipient_emails)
-            
-            # Attach plain text and HTML versions
-            part1 = MIMEText(text_body, 'plain')
-            part2 = MIMEText(html_body, 'html')
-            msg.attach(part1)
-            msg.attach(part2)
-            
-            # Attach CSV file
-            csv_part = MIMEBase('application', 'csv')
+            msg['MIME-Version'] = '1.0'
+
+            # text + HTML are the two "alternatives" — they live together inside
+            # their own multipart/alternative, which is the FIRST child of the
+            # mixed root. Outlook picks the HTML; plain-text clients fall back.
+            body = MIMEMultipart('alternative')
+            body.attach(MIMEText(text_body, 'plain', 'utf-8'))
+            body.attach(MIMEText(html_body, 'html', 'utf-8'))
+            msg.attach(body)
+
+            # CSV attachment — sibling of the body on the mixed root.
+            csv_filename = f'customer_edit_history_{start_date.strftime("%Y%m%d")}_to_{end_date.strftime("%Y%m%d")}.csv'
+            csv_part = MIMEBase('text', 'csv')                      # text/csv → Excel opens it
             csv_part.set_payload(csv_content.encode('utf-8-sig'))
             encoders.encode_base64(csv_part)
-            csv_part.add_header(
-                'Content-Disposition',
-                f'attachment; filename="customer_edit_history_{start_date.strftime("%Y%m%d")}_to_{end_date.strftime("%Y%m%d")}.csv"'
-            )
+            # Outlook reads the filename from BOTH headers — set the name on the
+            # Content-Type too, else it can arrive as a nameless "ATT00001" file.
+            csv_part.add_header('Content-Type', 'text/csv', name=csv_filename)
+            csv_part.add_header('Content-Disposition', 'attachment', filename=csv_filename)
             msg.attach(csv_part)
             
             # Send email
@@ -465,195 +473,123 @@ class EditCustomerController:
             return False
     
     def _generate_professional_html_report(self, entries: List, start_date: datetime, end_date: datetime) -> str:
-        """Generate professional HTML report with scrollable table and download option"""
-        
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <style>
-                body {{
-                    font-family: 'Segoe UI', Arial, sans-serif;
-                    margin: 0;
-                    padding: 20px;
-                    background-color: #f5f5f5;
-                }}
-                .container {{
-                    max-width: 100%;
-                    background-color: white;
-                    border-radius: 8px;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                    overflow: hidden;
-                }}
-                .header {{
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    padding: 20px 30px;
-                }}
-                .header h1 {{
-                    margin: 0;
-                    font-size: 24px;
-                }}
-                .info-bar {{
-                    background-color: #f8f9fa;
-                    padding: 15px 30px;
-                    border-bottom: 1px solid #e0e0e0;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    flex-wrap: wrap;
-                }}
-                .info-item {{
-                    margin: 5px 0;
-                }}
-                .info-label {{
-                    font-weight: 600;
-                    color: #555;
-                }}
-                .info-value {{
-                    color: #333;
-                    margin-left: 5px;
-                }}
-                .download-note {{
-                    background-color: #e3f2fd;
-                    padding: 10px 30px;
-                    border-left: 4px solid #2196f3;
-                    margin: 0;
-                    font-size: 14px;
-                    color: #1976d2;
-                }}
-                .table-wrapper {{
-                    overflow-x: auto;
-                    max-height: 500px;
-                    overflow-y: auto;
-                    margin: 20px 0;
-                }}
-                table {{
-                    width: 100%;
-                    border-collapse: collapse;
-                    font-size: 13px;
-                    min-width: 1200px;
-                }}
-                th {{
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    padding: 12px 8px;
-                    text-align: left;
-                    font-weight: 600;
-                    position: sticky;
-                    top: 0;
-                    z-index: 10;
-                    white-space: nowrap;
-                }}
-                td {{
-                    padding: 10px 8px;
-                    border-bottom: 1px solid #e0e0e0;
-                    white-space: nowrap;
-                }}
-                tr:hover {{
-                    background-color: #f5f5f5;
-                }}
-                .footer {{
-                    background-color: #f8f9fa;
-                    padding: 15px 30px;
-                    text-align: center;
-                    color: #666;
-                    font-size: 12px;
-                    border-top: 1px solid #e0e0e0;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>Customer Edit History Report</h1>
-                </div>
-                
-                                <div class="info-bar">
-                    <div class="info-item">
-                        <span class="info-label">From Date:</span>
-                        <span class="info-value">{start_date.strftime('%Y-%m-%d')}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">To Date:</span>
-                        <span class="info-value">{end_date.strftime('%Y-%m-%d')}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">Total Rows:</span>
-                        <span class="info-value">{len(entries)}</span>
-                    </div>
-                </div>
-                
-                <div class="download-note">
-                    📎 <strong>CSV attachment included:</strong> A CSV file with all data has been attached to this email for easy downloading.
-                </div>
-                
-                <div class="table-wrapper">
-                    <table>
+        """Outlook- AND Gmail-compatible HTML report.
+
+        All 18 columns are kept. In each EDITED column the value is shown only
+        when it differs from the matching ORIGINAL column; if unchanged it shows
+        "-", so the columns that actually changed stand out at a glance. Changed
+        cells get a green, medium-weight style.
+        """
+        td_s = "padding:10px 8px;border-bottom:1px solid #e0e0e0;white-space:nowrap;font-size:13px;color:#333333;"
+        # A changed edited cell — green + medium weight so edits pop out.
+        td_changed = "padding:10px 8px;border-bottom:1px solid #e0e0e0;white-space:nowrap;font-size:13px;color:#1d6f42;font-weight:500;"
+        th_s = "padding:12px 8px;text-align:left;font-weight:600;color:#ffffff;white-space:nowrap;font-size:13px;"
+        # Gradient for Gmail + solid background-color for Outlook (white text stays visible in both).
+        grad = "background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);background-color:#764ba2;"
+
+        # Edited value only when it differs from the original; else "-".
+        # Both are normalised (None -> '', trimmed) so "None vs empty" isn't a change.
+        def diff(original, edited):
+            o = '' if original is None else str(original).strip()
+            e = '' if edited is None else str(edited).strip()
+            if o == e:
+                return '-'
+            return e if e else '-'
+
+        headers = ['ID', 'Customer ID', 'Instance ID', 'Original Name', 'Original Phone',
+                   'Original Email', 'Original PAN', 'Original Location', 'Edited Name',
+                   'Edited Phone', 'Edited Email', 'Edited PAN', 'Edited Location',
+                   'User ID', 'User Name', 'Edit Count', 'Created At', 'Last Edited']
+        ths = "".join(f'<td bgcolor="#764ba2" style="{grad}{th_s}">{h}</td>' for h in headers)
+
+        rows_html = ""
+        for entry in entries:
+            # (value, is_edited_column). Edited columns are compared to their original;
+            # unchanged ones become "-" via diff().
+            cells = [
+                (entry.id, False),
+                (entry.customer_id, False),
+                (entry.instance_id or '-', False),
+                (entry.original_customer_name or '-', False),
+                (entry.original_phone_number or '-', False),
+                (entry.original_email or '-', False),
+                (entry.original_pan_number or '-', False),
+                (entry.original_location or '-', False),
+                (diff(entry.original_customer_name, entry.edited_customer_name), True),
+                (diff(entry.original_phone_number, entry.edited_phone_number), True),
+                (diff(entry.original_email, entry.edited_email), True),
+                (diff(entry.original_pan_number, entry.edited_pan_number), True),
+                (diff(entry.original_location, entry.edited_location), True),
+                (entry.user_id, False),
+                (entry.user_name, False),
+                (entry.edit_count, False),
+                (entry.created_at.strftime('%Y-%m-%d %H:%M') if entry.created_at else '-', False),
+                (entry.last_edited_at.strftime('%Y-%m-%d %H:%M') if entry.last_edited_at else '-', False),
+            ]
+            tds = ""
+            for value, is_edited in cells:
+                # Only an edited column that actually changed (not "-") gets the green style.
+                style = td_changed if (is_edited and value != '-') else td_s
+                tds += f'<td style="{style}">{value}</td>'
+            rows_html += f'<tr>{tds}</tr>'
+
+        html = f"""<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!--[if mso]><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
+    <style>
+        tr:hover td {{ background-color:#f5f5f5; }}
+    </style>
+</head>
+<body style="margin:0;padding:20px;background-color:#f5f5f5;font-family:'Segoe UI',Arial,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:100%;background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+        <tr>
+            <td bgcolor="#764ba2" style="{grad}color:#ffffff;padding:20px 30px;">
+                <h1 style="margin:0;font-size:24px;color:#ffffff;">Customer Edit History Report</h1>
+            </td>
+        </tr>
+        <tr>
+            <td style="background-color:#f8f9fa;padding:15px 30px;border-bottom:1px solid #e0e0e0;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                        <td style="font-size:14px;color:#333333;padding:5px 0;"><span style="font-weight:600;color:#555555;">From Date:</span> {start_date.strftime('%Y-%m-%d')}</td>
+                        <td align="center" style="font-size:14px;color:#333333;padding:5px 0;"><span style="font-weight:600;color:#555555;">To Date:</span> {end_date.strftime('%Y-%m-%d')}</td>
+                        <td align="right" style="font-size:14px;color:#333333;padding:5px 0;"><span style="font-weight:600;color:#555555;">Total Rows:</span> {len(entries)}</td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+        <tr>
+            <td style="background-color:#e3f2fd;padding:10px 30px;border-left:4px solid #2196f3;font-size:14px;color:#1976d2;">
+                📎 <strong>CSV attachment included:</strong> A CSV file with all data has been attached to this email for easy downloading.
+            </td>
+        </tr>
+        <tr>
+            <td style="padding:20px 30px;">
+                <div style="max-height:500px;overflow:auto;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:13px;min-width:1200px;">
                         <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Customer ID</th>
-                                <th>Instance ID</th>
-                                <th>Original Name</th>
-                                <th>Original Phone</th>
-                                <th>Original Email</th>
-                                <th>Original PAN</th>
-                                <th>Original Location</th>
-                                <th>Edited Name</th>
-                                <th>Edited Phone</th>
-                                <th>Edited Email</th>
-                                <th>Edited PAN</th>
-                                <th>Edited Location</th>
-                                <th>User ID</th>
-                                <th>User Name</th>
-                                <th>Edit Count</th>
-                                <th>Created At</th>
-                                <th>Last Edited</th>
-                            </tr>
+                            <tr>{ths}</tr>
                         </thead>
                         <tbody>
-        """
-        
-        for entry in entries:
-            html += f"""
-                            <tr>
-                                <td>{entry.id}</td>
-                                <td>{entry.customer_id}</td>
-                                <td>{entry.instance_id or '-'}</td>
-                                <td>{entry.original_customer_name or '-'}</td>
-                                <td>{entry.original_phone_number or '-'}</td>
-                                <td>{entry.original_email or '-'}</td>
-                                <td>{entry.original_pan_number or '-'}</td>
-                                <td>{entry.original_location or '-'}</td>
-                                <td>{entry.edited_customer_name or '-'}</td>
-                                <td>{entry.edited_phone_number or '-'}</td>
-                                <td>{entry.edited_email or '-'}</td>
-                                <td>{entry.edited_pan_number or '-'}</td>
-                                <td>{entry.edited_location or '-'}</td>
-                                <td>{entry.user_id}</td>
-                                <td>{entry.user_name}</td>
-                                <td>{entry.edit_count}</td>
-                                <td>{entry.created_at.strftime('%Y-%m-%d %H:%M') if entry.created_at else '-'}</td>
-                                <td>{entry.last_edited_at.strftime('%Y-%m-%d %H:%M') if entry.last_edited_at else '-'}</td>
-                            </tr>
-            """
-        
-        html += f"""
+                            {rows_html}
                         </tbody>
                     </table>
                 </div>
-                
-                <div class="footer">
-                    <p>This report contains {len(entries)} record(s) from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}</p>
-                    <p>For data export, please use the attached CSV file.</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-        
+            </td>
+        </tr>
+        <tr>
+            <td style="background-color:#f8f9fa;padding:15px 30px;text-align:center;color:#666666;font-size:12px;border-top:1px solid #e0e0e0;">
+                <p style="margin:4px 0;">This report contains {len(entries)} record(s) from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}</p>
+                <p style="margin:4px 0;">For data export, please use the attached CSV file.</p>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
         return html
     
     def _generate_professional_text_report(self, entries: List, start_date: datetime, end_date: datetime) -> str:

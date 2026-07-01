@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
 import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
@@ -29,6 +31,20 @@ import {
 import CampaignCustomersFollowupModal from '../components/CampaignCustomersFollowupModal';
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
+
+// ---- Modern date picker helpers ----
+// State keeps dates as 'YYYY-MM-DD' strings; react-datepicker uses Date objects.
+// Parse as local midnight to avoid timezone off-by-one shifts.
+const toYMD = (d) => {
+  if (!d) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+const fromYMD = (s) => (s ? new Date(`${s}T00:00:00`) : null);
+const DATE_INPUT_CLASS =
+  'w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white text-black cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-[#2f3192]/40 focus:border-[#2f3192] disabled:opacity-50 disabled:cursor-not-allowed';
 
 // ⚡ Module-level cache: lives for the whole browser tab session (NOT reset on
 // component unmount). Reopening the Campaign page reads from here instantly
@@ -127,8 +143,35 @@ const SERVICE_CYCLE_COLS = [
   { key: 'schedule', label: 'Schedule' },
   { key: 'remarks', label: 'Remarks' },
 ];
+
 const blankServiceCycleRow = () => ({ service_type: '', schedule: '', remarks: '' });
 
+// Auto-growing textarea — height follows its content (no manual drag handle).
+// Grows when text wraps to more lines, shrinks back down when text is removed.
+const AutoGrowTextarea = ({ value, minRows = 1, className = '', style, ...props }) => {
+  const ref = useRef(null);
+
+  const resize = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';                 // reset first so scrollHeight is accurate
+    el.style.height = `${el.scrollHeight}px`; // grow/shrink to fit content
+  };
+
+  useEffect(() => { resize(); }, [value]);    // re-fit whenever value changes (typing + edit mode)
+
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      rows={minRows}
+      onInput={resize}
+      className={className}
+      style={{ resize: 'none', overflow: 'hidden', ...style }}
+      {...props}
+    />
+  );
+};
 const Campaign = () => {
   const [showCampaignForm, setShowCampaignForm] = useState(false);
   const [showServiceForm, setShowServiceForm] = useState(false);
@@ -506,7 +549,6 @@ const Campaign = () => {
   const fetchCampaignsLazy = async ({ background = false } = {}) => {
     // Prevent duplicate requests
     if (fetchingRef.current) {
-      console.log('Already fetching drives, skipping...');
       return;
     }
 
@@ -2328,6 +2370,85 @@ const Campaign = () => {
 
   return (
     <div className="min-h-screen">
+      {/* Modern themed calendar styling for the react-datepicker date fields */}
+      <style>{`
+        .camp-popper { z-index: 9999 !important; }
+        .camp-calendar {
+          font-family: inherit;
+          border: 1px solid #e5e7eb;
+          border-radius: 14px;
+          box-shadow: 0 14px 38px rgba(47, 49, 146, 0.18);
+          overflow: hidden;
+          padding-bottom: 6px;
+        }
+        .camp-calendar .react-datepicker__header {
+          background: linear-gradient(135deg, #2f3192, #335478);
+          border-bottom: none;
+          padding-top: 12px;
+        }
+        .camp-calendar .react-datepicker__current-month {
+          color: #fff;
+          font-weight: 700;
+          font-size: 0.85rem;
+          margin-bottom: 6px;
+        }
+        .camp-calendar .react-datepicker__day-name {
+          color: rgba(255, 255, 255, 0.85);
+          font-weight: 600;
+          width: 2rem;
+          line-height: 2rem;
+        }
+        .camp-calendar .react-datepicker__day {
+          width: 2rem;
+          line-height: 2rem;
+          margin: 2px;
+          border-radius: 9999px;
+          color: #111827;
+          transition: background .15s ease, color .15s ease;
+        }
+        .camp-calendar .react-datepicker__day:hover { background: #e0e7ff; }
+        .camp-calendar .react-datepicker__day--selected,
+        .camp-calendar .react-datepicker__day--keyboard-selected {
+          background: #2f3192 !important;
+          color: #fff !important;
+        }
+        .camp-calendar .react-datepicker__day--today { font-weight: 700; color: #2f3192; }
+        .camp-calendar .react-datepicker__day--selected.react-datepicker__day--today { color: #fff; }
+        .camp-calendar .react-datepicker__day--disabled { color: #d1d5db; }
+        .camp-calendar .react-datepicker__day--outside-month { color: #cbd5e1; }
+        .camp-calendar .react-datepicker__navigation { top: 12px; }
+        .camp-calendar .react-datepicker__navigation-icon::before { border-color: #fff; }
+        .camp-calendar .react-datepicker__triangle { display: none; }
+
+        /* Clear (×) button — subtle gray pill, red on hover */
+        .camp-dp-wrapper .react-datepicker__close-icon {
+          right: 10px;
+          padding: 0;
+          height: 100%;
+          display: flex;
+          align-items: center;
+        }
+        .camp-dp-wrapper .react-datepicker__close-icon::after {
+          background-color: #f1f5f9;
+          color: #64748b;
+          height: 18px;
+          width: 18px;
+          font-size: 14px;
+          line-height: 1;
+          border-radius: 9999px;
+          padding: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: inset 0 0 0 1px #e2e8f0;
+          transition: background-color .15s ease, color .15s ease, box-shadow .15s ease;
+        }
+        .camp-dp-wrapper .react-datepicker__close-icon:hover::after {
+          background-color: #ef4444;
+          color: #fff;
+          box-shadow: inset 0 0 0 1px #ef4444;
+        }
+      `}</style>
       <div className="max-w-7xl mx-auto px-4 sm:px-3">
         {/* Header Section */}
         <div className="flex flex-wrap items-start sm:items-center justify-between gap-2 sm:gap-3 mb-4 sm:mb-3">
@@ -2834,50 +2955,56 @@ const Campaign = () => {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-black mb-1">Start Date *</label>
-                    <input
-                      type="date"
-                      value={newCampaign.start_date}
-                      required
-                      onChange={(e) => {
-                        const newStartDate = e.target.value;
-                        if (isPastDate(newStartDate)) {
+                    <DatePicker
+                      selected={fromYMD(newCampaign.start_date)}
+                      onChange={(d) => {
+                        const newStartDate = toYMD(d);
+                        if (newStartDate && isPastDate(newStartDate)) {
                           toast.error('Start date cannot be a past date. Please select today or a future date.');
                           return;
                         }
                         if (newCampaign.end_date && newStartDate > newCampaign.end_date) {
-                          setNewCampaign({
-                            ...newCampaign,
-                            start_date: newStartDate,
-                            end_date: ''
-                          });
+                          setNewCampaign({ ...newCampaign, start_date: newStartDate, end_date: '' });
                           toast.error('End date cannot be before start date. Please re-select end date.');
                         } else {
                           setNewCampaign({ ...newCampaign, start_date: newStartDate });
                         }
                       }}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
-                      style={{ '--tw-ring-color': themeColor }}
+                      minDate={new Date()}
+                      dateFormat="dd MMM yyyy"
+                      placeholderText="Select start date"
                       disabled={createLoading}
-                      min={new Date().toISOString().split('T')[0]} // Add this line to disable past dates in the date picker UI
+                      className={DATE_INPUT_CLASS}
+                      wrapperClassName="w-full block camp-dp-wrapper"
+                      calendarClassName="camp-calendar"
+                      popperClassName="camp-popper"
+                      portalId="camp-datepicker-portal"
+                      showPopperArrow={false}
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-black mb-1">End Date</label>
-                    <input
-                      type="date"
-                      value={newCampaign.end_date}
-                      onChange={(e) => {
-                        const newEndDate = e.target.value;
-                        if (newCampaign.start_date && newEndDate < newCampaign.start_date) {
+                    <DatePicker
+                      selected={fromYMD(newCampaign.end_date)}
+                      onChange={(d) => {
+                        const newEndDate = toYMD(d);
+                        if (newCampaign.start_date && newEndDate && newEndDate < newCampaign.start_date) {
                           toast.error('End date cannot be before start date');
                           return;
                         }
                         setNewCampaign({ ...newCampaign, end_date: newEndDate });
                       }}
-                      min={newCampaign.start_date || undefined}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
-                      style={{ '--tw-ring-color': themeColor }}
+                      minDate={fromYMD(newCampaign.start_date) || new Date()}
+                      dateFormat="dd MMM yyyy"
+                      placeholderText="Select end date (optional)"
                       disabled={createLoading}
+                      isClearable={!createLoading}
+                      className={DATE_INPUT_CLASS}
+                      wrapperClassName="w-full block camp-dp-wrapper"
+                      calendarClassName="camp-calendar"
+                      popperClassName="camp-popper"
+                      portalId="camp-datepicker-portal"
+                      showPopperArrow={false}
                     />
                   </div>
                 </div>
@@ -3438,37 +3565,56 @@ const Campaign = () => {
                       min={new Date().toISOString().split('T')[0]} // Add this line
                     /> */}
                     <label className="block text-xs font-semibold text-black mb-1">Start Date *</label>
-                    <input
-                      type="date"
-                      value={editCampaignData.start_date}
-                      required
-                      onChange={(e) => {
-                        // Editing: only remove the past-date lock. Let the user decide
-                        // start/end dates freely — don't auto-clear or force anything.
-                        setEditCampaignData({ ...editCampaignData, start_date: e.target.value });
+                    <DatePicker
+                      selected={fromYMD(editCampaignData.start_date)}
+                      onChange={(d) => {
+                        // Editing: let the user pick start/end dates freely — no past-date lock.
+                        setEditCampaignData({ ...editCampaignData, start_date: toYMD(d) });
                       }}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
-                      style={{ '--tw-ring-color': themeColor }}
+                      dateFormat="dd MMM yyyy"
+                      placeholderText="Select start date"
                       disabled={editLoading}
+                      className={DATE_INPUT_CLASS}
+                      wrapperClassName="w-full block camp-dp-wrapper"
+                      calendarClassName="camp-calendar"
+                      popperClassName="camp-popper"
+                      portalId="camp-datepicker-portal"
+                      showPopperArrow={false}
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-black mb-1">End Date</label>
-                    <input
-                      type="date"
-                      value={editCampaignData.end_date}
-                      onChange={(e) => {
-                        const newEndDate = e.target.value;
-                        if (editCampaignData.start_date && newEndDate < editCampaignData.start_date) {
+                    <DatePicker
+                      selected={fromYMD(editCampaignData.end_date)}
+                      onChange={(d) => {
+                        const newEndDate = toYMD(d);
+                        if (editCampaignData.start_date && newEndDate && newEndDate < editCampaignData.start_date) {
                           toast.error('End date cannot be before start date');
                           return;
                         }
-                        setEditCampaignData({ ...editCampaignData, end_date: newEndDate });
+                        // Setting the end date to today or a future date auto-activates the drive.
+                        const activate = !!newEndDate && !isPastDate(newEndDate);
+                        const wasInactive = editCampaignData.status !== 'active';
+                        setEditCampaignData(prev => ({
+                          ...prev,
+                          end_date: newEndDate,
+                          ...(activate ? { status: 'active' } : {})
+                        }));
+                        if (activate && wasInactive) {
+                          toast.success('Drive set to Active — end date is in the future');
+                        }
                       }}
-                      min={editCampaignData.start_date || undefined}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
-                      style={{ '--tw-ring-color': themeColor }}
+                      minDate={fromYMD(editCampaignData.start_date) || undefined}
+                      dateFormat="dd MMM yyyy"
+                      placeholderText="Select end date (optional)"
                       disabled={editLoading}
+                      isClearable={!editLoading}
+                      className={DATE_INPUT_CLASS}
+                      wrapperClassName="w-full block camp-dp-wrapper"
+                      calendarClassName="camp-calendar"
+                      popperClassName="camp-popper"
+                      portalId="camp-datepicker-portal"
+                      showPopperArrow={false}
                     />
                   </div>
                   <div>
@@ -4172,7 +4318,7 @@ const Campaign = () => {
                 {letterFormatData.products.length > 0 && (
                   <div>
                     <label className="block text-xs font-semibold text-black mb-1">
-                      Discription <span className="text-gray-400 font-normal">(optional)</span>
+                      Description <span className="text-gray-400 font-normal">(optional)</span>
                     </label>
                     <textarea
                       value={letterFormatData.note || ''}
@@ -4372,54 +4518,54 @@ const Campaign = () => {
                           />
                         </div>
 
-                        <div className="overflow-x-auto border border-gray-200 rounded-lg bg-white">
-                          <table className="w-full text-[11px]">
-                            <thead className="bg-gray-100">
-                              <tr>
+                        <div className="overflow-x-auto border border-gray-300 rounded-lg bg-white shadow-sm">
+                          <table className="w-full text-[11px] border-collapse">
+                            <thead>
+                              <tr className="bg-gradient-to-b from-gray-50 to-gray-100 text-gray-600">
                                 {SERVICE_CYCLE_COLS.map(c => (
-                                  <th key={c.key} className="px-2 py-1 text-left font-semibold text-black border-r border-gray-200 whitespace-nowrap">
+                                  <th key={c.key} className="px-2.5 py-2 text-left font-semibold uppercase tracking-wide text-[10px] border border-gray-300 whitespace-nowrap">
                                     {c.label}
                                   </th>
                                 ))}
-                                <th className="px-2 py-1 text-center font-semibold text-black w-[40px]"></th>
+                                <th className="px-1 py-2 text-center font-semibold border border-gray-300 w-[36px]"></th>
                               </tr>
                             </thead>
                             <tbody>
                               {(letterFormatData.service_cycle_rows || []).map((row, idx) => (
-                                <tr key={idx} className="border-t border-gray-100 align-top">
-                                  <td className="px-1.5 py-1 border-r border-gray-100">
+                                <tr key={idx} className="align-top hover:bg-[#2f3192]/[0.03] transition-colors">
+                                  <td className="p-0 border border-gray-300 align-top focus-within:ring-1 focus-within:ring-inset focus-within:ring-[#2f3192] focus-within:bg-blue-50/40">
                                     <input
                                       value={row.service_type}
                                       onChange={(e) => setServiceCycleCell(idx, 'service_type', e.target.value)}
-                                      className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-[11px] text-black"
+                                      className="w-full bg-transparent border-0 outline-none focus:ring-0 px-2.5 py-1.5 text-[11px] text-black placeholder-gray-300"
                                       placeholder="e.g. B Check"
                                       disabled={letterFormatSaving}
                                     />
                                   </td>
-                                  <td className="px-1.5 py-1 border-r border-gray-100">
-                                    <textarea
+                                  <td className="p-0 border border-gray-300 align-top focus-within:ring-1 focus-within:ring-inset focus-within:ring-[#2f3192] focus-within:bg-blue-50/40">
+                                    <AutoGrowTextarea
                                       value={row.schedule}
                                       onChange={(e) => setServiceCycleCell(idx, 'schedule', e.target.value)}
-                                      className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-[11px] text-black resize-y"
-                                      rows={2}
+                                      className="w-full block bg-transparent border-0 outline-none focus:ring-0 px-2.5 py-1.5 text-[11px] text-black placeholder-gray-300"
+                                      minRows={2}
                                       placeholder="e.g. Each 500 hours or 12 months"
                                       disabled={letterFormatSaving}
                                     />
                                   </td>
-                                  <td className="px-1.5 py-1 border-r border-gray-100">
-                                    <textarea
+                                  <td className="p-0 border border-gray-300 align-top focus-within:ring-1 focus-within:ring-inset focus-within:ring-[#2f3192] focus-within:bg-blue-50/40">
+                                    <AutoGrowTextarea
                                       value={row.remarks}
                                       onChange={(e) => setServiceCycleCell(idx, 'remarks', e.target.value)}
-                                      className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-[11px] text-black resize-y"
-                                      rows={2}
+                                      className="w-full block bg-transparent border-0 outline-none focus:ring-0 px-2.5 py-1.5 text-[11px] text-black placeholder-gray-300"
+                                      minRows={2}
                                       placeholder="Remarks"
                                       disabled={letterFormatSaving}
                                     />
                                   </td>
-                                  <td className="px-1.5 py-1 text-center">
+                                  <td className="p-0 border border-gray-300 text-center align-middle">
                                     <button type="button" title="Remove this row"
                                       onClick={() => removeServiceCycleRow(idx)}
-                                      className="text-gray-400 hover:text-red-600"
+                                      className="text-gray-400 hover:text-red-600 hover:bg-red-50 rounded p-1 transition-colors"
                                       disabled={letterFormatSaving}>
                                       <XMarkIcon className="h-3.5 w-3.5" />
                                     </button>
@@ -4428,7 +4574,7 @@ const Campaign = () => {
                               ))}
                               {(letterFormatData.service_cycle_rows || []).length === 0 && (
                                 <tr>
-                                  <td colSpan="4" className="px-2 py-2 text-center text-[10px] text-gray-400">
+                                  <td colSpan="4" className="px-2 py-3 text-center text-[10px] text-gray-400 border border-gray-300">
                                     No rows. Click "Add Row" to start.
                                   </td>
                                 </tr>

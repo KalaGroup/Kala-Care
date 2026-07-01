@@ -94,6 +94,14 @@ const CDBUpdateTable = ({ user, showToast }) => {
         );
     };
 
+    // Show the edited value only when it differs from the original.
+    // If they're the same (or both empty), show '-' instead.
+    const showChanged = (original, edited, search) => {
+        const norm = (v) => (v === null || v === undefined || v === '-' ? '' : String(v).trim());
+        if (norm(original) === norm(edited)) return '-';
+        return highlightText(edited, search);
+    };
+
     // Helper function to format UTC date directly (no timezone conversion)
     const formatUTCDate = (utcDateString) => {
         if (!utcDateString) return '-';
@@ -444,8 +452,8 @@ const CDBUpdateTable = ({ user, showToast }) => {
                 );
             }
 
-            // Push done records to the bottom (latest-first date order kept within each group)
-            filtered.sort((a, b) => (a.is_done === b.is_done ? 0 : a.is_done ? 1 : -1));
+            // Keep the natural (latest-first) date order — marking a row "done"
+            // no longer moves it to the bottom; it stays in place.
 
             setFilteredHistories(filtered);
         }
@@ -768,7 +776,7 @@ const CDBUpdateTable = ({ user, showToast }) => {
                                         key={history.id}
                                         className={`transition-colors ${history.is_done ? 'bg-green-50 hover:bg-green-100' : 'hover:bg-gray-50'}`}
                                     >
-                                        <td className="px-2 py-1 text-center border-r border-gray-200 whitespace-nowrap">
+                                        <td className="px-2 py-0.5 text-center border-r border-gray-200 whitespace-nowrap">
                                             <input
                                                 type="checkbox"
                                                 checked={!!history.is_done}
@@ -777,22 +785,36 @@ const CDBUpdateTable = ({ user, showToast }) => {
                                                 title={history.is_done ? 'Mark as not done' : 'Mark as done'}
                                             />
                                         </td>
-                                        <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200 whitespace-nowrap">{idx + 1}</td>
-                                        <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200 whitespace-nowrap">{highlightText(history.instance_id, searchTerm)}</td>
-                                        <td className="px-2 py-1 text-left text-xs text-black border-r border-gray-200 whitespace-nowrap">{highlightText(history.original_customer_name, searchTerm)}</td>
-                                        <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200 whitespace-nowrap">{history.original_phone_number}</td>
-                                        <td className="px-2 py-1 text-left text-xs text-black border-r border-gray-200 whitespace-nowrap">{history.original_email}</td>
-                                        <td className="px-2 py-1 text-left text-xs text-black border-r border-gray-200 whitespace-nowrap">{history.original_location}</td>
-                                        <td className="px-2 py-1 text-left text-xs text-black border-r border-gray-200 whitespace-nowrap">{highlightText(history.edited_customer_name, searchTerm)}</td>
-                                        <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200 whitespace-nowrap">{history.edited_phone_number}</td>
-                                        <td className="px-2 py-1 text-left text-xs text-black border-r border-gray-200 whitespace-nowrap">{history.edited_email}</td>
-                                        <td className="px-2 py-1 text-left text-xs text-black border-r border-gray-200 whitespace-nowrap">{history.edited_location}</td>
-                                        <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200 whitespace-nowrap">
+                                        <td className="px-2 py-0.5 text-center text-xs text-black border-r border-gray-200 whitespace-nowrap">{idx + 1}</td>
+                                        <td className="px-2 py-0.5 text-center text-xs text-black border-r border-gray-200 whitespace-nowrap">{highlightText(history.instance_id, searchTerm)}</td>
+                                        <td className="px-2 py-0.5 text-left text-xs text-black border-r border-gray-200">
+                                            <div className="truncate max-w-[110px]" title={history.original_customer_name || ''}>{highlightText(history.original_customer_name, searchTerm)}</div>
+                                        </td>
+                                        <td className="px-2 py-0.5 text-center text-xs text-black border-r border-gray-200 whitespace-nowrap">{history.original_phone_number}</td>
+                                        <td className="px-2 py-0.5 text-left text-xs text-black border-r border-gray-200">
+                                            <div className="truncate max-w-[140px]" title={history.original_email || ''}>{history.original_email}</div>
+                                        </td>
+                                        <td className="px-2 py-0.5 text-left text-xs text-black border-r border-gray-200">
+                                            <div className="truncate max-w-[120px]" title={history.original_location || ''}>{history.original_location}</div>
+                                        </td>
+                                        <td className="px-2 py-0.5 text-left text-xs text-black border-r border-gray-200">
+                                            <div className="truncate max-w-[110px]" title={history.edited_customer_name || history.original_customer_name || ''}>{showChanged(history.original_customer_name, history.edited_customer_name, searchTerm)}</div>
+                                        </td>
+                                        <td className="px-2 py-0.5 text-center text-xs text-black border-r border-gray-200">
+                                            <div className="truncate max-w-[90px] mx-auto" title={history.edited_phone_number || history.original_phone_number || ''}>{showChanged(history.original_phone_number, history.edited_phone_number, searchTerm)}</div>
+                                        </td>
+                                        <td className="px-2 py-0.5 text-left text-xs text-black border-r border-gray-200">
+                                            <div className="truncate max-w-[140px]" title={history.edited_email || history.original_email || ''}>{showChanged(history.original_email, history.edited_email, searchTerm)}</div>
+                                        </td>
+                                        <td className="px-2 py-0.5 text-left text-xs text-black border-r border-gray-200">
+                                            <div className="truncate max-w-[120px]" title={history.edited_location || history.original_location || ''}>{showChanged(history.original_location, history.edited_location, searchTerm)}</div>
+                                        </td>
+                                        <td className="px-2 py-0.5 text-center text-xs text-black border-r border-gray-200 whitespace-nowrap">
                                             {highlightText(history.user_name, searchTerm)}
                                             <span className="text-gray-400 text-[10px] block">{history.user_id}</span>
                                         </td>
-                                        <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200 whitespace-nowrap">{formatUTCDate(history.edited_at)}</td>
-                                        <td className="px-2 py-1 text-center whitespace-nowrap">
+                                        <td className="px-2 py-0.5 text-center text-xs text-black border-r border-gray-200 whitespace-nowrap">{formatUTCDate(history.edited_at)}</td>
+                                        <td className="px-2 py-0.5 text-center whitespace-nowrap">
                                             <button
                                                 onClick={() => handleSoftDelete(history.id)}
                                                 className="p-1 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
@@ -808,6 +830,36 @@ const CDBUpdateTable = ({ user, showToast }) => {
                     </div>
                 </div>
             )}
+
+            {/* Floating scroll to top / bottom buttons — bottom-right corner */}
+            <div className="fixed bottom-6 right-4 z-40 flex flex-col gap-1.5">
+                <button
+                    onClick={() => {
+                        const c = document.getElementById('cdb-table-container');
+                        if (c) c.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
+                    style={{ backgroundColor: '#2f3192' }}
+                    title="Scroll to top"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="white" className="w-4 h-4">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+                    </svg>
+                </button>
+                <button
+                    onClick={() => {
+                        const c = document.getElementById('cdb-table-container');
+                        if (c) c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' });
+                    }}
+                    className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
+                    style={{ backgroundColor: '#2f3192' }}
+                    title="Scroll to bottom"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="white" className="w-4 h-4">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                    </svg>
+                </button>
+            </div>
         </div>
     );
 };
@@ -2471,7 +2523,7 @@ const Profile = () => {
                                     {/* Employees Table */}
                                     <div className="border border-gray-200 rounded-lg overflow-hidden">
                                         {/* Table container */}
-                                        <div className="overflow-auto max-h-[150vh]" style={{ scrollbarWidth: 'thin' }}>
+                                        <div id="employees-table-container" className="overflow-auto max-h-[150vh]" style={{ scrollbarWidth: 'thin' }}>
                                             <table className="border-collapse min-w-[1000px] w-full">
                                                 <thead className="bg-gray-50 sticky top-0 z-10">
                                                     <tr>
@@ -2630,6 +2682,36 @@ const Profile = () => {
                                                 </tbody>
                                             </table>
                                         </div>
+                                    </div>
+
+                                    {/* Floating scroll to top / bottom buttons — bottom-right corner */}
+                                    <div className="fixed bottom-6 right-4 z-40 flex flex-col gap-1.5">
+                                        <button
+                                            onClick={() => {
+                                                const c = document.getElementById('employees-table-container');
+                                                if (c) c.scrollTo({ top: 0, behavior: 'smooth' });
+                                            }}
+                                            className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
+                                            style={{ backgroundColor: '#2f3192' }}
+                                            title="Scroll to top"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="white" className="w-4 h-4">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                const c = document.getElementById('employees-table-container');
+                                                if (c) c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' });
+                                            }}
+                                            className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
+                                            style={{ backgroundColor: '#2f3192' }}
+                                            title="Scroll to bottom"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="white" className="w-4 h-4">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                                            </svg>
+                                        </button>
                                     </div>
                                 </>
                             )}

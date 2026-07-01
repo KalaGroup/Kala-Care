@@ -138,6 +138,33 @@ const SortableTableHeader = ({ id, children, onClick, sortIcon, className, style
   );
 };
 
+// Auto-growing textarea — height follows its content (no manual drag handle).
+// Grows when text wraps to more lines, shrinks back down when text is removed.
+const AutoGrowTextarea = ({ value, minRows = 1, className = '', style, ...props }) => {
+  const ref = useRef(null);
+
+  const resize = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';                 // reset first so scrollHeight is accurate
+    el.style.height = `${el.scrollHeight}px`; // grow/shrink to fit content
+  };
+
+  useEffect(() => { resize(); }, [value]);      // re-fit whenever value changes
+
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      rows={minRows}
+      onInput={resize}
+      className={className}
+      style={{ resize: 'none', overflow: 'hidden', ...style }}
+      {...props}
+    />
+  );
+};
+
 const CustomerEng2 = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -6917,8 +6944,9 @@ ${f.start_para}`;
               )}
             </div>
 
-            {/* Floating scroll to top / bottom buttons — bottom-right corner */}
-            <div className="fixed bottom-6 right-4 z-40 flex flex-col gap-1.5">
+            {/* Floating scroll to top / bottom buttons — screen bottom-right,
+                shifted left to clear the table scrollbar */}
+            <div className="fixed bottom-6 right-10 z-40 flex flex-col gap-1.5">
               <button
                 onClick={() => {
                   if (tableContainerRef.current) {
@@ -9653,51 +9681,51 @@ ${f.start_para}`;
                                   rows="2"
                                 />
 
-                                <div className="mt-1 overflow-x-auto border border-gray-200 rounded-lg">
-                                  <table className="w-full text-[11px]">
-                                    <thead className="bg-gray-100">
-                                      <tr>
+                                <div className="mt-1 overflow-x-auto border border-gray-300 rounded-lg shadow-sm bg-white">
+                                  <table className="w-full text-[11px] border-collapse">
+                                    <thead>
+                                      <tr className="bg-gradient-to-b from-gray-50 to-gray-100 text-gray-600">
                                         {SERVICE_CYCLE_COLS.map(c => (
-                                          <th key={c.key} className="px-2 py-1 text-left font-semibold text-black border-r border-gray-200 whitespace-nowrap">
+                                          <th key={c.key} className="px-2.5 py-2 text-left font-semibold uppercase tracking-wide text-[10px] border border-gray-300 whitespace-nowrap">
                                             {c.label}
                                           </th>
                                         ))}
-                                        <th className="px-2 py-1 text-center font-semibold text-black w-[40px]"></th>
+                                        <th className="px-1 py-2 text-center font-semibold border border-gray-300 w-[36px]"></th>
                                       </tr>
                                     </thead>
                                     <tbody>
                                       {serviceCycleRows.map((row, idx) => (
-                                        <tr key={idx} className="border-t border-gray-100 align-top">
-                                          <td className="px-1.5 py-1 border-r border-gray-100">
+                                        <tr key={idx} className="align-top hover:bg-[#2f3192]/[0.03] transition-colors">
+                                          <td className="p-0 border border-gray-300 align-top focus-within:ring-1 focus-within:ring-inset focus-within:ring-[#2f3192] focus-within:bg-blue-50/40">
                                             <input
                                               value={row.service_type}
                                               onChange={(e) => setServiceCycleCell(idx, 'service_type', e.target.value)}
-                                              className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-[11px] text-black"
+                                              className="w-full bg-transparent border-0 outline-none focus:ring-0 px-2.5 py-1.5 text-[11px] text-black placeholder-gray-300"
                                               placeholder="e.g. B Check"
                                             />
                                           </td>
-                                          <td className="px-1.5 py-1 border-r border-gray-100">
-                                            <textarea
+                                          <td className="p-0 border border-gray-300 align-top focus-within:ring-1 focus-within:ring-inset focus-within:ring-[#2f3192] focus-within:bg-blue-50/40">
+                                            <AutoGrowTextarea
                                               value={row.schedule}
                                               onChange={(e) => setServiceCycleCell(idx, 'schedule', e.target.value)}
-                                              className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-[11px] text-black resize-y"
-                                              rows="2"
+                                              className="w-full block bg-transparent border-0 outline-none focus:ring-0 px-2.5 py-1.5 text-[11px] text-black placeholder-gray-300"
+                                              minRows={2}
                                               placeholder="e.g. Each 500 hours or 12 months"
                                             />
                                           </td>
-                                          <td className="px-1.5 py-1 border-r border-gray-100">
-                                            <textarea
+                                          <td className="p-0 border border-gray-300 align-top focus-within:ring-1 focus-within:ring-inset focus-within:ring-[#2f3192] focus-within:bg-blue-50/40">
+                                            <AutoGrowTextarea
                                               value={row.remarks}
                                               onChange={(e) => setServiceCycleCell(idx, 'remarks', e.target.value)}
-                                              className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-[11px] text-black resize-y"
-                                              rows="2"
+                                              className="w-full block bg-transparent border-0 outline-none focus:ring-0 px-2.5 py-1.5 text-[11px] text-black placeholder-gray-300"
+                                              minRows={2}
                                               placeholder="Remarks"
                                             />
                                           </td>
-                                          <td className="px-1.5 py-1 text-center">
+                                          <td className="p-0 border border-gray-300 text-center align-middle">
                                             <button type="button" title="Remove this row"
                                               onClick={() => removeServiceCycleRow(idx)}
-                                              className="text-gray-400 hover:text-red-600">
+                                              className="text-gray-400 hover:text-red-600 hover:bg-red-50 rounded p-1 transition-colors">
                                               <XMarkIcon className="h-3.5 w-3.5" />
                                             </button>
                                           </td>
@@ -9705,7 +9733,7 @@ ${f.start_para}`;
                                       ))}
                                       {serviceCycleRows.length === 0 && (
                                         <tr>
-                                          <td colSpan="4" className="px-2 py-2 text-center text-[10px] text-gray-400">
+                                          <td colSpan="4" className="px-2 py-3 text-center text-[10px] text-gray-400 border border-gray-300">
                                             No service cycle rows for this format. Set them in Letter Master.
                                           </td>
                                         </tr>
@@ -9956,9 +9984,14 @@ ${f.start_para}`;
                           <input type="checkbox" className="hidden" checked={letterChannels.includes('email')} onChange={() => toggleLetterSendChannel('email')} />
                           <EnvelopeIcon className="h-4 w-4" /> Email
                         </label>
-                        <label className={`flex items-center gap-1.5 px-3 py-1 border rounded-md cursor-pointer text-sm ${letterChannels.includes('whatsapp') ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-300 text-black'}`}>
-                          <input type="checkbox" className="hidden" checked={letterChannels.includes('whatsapp')} onChange={() => toggleLetterSendChannel('whatsapp')} />
+                        {/* WhatsApp sending is not implemented yet — button is disabled/non-clickable. */}
+                        <label
+                          title="WhatsApp sending is not available yet"
+                          className="flex items-center gap-1.5 px-3 py-1 border rounded-md text-sm border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed opacity-60"
+                        >
+                          <input type="checkbox" className="hidden" checked={false} disabled onChange={() => { }} />
                           <ChatBubbleLeftRightIcon className="h-4 w-4" /> WhatsApp
+                          <span className="text-[9px] font-medium ml-0.5">(Coming soon)</span>
                         </label>
                       </div>
 
