@@ -627,7 +627,24 @@ class EngagementController:
                 normalized = self._normalize_id(inst_id)
                 if normalized and normalized not in agreement_map:
                     agreement_map[normalized] = end_date
-        
+
+        # Last oil-change info from oil_services (AssetService) — one row per
+        # instance_id, joined by the indexed instance_id in the SAME chunked
+        # pattern as warranty/agreement above (no per-row query).
+        oil_type_map = {}
+        oil_date_map = {}
+        for i in range(0, len(id_list), CHUNK_WA):
+            chunk = id_list[i:i + CHUNK_WA]
+            for inst_id, oc_type, oc_date in self.db.query(
+                AssetService.instance_id,
+                AssetService.last_oil_change_sr_type,
+                AssetService.last_oil_change_date
+            ).filter(AssetService.instance_id.in_(chunk)).all():
+                normalized = self._normalize_id(inst_id)
+                if normalized and normalized not in oil_type_map:
+                    oil_type_map[normalized] = oc_type
+                    oil_date_map[normalized] = oc_date
+
         # ========== Build result using in-memory lookups (NO MORE QUERIES PER CUSTOMER) ==========
         result = []
         cutoff_90_days = datetime.utcnow() - timedelta(days=90)
@@ -713,6 +730,8 @@ class EngagementController:
                 "branch_id": customer.branch_id,
                 "warranty_expiry_date": warranty_map.get(normalized_customer_id),
                 "agreement_end_date": agreement_map.get(normalized_customer_id),
+                "last_oil_change_sr_type": oil_type_map.get(normalized_customer_id),
+                "last_oil_change_date": oil_date_map.get(normalized_customer_id),
                 "campaigns": customer_campaign_names,
                 "campaign_checkmarks": {name: name in customer_campaign_names for name in campaign_names},
                 "campaign_status": campaign_status,
@@ -1839,6 +1858,7 @@ class EngagementController:
                 "branch_id": c.branch_id, "customer_name": c.customer_name or "Unknown",
                 "mobile": c.phone_number or "-", "email": c.email or "-",
                 "warranty_expiry_date": None, "agreement_end_date": None,
+                "last_oil_change_sr_type": None, "last_oil_change_date": None,
                 "campaigns": [], "campaign_checkmarks": {}, "campaign_status": {},
                 "followup_flags": self._get_followup_flags(c, flag_src),
                 "latest_status": latest.status if latest else None,
@@ -1919,6 +1939,7 @@ class EngagementController:
             page_inst = [rows_by_id[cid]["instance_id"] for cid in page_ids if rows_by_id[cid]["instance_id"]]
             page_norm = list({self._normalize_id(i) for i in page_inst})
             warranty_map, agreement_map = {}, {}
+            oil_type_map, oil_date_map = {}, {}
             CHUNK = 1000
             if page_norm:
                 for i in range(0, len(page_norm), CHUNK):
@@ -1940,6 +1961,19 @@ class EngagementController:
                         n = self._normalize_id(inst_id)
                         if n and n not in agreement_map:
                             agreement_map[n] = end_d
+                # Last oil-change info from oil_services (AssetService) — one
+                # indexed batch query per page, same pattern as warranty/agreement.
+                for i in range(0, len(page_norm), CHUNK):
+                    chunk = page_norm[i:i + CHUNK]
+                    for inst_id, oc_type, oc_date in self.db.query(
+                        AssetService.instance_id,
+                        AssetService.last_oil_change_sr_type,
+                        AssetService.last_oil_change_date
+                    ).filter(AssetService.instance_id.in_(chunk)).all():
+                        n = self._normalize_id(inst_id)
+                        if n and n not in oil_type_map:
+                            oil_type_map[n] = oc_type
+                            oil_date_map[n] = oc_date
 
             result = []
             for idx, cid in enumerate(page_ids, start=start_idx + 1):
@@ -1950,6 +1984,8 @@ class EngagementController:
                     "campaigns": [], "campaign_checkmarks": {}, "campaign_status": {},
                     "warranty_expiry_date": warranty_map.get(norm) if norm else None,
                     "agreement_end_date": agreement_map.get(norm) if norm else None,
+                    "last_oil_change_sr_type": oil_type_map.get(norm) if norm else None,
+                    "last_oil_change_date": oil_date_map.get(norm) if norm else None,
                     **base,
                 })
 

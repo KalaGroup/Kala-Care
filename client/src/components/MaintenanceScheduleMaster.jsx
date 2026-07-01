@@ -325,7 +325,7 @@ const MasterData = () => {
                                                             <thead>
                                                                 <tr className="bg-gray-100/70 text-[10px] font-semibold text-black uppercase tracking-wider">
                                                                     {['Sr.', 'Part Number', 'Description', 'Qty', 'Act', 'Svc Hrs', 'Service Type', 'Consumable'].map((h, i) => (
-                                                                        <th key={i} className={`px-3 py-1.5 border border-gray-200 ${[3, 4, 5, 7].includes(i) ? 'text-center' : 'text-left'}`}>{h}</th>
+                                                                        <th key={i} className={`px-3 py-1.5 border border-gray-200 ${[1, 2, 3, 4, 5, 7].includes(i) ? 'text-center' : 'text-left'}`}>{h}</th>
                                                                     ))}
                                                                 </tr>
                                                             </thead>

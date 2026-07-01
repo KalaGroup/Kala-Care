@@ -29,8 +29,8 @@ const PrintSheet = ({ app, services, parts, onClose }) => {
     const svcLabel = services.map((s) => s.name).join(', ') || '—';
     const svcHours = [...new Set(services.map((s) => s.hours))].join(' / ') || '—';
     const [logoError, setLogoError] = useState(false);
-    const th = 'bg-[#13181d] text-white text-[9.5px] font-semibold px-2 py-1.5';
-    const td = 'px-2 py-1 border-b border-gray-200 text-[11px]';
+    const th = 'bg-[#13181d] text-white text-[9.5px] font-semibold px-2 py-1.5 border border-gray-400';
+    const td = 'px-2 py-1 border border-gray-300 text-[11px]';
 
     return (
         <div className="fixed inset-0 z-[200] flex flex-col mx-print-stage" style={{ background: '#525659' }}>
@@ -42,7 +42,8 @@ const PrintSheet = ({ app, services, parts, onClose }) => {
                     .mx-print-bar { display: none !important; }
                     .mx-print-stage { position: absolute !important; background: #fff !important; }
                     .mx-print-scroll { overflow: visible !important; padding: 0 !important; display: block !important; }
-                    .mx-sheet { box-shadow: none !important; width: auto !important; margin: 0 !important; }
+                    .mx-sheet { box-shadow: none !important; width: auto !important; margin: 0 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+                    .mx-sheet table, .mx-sheet th, .mx-sheet td { border-color: #9ca3af !important; }
                 }
             `}</style>
             <div className="mx-print-bar flex items-center gap-3 px-5 py-2.5 text-white" style={{ background: themeDark }}>
@@ -58,7 +59,7 @@ const PrintSheet = ({ app, services, parts, onClose }) => {
                 </button>
             </div>
             <div className="mx-print-scroll flex-1 overflow-auto p-7 flex justify-center">
-                <div className="mx-sheet relative bg-white shadow-2xl" style={{ width: 880, maxWidth: '100%', minHeight: 1100, padding: '48px 52px', color: '#13181d' }}>
+                <div className="mx-sheet relative bg-white shadow-2xl" style={{ width: 880, maxWidth: '100%', minHeight: 1100, padding: '48px 52px', color: '#13181d', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>
                     <div className="absolute inset-0 pointer-events-none flex items-center justify-center overflow-hidden">
                         <div style={{ transform: 'rotate(-30deg)', fontSize: 64, fontWeight: 800, letterSpacing: '0.04em', whiteSpace: 'nowrap', color: 'rgba(191,55,46,0.07)' }}>FOR INTERNAL USE ONLY</div>
                     </div>
@@ -75,18 +76,24 @@ const PrintSheet = ({ app, services, parts, onClose }) => {
                             </div>
                         </div>
                         <div className="text-center text-[15px] font-extrabold tracking-wide my-4 uppercase">B-Check Service Template — CPCB IV+</div>
-                        <div className="grid grid-cols-2 gap-x-8 border border-gray-300 rounded-md overflow-hidden mb-5">
-                            {[
-                                ['Application Code', app.appCode], ['Type of Service', svcLabel],
-                                ['Engine Model', app.engineModel || '—'], ['Selection (Hrs)', svcHours],
-                                ['Segment', app.segment || '—'], ['KVA Rating', `${app.kva || '—'} KVA`],
-                            ].map(([k, v], i) => (
-                                <div key={i} className="flex border-b border-gray-200 last:border-b-0 [&:nth-last-child(2)]:border-b-0">
-                                    <div className="w-[44%] bg-gray-50 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-gray-700 border-r border-gray-200">{k}</div>
-                                    <div className="px-3 py-2 text-[12.5px] font-semibold font-mono">{v}</div>
-                                </div>
-                            ))}
-                        </div>
+                        <table className="w-full border-collapse mb-5" style={{ tableLayout: 'fixed' }}>
+                            <tbody>
+                                {[
+                                    [['Application Code', app.appCode], ['Type of Service', svcLabel]],
+                                    [['Engine Model', app.engineModel || '—'], ['Selection (Hrs)', svcHours]],
+                                    [['Segment', app.segment || '—'], ['KVA Rating', `${app.kva || '—'} KVA`]],
+                                ].map((pair, r) => (
+                                    <tr key={r}>
+                                        {pair.map(([k, v], c) => (
+                                            <React.Fragment key={c}>
+                                                <td className="w-[16%] bg-gray-50 border border-gray-400 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-gray-700 align-middle whitespace-nowrap">{k}</td>
+                                                <td className="w-[34%] border border-gray-400 px-3 py-2 text-[12.5px] font-semibold font-mono align-middle break-words">{v}</td>
+                                            </React.Fragment>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                         <table className="w-full border-collapse">
                             <thead>
                                 <tr>
@@ -299,7 +306,7 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
                                     <thead>
                                         <tr className="bg-gray-50 text-[10px] sm:text-[11px] font-semibold text-black uppercase tracking-wider">
                                             {['Sr.', 'Part Number', 'Description', 'Qty', 'Act', 'Alt Part No', 'Alt Description', 'Qty', 'Act', 'Svc Hrs', 'Consumable'].map((h, i) => (
-                                                <th key={i} className={`px-3 py-2 border border-gray-200 ${[3, 4, 7, 8, 9, 10].includes(i) ? 'text-center' : 'text-left'}`}>{h}</th>
+                                                <th key={i} className={`px-3 py-2 border border-gray-200 ${[1, 2, 3, 4, 7, 8, 9, 10].includes(i) ? 'text-center' : 'text-left'}`}>{h}</th>
                                             ))}
                                         </tr>
                                     </thead>

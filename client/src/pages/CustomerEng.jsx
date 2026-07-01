@@ -441,7 +441,7 @@ const CustomerEng = () => {
     });
 
     const [columnOrder, setColumnOrder] = useState(() => {
-        const defaultOrder = ['sr_no', 'instance_id', 'customer_name', 'contact', 'email', 'warranty_expiry', 'agreement_end_date', 'branch_id', 'latest_flag', 'last_followup_date', 'last_followup_user', 'next_followup_date', 'remark'];
+        const defaultOrder = ['sr_no', 'instance_id', 'last_oil_change_sr_type', 'last_oil_change_date', 'customer_name', 'contact', 'email', 'warranty_expiry', 'agreement_end_date', 'branch_id', 'latest_flag', 'last_followup_date', 'last_followup_user', 'next_followup_date', 'remark'];
         const savedOrder = localStorage.getItem('customerEng_column_order');
         if (savedOrder) {
             const parsed = JSON.parse(savedOrder);
@@ -453,6 +453,15 @@ const CustomerEng = () => {
             if (!parsed.includes('agreement_end_date')) {
                 const wIdx = parsed.indexOf('warranty_expiry');
                 parsed.splice(wIdx + 1, 0, 'agreement_end_date');
+            }
+            // Migration: Last Oil Change columns right after Instance ID (front of table)
+            if (!parsed.includes('last_oil_change_sr_type')) {
+                const iIdx = parsed.indexOf('instance_id');
+                parsed.splice(iIdx + 1, 0, 'last_oil_change_sr_type');
+            }
+            if (!parsed.includes('last_oil_change_date')) {
+                const tIdx = parsed.indexOf('last_oil_change_sr_type');
+                parsed.splice(tIdx + 1, 0, 'last_oil_change_date');
             }
             return parsed;
         }
@@ -1248,6 +1257,7 @@ const CustomerEng = () => {
                     case 'agreement_end_date': aRaw = a.agreement_end_date; bRaw = b.agreement_end_date; isDate = true; break;
                     case 'last_followup_date': aRaw = a.last_followup_date; bRaw = b.last_followup_date; isDate = true; break;
                     case 'next_followup_date': aRaw = a.next_followup_date; bRaw = b.next_followup_date; isDate = true; break;
+                    case 'last_oil_change_date': aRaw = a.last_oil_change_date; bRaw = b.last_oil_change_date; isDate = true; break;
                     default:
                         return 0;
                 }
@@ -3223,6 +3233,8 @@ const CustomerEng = () => {
                 'Sr. No.': index + 1,
                 'Customer ID': customer.customer_id || '',
                 'Instance ID': customer.instance_id || '',
+                'Last Oil Change SR Type': customer.last_oil_change_sr_type || '',
+                'Last Oil Change Date': formatDate(customer.last_oil_change_date),
                 'Customer Name': customer.customer_name || '',
                 'Contact': customer.mobile || '',
                 'Email': customer.email || '',
@@ -6984,7 +6996,7 @@ ${f.start_para}`;
                                 }
                             }}
                         >
-                            <table className="w-full border-collapse border border-gray-200" style={{ minWidth: `${(activeCampaigns.length + 13) * 105}px` }}>
+                            <table className="w-full border-collapse border border-gray-200" style={{ minWidth: `${(activeCampaigns.length + 15) * 105}px` }}>
                                 <thead className="bg-gray-50 sticky top-0 z-10">
                                     <DndContext collisionDetection={closestCenter} onDragEnd={handleColumnDragEnd}>
                                         <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
@@ -7013,6 +7025,36 @@ ${f.start_para}`;
                                                                 sortIcon={getSortIcon('instance_id')}
                                                             >
                                                                 Instance ID
+                                                            </SortableTableHeader>
+                                                        );
+                                                    }
+                                                    if (colId === 'last_oil_change_sr_type') {
+                                                        return (
+                                                            <SortableTableHeader
+                                                                key={colId}
+                                                                id={colId}
+                                                                className="px-2 py-1 text-center text-[11px] font-bold text-black uppercase whitespace-nowrap border-r border-gray-200 w-[90px]"
+                                                            >
+                                                                <div className="flex flex-col items-center justify-center leading-tight">
+                                                                    <span>Last Oil Change</span>
+                                                                    <span>SR Type</span>
+                                                                </div>
+                                                            </SortableTableHeader>
+                                                        );
+                                                    }
+                                                    if (colId === 'last_oil_change_date') {
+                                                        return (
+                                                            <SortableTableHeader
+                                                                key={colId}
+                                                                id={colId}
+                                                                onClick={() => handleSort('last_oil_change_date')}
+                                                                className="px-1 py-1 text-center text-[11px] font-bold text-black uppercase whitespace-nowrap cursor-pointer hover:bg-gray-100 border-r border-gray-200 w-[90px]"
+                                                                sortIcon={getSortIcon('last_oil_change_date')}
+                                                            >
+                                                                <div className="flex flex-col items-center justify-center leading-tight">
+                                                                    <span>Last Oil Change</span>
+                                                                    <span>Date</span>
+                                                                </div>
                                                             </SortableTableHeader>
                                                         );
                                                     }
@@ -7661,6 +7703,21 @@ ${f.start_para}`;
                                                                         <span className="px-1 py-0.5 rounded" style={{ backgroundColor: '#ffdb62' }}>{customer.instance_id || "-"}</span>
                                                                     ) : (customer.instance_id || "-")}
                                                                 </div>
+                                                            </td>
+                                                        );
+                                                    }
+                                                    if (colId === 'last_oil_change_sr_type') {
+                                                        const v = customer.last_oil_change_sr_type || '-';
+                                                        return (
+                                                            <td key={colId} className="px-2 py-1 text-[12px] text-black border-r border-gray-200 w-[90px] text-center">
+                                                                <div className="truncate" title={customer.last_oil_change_sr_type || ''}>{v}</div>
+                                                            </td>
+                                                        );
+                                                    }
+                                                    if (colId === 'last_oil_change_date') {
+                                                        return (
+                                                            <td key={colId} className="px-1 py-1 text-[12px] text-black whitespace-nowrap border-r border-gray-200 w-[90px] text-center">
+                                                                {formatDate(customer.last_oil_change_date)}
                                                             </td>
                                                         );
                                                     }
