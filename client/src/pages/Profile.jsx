@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import DeleteDataModal from '../components/DeleteDataModal';
+import DraggableScrollButtons from '../components/DraggableScrollButtons';
 import Swal from 'sweetalert2';
 import {
     FaImage, FaEdit, FaTrash, FaSearch, FaUserPlus, FaSignOutAlt,
@@ -862,8 +863,8 @@ const CDBUpdateTable = ({ user, showToast }) => {
                 </div>
             )}
 
-            {/* Floating scroll to top / bottom buttons — bottom-right corner */}
-            <div className="fixed bottom-6 right-4 z-40 flex flex-col gap-1.5">
+            {/* Floating scroll to top / bottom buttons — draggable horizontally along the bottom */}
+            <DraggableScrollButtons storageKey="profileCdbScrollBtnsPos" initialRight={16}>
                 <button
                     onClick={() => {
                         const c = document.getElementById('cdb-table-container');
@@ -895,7 +896,7 @@ const CDBUpdateTable = ({ user, showToast }) => {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
                     </svg>
                 </button>
-            </div>
+            </DraggableScrollButtons>
         </div>
     );
 };
@@ -2720,8 +2721,8 @@ const Profile = () => {
                                         </div>
                                     </div>
 
-                                    {/* Floating scroll to top / bottom buttons — bottom-right corner */}
-                                    <div className="fixed bottom-6 right-4 z-40 flex flex-col gap-1.5">
+                                    {/* Floating scroll to top / bottom buttons — draggable horizontally along the bottom */}
+                                    <DraggableScrollButtons storageKey="profileEmployeesScrollBtnsPos" initialRight={16}>
                                         <button
                                             onClick={() => {
                                                 const c = document.getElementById('employees-table-container');
@@ -2748,7 +2749,7 @@ const Profile = () => {
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
                                             </svg>
                                         </button>
-                                    </div>
+                                    </DraggableScrollButtons>
                                 </>
                             )}
 

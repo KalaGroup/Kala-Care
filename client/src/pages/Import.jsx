@@ -361,7 +361,8 @@ const Import = () => {
     };
 
     const handleFileChange = async (e) => {
-        const selectedFiles = Array.from(e.target.files);
+        const inputEl = e.target;
+        const selectedFiles = Array.from(inputEl.files);
         // Check file size (100MB limit to match backend)
         const maxSize = 100 * 1024 * 1024; // 100MB in bytes
         const validFiles = selectedFiles.filter(file => file.size <= maxSize);
@@ -369,6 +370,9 @@ const Import = () => {
         if (validFiles.length !== selectedFiles.length) {
             toast.error('Some files exceed the 100MB size limit');
         }
+
+        // Reset the input so the SAME file can be selected again later
+        inputEl.value = '';
 
         setFiles(validFiles);
         setResults([]);
@@ -498,6 +502,8 @@ const Import = () => {
                         }]);
                         setFiles([]); setSelectedFileType(''); setFilePreview(null);
                         setShowPreview(false); setFormatError(null);
+                        const fileInput = document.getElementById('file-input');
+                        if (fileInput) fileInput.value = '';
                         return;
                     }
 
@@ -531,6 +537,9 @@ const Import = () => {
         setFilePreview(null);
         setShowPreview(false);
         setFormatError(null);
+        // Clear the actual file input so a new/same file can be picked again
+        const fileInput = document.getElementById('file-input');
+        if (fileInput) fileInput.value = '';
         toast.success('File removed successfully');
     };
 

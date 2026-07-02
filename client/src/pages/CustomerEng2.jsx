@@ -17,6 +17,7 @@ import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dn
 import { CSS } from '@dnd-kit/utilities';
 import Swal from 'sweetalert2';
 import { verticalListSortingStrategy } from '@dnd-kit/sortable';
+import DraggableScrollButtons from '../components/DraggableScrollButtons';
 import {
   CalendarIcon,
   FunnelIcon,
@@ -7042,9 +7043,8 @@ ${f.start_para}`;
               )}
             </div>
 
-            {/* Floating scroll to top / bottom buttons — screen bottom-right,
-                shifted left to clear the table scrollbar */}
-            <div className="fixed bottom-6 right-10 z-40 flex flex-col gap-1.5">
+            {/* Floating scroll to top / bottom buttons — draggable horizontally along the bottom */}
+            <DraggableScrollButtons storageKey="customerEng2ScrollBtnsPos" initialRight={40}>
               <button
                 onClick={() => {
                   if (tableContainerRef.current) {
@@ -7071,7 +7071,7 @@ ${f.start_para}`;
               >
                 <ChevronDownIcon className="h-4 w-4 text-white" />
               </button>
-            </div>
+            </DraggableScrollButtons>
 
             {/* Background-load progress — hidden while searching and once everything is loaded */}
             {hasMore && !debouncedSearchTerm.trim() && (

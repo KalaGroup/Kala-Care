@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { DndContext, closestCenter } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import DraggableScrollButtons from '../components/DraggableScrollButtons';
 import {
   UserIcon,
   PhoneIcon,
@@ -1458,8 +1459,8 @@ const Customer = () => {
             )}
           </div>
 
-            {/* Floating scroll to top / bottom buttons — screen bottom-right */}
-            <div className="fixed bottom-6 right-4 z-40 flex flex-col gap-1.5">
+            {/* Floating scroll to top / bottom buttons — draggable horizontally along the bottom */}
+            <DraggableScrollButtons storageKey="customerScrollBtnsPos" initialRight={16}>
               <button
                 onClick={() => tableContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
                 className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
@@ -1480,7 +1481,7 @@ const Customer = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
                 </svg>
               </button>
-            </div>
+            </DraggableScrollButtons>
 
           {/* Pagination Component */}
           {totalCount > 0 && (
