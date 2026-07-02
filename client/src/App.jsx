@@ -11,21 +11,77 @@ import Login from './pages/Login';
 // is bundled into its own chunk that loads only when that route is visited.
 // This keeps the initial bundle small so the app paints fast instead of
 // waiting for every page's code to download up front.
-const Customer = lazy(() => import('./pages/Customer'));
-const Import = lazy(() => import('./pages/Import'));
-const Campaign = lazy(() => import('./pages/Campaign'));
-const CustomerEng = lazy(() => import('./pages/CustomerEng'));
-const Profile = lazy(() => import('./pages/Profile'));
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const CustomerEng2 = lazy(() => import('./pages/CustomerEng2'));
-const Expense = lazy(() => import('./pages/Expense'));
-const ExDashboard = lazy(() => import('./pages/ExDashboard'));
-const MOMTracking = lazy(() => import('./pages/MOMTracking'));
-const SalseANDFinance = lazy(() => import('./pages/SalseANDFinance'));
-const KnowledgeBook = lazy(() => import('./pages/KnowledgeBook'));
+//
+// The importer functions are named (not inlined) so the same reference can be
+// reused both by React.lazy AND by the idle prefetcher below. import() dedupes,
+// so prefetching just warms the module cache — the real navigation then resolves
+// instantly instead of waiting on a fresh chunk download.
+const importCustomer = () => import('./pages/Customer');
+const importImport = () => import('./pages/Import');
+const importCampaign = () => import('./pages/Campaign');
+const importCustomerEng = () => import('./pages/CustomerEng');
+const importProfile = () => import('./pages/Profile');
+const importDashboard = () => import('./pages/Dashboard');
+const importCustomerEng2 = () => import('./pages/CustomerEng2');
+const importExpense = () => import('./pages/Expense');
+const importExDashboard = () => import('./pages/ExDashboard');
+const importMOMTracking = () => import('./pages/MOMTracking');
+const importSalseANDFinance = () => import('./pages/SalseANDFinance');
+const importKnowledgeBook = () => import('./pages/KnowledgeBook');
+const importMaintenanceSchedule = () => import('./pages/MaintenanceSchedule');
+const importMaintenanceReports = () => import('./pages/MaintenanceReports');
+
+const Customer = lazy(importCustomer);
+const Import = lazy(importImport);
+const Campaign = lazy(importCampaign);
+const CustomerEng = lazy(importCustomerEng);
+const Profile = lazy(importProfile);
+const Dashboard = lazy(importDashboard);
+const CustomerEng2 = lazy(importCustomerEng2);
+const Expense = lazy(importExpense);
+const ExDashboard = lazy(importExDashboard);
+const MOMTracking = lazy(importMOMTracking);
+const SalseANDFinance = lazy(importSalseANDFinance);
+const KnowledgeBook = lazy(importKnowledgeBook);
 //added by nik
-const MaintenanceSchedule = lazy(() => import('./pages/MaintenanceSchedule'));
-const MaintenanceReports = lazy(() => import('./pages/MaintenanceReports'));
+const MaintenanceSchedule = lazy(importMaintenanceSchedule);
+const MaintenanceReports = lazy(importMaintenanceReports);
+
+// Route chunks to warm during idle time, most-visited first, so a later navbar
+// click finds the chunk already cached. Order roughly by how often pages are hit.
+const ROUTE_PREFETCHERS = [
+  importDashboard,
+  importCustomerEng,
+  importCustomerEng2,
+  importProfile,
+  importCustomer,
+  importCampaign,
+  importKnowledgeBook,
+  importExpense,
+  importExDashboard,
+  importMaintenanceSchedule,
+  importMaintenanceReports,
+  importMOMTracking,
+  importSalseANDFinance,
+  importImport,
+];
+
+// Prefetch route chunks one at a time during browser idle periods. Runs after
+// the current page has settled, and yields between each chunk so it never
+// competes with the active page's own rendering / data fetches.
+function prefetchRouteChunks() {
+  const idle =
+    window.requestIdleCallback || ((cb) => window.setTimeout(() => cb({ timeRemaining: () => 0 }), 200));
+  let i = 0;
+  const step = () => {
+    if (i >= ROUTE_PREFETCHERS.length) return;
+    const load = ROUTE_PREFETCHERS[i++];
+    // Swallow errors — a failed prefetch just means the real navigation fetches it.
+    Promise.resolve().then(load).catch(() => {});
+    idle(step);
+  };
+  idle(step);
+}
 
 // Lightweight fallback shown while a route chunk is being fetched.
 function RouteFallback() {
@@ -126,6 +182,14 @@ function Layout() {
   const user = JSON.parse(sessionStorage.getItem('user'));
 
   const hideNavbar = location.pathname === "/login";
+
+  // Warm the other route chunks in the background so navbar clicks open
+  // instantly instead of waiting on a fresh chunk download each time.
+  useEffect(() => {
+    if (!user) return; // only prefetch for logged-in users (routes are gated)
+    prefetchRouteChunks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Refresh user from server once per app load so permission changes
   // (like can_access_expense) reflect without requiring re-login.

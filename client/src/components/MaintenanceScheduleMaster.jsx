@@ -435,12 +435,62 @@ const blankPart = () => ({ partNumber: '', partDesc: '', qty: '1', action: 'R', 
 
 const AppFormModal = ({ initial, opts, existing, onClose, onSave }) => {
     const isEdit = !!initial;
-    const [hdr, setHdr] = useState({
+
+    // ---- Local draft (Option 1): auto-save the in-progress form to the browser
+    // so an interruption (refresh, crash, session timeout, accidental Cancel)
+    // never wipes it. This is a DRAFT only — it never touches the database and
+    // the full mandatory validation still runs before anything is committed.
+    const makeInitialHdr = () => ({
         appCode: initial?.appCode || '', segment: initial?.segment || 'PG', kva: initial?.kva || (opts.kvaOpts[0] || ''),
         engineModel: initial?.engineModel || '', systemAppCode: initial?.systemAppCode || '', emission: initial?.emission || 'CPCB IV+',
     });
-    const [parts, setParts] = useState(initial ? JSON.parse(JSON.stringify(initial.parts)) : [blankPart()]);
+    const makeInitialParts = () => (initial ? JSON.parse(JSON.stringify(initial.parts)) : [blankPart()]);
+    // Add drafts share one slot; edit drafts are keyed per app code.
+    const draftKey = isEdit ? `msm:appDraft:edit:${initial.appCode}` : 'msm:appDraft:new';
+    // Snapshot of the pristine form — we only persist (and only prompt) when the
+    // current form actually differs from this, so blank/no-op drafts never linger.
+    const baseRef = useRef(JSON.stringify({ hdr: makeInitialHdr(), parts: makeInitialParts() }));
+
+    const [hdr, setHdr] = useState(makeInitialHdr);
+    const [parts, setParts] = useState(makeInitialParts);
     const [saving, setSaving] = useState(false);
+    const [pendingDraft, setPendingDraft] = useState(null); // a found draft awaiting Restore/Discard
+
+    // On open, offer to restore a saved draft (only if it differs from the default form).
+    useEffect(() => {
+        try {
+            const raw = localStorage.getItem(draftKey);
+            if (!raw) return;
+            const saved = JSON.parse(raw);
+            const same = JSON.stringify({ hdr: saved.hdr, parts: saved.parts }) === baseRef.current;
+            if (same) localStorage.removeItem(draftKey); // stale no-op draft
+            else setPendingDraft(saved);
+        } catch { try { localStorage.removeItem(draftKey); } catch { /* ignore */ } }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Auto-save as the user types (debounced). Only writes when the form differs
+    // from the pristine baseline, so it never clobbers a pending draft on mount
+    // and never stores an empty/unchanged form.
+    useEffect(() => {
+        const cur = JSON.stringify({ hdr, parts });
+        if (cur === baseRef.current) return;
+        const t = setTimeout(() => {
+            try { localStorage.setItem(draftKey, JSON.stringify({ hdr, parts, savedAt: Date.now() })); } catch { /* quota/full — ignore */ }
+        }, 400);
+        return () => clearTimeout(t);
+    }, [hdr, parts, draftKey]);
+
+    const restoreDraft = () => {
+        const d = pendingDraft;
+        if (d?.hdr) setHdr((h) => ({ ...h, ...d.hdr }));
+        if (Array.isArray(d?.parts) && d.parts.length) setParts(d.parts.map((p) => ({ ...blankPart(), ...p })));
+        setPendingDraft(null);
+    };
+    const discardDraft = () => {
+        try { localStorage.removeItem(draftKey); } catch { /* ignore */ }
+        setPendingDraft(null);
+    };
 
     const setPart = (i, k, v) => setParts((arr) => arr.map((p, j) => (j === i ? { ...p, [k]: v } : p)));
     const sel = 'w-full rounded-md border border-gray-200 px-1.5 py-1 text-[12px] bg-white outline-none focus:ring-1 focus:ring-indigo-200';
@@ -473,6 +523,7 @@ const AppFormModal = ({ initial, opts, existing, onClose, onSave }) => {
         setSaving(true);
         try {
             await onSave(rec);
+            try { localStorage.removeItem(draftKey); } catch { /* ignore */ }
             onClose();
         } catch (e) {
             toast.error(e.message || 'Could not save');
@@ -488,6 +539,21 @@ const AppFormModal = ({ initial, opts, existing, onClose, onSave }) => {
                     <button onClick={onClose} disabled={saving} className="ml-auto rounded-lg p-1 text-gray-400 hover:bg-gray-100 disabled:opacity-50"><XMarkIcon className="h-5 w-5" /></button>
                 </div>
                 <div className="px-5 py-4 max-h-[64vh] overflow-y-auto">
+                    {pendingDraft && (
+                        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                            <span className="flex-1 text-[12px] font-medium text-amber-900">
+                                You have an unsaved draft{pendingDraft.savedAt ? ` from ${new Date(pendingDraft.savedAt).toLocaleString()}` : ''}. Restore it?
+                            </span>
+                            <button type="button" onClick={restoreDraft}
+                                className="rounded-md bg-amber-600 px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-amber-700 transition">
+                                Restore
+                            </button>
+                            <button type="button" onClick={discardDraft}
+                                className="rounded-md border border-amber-300 bg-white px-2.5 py-1 text-[12px] font-medium text-amber-800 hover:bg-amber-100 transition">
+                                Discard
+                            </button>
+                        </div>
+                    )}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div><label className={label}>App Code <span className="text-red-500">*</span></label>
                             <input className={`${field} font-mono ${isEdit ? 'opacity-60' : ''}`} value={hdr.appCode} disabled={isEdit}

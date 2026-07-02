@@ -180,3 +180,18 @@ CREATE INDEX idx_sales_bm_date ON sales_bm(date);
 CREATE NONCLUSTERED INDEX IX_cust_edit_hist_deleted_customer ON dbo.customer_edit_history (is_deleted, customer_id);      -- distinct edited customers
 CREATE NONCLUSTERED INDEX IX_cust_edit_hist_customer_edited  ON dbo.customer_edit_history (customer_id, last_edited_at DESC); -- per-customer history, newest first
 CREATE NONCLUSTERED INDEX IX_cust_edit_hist_created          ON dbo.customer_edit_history (created_at);                    -- 10-day report
+
+
+
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_mom_meetings_branch_date'
+                 AND object_id = OBJECT_ID('dbo.mom_meetings'))
+    CREATE INDEX IX_mom_meetings_branch_date
+        ON dbo.mom_meetings (branch_code, meeting_date DESC);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_mom_rows_track_meeting'
+                 AND object_id = OBJECT_ID('dbo.mom_rows'))
+    CREATE INDEX IX_mom_rows_track_meeting
+        ON dbo.mom_rows (track_id, meeting_id);

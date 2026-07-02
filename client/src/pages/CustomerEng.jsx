@@ -677,6 +677,16 @@ const CustomerEng = () => {
         fetchEngagementData();
     }, [fromDate, toDate]);
 
+    // Load the drive catalog ONCE on mount, in parallel with the engagement data.
+    // The catalog carries each drive's id/color, which the campaign filter uses to
+    // order chips LATEST → OLDEST. Fetching it up-front (instead of after the
+    // engagement call returns) means the correct order is ready immediately — no
+    // initial mis-order that snaps into place a moment later.
+    useEffect(() => {
+        fetchCampaignColors();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     // Load this customer's letter history when the details view opens
     useEffect(() => {
         if (showCustomerDetails && customerDetails?.instance_id) {
@@ -1532,6 +1542,19 @@ const CustomerEng = () => {
         [campaignShortNameMap]
     );
 
+    // Active drives ordered LATEST → OLDEST (highest drive id = newest).
+    // Memoized so the filter chips sort only when the data actually changes
+    // (not on every render), and so the order settles the instant the drive
+    // catalog — which carries the ids — arrives.
+    const orderedActiveCampaigns = useMemo(
+        () => [...activeCampaigns].sort((a, b) => {
+            const idA = campaignShortNameMap[a]?.id ?? -Infinity;
+            const idB = campaignShortNameMap[b]?.id ?? -Infinity;
+            return idB - idA;
+        }),
+        [activeCampaigns, campaignShortNameMap]
+    );
+
     const fetchEngagementData = async () => {
         setLoading(true);
         const loadingToast = toast.loading('Loading engagement data...');
@@ -1567,8 +1590,8 @@ const CustomerEng = () => {
             setPage(1);
 
             toast.dismiss(loadingToast);
-
-            fetchCampaignColors();
+            // Drive catalog (colors + ids for ordering) is loaded once on mount in
+            // parallel — see the dedicated mount effect — so we don't refetch it here.
         } catch (err) {
             toast.dismiss(loadingToast);
             toast.error(err.message || 'Failed to load engagement data');
@@ -6729,13 +6752,9 @@ ${f.start_para}`;
                                     >
                                         {(() => {
                                             // Order LATEST → OLDEST by drive id (highest id = newest).
-                                            // If activeCampaigns already arrives oldest→latest, replace this
-                                            // whole sort with: const ordered = [...activeCampaigns].reverse();
-                                            const ordered = [...activeCampaigns].sort((a, b) => {
-                                                const idA = campaignShortNameMap[a]?.id ?? -Infinity;
-                                                const idB = campaignShortNameMap[b]?.id ?? -Infinity;
-                                                return idB - idA;
-                                            });
+                                            // Computed once via useMemo (orderedActiveCampaigns) so the chips
+                                            // don't re-sort on every render and settle instantly on load.
+                                            const ordered = orderedActiveCampaigns;
 
                                             // Chunk into vertical pairs: [latest, 2nd], [3rd, 4th], ...
                                             const pairs = [];
@@ -6754,7 +6773,7 @@ ${f.start_para}`;
                                                         key={campaign}
                                                         onClick={() => handleCampaignToggle(campaign)}
                                                         title={campaign}
-                                                        className={`px-2 py-0.5 rounded-lg text-sm font-bold text-left break-words leading-tight max-w-full ${selectedCampaigns.includes(campaign)
+                                                        className={`self-start px-2 py-0.5 rounded-lg text-sm font-bold text-left break-words leading-tight max-w-full ${selectedCampaigns.includes(campaign)
                                                             ? 'text-white'
                                                             : 'text-gray-700 hover:bg-gray-50'
                                                             }`}
@@ -6882,7 +6901,30 @@ ${f.start_para}`;
                                         All - {notConnectedCount + rejectedCount + wipCount + rescheduledCount + completedCountFromAPI}                                    </button>
 
                                     {/* Divider sits ONLY above these status buttons, not over the All */}
+                                    {/* Order: WIP → FR → NC → R → C */}
                                     <div className="flex items-center gap-0.5 border-t border-gray-300 pt-0.5">
+                                        <button
+                                            onClick={() => setSelectedStatus('WIP')}
+                                            title="Work in Progress — drives with 'WIP' status (respects drive & branch filters)"
+                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'WIP'
+                                                ? "bg-[#2f3192] text-white shadow-sm"
+                                                : "text-black hover:bg-gray-50"
+                                                }`}
+                                        >
+                                            WIP · {wipCount}
+                                        </button>
+
+                                        <button
+                                            onClick={() => setSelectedStatus('FR')}
+                                            title="Follow-up Reschedule — drives with 'Rescheduled' status (respects drive & branch filters)"
+                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'FR'
+                                                ? "bg-[#2f3192] text-white shadow-sm"
+                                                : "text-black hover:bg-gray-50"
+                                                }`}
+                                        >
+                                            FR · {rescheduledCount}
+                                        </button>
+
                                         <button
                                             onClick={() => setSelectedStatus('NC')}
                                             title="Not connected — drives with 'Not Connected' status (respects drive & branch filters)"
@@ -6918,28 +6960,6 @@ ${f.start_para}`;
                                         >
                                             C · {completedCountFromAPI}
                                         </span>
-
-                                        <button
-                                            onClick={() => setSelectedStatus('WIP')}
-                                            title="Work in Progress — drives with 'WIP' status (respects drive & branch filters)"
-                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'WIP'
-                                                ? "bg-[#2f3192] text-white shadow-sm"
-                                                : "text-black hover:bg-gray-50"
-                                                }`}
-                                        >
-                                            WIP · {wipCount}
-                                        </button>
-
-                                        <button
-                                            onClick={() => setSelectedStatus('FR')}
-                                            title="Follow-up Reschedule — drives with 'Rescheduled' status (respects drive & branch filters)"
-                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'FR'
-                                                ? "bg-[#2f3192] text-white shadow-sm"
-                                                : "text-black hover:bg-gray-50"
-                                                }`}
-                                        >
-                                            FR · {rescheduledCount}
-                                        </button>
                                     </div>
                                 </div>
                             </div>

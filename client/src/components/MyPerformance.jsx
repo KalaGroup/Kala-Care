@@ -414,7 +414,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     // still uses the full `displayedFollowups` list).
     const FOLLOWUP_RENDER_STEP = 150;
     const [followupRenderLimit, setFollowupRenderLimit] = useState(FOLLOWUP_RENDER_STEP);
-    const [followupView, setFollowupView] = useState('all'); // All-Follow-ups view: 'all' | 'unique'
+    const [followupView, setFollowupView] = useState('all'); // All-Follow-ups view: 'all' | 'unique' | 'unique_drive'
     const [followupSearchTerm, setFollowupSearchTerm] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
@@ -1514,7 +1514,10 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         quotationFollowupIds, cspQuotationFollowupIds, isCspFollowup]);
 
     const displayedFollowups = useMemo(() => {
+        // 'unique'       → latest row per unique Instance ID (drive ignored)
+        // 'unique_drive' → latest row per unique Drive + Instance ID combination
         if (followupView === 'unique') return getLatestFollowupsPerInstance(visibleFollowups);
+        if (followupView === 'unique_drive') return getLatestFollowupsPerInstanceCampaign(visibleFollowups);
         return visibleFollowups;
     }, [followupView, visibleFollowups]);
 
@@ -1692,19 +1695,19 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     }, [performance?.followup_type_breakdown]);
 
     const fetchExportPermission = useCallback(async () => {
-        if (!userData || !userData.user_id) return;
+        const uid = userData?.user_id || userData?.id;
+        if (!uid) return;
         try {
-            const payload = {
-                user_id: userData.user_id || userData.id,
-                name: userData.name,
-                role: userData.role,
-                branch: userData.branch
-            };
-            const response = await axios.post(
-                `${API_BASE_URL}/performance/check-export-permission`,
-                payload
+            // Use the SAME endpoint the Customer Engagement pages use — a simple
+            // GET by user_id. This route works on both local and hosted backends,
+            // whereas the older POST /performance/check-export-permission route
+            // was not reliably available on the hosted server, so the export
+            // button never appeared there. Switching to this GET fixes that.
+            const response = await axios.get(
+                `${API_BASE_URL}/v1/engagement/check-export-permission`,
+                { params: { user_id: uid } }
             );
-            setCanExport(response.data?.can_export || false);
+            setCanExport(Boolean(response.data?.can_export));
         } catch (error) {
             console.error('Error fetching export permission:', error);
             setCanExport(false);
@@ -3475,17 +3478,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                             : 'All Follow-ups'} by {userData?.name || 'User'}
                                     </h3>
                                     <p className="text-[11px] text-white/80 mt-0.5">
-                                        {getDateRangeText()} • Total: {(followupView !== 'all' || statusLocked)
-                                            ? displayedFollowups.length
-                                            : quotationFilterActive
-                                                ? quotationCount
-                                                : quotationSentFilterActive
-                                                    ? quotationSentCount
-                                                    : cspQuotationFilterActive
-                                                        ? cspQuotationCount
-                                                        : cspQuotationSentFilterActive
-                                                            ? cspQuotationSentCount
-                                                            : mergedFollowups.length} {followupView === 'unique' ? 'unique ' : ''}follow-up(s)
+                                        {getDateRangeText()} • Total: {displayedFollowups.length} {followupView === 'unique' ? 'unique ' : followupView === 'unique_drive' ? 'unique drive ' : ''}follow-up(s)
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -3550,7 +3543,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         </div>
                                     )}
 
-                                    {/* View dropdown — All / Unique (latest per Instance ID) / NC (Not Connected remark) */}
+                                    {/* View dropdown — All / Unique (latest per Instance ID) / Unique with Drive (latest per Drive + Instance ID) */}
                                     <div className="flex items-center gap-1">
                                         <label className="text-[11px] text-white whitespace-nowrap">
                                             View{followupView !== 'all' ? ` (${displayedFollowups.length})` : ''}:
@@ -3559,11 +3552,12 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                             <select
                                                 value={followupView}
                                                 onChange={(e) => setFollowupView(e.target.value)}
-                                                title="All • Unique (latest per Instance ID) • NC (Not Connected)"
+                                                title="All • Unique (latest per Instance ID) • Unique with Drive (latest per Drive + Instance ID)"
                                                 className="border border-gray-300 rounded-md pl-2 pr-6 py-1 text-[11px] bg-white text-black appearance-none cursor-pointer focus:outline-none"
                                             >
                                                 <option value="all">All</option>
                                                 <option value="unique">Unique</option>
+                                                <option value="unique_drive">Unique with Drive</option>
                                             </select>
                                             <svg className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-black pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -3579,25 +3573,6 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         onChange={(e) => setFollowupSearchTerm(e.target.value)}
                                         className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-64 bg-white focus:outline-none"
                                     />
-
-                                    {/* Clear filters — sits right after the search bar */}
-                                    {(createdFromDate || createdToDate || statusFilter !== 'all' || followupSearchTerm) && (
-                                        <button
-                                            onClick={() => {
-                                                setCreatedFromDate('');
-                                                setCreatedToDate('');
-                                                setStatusFilter('all');
-                                                setFollowupSearchTerm('');
-                                            }}
-                                            className="px-2 py-1 text-[11px] text-white border border-white/40 rounded-md bg-white/10 hover:bg-white/20 flex items-center gap-1"
-                                            title="Clear filters"
-                                        >
-                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                            </svg>
-                                            Clear
-                                        </button>
-                                    )}
 
                                     {/* Export — permission-gated, exports only the filtered rows */}
                                     {canExport && (

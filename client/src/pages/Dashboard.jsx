@@ -2881,6 +2881,16 @@ const Dashboard = () => {
     // Backwards compat shim
     const getOverallStats = useCallback(() => overallStats, [overallStats]);
 
+    // Format a Date as MM/DD/YYYY (zero-padded) so the calendar filter always
+    // shows dates in US month/day/year order regardless of the browser locale.
+    const formatMMDDYYYY = (date) => {
+        if (!(date instanceof Date) || isNaN(date)) return '';
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
+        const dd = String(date.getDate()).padStart(2, '0');
+        const yyyy = date.getFullYear();
+        return `${mm}/${dd}/${yyyy}`;
+    };
+
     const getTimePeriodDisplayText = () => {
         switch (timePeriod) {
             case 'month': return 'Last 30 Days';
@@ -2889,7 +2899,7 @@ const Dashboard = () => {
             case 'year': return 'Last 12 Months';
             case 'custom':
                 if (customStartDate && customEndDate) {
-                    return `${customStartDate.toLocaleDateString()} - ${customEndDate.toLocaleDateString()}`;
+                    return `${formatMMDDYYYY(customStartDate)} - ${formatMMDDYYYY(customEndDate)}`;
                 }
                 return 'Custom Range';
             default: return 'Calendar';
@@ -2898,25 +2908,25 @@ const Dashboard = () => {
 
     const getDateRangeText = () => {
         if (timePeriod === 'custom' && customStartDate && customEndDate) {
-            return `${customStartDate.toLocaleDateString()} to ${customEndDate.toLocaleDateString()}`;
+            return `${formatMMDDYYYY(customStartDate)} to ${formatMMDDYYYY(customEndDate)}`;
         }
 
         const now = new Date();
-        const endDate = now.toLocaleDateString();
+        const endDate = formatMMDDYYYY(now);
         let startDate;
 
         switch (timePeriod) {
             case 'month':
-                startDate = new Date(now.setMonth(now.getMonth() - 1)).toLocaleDateString();
+                startDate = formatMMDDYYYY(new Date(now.setMonth(now.getMonth() - 1)));
                 return `${startDate} - ${endDate}`;
             case '3months':
-                startDate = new Date(now.setMonth(now.getMonth() - 3)).toLocaleDateString();
+                startDate = formatMMDDYYYY(new Date(now.setMonth(now.getMonth() - 3)));
                 return `${startDate} - ${endDate}`;
             case '6months':
-                startDate = new Date(now.setMonth(now.getMonth() - 6)).toLocaleDateString();
+                startDate = formatMMDDYYYY(new Date(now.setMonth(now.getMonth() - 6)));
                 return `${startDate} - ${endDate}`;
             case 'year':
-                startDate = new Date(now.setFullYear(now.getFullYear() - 1)).toLocaleDateString();
+                startDate = formatMMDDYYYY(new Date(now.setFullYear(now.getFullYear() - 1)));
                 return `${startDate} - ${endDate}`;
             default:
                 return 'Calendar';
@@ -3249,13 +3259,13 @@ const Dashboard = () => {
                                                             <div className="flex-1">
                                                                 <label className="block text-[11px] text-gray-500 mb-0.5 text-center">Start Date</label>
                                                                 <div className="px-1.5 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-center truncate">
-                                                                    {customStartDate ? customStartDate.toLocaleDateString() : 'Not selected'}
+                                                                    {customStartDate ? formatMMDDYYYY(customStartDate) : 'Not selected'}
                                                                 </div>
                                                             </div>
                                                             <div className="flex-1">
                                                                 <label className="block text-[11px] text-gray-500 mb-0.5 text-center">End Date</label>
                                                                 <div className="px-1.5 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-center truncate">
-                                                                    {customEndDate ? customEndDate.toLocaleDateString() : 'Not selected'}
+                                                                    {customEndDate ? formatMMDDYYYY(customEndDate) : 'Not selected'}
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -3274,7 +3284,7 @@ const Dashboard = () => {
                                                                 inline
                                                                 maxDate={new Date()}
                                                                 calendarClassName="custom-calendar"
-                                                                dateFormat="dd/MM/yyyy"
+                                                                dateFormat="MM/dd/yyyy"
                                                             />
                                                         </div>
 

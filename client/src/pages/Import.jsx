@@ -601,72 +601,67 @@ const Import = () => {
                     {/* Card Body */}
                     <div className="p-3 sm:p-4">
                         <div className="space-y-3 sm:space-y-4">
-                            {/* File Type Selection */}
-                            <div>
-                                <label className="block text-[11px] sm:text-xs font-semibold text-black mb-1 sm:mb-1.5">
-                                    File Type <span className="text-red-500">*</span>
-                                </label>
-                                <div className="relative max-w-md">
-                                    <select
-                                        value={selectedFileType}
-                                        onChange={handleFileTypeChange}
-                                        className="w-full appearance-none border rounded-lg shadow-sm px-2 sm:px-3 py-1.5 sm:py-2 pr-7 sm:pr-8 text-[11px] sm:text-xs focus:ring-2 transition-all bg-white text-black"
-                                        style={{
-                                            borderColor: selectedFileType ? '#2f3192' : '#D1D5DB',
-                                            '--tw-ring-color': '#2f3192'
-                                        }}
-                                        onFocus={(e) => e.target.style.borderColor = '#2f3192'}
-                                        onBlur={(e) => e.target.style.borderColor = selectedFileType ? '#2f3192' : '#D1D5DB'}
-                                        disabled={uploading}
-                                    >
-                                        <option value="" disabled>Select a file type</option>
-                                        {FILE_TYPES.map(type => (
-                                            <option key={type} value={type}>{type}</option>
-                                        ))}
-                                    </select>
-                                    <ChevronDownIcon
-                                        className="absolute right-2 sm:right-2.5 top-1/2 transform -translate-y-1/2 h-3 w-3 sm:h-3.5 sm:w-3.5 pointer-events-none"
-                                        style={{ color: selectedFileType ? '#2f3192' : '#9CA3AF' }}
-                                    />
+                            {/* File Type Selection + Last Updated Info in one row */}
+                            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-4">
+                                {/* File Type Selection */}
+                                <div className="w-full md:w-auto">
+                                    <label className="block text-[11px] sm:text-xs font-semibold text-black mb-1 sm:mb-1.5">
+                                        File Type <span className="text-red-500">*</span>
+                                    </label>
+                                    <div className="relative w-full md:w-80">
+                                        <select
+                                            value={selectedFileType}
+                                            onChange={handleFileTypeChange}
+                                            className="w-full appearance-none border rounded-lg shadow-sm px-2 sm:px-3 py-1.5 sm:py-2 pr-7 sm:pr-8 text-[11px] sm:text-xs focus:ring-2 transition-all bg-white text-black"
+                                            style={{
+                                                borderColor: selectedFileType ? '#2f3192' : '#D1D5DB',
+                                                '--tw-ring-color': '#2f3192'
+                                            }}
+                                            onFocus={(e) => e.target.style.borderColor = '#2f3192'}
+                                            onBlur={(e) => e.target.style.borderColor = selectedFileType ? '#2f3192' : '#D1D5DB'}
+                                            disabled={uploading}
+                                        >
+                                            <option value="" disabled>Select a file type</option>
+                                            {FILE_TYPES.map(type => (
+                                                <option key={type} value={type}>{type}</option>
+                                            ))}
+                                        </select>
+                                        <ChevronDownIcon
+                                            className="absolute right-2 sm:right-2.5 top-1/2 transform -translate-y-1/2 h-3 w-3 sm:h-3.5 sm:w-3.5 pointer-events-none"
+                                            style={{ color: selectedFileType ? '#2f3192' : '#9CA3AF' }}
+                                        />
+                                    </div>
+                                    <p className="mt-0.5 text-[10px] text-black">Choose the type of data you're importing</p>
                                 </div>
-                                <p className="mt-0.5 text-[10px] text-black">Choose the type of data you're importing</p>
+
+                                {/* Last Updated Info — newest updated_at for the selected file type */}
+                                {selectedFileType && (
+                                    <div className="flex md:justify-end shrink-0">
+                                        {lastUpdatedLoading ? (
+                                            <span className="text-[10px] sm:text-xs text-black flex items-center gap-1.5">
+                                                <ArrowPathIcon className="animate-spin h-3 w-3" style={{ color: themeColor }} />
+                                                Checking last update...
+                                            </span>
+                                        ) : lastUpdatedInfo && lastUpdatedInfo.last_updated ? (
+                                            <div className="inline-flex items-center gap-3 whitespace-nowrap px-3 py-2 border rounded-md bg-gray-50">
+                                                <ClockIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" style={{ color: themeColor }} />
+                                                <span className="text-[10px] sm:text-xs text-black">
+                                                    <span className="font-semibold">Last data update:</span>{" "}
+                                                    {formatDateTime(lastUpdatedInfo.last_updated)}
+                                                </span>
+                                                <span className="text-[10px] sm:text-xs text-black">
+                                                    <span className="font-semibold">Total records:</span>{" "}
+                                                    {lastUpdatedInfo.total_records.toLocaleString("en-IN")}
+                                                </span>
+                                            </div>
+                                        ) : (
+                                            <span className="text-[10px] sm:text-xs text-black">
+                                                No data has been uploaded yet for this file type.
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
                             </div>
-
-                            {/* Last Updated Info — newest updated_at for the selected file type */}
-                            {selectedFileType && (
-                                <div className="flex justify-end">
-                                    {lastUpdatedLoading ? (
-                                        <span className="text-[10px] sm:text-xs text-black flex items-center gap-1.5">
-                                            <ArrowPathIcon
-                                                className="animate-spin h-3 w-3"
-                                                style={{ color: themeColor }}
-                                            />
-                                            Checking last update...
-                                        </span>
-                                    ) : lastUpdatedInfo && lastUpdatedInfo.last_updated ? (
-                                        <div className="inline-flex items-center gap-3 whitespace-nowrap px-3 py-2 border rounded-md bg-gray-50">
-                                            <ClockIcon
-                                                className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0"
-                                                style={{ color: themeColor }}
-                                            />
-
-                                            <span className="text-[10px] sm:text-xs text-black">
-                                                <span className="font-semibold">Last data update:</span>{" "}
-                                                {formatDateTime(lastUpdatedInfo.last_updated)}
-                                            </span>
-
-                                            <span className="text-[10px] sm:text-xs text-black">
-                                                <span className="font-semibold">Total records:</span>{" "}
-                                                {lastUpdatedInfo.total_records.toLocaleString("en-IN")}
-                                            </span>
-                                        </div>
-                                    ) : (
-                                        <span className="text-[10px] sm:text-xs text-black">
-                                            No data has been uploaded yet for this file type.
-                                        </span>
-                                    )}
-                                </div>
-                            )}
 
                             {/* File Format Display Section - Shows expected columns for selected file type */}
                             {selectedFileType && FILE_TYPE_COLUMNS[selectedFileType] && (
