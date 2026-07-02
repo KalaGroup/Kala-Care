@@ -1,24 +1,58 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 
 import Navbar from './components/Navbar';
-import Customer from './pages/Customer';
-import Import from './pages/Import';
-import Campaign from './pages/Campaign';
-import CustomerEng from './pages/CustomerEng';
+// Login is eager: it is the first screen an unauthenticated user sees, so we
+// don't want a lazy-chunk round-trip before it can render.
 import Login from './pages/Login';
-import Profile from './pages/Profile';
-import Dashboard from './pages/Dashboard';
-import CustomerEng2 from './pages/CustomerEng2';
-import Expense from './pages/Expense';
-import ExDashboard from './pages/ExDashboard';
-import MOMTracking from './pages/MOMTracking';
-import SalseANDFinance from './pages/SalseANDFinance';
-import KnowledgeBook from './pages/KnowledgeBook';
+
+// Route-level code-splitting: each page (and its heavy chart/xlsx/plotly libs)
+// is bundled into its own chunk that loads only when that route is visited.
+// This keeps the initial bundle small so the app paints fast instead of
+// waiting for every page's code to download up front.
+const Customer = lazy(() => import('./pages/Customer'));
+const Import = lazy(() => import('./pages/Import'));
+const Campaign = lazy(() => import('./pages/Campaign'));
+const CustomerEng = lazy(() => import('./pages/CustomerEng'));
+const Profile = lazy(() => import('./pages/Profile'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const CustomerEng2 = lazy(() => import('./pages/CustomerEng2'));
+const Expense = lazy(() => import('./pages/Expense'));
+const ExDashboard = lazy(() => import('./pages/ExDashboard'));
+const MOMTracking = lazy(() => import('./pages/MOMTracking'));
+const SalseANDFinance = lazy(() => import('./pages/SalseANDFinance'));
+const KnowledgeBook = lazy(() => import('./pages/KnowledgeBook'));
 //added by nik
-import MaintenanceSchedule from './pages/MaintenanceSchedule';
-import MaintenanceReports from './pages/MaintenanceReports';
+const MaintenanceSchedule = lazy(() => import('./pages/MaintenanceSchedule'));
+const MaintenanceReports = lazy(() => import('./pages/MaintenanceReports'));
+
+// Lightweight fallback shown while a route chunk is being fetched.
+function RouteFallback() {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '60vh',
+        width: '100%',
+      }}
+    >
+      <div
+        style={{
+          width: 40,
+          height: 40,
+          border: '4px solid #e5e7eb',
+          borderTopColor: '#3b82f6',
+          borderRadius: '50%',
+          animation: 'kc-route-spin 0.8s linear infinite',
+        }}
+      />
+      <style>{'@keyframes kc-route-spin{to{transform:rotate(360deg)}}'}</style>
+    </div>
+  );
+}
 
 // Helper function to check if user is any type of admin
 const isAdmin = (role) => {
@@ -121,6 +155,7 @@ function Layout() {
   }, []);
 
   const routes = (
+    <Suspense fallback={<RouteFallback />}>
     <Routes>
       {/* Public Routes */}
       <Route path="/login" element={
@@ -251,6 +286,7 @@ function Layout() {
         )
       } />
     </Routes>
+    </Suspense>
   );
 
   return hideNavbar ? routes : <Navbar>{routes}</Navbar>;

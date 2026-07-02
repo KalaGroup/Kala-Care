@@ -101,7 +101,10 @@ def get_branch_monthly(db: Session, branch_code: str, year: int) -> List[Dict[st
     start = datetime(year, 1, 1)
     end = datetime(year + 1, 1, 1)
 
-    records = db.query(TADAHistory).filter(
+    records = db.query(
+        TADAHistory.moved_at,
+        TADAHistory.total_amount,
+    ).filter(
         TADAHistory.sd_branch_code == branch_code,
         TADAHistory.verification_status == 'Verified',
         TADAHistory.moved_at >= start,
@@ -150,7 +153,12 @@ def get_engineers_verified(
         except Exception:
             dt = None
 
-    records = db.query(TADAHistory).filter(
+    records = db.query(
+        TADAHistory.sr_reach_at_site_datetime,
+        TADAHistory.service_engineer_name,
+        TADAHistory.service_engineer_uid,
+        TADAHistory.total_amount,
+    ).filter(
         TADAHistory.verification_status == 'Verified',
         TADAHistory.sd_branch_code == branch_code,
     ).all()
@@ -205,7 +213,14 @@ def get_engineers_unverified(db: Session, branch_code: str) -> List[Dict[str, An
     km_rates = _get_branch_km_rates(db)
     rate = km_rates.get(branch_code) or km_rates.get('HO')
 
-    rows = db.query(TADAImport).filter(
+    rows = db.query(
+        TADAImport.service_engineer_name,
+        TADAImport.service_engineer_uid,
+        TADAImport.total_amount,
+        TADAImport.ho_corrected_km,
+        TADAImport.branch_verified_km,
+        TADAImport.two_way_km,
+    ).filter(
         (TADAImport.verification_status != 'Verified') |
         (TADAImport.verification_status.is_(None)),
         TADAImport.sd_branch_code == branch_code,
@@ -313,7 +328,10 @@ def get_branch_office_monthly(db: Session, branch_code: str, year: int) -> List[
     start = datetime(year, 1, 1)
     end   = datetime(year + 1, 1, 1)
 
-    records = db.query(OfficeExpenseHistory).filter(
+    records = db.query(
+        OfficeExpenseHistory.moved_at,
+        OfficeExpenseHistory.amount,
+    ).filter(
         OfficeExpenseHistory.branch_code == branch_code,
         OfficeExpenseHistory.moved_at >= start,
         OfficeExpenseHistory.moved_at < end,
@@ -355,7 +373,10 @@ def get_branch_office_by_category(
         try: dt = datetime.strptime(date_to, '%Y-%m-%d') + timedelta(days=1)
         except Exception: dt = None
 
-    q = db.query(OfficeExpenseHistory).filter(
+    q = db.query(
+        OfficeExpenseHistory.expenses_head,
+        OfficeExpenseHistory.amount,
+    ).filter(
         OfficeExpenseHistory.branch_code == branch_code,
     )
     if df: q = q.filter(OfficeExpenseHistory.paid_date >= df)
@@ -446,7 +467,10 @@ def get_branch_vendor_monthly(db: Session, branch_code: str, year: int) -> List[
     start = datetime(year, 1, 1)
     end   = datetime(year + 1, 1, 1)
 
-    records = db.query(LocalVendorBillHistory).filter(
+    records = db.query(
+        LocalVendorBillHistory.moved_at,
+        LocalVendorBillHistory.payment_amount,
+    ).filter(
         LocalVendorBillHistory.branch_code == branch_code,
         LocalVendorBillHistory.moved_at >= start,
         LocalVendorBillHistory.moved_at < end,
@@ -488,7 +512,10 @@ def get_branch_vendor_by_vendor(
         try: dt = datetime.strptime(date_to, '%Y-%m-%d') + timedelta(days=1)
         except Exception: dt = None
 
-    q = db.query(LocalVendorBillHistory).filter(
+    q = db.query(
+        LocalVendorBillHistory.vendor_name,
+        LocalVendorBillHistory.payment_amount,
+    ).filter(
         LocalVendorBillHistory.branch_code == branch_code,
     )
     if df: q = q.filter(LocalVendorBillHistory.invoice_date >= df)

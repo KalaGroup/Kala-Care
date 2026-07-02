@@ -147,7 +147,12 @@ def get_all_branches_verified_expense(
         except Exception:
             dt = None
 
-    records = db.query(TADAHistory).filter(
+    # Project only the columns used below (avoids loading every Text/blob column).
+    records = db.query(
+        TADAHistory.sr_reach_at_site_datetime,
+        TADAHistory.sd_branch_code,
+        TADAHistory.total_amount,
+    ).filter(
         TADAHistory.verification_status == 'Verified',
         TADAHistory.sd_branch_code.in_(BRANCH_ORDER),
     ).all()
@@ -208,7 +213,10 @@ def get_branch_monthly_expense(
     start = datetime(year, 1, 1)
     end = datetime(year + 1, 1, 1)
 
-    records = db.query(TADAHistory).filter(
+    records = db.query(
+        TADAHistory.moved_at,
+        TADAHistory.total_amount,
+    ).filter(
         TADAHistory.sd_branch_code == branch_code,
         TADAHistory.verification_status == 'Verified',
         TADAHistory.moved_at >= start,
@@ -298,7 +306,7 @@ def get_all_branches_unverified_count(db: Session) -> List[Dict[str, Any]]:
 # ──────────────────────────────────────────────────────────────────
 def get_available_years(db: Session, branch_code: Optional[str] = None) -> List[int]:
     """Distinct years that have verified history records."""
-    q = db.query(TADAHistory).filter(TADAHistory.verification_status == 'Verified')
+    q = db.query(TADAHistory.sr_reach_at_site_datetime).filter(TADAHistory.verification_status == 'Verified')
     if branch_code:
         q = q.filter(TADAHistory.sd_branch_code == branch_code)
 
@@ -361,7 +369,10 @@ def get_all_branches_office_verified_expense(
         except Exception:
             dt = None
 
-    q = db.query(OfficeExpenseHistory).filter(
+    q = db.query(
+        OfficeExpenseHistory.branch_code,
+        OfficeExpenseHistory.amount,
+    ).filter(
         OfficeExpenseHistory.branch_code.in_(BRANCH_ORDER),
     )
     if df:
@@ -411,7 +422,10 @@ def get_branch_monthly_office_expense(
     start = datetime(year, 1, 1)
     end = datetime(year + 1, 1, 1)
 
-    records = db.query(OfficeExpenseHistory).filter(
+    records = db.query(
+        OfficeExpenseHistory.moved_at,
+        OfficeExpenseHistory.amount,
+    ).filter(
         OfficeExpenseHistory.branch_code == branch_code,
         OfficeExpenseHistory.moved_at >= start,
         OfficeExpenseHistory.moved_at < end,
@@ -526,7 +540,10 @@ def get_all_branches_vendor_verified(
         except Exception:
             dt = None
 
-    q = db.query(LocalVendorBillHistory).filter(
+    q = db.query(
+        LocalVendorBillHistory.branch_code,
+        LocalVendorBillHistory.payment_amount,
+    ).filter(
         LocalVendorBillHistory.branch_code.in_(BRANCH_ORDER),
     )
     if df:
@@ -576,7 +593,10 @@ def get_branch_monthly_vendor(
     start = datetime(year, 1, 1)
     end = datetime(year + 1, 1, 1)
 
-    records = db.query(LocalVendorBillHistory).filter(
+    records = db.query(
+        LocalVendorBillHistory.moved_at,
+        LocalVendorBillHistory.payment_amount,
+    ).filter(
         LocalVendorBillHistory.branch_code == branch_code,
         LocalVendorBillHistory.moved_at >= start,
         LocalVendorBillHistory.moved_at < end,

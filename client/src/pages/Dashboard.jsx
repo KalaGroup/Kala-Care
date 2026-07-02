@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+﻿import React, { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
 import 'echarts-gl';
 import {
@@ -15,20 +15,24 @@ import {
     Filler
 } from 'chart.js';
 import { Bar, Pie, Line } from 'react-chartjs-2';
-import MyPerformance from '../components/MyPerformance';
-import CampaignCustomersFollowupModal from '../components/CampaignCustomersFollowupModal';
-import BranchCustomersModal from '../components/BranchCustomersModal';
-import BranchLetterReportModal from '../components/BranchLetterReportModal';
-import OtherFollowupModal from '../components/OtherFollowupModal';
-import EmployeeCampaignProgress from '../components/EmployeeCampaignProgress';
-import EmployeeActivityModal from '../components/EmployeeActivityModal';
-import EmployeeRRModal from '../components/EmployeeRRModal';
+// Heavy sub-views/modals are code-split into their own chunks so they are NOT
+// part of the main Dashboard bundle. MyPerformance is only ever rendered for
+// employees/branch-admins; the modals are mounted-but-closed, so their chunks
+// load in the background (fallback={null}) with no visual change.
+const MyPerformance = lazy(() => import('../components/MyPerformance'));
+const CampaignCustomersFollowupModal = lazy(() => import('../components/CampaignCustomersFollowupModal'));
+const BranchCustomersModal = lazy(() => import('../components/BranchCustomersModal'));
+const BranchLetterReportModal = lazy(() => import('../components/BranchLetterReportModal'));
+const OtherFollowupModal = lazy(() => import('../components/OtherFollowupModal'));
+const EmployeeCampaignProgress = lazy(() => import('../components/EmployeeCampaignProgress'));
+const EmployeeActivityModal = lazy(() => import('../components/EmployeeActivityModal'));
+const EmployeeRRModal = lazy(() => import('../components/EmployeeRRModal'));
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
-import EmployeePerformanceModal from '../components/EmployeePerformanceModal';
-import EmployeeTime from '../components/EmployeeTime';
+const EmployeePerformanceModal = lazy(() => import('../components/EmployeePerformanceModal'));
+const EmployeeTime = lazy(() => import('../components/EmployeeTime'));
 
 // Register ChartJS components
 ChartJS.register(
@@ -3971,15 +3975,17 @@ const Dashboard = () => {
 
                 {/* My Performance Tab (for Branch Admin and Employee) */}
                 {activeTab === 'overall' && !(isMasterAdmin || isITAdmin) && (
-                    <MyPerformance
-                        userData={userData}
-                        timePeriod={timePeriod}
-                        customStartDate={customStartDate}
-                        customEndDate={customEndDate}
-                        isBranchAdmin={isBranchAdmin}
-                        isMasterAdmin={isMasterAdmin}
-                        isITAdmin={isITAdmin}
-                    />
+                    <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: '#6b7280' }}>Loading…</div>}>
+                        <MyPerformance
+                            userData={userData}
+                            timePeriod={timePeriod}
+                            customStartDate={customStartDate}
+                            customEndDate={customEndDate}
+                            isBranchAdmin={isBranchAdmin}
+                            isMasterAdmin={isMasterAdmin}
+                            isITAdmin={isITAdmin}
+                        />
+                    </Suspense>
                 )}
 
                 {/* Branch Overview Tab */}
@@ -6129,6 +6135,7 @@ const Dashboard = () => {
                 )}
             </div>
 
+            <Suspense fallback={null}>
             <CampaignCustomersFollowupModal
                 isOpen={showCustomersModal || showAllCampaignReport}
                 onClose={() => {
@@ -6230,6 +6237,7 @@ const Dashboard = () => {
                 onClose={() => setShowEmployeeTimeModal(false)}
                 userData={userData}
             />
+            </Suspense>
         </div>
     );
 };

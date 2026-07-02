@@ -1,7 +1,7 @@
 from datetime import timezone
 
 from fastapi import HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.maintenance_model import (
     MaintenanceAppCode, MaintenancePart, MaintenanceService, MaintenanceActivity,
@@ -80,7 +80,16 @@ def _get(db: Session, app_code: str) -> MaintenanceAppCode:
 # ---------------- APP CODES ---------------- #
 
 def list_apps(db: Session):
-    rows = db.query(MaintenanceAppCode).order_by(MaintenanceAppCode.app_code).all()
+    # selectinload eager-loads ALL parts in ONE extra query (parts are ordered by
+    # sort_order via the relationship) instead of the N+1 that lazy access caused
+    # — one query per app code. This is the main speed-up for the Master, Service
+    # Selection and Report screens, which all call this endpoint.
+    rows = (
+        db.query(MaintenanceAppCode)
+        .options(selectinload(MaintenanceAppCode.parts))
+        .order_by(MaintenanceAppCode.app_code)
+        .all()
+    )
     return [serialize_app(a) for a in rows]
 
 
@@ -137,9 +146,12 @@ def import_apps(db: Session, items: list):
         code = (a.get("appCode") or "").strip()
         if not code:
             continue
-        existing = db.query(MaintenanceAppCode).filter(MaintenanceAppCode.app_code == code).first()
+        existing = db.query(MaintenanceAppCode.id).filter(MaintenanceAppCode.app_code == code).first()
         if existing:
-            db.delete(existing)
+            # Set-based delete of the old code + its parts — never loads the part
+            # rows into memory (matters on a full re-upload of the master file).
+            db.query(MaintenancePart).filter(MaintenancePart.app_code_id == existing.id).delete(synchronize_session=False)
+            db.query(MaintenanceAppCode).filter(MaintenanceAppCode.id == existing.id).delete(synchronize_session=False)
             db.flush()
             replaced.append(code)
         else:

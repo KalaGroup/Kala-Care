@@ -216,20 +216,119 @@ class EditCustomerController:
         """
         Get all customers that have been edited, with their edit info.
         Soft-deleted rows (is_deleted = True) are excluded.
+
+        Batched to avoid the previous N+1 (which ran 3 queries per customer via
+        get_customer_with_edit_info). We now fetch the customers, their full edit
+        history and the latest-editor users in a handful of chunked queries and
+        assemble the SAME per-customer dicts in Python. Output is identical.
         """
         # Only customer_ids that still have at least one non-deleted edit row
-        edited_customer_ids = self.db.query(CustomerEditHistory.customer_id).filter(
-            CustomerEditHistory.is_deleted == False
-        ).distinct().all()
-        edited_customer_ids = [c[0] for c in edited_customer_ids]
-        
-        result = []
+        edited_customer_ids = [
+            c[0] for c in self.db.query(CustomerEditHistory.customer_id).filter(
+                CustomerEditHistory.is_deleted == False
+            ).distinct().all()
+        ]
+        if not edited_customer_ids:
+            return []
+
+        CHUNK = 1000  # SQL Server caps IN() at ~2100 parameters
+
+        # 1) All original customers, by id
+        customers_by_id: Dict[int, Any] = {}
+        for i in range(0, len(edited_customer_ids), CHUNK):
+            chunk = edited_customer_ids[i:i + CHUNK]
+            for c in self.db.query(Customer).filter(Customer.id.in_(chunk)).all():
+                customers_by_id[c.id] = c
+
+        # 2) ALL edit history (deleted + non-deleted) for these customers, newest
+        #    first — grouped per customer (mirrors get_customer_with_edit_info,
+        #    which sorts each customer's history by last_edited_at desc).
+        history_by_customer: Dict[int, List[CustomerEditHistory]] = {}
+        for i in range(0, len(edited_customer_ids), CHUNK):
+            chunk = edited_customer_ids[i:i + CHUNK]
+            rows = self.db.query(CustomerEditHistory).filter(
+                CustomerEditHistory.customer_id.in_(chunk)
+            ).order_by(desc(CustomerEditHistory.last_edited_at)).all()
+            for h in rows:
+                history_by_customer.setdefault(h.customer_id, []).append(h)
+
+        # 3) The latest-editor users, by user_id
+        latest_user_ids = list({
+            hist[0].user_id
+            for hist in history_by_customer.values()
+            if hist and hist[0].user_id
+        })
+        users_by_id: Dict[str, Any] = {}
+        for i in range(0, len(latest_user_ids), CHUNK):
+            chunk = latest_user_ids[i:i + CHUNK]
+            for u in self.db.query(User).filter(User.user_id.in_(chunk)).all():
+                users_by_id[u.user_id] = u
+
+        # 4) Assemble the same dicts get_customer_with_edit_info would return
+        result: List[Dict[str, Any]] = []
         for customer_id in edited_customer_ids:
-            customer_info = self.get_customer_with_edit_info(customer_id)
-            # keep only customers that still have visible history
-            if customer_info and customer_info['edit_history']:
-                result.append(customer_info)
-        
+            customer = customers_by_id.get(customer_id)
+            if not customer:
+                continue
+
+            history = history_by_customer.get(customer_id, [])
+            visible = [h for h in history if not h.is_deleted]
+            if not visible:  # keep only customers that still have visible history
+                continue
+
+            latest_edit = history[0] if history else None
+            last_editor = None
+            if latest_edit:
+                u = users_by_id.get(latest_edit.user_id)
+                if u:
+                    last_editor = {
+                        "user_id": u.user_id,
+                        "name": u.name,
+                        "role": u.role,
+                    }
+
+            result.append({
+                "original_customer": {
+                    "id": customer.id,
+                    "instance_id": customer.instance_id,
+                    "customer_name": customer.customer_name,
+                    "phone_number": customer.phone_number,
+                    "email": customer.email,
+                    "pan_number": customer.pan_number,
+                    "location": customer.location,
+                    "created_at": customer.created_at
+                },
+                "current_edited_data": {
+                    "customer_name": latest_edit.edited_customer_name,
+                    "phone_number": latest_edit.edited_phone_number,
+                    "email": latest_edit.edited_email,
+                    "pan_number": latest_edit.edited_pan_number,
+                    "location": latest_edit.edited_location
+                } if latest_edit else None,
+                "edit_history": [
+                    {
+                        "id": h.id,
+                        "edited_at": h.last_edited_at,
+                        "user_id": h.user_id,
+                        "user_name": h.user_name,
+                        "edit_count": h.edit_count,
+                        "is_done": bool(h.is_done),
+                        "is_deleted": bool(h.is_deleted),
+                        "edited_data": {
+                            "customer_name": h.edited_customer_name,
+                            "phone_number": h.edited_phone_number,
+                            "email": h.edited_email,
+                            "pan_number": h.edited_pan_number,
+                            "location": h.edited_location
+                        }
+                    }
+                    for h in visible
+                ],
+                "last_edited_by": last_editor,
+                "last_edited_at": latest_edit.last_edited_at if latest_edit else None,
+                "total_edits": len(history)
+            })
+
         return result[skip:skip + limit]
     
     def set_edit_history_done(self, history_id: int, is_done: bool) -> Optional[CustomerEditHistory]:

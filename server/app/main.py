@@ -9,6 +9,7 @@ logging.getLogger("asyncio").addFilter(_SuppressConnLost())
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from pathlib import Path
@@ -198,6 +199,13 @@ def startup():
             db.close()
     else:
         print("❌ Database Connection Failed")
+
+# ---------------- COMPRESSION ---------------- #
+# Transparently gzip large JSON responses (e.g. the big performance/followup
+# payloads). Responses smaller than minimum_size are left uncompressed so we
+# don't waste CPU on tiny bodies. This changes nothing about the response
+# content — clients decode it automatically.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # ---------------- CORS ---------------- #
 

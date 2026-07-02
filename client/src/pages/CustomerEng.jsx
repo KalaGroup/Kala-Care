@@ -258,6 +258,10 @@ const CustomerEng = () => {
     const [letterFormatsLoading, setLetterFormatsLoading] = useState(false);
     const [selectedLetterFormat, setSelectedLetterFormat] = useState(null);
     const [letterAttachments, setLetterAttachments] = useState([]);
+    // True while the selected format's real attachment content is being fetched
+    // on demand (the wizard's format list only carries attachment metadata so it
+    // opens fast). Sending is blocked until this finishes.
+    const [letterAttachmentsHydrating, setLetterAttachmentsHydrating] = useState(false);
     const [letterRefNo, setLetterRefNo] = useState('');
     const [letterFy, setLetterFy] = useState('');
     const [letterSeq, setLetterSeq] = useState(1);
@@ -328,6 +332,15 @@ const CustomerEng = () => {
     const [filteredCustomers, setFilteredCustomers] = useState([]);
     const [displayedCustomers, setDisplayedCustomers] = useState([]); // For lazy loading
     const [searchTerm, setSearchTerm] = useState('');
+    // Debounced copy of the search term. The input stays bound to `searchTerm`
+    // (so typing is instant), but the heavy filter/sort effect below keys off
+    // this debounced value — so it runs once the user pauses typing instead of
+    // on every keystroke. Same results, just not janky on large customer lists.
+    const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+    useEffect(() => {
+        const t = setTimeout(() => setDebouncedSearchTerm(searchTerm), 250);
+        return () => clearTimeout(t);
+    }, [searchTerm]);
 
     // Related assets for the currently-viewed customer (returned by /customers/{id})
     const [serverRelatedAssets, setServerRelatedAssets] = useState([]);
@@ -953,8 +966,8 @@ const CustomerEng = () => {
         const noDateIdsSet = new Set(noDateRows.map(c => c.customer_id));
 
         // ========== STEP 2: SEARCH FILTER ==========
-        if (searchTerm) {
-            const term = searchTerm.toLowerCase().trim();
+        if (debouncedSearchTerm) {
+            const term = debouncedSearchTerm.toLowerCase().trim();
 
             // ✅ Instance ID exact/starts-with match → prioritize these rows first
             const instanceExact = [];
@@ -970,7 +983,7 @@ const CustomerEng = () => {
                     instancePartial.push(customer);
                 } else if (
                     customer.customer_name?.toLowerCase().includes(term) ||
-                    customer.mobile?.includes(searchTerm) ||
+                    customer.mobile?.includes(debouncedSearchTerm) ||
                     customer.email?.toLowerCase().includes(term) ||
                     customer.contact_person?.toLowerCase().includes(term) ||
                     customer.last_followup_user?.toLowerCase().includes(term)
@@ -1281,7 +1294,7 @@ const CustomerEng = () => {
         setTotalCount(filtered.length);
 
         // ✅ If searching, show ALL results instantly (no lazy loading needed for filtered set)
-        if (searchTerm) {
+        if (debouncedSearchTerm) {
             setDisplayedCustomers(filtered);
             setHasMore(false);
         } else {
@@ -1324,7 +1337,7 @@ const CustomerEng = () => {
             if (customer.followup_flags?.C7) counts.C7++;
         });
         setFlagCounts(counts);
-    }, [searchTerm, customers, selectedCampaigns, selectedFlag, selectedStatus, sortConfig, isAdmin, userBranch, fromDate, toDate, selectedBranches, campaignColumnFilters, warrantyDateRange, agreementDateRange]);
+    }, [debouncedSearchTerm, customers, selectedCampaigns, selectedFlag, selectedStatus, sortConfig, isAdmin, userBranch, fromDate, toDate, selectedBranches, campaignColumnFilters, warrantyDateRange, agreementDateRange]);
 
     // R (Rejected) count — respects campaign + branch filters
     const rejectedCount = useMemo(() => {
@@ -4118,8 +4131,11 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     const fetchLetterFormatsForWizard = async () => {
         setLetterFormatsLoading(true);
         try {
-            // include_expired=false -> backend hides formats past their expiry date
-            const res = await fetch(`${API_BASE_URL}/v1/campaigns/letter-master/formats?include_expired=false`);
+            // include_expired=false -> backend hides formats past their expiry date.
+            // include_attachment_content=false -> the picker only needs metadata, so
+            // the heavy base64 attachment content is omitted and the wizard opens
+            // fast. The selected format's real content is hydrated in selectLetterFormat.
+            const res = await fetch(`${API_BASE_URL}/v1/campaigns/letter-master/formats?include_expired=false&include_attachment_content=false`);
             if (!res.ok) throw new Error('Failed to load letter formats');
             const data = await res.json();
             setWizardLetterFormats(data);
@@ -4128,6 +4144,19 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         } finally {
             setLetterFormatsLoading(false);
         }
+    };
+
+    // Fetch a single letter format WITH its full attachment content (the wizard
+    // list carries metadata only). Returns null on failure.
+    const fetchFullLetterFormat = async (formatId) => {
+        if (!formatId) return null;
+        try {
+            const res = await fetch(`${API_BASE_URL}/v1/campaigns/letter-master/formats/${formatId}`);
+            if (res.ok) return await res.json();
+        } catch (e) {
+            console.error('Failed to fetch full letter format:', e);
+        }
+        return null;
     };
 
     const resetLetterWizardState = () => {
@@ -4139,6 +4168,7 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         setPreviousLetters([]);
         setSelectedLetterFormat(null);
         setLetterAttachments([]);
+        setLetterAttachmentsHydrating(false);
         setLetterChannels([]);
         setLetterFileName('');
         setEditingLetterRecordId(null);
@@ -4197,7 +4227,24 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
 
     const selectLetterFormat = async (fmt) => {
         setSelectedLetterFormat(fmt);
+        // Seed with the metadata-only defaults so names/sizes show instantly…
         setLetterAttachments((fmt.default_attachments || []).map(a => ({ ...a })));
+
+        // …then hydrate their real base64 content on demand. We patch each
+        // content-less default in place (matched by name+size) and leave any
+        // user-added attachments (which already have content) untouched, so no
+        // race can drop them. Sending stays blocked until this resolves.
+        if ((fmt.default_attachments || []).length > 0) {
+            setLetterAttachmentsHydrating(true);
+            fetchFullLetterFormat(fmt.id).then(full => {
+                const hydrated = (full && Array.isArray(full.default_attachments)) ? full.default_attachments : [];
+                const byKey = new Map(hydrated.map(a => [`${a.name}|${a.size}`, a]));
+                setLetterAttachments(prev => prev.map(a =>
+                    a.content ? a : (byKey.get(`${a.name}|${a.size}`) || a)
+                ));
+                setLetterAttachmentsHydrating(false);
+            });
+        }
 
         // CSP-only Service Cycle defaults, seeded from the Letter Master format.
         // Pre-load the format's default rows so they're ready, but DO NOT auto-tick
@@ -5176,6 +5223,7 @@ ${f.start_para}`;
         setLetterAttachments(prev => prev.filter((_, idx) => idx !== i));
 
     const handleSendLetter = async () => {
+        if (letterAttachmentsHydrating) { toast('Please wait — loading attachments…'); return; }
         if (letterChannels.length === 0) { toast.error('Select at least one channel to send'); return; }
         if (letterChannels.includes('email') && !letterEmailTo.trim() && letterToList.length === 0) { toast.error('Enter a recipient email address'); return; }
         if (letterChannels.includes('whatsapp') && !letterWhatsappTo.trim()) { toast.error('Enter a WhatsApp number'); return; }
@@ -5610,6 +5658,7 @@ ${f.start_para}`;
     };
 
     const handleSaveLetterDraft = async () => {
+        if (letterAttachmentsHydrating) { toast('Please wait — loading attachments…'); return; }
         if (!letterFields.body && !letterFields.subject) { toast.error('Nothing to save yet'); return; }
         setLetterSending(true);
         const t = toast.loading('Saving draft...');
@@ -10973,7 +11022,7 @@ ${f.start_para}`;
                                     {(letterStep === 2 || letterStep === 3) && (
                                         <button
                                             onClick={handleSaveLetterDraft}
-                                            disabled={letterSending}
+                                            disabled={letterSending || letterAttachmentsHydrating}
                                             className="px-3 py-1.5 border rounded-lg text-[11px] font-medium hover:bg-gray-50 disabled:opacity-50"
                                             style={{ color: themeColor, borderColor: themeColor }}
                                         >
@@ -10995,12 +11044,12 @@ ${f.start_para}`;
                                 ) : (
                                     <button
                                         onClick={handleSendLetter}
-                                        disabled={letterSending}
+                                        disabled={letterSending || letterAttachmentsHydrating}
                                         className="px-4 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
                                         style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}
                                     >
-                                        {letterSending ? <ArrowPathIcon className="h-3 w-3 animate-spin" /> : <PaperAirplaneIcon className="h-3 w-3" />}
-                                        Send Letter
+                                        {(letterSending || letterAttachmentsHydrating) ? <ArrowPathIcon className="h-3 w-3 animate-spin" /> : <PaperAirplaneIcon className="h-3 w-3" />}
+                                        {letterAttachmentsHydrating ? 'Loading attachments…' : 'Send Letter'}
                                     </button>
                                 )}
                             </div>

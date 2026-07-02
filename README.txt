@@ -101,3 +101,82 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_customers_customer_name'
 
 
 CREATE NONCLUSTERED INDEX IX_letter_send_records_sent_by_id ON letter_send_records (sent_by_id);    
+
+
+
+
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_kb_files_folder' AND object_id=OBJECT_ID('dbo.kb_files'))
+    CREATE NONCLUSTERED INDEX IX_kb_files_folder
+        ON dbo.kb_files (folder_id, original_name)
+        INCLUDE (is_hidden, kind, description, category_id, size_bytes, created_at);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_kb_files_category' AND object_id=OBJECT_ID('dbo.kb_files'))
+    CREATE NONCLUSTERED INDEX IX_kb_files_category
+        ON dbo.kb_files (category_id, original_name)
+        INCLUDE (is_hidden, kind, description, size_bytes, folder_id, created_at);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_kb_folders_parent' AND object_id=OBJECT_ID('dbo.kb_folders'))
+    CREATE NONCLUSTERED INDEX IX_kb_folders_parent
+        ON dbo.kb_folders (parent_id)
+        INCLUDE (name, is_system, is_hidden, description, created_at, updated_at);
+GO
+
+
+
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_maintenance_parts_app_cover' AND object_id=OBJECT_ID('dbo.maintenance_parts'))
+    CREATE NONCLUSTERED INDEX IX_maintenance_parts_app_cover
+        ON dbo.maintenance_parts (app_code_id, sort_order)
+        INCLUDE (part_number, part_desc, qty, action,
+                 alt_part_no, alt_desc, alt_qty, alt_action,
+                 service_hours, consumable, schedule);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_maintenance_activity_created' AND object_id=OBJECT_ID('dbo.maintenance_activity'))
+    CREATE NONCLUSTERED INDEX IX_maintenance_activity_created
+        ON dbo.maintenance_activity (created_at DESC, id DESC)
+        INCLUDE (app_code, employee, engine_model, segment);
+GO
+
+
+
+-- TADA (Critical)
+CREATE INDEX idx_tada_imports_branch_code ON tada_imports(branch_code);
+CREATE INDEX idx_tada_imports_engineer_uid ON tada_imports(service_engineer_uid);
+CREATE INDEX idx_tada_imports_task_start_date ON tada_imports(task_start_date);
+CREATE INDEX idx_tada_imports_verification_status ON tada_imports(verification_status);
+CREATE INDEX idx_tada_imports_sd_branch_code ON tada_imports(sd_branch_code);
+
+-- TADA History
+CREATE INDEX idx_tada_history_branch_code ON tada_history(branch_code);
+CREATE INDEX idx_tada_history_verification_status ON tada_history(verification_status);
+
+-- TADA Bill Wise
+CREATE INDEX idx_tada_bill_wise_branch_code ON tada_bill_wise(branch_code);
+CREATE INDEX idx_tada_bill_wise_verification_status ON tada_bill_wise(verification_status);
+CREATE INDEX idx_tada_bill_wise_engineer_uid ON tada_bill_wise(service_engineer_uid);
+CREATE INDEX idx_tada_bill_wise_employee_id ON tada_bill_wise(employee_id);
+CREATE INDEX idx_tada_bill_wise_date ON tada_bill_wise(date);
+
+-- Office Expenses
+CREATE INDEX idx_office_expenses_branch_code ON office_expenses(branch_code);
+CREATE INDEX idx_office_expenses_paid_date ON office_expenses(paid_date);
+CREATE INDEX idx_office_expenses_expenses_head ON office_expenses(expenses_head);
+
+-- Local Vendor Bills
+CREATE INDEX idx_lvb_branch_code ON local_vendor_bills(branch_code);
+CREATE INDEX idx_lvb_invoice_date ON local_vendor_bills(invoice_date);
+CREATE INDEX idx_lvb_verification_status ON local_vendor_bills(verification_status);
+
+-- Sales & BM
+CREATE INDEX idx_sales_bm_branch_code ON sales_bm(branch_code);
+CREATE INDEX idx_sales_bm_verification_status ON sales_bm(verification_status);
+CREATE INDEX idx_sales_bm_engineer_uid ON sales_bm(engineer_uid);
+CREATE INDEX idx_sales_bm_date ON sales_bm(date);
+
+
+
+
+CREATE NONCLUSTERED INDEX IX_cust_edit_hist_deleted_customer ON dbo.customer_edit_history (is_deleted, customer_id);      -- distinct edited customers
+CREATE NONCLUSTERED INDEX IX_cust_edit_hist_customer_edited  ON dbo.customer_edit_history (customer_id, last_edited_at DESC); -- per-customer history, newest first
+CREATE NONCLUSTERED INDEX IX_cust_edit_hist_created          ON dbo.customer_edit_history (created_at);                    -- 10-day report

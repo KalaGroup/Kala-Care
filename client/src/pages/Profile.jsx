@@ -71,6 +71,20 @@ const CDBUpdateTable = ({ user, showToast }) => {
     const [dateFilter, setDateFilter] = useState('all');
     const [showDateDropdown, setShowDateDropdown] = useState(false);
 
+    // Debounced search term: the input stays instant, but the (potentially large)
+    // filter pass below only re-runs once the user pauses typing.
+    const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+    useEffect(() => {
+        const t = setTimeout(() => setDebouncedSearchTerm(searchTerm), 250);
+        return () => clearTimeout(t);
+    }, [searchTerm]);
+
+    // Progressive rendering: only this many rows are put in the DOM at once and
+    // the window grows as the user scrolls. Keeps a large history table snappy
+    // without changing markup, filtering or export (export uses filteredHistories).
+    const CDB_RENDER_STEP = 100;
+    const [cdbRenderLimit, setCdbRenderLimit] = useState(CDB_RENDER_STEP);
+
     // Export permission — Master Admin is always allowed, others need can_export
     const canExport = user && (user.role === 'master_admin' || user.can_export);
 
@@ -443,12 +457,13 @@ const CDBUpdateTable = ({ user, showToast }) => {
                     break;
             }
 
-            if (searchTerm) {
+            if (debouncedSearchTerm) {
+                const s = debouncedSearchTerm.toLowerCase();
                 filtered = filtered.filter(history =>
-                    history.instance_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                    history.original_customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                    history.edited_customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                    history.user_name?.toLowerCase().includes(searchTerm.toLowerCase())
+                    history.instance_id?.toLowerCase().includes(s) ||
+                    history.original_customer_name?.toLowerCase().includes(s) ||
+                    history.edited_customer_name?.toLowerCase().includes(s) ||
+                    history.user_name?.toLowerCase().includes(s)
                 );
             }
 
@@ -457,7 +472,22 @@ const CDBUpdateTable = ({ user, showToast }) => {
 
             setFilteredHistories(filtered);
         }
-    }, [searchTerm, dateFilter, editHistories]);
+    }, [debouncedSearchTerm, dateFilter, editHistories]);
+
+    // Reset the progressive-render window whenever the filtered list changes.
+    useEffect(() => {
+        setCdbRenderLimit(CDB_RENDER_STEP);
+    }, [filteredHistories]);
+
+    // Grow the window as the user nears the bottom of the scroll container.
+    const handleCdbScroll = (e) => {
+        const el = e.currentTarget;
+        if (el.scrollHeight - el.scrollTop - el.clientHeight < 300) {
+            setCdbRenderLimit(prev =>
+                prev < filteredHistories.length ? prev + CDB_RENDER_STEP : prev
+            );
+        }
+    };
 
     const exportToExcel = () => {
         try {
@@ -746,6 +776,7 @@ const CDBUpdateTable = ({ user, showToast }) => {
                     <div
                         className="overflow-auto max-h-[70vh]"
                         id="cdb-table-container"
+                        onScroll={handleCdbScroll}
                         style={{
                             overflow: 'auto',
                             scrollbarWidth: 'thin'
@@ -771,7 +802,7 @@ const CDBUpdateTable = ({ user, showToast }) => {
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
-                                {filteredHistories.map((history, idx) => (
+                                {filteredHistories.slice(0, cdbRenderLimit).map((history, idx) => (
                                     <tr
                                         key={history.id}
                                         className={`transition-colors ${history.is_done ? 'bg-green-50 hover:bg-green-100' : 'hover:bg-gray-50'}`}
@@ -848,8 +879,13 @@ const CDBUpdateTable = ({ user, showToast }) => {
                 </button>
                 <button
                     onClick={() => {
-                        const c = document.getElementById('cdb-table-container');
-                        if (c) c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' });
+                        // Render every row first so "bottom" is the true last record,
+                        // then scroll once the DOM has grown.
+                        setCdbRenderLimit(filteredHistories.length);
+                        setTimeout(() => {
+                            const c = document.getElementById('cdb-table-container');
+                            if (c) c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' });
+                        }, 0);
                     }}
                     className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
                     style={{ backgroundColor: '#2f3192' }}

@@ -253,10 +253,19 @@ def get_user_csp_sr_count(
 @router.get("/letter-master/formats", response_model=List[campaign_schema.LetterFormatResponse])
 def get_all_letter_formats(
     include_expired: bool = Query(True, description="Include formats past their expiry date"),
+    include_attachment_content: bool = Query(
+        True,
+        description="When false, omit the heavy base64 attachment content from the "
+                    "list (metadata/count only). Full content is fetched per-format "
+                    "via GET /letter-master/formats/{id}."
+    ),
     db: Session = Depends(get_db)
 ):
     controller = CampaignController(db)
-    return controller.get_all_letter_formats(include_expired=include_expired)
+    return controller.get_all_letter_formats(
+        include_expired=include_expired,
+        strip_attachment_content=not include_attachment_content,
+    )
 
 @router.get("/letter-master/formats/{format_id}", response_model=campaign_schema.LetterFormatResponse)
 def get_letter_format(format_id: int, db: Session = Depends(get_db)):

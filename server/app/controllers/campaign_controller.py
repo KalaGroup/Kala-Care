@@ -935,7 +935,8 @@ class CampaignController:
 
 # ==================== Letter Master (Letter Format) ====================
 
-    def get_all_letter_formats(self, include_expired: bool = True):
+    def get_all_letter_formats(self, include_expired: bool = True,
+                               strip_attachment_content: bool = False):
         from app.models.campaign_model import CampaignLetterFormat
 
         formats = (
@@ -944,27 +945,42 @@ class CampaignController:
             .all()
         )
 
-        # Admin page (include_expired=True) -> return everything as before.
-        if include_expired:
-            return formats
-
         # Send Letter wizard (include_expired=False) -> drop EXPIRED formats.
         # expiry_date = "date after which this format should not be used", so a
         # format stays usable up to AND including its expiry date. Formats with
         # no expiry_date are always kept.
-        today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        result = []
-        for f in formats:
-            if f.expiry_date:
-                exp = f.expiry_date
-                if isinstance(exp, datetime):
-                    exp = exp.replace(hour=0, minute=0, second=0, microsecond=0)
-                else:
-                    exp = datetime.combine(exp, datetime.min.time())
-                if exp < today:
-                    continue  # expired -> skip
-            result.append(f)
-        return result
+        if not include_expired:
+            today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            kept = []
+            for f in formats:
+                if f.expiry_date:
+                    exp = f.expiry_date
+                    if isinstance(exp, datetime):
+                        exp = exp.replace(hour=0, minute=0, second=0, microsecond=0)
+                    else:
+                        exp = datetime.combine(exp, datetime.min.time())
+                    if exp < today:
+                        continue  # expired -> skip
+                kept.append(f)
+            formats = kept
+
+        # Optionally strip the heavy base64 attachment `content` (files up to 25MB
+        # each). Callers that only render the attachment COUNT/metadata — the admin
+        # Letter Master table and the Send Letter wizard's format picker — request
+        # this so the list payload stays small and loads fast; they hydrate the real
+        # content on demand via get_letter_format() when a specific format is
+        # opened/selected. Callers that need the content inline leave this off.
+        if strip_attachment_content:
+            for f in formats:
+                # Detach from the session so the trimming can never be persisted.
+                self.db.expunge(f)
+                atts = f.default_attachments or []
+                f.default_attachments = [
+                    {k: v for k, v in (a or {}).items() if k != 'content'}
+                    for a in atts
+                ]
+
+        return formats
 
     def get_distinct_goem_oem(self) -> List[str]:
         """Return all distinct non-null goem_oem values from asset_detailed."""

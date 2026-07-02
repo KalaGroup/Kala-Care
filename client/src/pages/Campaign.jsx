@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import toast from 'react-hot-toast';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
@@ -28,7 +28,9 @@ import {
   EyeIcon,
   TrashIcon
 } from '@heroicons/react/24/outline';
-import CampaignCustomersFollowupModal from '../components/CampaignCustomersFollowupModal';
+// Code-split the heavy customer-followups modal into its own chunk (loads in the
+// background; it's mounted-but-closed so there is no visual change).
+const CampaignCustomersFollowupModal = lazy(() => import('../components/CampaignCustomersFollowupModal'));
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
 
@@ -237,6 +239,10 @@ const Campaign = () => {
   const [letterFormatsLoading, setLetterFormatsLoading] = useState(false);
   const [letterFormatSaving, setLetterFormatSaving] = useState(false);
   const [viewingLetterFormat, setViewingLetterFormat] = useState(null);
+  // True while the full format (incl. heavy attachment content) is being fetched
+  // on demand for view/edit. The list endpoint returns attachment metadata only,
+  // so we hydrate the actual base64 content lazily when a format is opened.
+  const [letterFormatHydrating, setLetterFormatHydrating] = useState(false);
   // Serial No lock: true once a letter has already been sent with the format being edited
   const [serialLocked, setSerialLocked] = useState(false);
   const [serialLockLoading, setSerialLockLoading] = useState(false);
@@ -1546,7 +1552,9 @@ const Campaign = () => {
   const fetchLetterFormats = async () => {
     setLetterFormatsLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/v1/campaigns/letter-master/formats`);
+      // include_attachment_content=false -> list returns attachment metadata only
+      // (fast). Full content is hydrated on demand when a format is viewed/edited.
+      const response = await fetch(`${API_BASE_URL}/v1/campaigns/letter-master/formats?include_attachment_content=false`);
       if (!response.ok) throw new Error('Failed to fetch letter formats');
       const data = await response.json();
       setLetterFormats(data);
@@ -1840,6 +1848,19 @@ const Campaign = () => {
     setShowLetterFormatForm(true);
   };
 
+  // Fetch a single format WITH its full attachment content (the list endpoint
+  // returns attachment metadata only). Returns null on failure.
+  const fetchFullLetterFormat = async (formatId) => {
+    if (!formatId) return null;
+    try {
+      const res = await fetch(`${API_BASE_URL}/v1/campaigns/letter-master/formats/${formatId}`);
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error('Failed to fetch full letter format:', e);
+    }
+    return null;
+  };
+
   const openEditLetterFormat = (fmt) => {
     const product = (fmt.products || [])[0] || '';
     setLetterFormatData({
@@ -1853,6 +1874,7 @@ const Campaign = () => {
       note: fmt.note || '',
       customer_detail_fields: fmt.customer_detail_fields || [],
       engagement_detail_fields: fmt.engagement_detail_fields || [],
+      // Metadata-only for instant open; real content is hydrated just below.
       default_attachments: fmt.default_attachments || [],
       start_para: fmt.start_para || '',
       end_para: fmt.end_para || '',
@@ -1868,6 +1890,24 @@ const Campaign = () => {
     // Lock the Serial No box if a letter has already been sent with this format
     setSerialLocked(false);
     checkLetterFormatSerialLock(fmt.id);
+
+    // Hydrate the real attachment content on demand. While this is in flight the
+    // Save button and attachment uploader are disabled (see the form JSX) so a
+    // stripped-content attachment list can never be saved and no race can drop a
+    // freshly added attachment.
+    if ((fmt.default_attachments || []).length > 0) {
+      setLetterFormatHydrating(true);
+      fetchFullLetterFormat(fmt.id).then(full => {
+        if (full && Array.isArray(full.default_attachments)) {
+          setLetterFormatData(prev =>
+            prev.id === fmt.id
+              ? { ...prev, default_attachments: full.default_attachments }
+              : prev
+          );
+        }
+        setLetterFormatHydrating(false);
+      });
+    }
   };
 
   // Ask the backend whether this format already sent letters (locks Serial No)
@@ -1892,6 +1932,22 @@ const Campaign = () => {
   const openViewLetterFormat = (fmt) => {
     setViewingLetterFormat(fmt);
     setShowLetterFormatView(true);
+
+    // Attachment download links need the base64 content, which the list omits —
+    // hydrate the full format on demand and patch it in.
+    if ((fmt.default_attachments || []).length > 0) {
+      setLetterFormatHydrating(true);
+      fetchFullLetterFormat(fmt.id).then(full => {
+        if (full && Array.isArray(full.default_attachments)) {
+          setViewingLetterFormat(prev =>
+            prev && prev.id === fmt.id
+              ? { ...prev, default_attachments: full.default_attachments }
+              : prev
+          );
+        }
+        setLetterFormatHydrating(false);
+      });
+    }
   };
 
   // Reference No: KCGL/<FY>/<product>[-N]/BranchCode/serial no
@@ -2038,6 +2094,12 @@ const Campaign = () => {
 
   const handleSaveLetterFormat = async (e) => {
     e.preventDefault();
+    // Never save while attachment content is still being hydrated — otherwise we
+    // could persist attachments with their base64 content stripped.
+    if (letterFormatHydrating) {
+      toast('Please wait — loading existing attachments…');
+      return;
+    }
     if (!letterFormatData.format_type_name.trim()) {
       toast.error('Format Type Name is required');
       return;
@@ -4908,7 +4970,7 @@ const Campaign = () => {
                 {/* 9) Default Attachment */}
                 <div>
                   <label className="block text-xs font-semibold text-black mb-1.5">Default Attachment</label>
-                  <input type="file" multiple accept=".mp4,.jpg,.jpeg,.png,.pdf,.doc,.docx,.xlsx,.xls,.csv" onChange={handleLetterAttachmentUpload} className="hidden" id="letter-attach-upload" disabled={letterFormatSaving} />
+                  <input type="file" multiple accept=".mp4,.jpg,.jpeg,.png,.pdf,.doc,.docx,.xlsx,.xls,.csv" onChange={handleLetterAttachmentUpload} className="hidden" id="letter-attach-upload" disabled={letterFormatSaving || letterFormatHydrating} />
                   <label htmlFor="letter-attach-upload"
                     className="flex items-center justify-center gap-1.5 px-3 py-2 border border-dashed rounded-md cursor-pointer transition-all hover:border-[#2f3192]"
                     style={{ borderColor: themeColor }}>
@@ -4916,6 +4978,12 @@ const Campaign = () => {
                     <span className="text-sm text-black">Attach files (optional)</span>
                   </label>
                   <p className="text-[11px] text-gray-500 mt-1">mp4, jpg, png, pdf, word, excel — single, multiple or none.</p>
+
+                  {letterFormatHydrating && (
+                    <p className="text-[11px] text-[#2f3192] mt-1 flex items-center gap-1">
+                      <ArrowPathIcon className="h-3 w-3 animate-spin" /> Loading existing attachments…
+                    </p>
+                  )}
 
                   {letterFormatData.default_attachments.length > 0 && (
                     <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto p-2 bg-gray-50 rounded-md">
@@ -4926,7 +4994,7 @@ const Campaign = () => {
                             <span className="text-xs text-black truncate">{att.name}</span>
                             <span className="text-xs text-gray-500 shrink-0">({(att.size / 1024).toFixed(0)} KB)</span>
                           </div>
-                          <button type="button" onClick={() => removeLetterAttachment(index)} className="text-red-500 hover:text-red-700 shrink-0 ml-1">
+                          <button type="button" onClick={() => removeLetterAttachment(index)} disabled={letterFormatSaving || letterFormatHydrating} className="text-red-500 hover:text-red-700 shrink-0 ml-1 disabled:opacity-40 disabled:cursor-not-allowed">
                             <XMarkIcon className="h-3.5 w-3.5" />
                           </button>
                         </div>
@@ -4941,7 +5009,7 @@ const Campaign = () => {
                     className="flex-1 px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-black hover:bg-gray-50 transition-all disabled:opacity-50">
                     Cancel
                   </button>
-                  <button type="submit" disabled={letterFormatSaving || !letterFormatData.format_type_name.trim()}
+                  <button type="submit" disabled={letterFormatSaving || letterFormatHydrating || !letterFormatData.format_type_name.trim()}
                     className="flex-1 text-white font-medium rounded-md py-1 text-sm hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
                     {letterFormatSaving ? (<><ArrowPathIcon className="h-4 w-4 animate-spin" /> Saving...</>) : 'Save Format'}
@@ -5212,12 +5280,22 @@ const Campaign = () => {
                   ) : (
                     <div className="space-y-1.5">
                       {viewingLetterFormat.default_attachments.map((att, idx) => (
-                        <a key={idx} href={`data:${att.type};base64,${att.content}`} download={att.name}
-                          className="flex items-center gap-2 p-2 bg-gray-50 rounded-md border hover:bg-gray-100 transition-all">
-                          <DocumentIcon className="h-3.5 w-3.5 text-[#2f3192] shrink-0" />
-                          <span className="text-xs text-black truncate flex-1">{att.name}</span>
-                          <span className="text-xs text-gray-500">({(att.size / 1024).toFixed(0)} KB)</span>
-                        </a>
+                        att.content ? (
+                          <a key={idx} href={`data:${att.type};base64,${att.content}`} download={att.name}
+                            className="flex items-center gap-2 p-2 bg-gray-50 rounded-md border hover:bg-gray-100 transition-all">
+                            <DocumentIcon className="h-3.5 w-3.5 text-[#2f3192] shrink-0" />
+                            <span className="text-xs text-black truncate flex-1">{att.name}</span>
+                            <span className="text-xs text-gray-500">({(att.size / 1024).toFixed(0)} KB)</span>
+                          </a>
+                        ) : (
+                          <div key={idx} className="flex items-center gap-2 p-2 bg-gray-50 rounded-md border opacity-70">
+                            <DocumentIcon className="h-3.5 w-3.5 text-[#2f3192] shrink-0" />
+                            <span className="text-xs text-black truncate flex-1">{att.name}</span>
+                            {letterFormatHydrating
+                              ? <ArrowPathIcon className="h-3 w-3 animate-spin text-gray-400" />
+                              : <span className="text-xs text-gray-500">({(att.size / 1024).toFixed(0)} KB)</span>}
+                          </div>
+                        )
                       ))}
                     </div>
                   )}
@@ -5449,15 +5527,17 @@ const Campaign = () => {
       </div>
 
       {/* Customer Follow-ups Modal */}
-      <CampaignCustomersFollowupModal
-        isOpen={showFollowupModal}
-        onClose={() => {
-          setShowFollowupModal(false);
-          setSelectedCampaignForModal(null);
-        }}
-        campaign={selectedCampaignForModal}
-        apiBaseUrl={API_BASE_URL}
-      />
+      <Suspense fallback={null}>
+        <CampaignCustomersFollowupModal
+          isOpen={showFollowupModal}
+          onClose={() => {
+            setShowFollowupModal(false);
+            setSelectedCampaignForModal(null);
+          }}
+          campaign={selectedCampaignForModal}
+          apiBaseUrl={API_BASE_URL}
+        />
+      </Suspense>
 
       <style jsx>{`
         .custom-scrollbar::-webkit-scrollbar {

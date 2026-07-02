@@ -408,6 +408,12 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const [showAllFollowupsModal, setShowAllFollowupsModal] = useState(false);
     const [allFollowupsData, setAllFollowupsData] = useState([]);
     const [loadingAllFollowups, setLoadingAllFollowups] = useState(false);
+    // Progressive rendering for the All-Follow-ups table: only this many rows are
+    // put in the DOM at once (grows as the user scrolls). Keeps the table snappy
+    // even with 100k+ rows without changing markup, filtering, or export (export
+    // still uses the full `displayedFollowups` list).
+    const FOLLOWUP_RENDER_STEP = 150;
+    const [followupRenderLimit, setFollowupRenderLimit] = useState(FOLLOWUP_RENDER_STEP);
     const [followupView, setFollowupView] = useState('all'); // All-Follow-ups view: 'all' | 'unique'
     const [followupSearchTerm, setFollowupSearchTerm] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -1511,6 +1517,28 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         if (followupView === 'unique') return getLatestFollowupsPerInstance(visibleFollowups);
         return visibleFollowups;
     }, [followupView, visibleFollowups]);
+
+    // Whenever the underlying list changes (new filter / search / data / view),
+    // reset the progressive-render window back to the first page.
+    useEffect(() => {
+        setFollowupRenderLimit(FOLLOWUP_RENDER_STEP);
+    }, [displayedFollowups]);
+
+    // Only the first `followupRenderLimit` rows are actually rendered as <tr>.
+    const renderedFollowups = useMemo(
+        () => displayedFollowups.slice(0, followupRenderLimit),
+        [displayedFollowups, followupRenderLimit]
+    );
+
+    // Grow the window as the user nears the bottom of the scroll container.
+    const handleFollowupTableScroll = useCallback((e) => {
+        const el = e.currentTarget;
+        if (el.scrollHeight - el.scrollTop - el.clientHeight < 400) {
+            setFollowupRenderLimit(prev =>
+                prev < displayedFollowups.length ? prev + FOLLOWUP_RENDER_STEP : prev
+            );
+        }
+    }, [displayedFollowups.length]);
 
     // Quotation sent count grouped by local date (YYYY-MM-DD) — derived from allFollowupsData
     const quotationSentByDate = useMemo(() => {
@@ -3613,7 +3641,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         No follow-ups found for the selected time period.
                                     </div>
                                 ) : (
-                                    <div className="overflow-x-auto overflow-y-auto max-h-[60vh]">
+                                    <div className="overflow-x-auto overflow-y-auto max-h-[60vh]" onScroll={handleFollowupTableScroll}>
                                         <table className="min-w-[2000px] w-full border-collapse text-[11px]">
                                             <thead className="bg-gray-100 sticky top-0 z-10">
                                                 <tr>
@@ -3641,7 +3669,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
-                                                {displayedFollowups
+                                                {renderedFollowups
                                                     .map((fu, idx) => (
                                                         <tr
                                                             key={fu.id}

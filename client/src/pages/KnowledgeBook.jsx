@@ -835,7 +835,7 @@ const KnowledgeBook = () => {
                                 <div key={file.id} className={`group flex flex-col h-full rounded-xl p-2.5 transition hover:bg-gray-50 ${isAdmin && file.is_hidden ? 'opacity-60' : ''}`}>
                                     <button onClick={() => setPreview(file)} className="w-full flex flex-col items-center" title={fileTitle(file)}>
                                         {file.kind === 'image' ? (
-                                            <img src={mediaUrl(file)} alt={file.name} className="w-16 h-16 rounded-lg object-cover border border-gray-200 transition-transform group-hover:scale-105" />
+                                            <img src={mediaUrl(file)} alt={file.name} loading="lazy" decoding="async" className="w-16 h-16 rounded-lg object-cover border border-gray-200 transition-transform group-hover:scale-105" />
                                         ) : (
                                             <span className="w-16 h-16 rounded-lg flex items-center justify-center transition-transform group-hover:scale-105" style={{ backgroundColor: 'rgb(165, 226, 250)' }}>
                                                 <Icon className="h-6 w-6" style={{ color: 'black' }} />

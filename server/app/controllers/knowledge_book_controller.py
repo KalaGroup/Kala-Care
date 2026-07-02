@@ -2,7 +2,7 @@ import io
 import zipfile
 from pathlib import Path
 from fastapi import UploadFile, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from sqlalchemy import func
 
 from app.models.knowledge_book_model import KBFolder, KBFile, KBCategory
@@ -105,7 +105,12 @@ def list_contents(db: Session, parent_id, is_admin: bool):
         folders = [f for f in folders if _has_visible_content(db, f.id)]
 
     if parent_id is not None:
-        flq = db.query(KBFile).filter(KBFile.folder_id == parent_id)
+        # Project ONLY the columns the DTO needs — never SELECT the LargeBinary
+        # `data` column (up to 25MB per file) just to render a file list.
+        flq = db.query(
+            KBFile.id, KBFile.original_name, KBFile.kind, KBFile.description,
+            KBFile.category_id, KBFile.is_hidden, KBFile.size_bytes, KBFile.created_at,
+        ).filter(KBFile.folder_id == parent_id)
         if not is_admin:
             flq = flq.filter(KBFile.is_hidden == False)  # noqa: E712
         files = flq.order_by(KBFile.original_name).all()
@@ -147,7 +152,14 @@ def list_contents(db: Session, parent_id, is_admin: bool):
 def list_all_files(db: Session, is_admin: bool, category_id=None):
     """Flat list of every categorised file across all folders (for the All Files tab).
     Non-admins only get non-hidden files living entirely inside non-hidden folders."""
-    q = db.query(KBFile)
+    # Project ONLY the columns the DTO needs — never SELECT the LargeBinary
+    # `data` column. Without this, "All Files" pulls EVERY file's bytes across the
+    # whole tree into memory at once.
+    q = db.query(
+        KBFile.id, KBFile.original_name, KBFile.kind, KBFile.description,
+        KBFile.category_id, KBFile.is_hidden, KBFile.size_bytes, KBFile.folder_id,
+        KBFile.created_at,
+    )
     if category_id:
         q = q.filter(KBFile.category_id == category_id)
     else:
@@ -308,16 +320,19 @@ def _delete_file_row(db: Session, file_row: KBFile):
 
 def delete_folder(db: Session, folder_id: int):
     """Delete a folder, its subfolders, and all their files (recursively)."""
-    folder = db.query(KBFolder).filter(KBFolder.id == folder_id).first()
+    folder = db.query(KBFolder.id).filter(KBFolder.id == folder_id).first()
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
 
     def recurse(fid):
-        for child in db.query(KBFolder).filter(KBFolder.parent_id == fid).all():
-            recurse(child.id)
-        for fl in db.query(KBFile).filter(KBFile.folder_id == fid).all():
-            _delete_file_row(db, fl)
-        db.delete(db.query(KBFolder).filter(KBFolder.id == fid).first())
+        # Depth-first: delete descendants before this folder. Only the folder IDs
+        # are fetched (no LargeBinary), and files are removed with a set-based
+        # DELETE so their bytes are never loaded into memory.
+        child_ids = [c.id for c in db.query(KBFolder.id).filter(KBFolder.parent_id == fid).all()]
+        for cid in child_ids:
+            recurse(cid)
+        db.query(KBFile).filter(KBFile.folder_id == fid).delete(synchronize_session=False)
+        db.query(KBFolder).filter(KBFolder.id == fid).delete(synchronize_session=False)
 
     recurse(folder_id)
     db.commit()
@@ -373,7 +388,10 @@ async def save_file(db: Session, folder_id: int, upload: UploadFile, uploaded_by
 
 
 def update_file(db: Session, file_id: int, name=None, description=None, category_id=None):
-    row = db.query(KBFile).filter(KBFile.id == file_id).first()
+    # load_only keeps the LargeBinary `data` deferred — we only touch metadata.
+    row = db.query(KBFile).options(load_only(
+        KBFile.id, KBFile.original_name, KBFile.kind, KBFile.description, KBFile.category_id,
+    )).filter(KBFile.id == file_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -396,17 +414,21 @@ def update_file(db: Session, file_id: int, name=None, description=None, category
         row.category_id = None
 
     db.commit()
-    db.refresh(row)
+    # Refresh only the metadata columns — never reload the LargeBinary `data`.
+    db.refresh(row, attribute_names=["original_name", "kind", "description", "category_id"])
     return row
 
 
 def toggle_hide_file(db: Session, file_id: int):
-    row = db.query(KBFile).filter(KBFile.id == file_id).first()
+    # load_only keeps the LargeBinary `data` deferred while we flip one flag.
+    row = db.query(KBFile).options(load_only(
+        KBFile.id, KBFile.is_hidden,
+    )).filter(KBFile.id == file_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="File not found")
     row.is_hidden = not bool(row.is_hidden)
     db.commit()
-    db.refresh(row)
+    db.refresh(row, attribute_names=["is_hidden"])
     return row
 
 
@@ -465,10 +487,11 @@ def build_folder_zip(db: Session, folder_id: int, is_admin: bool):
 
 
 def delete_file(db: Session, file_id: int):
-    row = db.query(KBFile).filter(KBFile.id == file_id).first()
-    if not row:
+    # Check existence without pulling the LargeBinary, then delete set-based.
+    exists = db.query(KBFile.id).filter(KBFile.id == file_id).first()
+    if not exists:
         raise HTTPException(status_code=404, detail="File not found")
-    _delete_file_row(db, row)
+    db.query(KBFile).filter(KBFile.id == file_id).delete(synchronize_session=False)
     db.commit()
     return True
 
