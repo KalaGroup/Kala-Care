@@ -482,9 +482,9 @@ const BranchLetterReportModal = ({ isOpen, onClose, branch, branchDisplayName, a
 
     return ReactDOM.createPortal(
         <>
-            <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3">
-                <div className="bg-white rounded-xl shadow-xl max-w-7xl w-full max-h-[92vh] overflow-hidden flex flex-col">
-                    <div className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2"
+            <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3 max-md:p-1.5">
+                <div className="bg-white rounded-xl shadow-xl max-w-7xl w-full max-h-[92vh] overflow-hidden flex flex-col max-lg:max-w-[95vw] max-lg:max-h-[90vh]">
+                    <div className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2 max-md:px-2"
                         style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}>
                         <div>
                             <h3 className="text-base font-semibold text-white">
@@ -573,7 +573,7 @@ const BranchLetterReportModal = ({ isOpen, onClose, branch, branchDisplayName, a
                                 placeholder="Search ref, customer, sender, subject..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
-                                className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 bg-white focus:outline-none"
+                                className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 bg-white focus:outline-none max-sm:w-full"
                             />
 
                             {/* Clear filters */}
@@ -613,7 +613,7 @@ const BranchLetterReportModal = ({ isOpen, onClose, branch, branchDisplayName, a
                         </div>
                     </div>
 
-                    <div className="flex-1 overflow-auto p-3 max-h-[70vh]"
+                    <div className="flex-1 overflow-auto p-3 max-h-[70vh] max-md:p-2"
                         onScroll={(e) => {
                             const el = e.currentTarget;
                             if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) {
@@ -707,12 +707,12 @@ const BranchLetterReportModal = ({ isOpen, onClose, branch, branchDisplayName, a
             </div>
 
             {showPdf && (
-                <div className="fixed inset-0 backdrop-blur-sm bg-black/50 flex items-center justify-center z-[10001] p-3">
-                    <div className="bg-white rounded-xl shadow-xl max-w-5xl w-full h-[92vh] overflow-hidden flex flex-col">
-                        <div className="px-4 py-2.5 border-b border-gray-200 flex justify-between items-center gap-2"
+                <div className="fixed inset-0 backdrop-blur-sm bg-black/50 flex items-center justify-center z-[10001] p-3 max-md:p-1.5">
+                    <div className="bg-white rounded-xl shadow-xl max-w-5xl w-full h-[92vh] overflow-hidden flex flex-col max-lg:max-w-[95vw] max-lg:h-[90vh]">
+                        <div className="px-4 py-2.5 border-b border-gray-200 flex justify-between items-center gap-2 max-sm:flex-wrap max-md:px-2"
                             style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}>
                             <h3 className="text-sm font-semibold text-white truncate">Letter — {pdfName}</h3>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 max-sm:flex-wrap">
                                 <button onClick={() => { const a = document.createElement('a'); a.href = pdfUrl; a.download = `${pdfName}.pdf`; a.click(); }}
                                     className="px-3 py-1.5 bg-white text-[#2f3192] rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 hover:bg-gray-100">
                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

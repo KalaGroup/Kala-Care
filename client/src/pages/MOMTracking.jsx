@@ -688,7 +688,7 @@ export default function MOMTracking() {
   return (
     <div className="font-sans">
       <FontScale />
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 pb-2">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 pb-2 max-md:px-2">
 
         {/* ===== HERO (same pattern as Knowledge Bank) ===== */}
         <div className="rounded-2xl px-3 sm:px-5 py-3 mb-3 text-white relative overflow-hidden" style={{ background: `linear-gradient(120deg, ${BRAND} 0%, ${BRAND_DARK} 100%)` }}>
@@ -715,7 +715,7 @@ export default function MOMTracking() {
 
         {/* ===== VIEW TABS + STEP INDICATOR ===== */}
         <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
-          <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm w-fit">
+          <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm w-fit max-sm:max-w-full max-sm:overflow-x-auto">
             {[{ k: 'new', label: 'New meeting', icon: Zap }, { k: 'history', label: 'History', icon: FileText }, { k: 'reports', label: 'Reports', icon: BarChart3 }].map((t) => (
               <button key={t.k} onClick={() => setView(t.k)} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 fs-12 font-semibold transition" style={view === t.k ? { background: BRAND_SOFT, color: BRAND } : { color: '#6b7280' }}>
                 <t.icon size={14} /> {t.label}
@@ -723,7 +723,7 @@ export default function MOMTracking() {
             ))}
           </div>
           {view === 'new' && (
-            <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+            <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm max-md:flex-wrap max-md:gap-2">
               {/* Back */}
               <button onClick={() => setStep(1)} disabled={step === 1}
                 className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 fs-11 font-semibold transition disabled:opacity-35 text-gray-600 hover:bg-gray-50">
@@ -823,11 +823,11 @@ export default function MOMTracking() {
               </div>
 
               {/* attendee table — mirrors the "Sr. No. | Attendees" block of the sheet */}
-              <div className="flex-1 overflow-y-auto kc-scroll" style={{ maxHeight: '21rem' }}>
+              <div className="flex-1 overflow-y-auto kc-scroll max-lg:overflow-x-auto" style={{ maxHeight: '21rem' }}>
                 {attendees.length === 0 ? (
                   <div className="p-8 text-center fs-12 text-gray-400">No attendees yet — pick a branch, its employees will appear here.</div>
                 ) : (
-                  <table className="w-full fs-12">
+                  <table className="w-full fs-12 max-md:min-w-[480px]">
                     <thead>
                       <tr className="text-left text-gray-500">
                         <th className="sticky top-0 z-10 px-4 py-2 font-semibold border-b border-gray-100" style={{ width: '4rem', background: '#f7f8fc' }}>Sr. No.</th>
@@ -862,7 +862,7 @@ export default function MOMTracking() {
               </div>
 
               {/* add manually */}
-              <div className="flex items-center gap-2 px-4 py-2.5 border-t border-gray-100" style={{ background: '#fafafc' }}>
+              <div className="flex items-center gap-2 px-4 py-2.5 border-t border-gray-100 max-sm:flex-wrap" style={{ background: '#fafafc' }}>
                 <UserPlus size={14} className="text-gray-400 flex-shrink-0" />
                 <input value={manualName} onChange={(e) => setManualName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addManual()}
                   placeholder="Add an attendee manually (guest, HO visitor, area manager…)" className="flex-1 fs-12 bg-transparent outline-none text-gray-700" disabled={!branch} />
@@ -879,7 +879,7 @@ export default function MOMTracking() {
                   <h2 className="text-[13px] font-bold text-gray-800">Points to discuss</h2>
                   <span className="fs-11 text-gray-400">tick the master points for this meeting's agenda — only ticked points appear on the sheet</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 max-md:flex-wrap">
                   <span className="fs-10 rounded-full px-2 py-0.5 font-bold" style={{ background: BRAND_SOFT, color: BRAND }}>{picked.size} of {master.length} selected</span>
                   <button onClick={pickAll} className="fs-11 font-semibold rounded-md border border-gray-200 px-2 py-1 text-gray-600 hover:bg-gray-50">Select all</button>
                   <button onClick={pickNone} className="fs-11 font-semibold rounded-md border border-gray-200 px-2 py-1 text-gray-600 hover:bg-gray-50">Clear</button>
@@ -905,7 +905,7 @@ export default function MOMTracking() {
               </div>
               <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 flex-wrap gap-2" style={{ background: '#fafafc' }}>
                 <span className="fs-11 text-gray-400">Set everything above first — the meeting sheet opens with these details locked in. Extra points can still be added live during the meeting.</span>
-                <button onClick={openSheet} className="kc-lift inline-flex items-center gap-2 rounded-xl px-5 py-2.5 fs-12 font-bold text-white" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})`, boxShadow: '0 6px 16px -6px rgba(47,49,146,.55)' }}>
+                <button onClick={openSheet} className="kc-lift inline-flex items-center gap-2 rounded-xl px-5 py-2.5 fs-12 font-bold text-white max-sm:w-full max-sm:justify-center" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})`, boxShadow: '0 6px 16px -6px rgba(47,49,146,.55)' }}>
                   <Zap size={15} /> Start meeting — open sheet <ChevronRight size={15} />
                 </button>
               </div>
@@ -928,12 +928,12 @@ export default function MOMTracking() {
                   </span>
                   <div className="text-sm font-bold uppercase" style={{ letterSpacing: '0.16em', color: BRAND_DARK }}>Minutes of Meeting</div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 max-md:flex-wrap">
                   {canExport && <button onClick={exportDraft} className="kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: BRAND }}><Download size={13} /> Export Excel</button>}
                   <button onClick={() => setStep(1)} className="kc-lift inline-flex items-center gap-1 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: '#5b6170' }}><ChevronLeft size={13} /> Setup</button>
                 </div>
               </div>
-              <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-gray-100 border-b border-gray-100">
+              <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-gray-100 border-b border-gray-100 max-sm:grid-cols-1">
                 {[['Date', fmt(mDate), CalendarDays], ['Location', mLocation, MapPin], ['Branch', branch?.name, Building2], ['Meeting type', mType, FileText]].map(([l, v, Icon]) => (
                   <div key={l} className="px-3 py-2 flex items-center gap-2 min-w-0">
                     <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: SHEET_SOFT }}><Icon size={14} style={{ color: SHEET_DARK }} /></span>
@@ -1137,7 +1137,7 @@ export default function MOMTracking() {
                 <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 fs-11 font-semibold" style={{ background: FLAG.T.bg, color: FLAG.T.color }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: FLAG.T.color }} /><b className="tabular-nums">{taskCount}</b> tasks</span>
                 <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 fs-11 font-semibold" style={{ background: FLAG.I.bg, color: FLAG.I.color }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: FLAG.I.color }} /><b className="tabular-nums">{infoCount}</b> info</span>
                 <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 fs-11 font-semibold" style={{ background: '#f1f3f9', color: '#5b6170' }}><CornerUpRight size={11} /><b className="tabular-nums">{carry.length}</b> carried</span>
-                <button onClick={finalize} className="kc-lift inline-flex items-center gap-2 rounded-xl px-5 py-2.5 fs-12 font-bold text-white" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})`, boxShadow: '0 6px 16px -6px rgba(47,49,146,.55)' }}><CheckCircle2 size={15} /> Finalize &amp; save</button>
+                <button onClick={finalize} className="kc-lift inline-flex items-center gap-2 rounded-xl px-5 py-2.5 fs-12 font-bold text-white max-sm:w-full max-sm:justify-center" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})`, boxShadow: '0 6px 16px -6px rgba(47,49,146,.55)' }}><CheckCircle2 size={15} /> Finalize &amp; save</button>
               </div>
             </div>
           </div>
@@ -1159,7 +1159,7 @@ export default function MOMTracking() {
       {/* ===== CONFIRM (finalize) ===== */}
       {confirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setConfirm(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-lg:max-h-[90vh] max-lg:overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             {/* header */}
             <div className="px-5 pt-5 pb-4 flex items-start gap-3">
               <span className="h-11 w-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: SHEET_SOFT }}>
@@ -1193,9 +1193,9 @@ export default function MOMTracking() {
               <p className="fs-11 text-gray-400">Once finalized, the sheet is saved to History and open tasks will carry forward to the next meeting.</p>
             </div>
             {/* actions */}
-            <div className="flex justify-end gap-2 px-5 py-4 mt-2 border-t border-gray-100" style={{ background: '#fafbfd' }}>
-              <button onClick={() => setConfirm(null)} className="rounded-lg border border-gray-200 bg-white px-4 py-2 fs-12 font-semibold text-gray-600 hover:bg-gray-50">Cancel</button>
-              <button onClick={confirm.onYes} disabled={saving} className="kc-lift inline-flex items-center gap-1.5 rounded-lg px-4 py-2 fs-12 font-bold text-white disabled:opacity-60" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})` }}>
+            <div className="flex justify-end gap-2 px-5 py-4 mt-2 border-t border-gray-100 max-sm:flex-col max-sm:items-stretch" style={{ background: '#fafbfd' }}>
+              <button onClick={() => setConfirm(null)} className="rounded-lg border border-gray-200 bg-white px-4 py-2 fs-12 font-semibold text-gray-600 hover:bg-gray-50 max-sm:w-full">Cancel</button>
+              <button onClick={confirm.onYes} disabled={saving} className="kc-lift inline-flex items-center gap-1.5 rounded-lg px-4 py-2 fs-12 font-bold text-white disabled:opacity-60 max-sm:w-full max-sm:justify-center" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})` }}>
                 <CheckCircle2 size={15} /> {saving ? 'Saving…' : (confirm.yesLabel || 'Yes, finalize')}
               </button>
             </div>
@@ -1218,7 +1218,7 @@ function MeetingSheetModal({ data, categories, canExport, onClose }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col" style={{ maxHeight: '92vh' }} onClick={(e) => e.stopPropagation()}>
         {/* header */}
-        <div className="px-4 py-3 flex items-start justify-between rounded-t-2xl border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
+        <div className="px-4 py-3 flex items-start justify-between rounded-t-2xl border-b border-gray-100 max-md:flex-wrap max-md:gap-2" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
           <div>
             <div className="fs-9 uppercase tracking-wide text-gray-400" style={{ letterSpacing: '0.14em' }}>Minutes of Meeting</div>
             <div className="text-base font-bold text-gray-800">{data.branchName}</div>
@@ -1228,8 +1228,8 @@ function MeetingSheetModal({ data, categories, canExport, onClose }) {
               <span>{data.type}</span><span>by {data.conductedBy}</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {canExport && <button onClick={() => exportMeetingExcel(data)} className="kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-bold" style={{ borderColor: '#dfe3f2', color: BRAND }}><Download size={13} /> Download Excel</button>}
+          <div className="flex items-center gap-2 max-md:flex-wrap">
+            {canExport && <button onClick={() => exportMeetingExcel(data)} className="kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-bold max-sm:text-xs max-sm:px-2" style={{ borderColor: '#dfe3f2', color: BRAND }}><Download size={13} /> Download Excel</button>}
             <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100"><X className="h-4 w-4" /></button>
           </div>
         </div>
@@ -1422,7 +1422,7 @@ function ReportsView({ history, branches }) {
       <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
         <div className="px-3 py-2.5 border-b border-gray-100 fs-12 font-bold text-gray-700">Branch-wise summary</div>
         <div className="overflow-x-auto kc-scroll">
-          <table className="w-full fs-12">
+          <table className="w-full fs-12 max-md:min-w-[600px]">
             <thead><tr className="text-left text-gray-500" style={{ background: SHEET_SOFT }}>
               <th className="px-3 py-1.5 font-semibold">Branch</th><th className="px-3 py-1.5 font-semibold">Last meeting</th>
               <th className="px-3 py-1.5 font-semibold text-center">Meetings</th><th className="px-3 py-1.5 font-semibold text-center">Open</th>
@@ -1523,7 +1523,7 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
           <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100"><X className="h-4 w-4" /></button>
         </div>
 
-        <div className="flex items-center gap-1 px-4 pt-2 border-b border-gray-100">
+        <div className="flex items-center gap-1 px-4 pt-2 border-b border-gray-100 max-sm:overflow-x-auto">
           {[['points', `Discussion areas (${master.length})`], ['cats', `Categories (${catKeys.length})`]].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} className="rounded-t-md px-3 py-2 fs-12 font-semibold transition" style={tab === k ? { color: BRAND, borderBottom: `2px solid ${BRAND}` } : { color: '#9ca3af' }}>{l}</button>
           ))}
@@ -1531,7 +1531,7 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
 
         {tab === 'points' ? (
           <>
-            <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2" style={{ background: '#fafafc' }}>
+            <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 max-sm:flex-wrap" style={{ background: '#fafafc' }}>
               <input value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder="Add a new discussion area…" className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 fs-12 outline-none" />
               <select value={cat} onChange={(e) => setCat(e.target.value)} className="rounded-lg border border-gray-200 px-2 py-1.5 fs-12 bg-white outline-none">{catKeys.map((c) => <option key={c}>{c}</option>)}</select>
               <button onClick={add} className="rounded-lg px-3 py-1.5 fs-12 font-semibold text-white inline-flex items-center gap-1" style={{ background: BRAND }}><Plus className="h-3.5 w-3.5" /> Add</button>
@@ -1546,14 +1546,14 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
                 </div>
               ))}
             </div>
-            <div className="px-4 py-2.5 border-t border-gray-100 flex items-center justify-between">
+            <div className="px-4 py-2.5 border-t border-gray-100 flex items-center justify-between max-md:flex-wrap max-md:gap-2">
               <span className="fs-10 text-gray-400">{master.length} areas · changes apply to new meetings</span>
               <button onClick={onClose} className="rounded-lg px-3 py-1.5 fs-12 font-semibold text-white" style={{ background: BRAND }}>Done</button>
             </div>
           </>
         ) : (
           <>
-            <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2" style={{ background: '#fafafc' }}>
+            <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 max-sm:flex-wrap" style={{ background: '#fafafc' }}>
               <input type="color" value={newColor} onChange={(e) => setNewColor(e.target.value)} className="h-8 w-9 rounded cursor-pointer border border-gray-200 p-0.5" title="Pick a colour" />
               <input value={newCat} onChange={(e) => setNewCat(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addCat()} placeholder="Add a new category…" className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 fs-12 outline-none" />
               <button onClick={addCat} className="rounded-lg px-3 py-1.5 fs-12 font-semibold text-white inline-flex items-center gap-1" style={{ background: BRAND }}><Plus className="h-3.5 w-3.5" /> Add</button>
@@ -1571,7 +1571,7 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
                 );
               })}
             </div>
-            <div className="px-4 py-2.5 border-t border-gray-100 flex items-center justify-between">
+            <div className="px-4 py-2.5 border-t border-gray-100 flex items-center justify-between max-md:flex-wrap max-md:gap-2">
               <span className="fs-10 text-gray-400">Deleting a category moves its points to another one</span>
               <button onClick={onClose} className="rounded-lg px-3 py-1.5 fs-12 font-semibold text-white" style={{ background: BRAND }}>Done</button>
             </div>

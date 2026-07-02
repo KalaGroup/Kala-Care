@@ -3082,7 +3082,7 @@ const Dashboard = () => {
     const GraphsSkeleton = () => (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 mb-3">
             {/* Campaign-wise Customer Breakdown Skeleton */}
-            <div className="lg:col-span-8 bg-white rounded-xl shadow-sm p-3 border border-gray-100">
+            <div className="lg:col-span-8 bg-white rounded-xl shadow-sm p-3 border border-gray-100 max-lg:w-full max-lg:min-w-0">
                 <div className="h-5 bg-gray-300 rounded w-64 mb-4 animate-pulse"></div>
                 <div className="h-[420px] bg-gray-100 rounded-lg animate-pulse flex items-center justify-center">
                     <div className="text-center">
@@ -3093,7 +3093,7 @@ const Dashboard = () => {
             </div>
 
             {/* Asset Status Distribution Skeleton */}
-            <div className="lg:col-span-4 bg-white rounded-xl shadow-sm p-3 border border-gray-100">
+            <div className="lg:col-span-4 bg-white rounded-xl shadow-sm p-3 border border-gray-100 max-lg:w-full max-lg:min-w-0">
                 <div className="h-5 bg-gray-300 rounded w-48 mb-4 animate-pulse"></div>
                 <div className="h-[350px] bg-gray-100 rounded-lg animate-pulse flex items-center justify-center">
                     <div className="text-center">
@@ -3418,7 +3418,7 @@ const Dashboard = () => {
                 </div>
             </div>
 
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 max-md:px-2">
                 {isFilterLoading && (
                     <div className="mb-4 flex justify-center">
                         <div className="bg-white rounded-lg shadow-sm px-4 py-2 flex items-center gap-2">
@@ -3449,7 +3449,7 @@ const Dashboard = () => {
                         </button>
 
                         <div className={`${isMobileMenuOpen ? 'block' : 'hidden'} lg:block`}>
-                            <nav className="flex flex-col lg:flex-row lg:space-x-2">
+                            <nav className="flex flex-col lg:flex-row lg:space-x-2 max-lg:gap-2">
                                 {/* Overall Performance Tab */}
                                 <button
                                     onClick={() => {
@@ -3638,7 +3638,7 @@ const Dashboard = () => {
                                                     </p>
                                                 </div>
                                                 <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
-                                                <div className="w-[60%] grid grid-cols-3 gap-x-2 gap-y-1 text-xs font-semibold">
+                                                <div className="w-[60%] grid grid-cols-3 gap-x-2 gap-y-1 text-xs font-semibold max-sm:grid-cols-2">
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>WIP:</span>
                                                         <span className="font-bold text-base whitespace-nowrap"><TimeValue>{summaryStats?.wip_assets || 0}</TimeValue></span>
@@ -3668,7 +3668,7 @@ const Dashboard = () => {
                                 {/* Two Graphs Row - Show when campaign data is ready */}
                                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 mb-3">
                                     {/* Campaign-wise Customer Breakdown - 65% width */}
-                                    <div className="lg:col-span-8 bg-white rounded-xl shadow-sm p-3 border border-gray-100">
+                                    <div className="lg:col-span-8 bg-white rounded-xl shadow-sm p-3 border border-gray-100 max-lg:w-full max-lg:min-w-0">
                                         <h3 className="text-base font-semibold text-gray-800 mb-4">
                                             Drive-wise Customer Breakdown
                                         </h3>
@@ -3684,7 +3684,7 @@ const Dashboard = () => {
                                     </div>
 
                                     {/* Asset Status Distribution - 35% width */}
-                                    <div className="lg:col-span-4 bg-white rounded-xl shadow-sm p-3 border border-gray-100 flex flex-col">
+                                    <div className="lg:col-span-4 bg-white rounded-xl shadow-sm p-3 border border-gray-100 flex flex-col max-lg:w-full max-lg:min-w-0">
                                         <h3 className="text-base font-semibold text-gray-800 mb-4">
                                             Asset Status Distribution
                                         </h3>
@@ -4058,7 +4058,7 @@ const Dashboard = () => {
                                                 className="px-3 py-2 cursor-pointer hover:bg-gray-50 transition-colors border-b border-gray-100"
                                                 onClick={() => handleBranchNameClick(branch)}
                                             >
-                                                <div className="flex items-center justify-between gap-3">
+                                                <div className="flex items-center justify-between gap-3 max-md:flex-wrap">
                                                     <div>
                                                         <h3 className="text-base font-semibold text-[#2f3192] underline hover:font-bold transition-colors">
                                                             {getBranchDisplayName(branch.branch)}
@@ -4067,11 +4067,11 @@ const Dashboard = () => {
                                                             {totalCampaigns} Active Drives
                                                         </p>
                                                     </div>
-                                                    <div className="flex items-center gap-4">
+                                                    <div className="flex items-center gap-4 max-md:flex-wrap">
                                                         {/* Letter Report — stopPropagation so the branch modal doesn't also open */}
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); handleOpenBranchLetters(branch); }}
-                                                            className="px-3 py-1.5 rounded-lg text-white text-xs font-medium hover:opacity-90 transition-opacity flex items-center gap-1.5 whitespace-nowrap"
+                                                            className="px-3 py-1.5 rounded-lg text-white text-xs font-medium hover:opacity-90 transition-opacity flex items-center gap-1.5 whitespace-nowrap max-sm:flex-wrap max-sm:w-full max-sm:justify-center max-sm:px-2"
                                                             style={{ backgroundColor: themeColor }}
                                                             title="View all letters sent from this branch"
                                                         >
@@ -4175,7 +4175,7 @@ const Dashboard = () => {
                                                                 </p>
                                                             </div>
                                                             <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
-                                                            <div className="w-[65%] grid grid-cols-3 gap-x-4 gap-y-1 text-xs font-semibold justify-items-start">
+                                                            <div className="w-[65%] grid grid-cols-3 gap-x-4 gap-y-1 text-xs font-semibold justify-items-start max-sm:grid-cols-2">
                                                                 <div className="flex items-baseline gap-1">
                                                                     <span className="w-8 shrink-0">WIP:</span>
                                                                     <span className="font-bold text-base text-black">{totalWip.toLocaleString()}</span>
@@ -4247,13 +4247,13 @@ const Dashboard = () => {
 
                 {/* Employee Progress Tab */}
                 {activeTab === 'branch-report' && (isMasterAdmin || isITAdmin || isBranchAdmin) && shouldLoadTab('branch-report') && (
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                        <div className="flex items-center justify-between mb-3">
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 max-md:p-2">
+                        <div className="flex items-center justify-between mb-3 max-md:flex-wrap max-md:gap-2">
                             <h2 className="text-base font-bold text-black">Branch Employee Report</h2>
                             {canViewTimeReport && (
                                 <button
                                     onClick={() => setShowEmployeeTimeModal(true)}
-                                    className="px-3 py-1.5 text-xs font-medium text-white rounded-lg hover:opacity-90 transition-opacity flex items-center gap-1.5 whitespace-nowrap"
+                                    className="px-3 py-1.5 text-xs font-medium text-white rounded-lg hover:opacity-90 transition-opacity flex items-center gap-1.5 whitespace-nowrap max-sm:w-full max-sm:justify-center"
                                     style={{ backgroundColor: themeColor }}
                                 >
                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4270,7 +4270,7 @@ const Dashboard = () => {
                                     <label className="block text-xs font-medium text-black">
                                         Select Branches
                                     </label>
-                                    <div className="flex gap-2">
+                                    <div className="flex gap-2 max-md:flex-wrap">
                                         <button
                                             onClick={() => {
                                                 const apiBranches = branches || [];
@@ -4298,7 +4298,7 @@ const Dashboard = () => {
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mb-4 p-3 border border-gray-200 rounded bg-gray-50 max-h-48 overflow-y-auto">
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mb-4 p-3 border border-gray-200 rounded bg-gray-50 max-h-48 overflow-y-auto max-sm:grid-cols-1">
                                     {(() => {
                                         const branchOrder = BRANCH_ORDER_LIST;
                                         // Render from the static list so branch names appear
@@ -4371,18 +4371,18 @@ const Dashboard = () => {
 
                         {!branchEmployeesLoading && selectedBranch && branchEmployees.length > 0 ? (
                             <div>
-                                <div className="mb-3 flex justify-between items-center">
+                                <div className="mb-3 flex justify-between items-center max-md:flex-wrap max-md:gap-2">
                                     <h3 className="text-sm font-semibold text-black">
                                         Employees from {selectedBranch.split(',').length} branch(es)
                                     </h3>
-                                    <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-3 max-md:flex-wrap">
                                         <p className="text-xs text-black">
                                             Total Employees: {branchEmployees.length}
                                         </p>
                                         {canExport && (
                                             <button
                                                 onClick={exportBranchEmployeesTable}
-                                                className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded font-medium transition-colors flex items-center gap-1.5"
+                                                className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded font-medium transition-colors flex items-center gap-1.5 max-sm:w-full max-sm:justify-center"
                                             >
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -4996,7 +4996,7 @@ const Dashboard = () => {
                                         Select drives to filter activity statistics
                                     </p>
                                 </div>
-                                <div className="flex gap-2">
+                                <div className="flex gap-2 max-md:flex-wrap max-sm:w-full">
                                     <button
                                         onClick={selectAllCampaigns}
                                         className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-black rounded-lg transition-colors"
@@ -5019,7 +5019,7 @@ const Dashboard = () => {
                             </div>
 
                             {showCampaignFilter && (
-                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50 max-h-48 overflow-y-auto">
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50 max-h-48 overflow-y-auto max-sm:grid-cols-1">
                                     {allCampaigns.map((campaign) => (
                                         <label key={campaign.id} className="flex items-center gap-2 cursor-pointer hover:bg-white p-2 rounded-lg transition-colors">
                                             <input
@@ -5070,14 +5070,14 @@ const Dashboard = () => {
                                 <div>
                                     <h3 className="text-base font-semibold text-black">Activity Statistics</h3>
                                 </div>
-                                <div className="flex flex-wrap gap-2">
+                                <div className="flex flex-wrap gap-2 max-sm:flex-col max-sm:items-stretch max-sm:w-full">
                                     {/* Branch Filter Dropdown */}
                                     {(isMasterAdmin || isITAdmin) && (
                                         <select
                                             value={activitySelectedBranch}
                                             onChange={(e) => setActivitySelectedBranch(e.target.value)}
                                             disabled={activityLoading || !activityStats || activityStats.length === 0}
-                                            className="px-2 py-1 border border-gray-300 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] disabled:opacity-50 bg-white text-black"
+                                            className="px-2 py-1 border border-gray-300 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] disabled:opacity-50 bg-white text-black max-sm:w-full max-sm:min-w-0"
                                         >
                                             <option value="">All Branches</option>
                                             {activityUniqueBranches.map(branch => (
@@ -5089,7 +5089,7 @@ const Dashboard = () => {
                                     <button
                                         onClick={() => setDetailedView(!detailedView)}
                                         disabled={activityLoading || !activityStats || activityStats.length === 0}
-                                        className="px-2 py-1 bg-[#2f3192] text-white text-sm rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap"
+                                        className="px-2 py-1 bg-[#2f3192] text-white text-sm rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap max-sm:w-full"
                                     >
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -5101,7 +5101,7 @@ const Dashboard = () => {
                                         <button
                                             onClick={exportActivityStatsToExcel}
                                             disabled={activityLoading || !activityStats || activityStats.length === 0}
-                                            className="px-2 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap"
+                                            className="px-2 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap max-sm:w-full"
                                         >
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -5576,7 +5576,7 @@ const Dashboard = () => {
                                         Select drives to filter rejected reason statistics
                                     </p>
                                 </div>
-                                <div className="flex gap-2">
+                                <div className="flex gap-2 max-md:flex-wrap max-sm:w-full">
                                     <button
                                         onClick={selectAllCampaigns}
                                         className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-black rounded-lg transition-colors"
@@ -5599,7 +5599,7 @@ const Dashboard = () => {
                             </div>
 
                             {showCampaignFilter && (
-                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50 max-h-48 overflow-y-auto">
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50 max-h-48 overflow-y-auto max-sm:grid-cols-1">
                                     {allCampaigns.map((campaign) => (
                                         <label key={campaign.id} className="flex items-center gap-2 cursor-pointer hover:bg-white p-2 rounded-lg transition-colors">
                                             <input
@@ -5649,14 +5649,14 @@ const Dashboard = () => {
                                 <div>
                                     <h3 className="text-base font-semibold text-black">Rejected Reasons Statistics</h3>
                                 </div>
-                                <div className="flex flex-wrap gap-2">
+                                <div className="flex flex-wrap gap-2 max-sm:flex-col max-sm:items-stretch max-sm:w-full">
                                     {/* Branch Filter Dropdown */}
                                     {(isMasterAdmin || isITAdmin) && (
                                         <select
                                             value={rrSelectedBranch}
                                             onChange={(e) => setRrSelectedBranch(e.target.value)}
                                             disabled={rrLoading || !rrStats || rrStats.length === 0}
-                                            className="px-2 py-1 border border-gray-300 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] disabled:opacity-50 bg-white text-black"
+                                            className="px-2 py-1 border border-gray-300 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] disabled:opacity-50 bg-white text-black max-sm:w-full max-sm:min-w-0"
                                         >
                                             <option value="">All Branches</option>
                                             {rrUniqueBranches.map(branch => (
@@ -5668,7 +5668,7 @@ const Dashboard = () => {
                                     <button
                                         onClick={() => setRrDetailedView(!rrDetailedView)}
                                         disabled={rrLoading || !rrStats || rrStats.length === 0}
-                                        className="px-2 py-1 bg-[#2f3192] text-white text-sm rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap"
+                                        className="px-2 py-1 bg-[#2f3192] text-white text-sm rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap max-sm:w-full"
                                     >
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -5680,7 +5680,7 @@ const Dashboard = () => {
                                         <button
                                             onClick={exportRrStatsToExcel}
                                             disabled={rrLoading || !rrStats || rrStats.length === 0}
-                                            className="px-2 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap"
+                                            className="px-2 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap max-sm:w-full"
                                         >
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />

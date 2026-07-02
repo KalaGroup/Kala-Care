@@ -69,7 +69,7 @@ const QuotationInfoSheetView = ({ isMaster, currentUser }) => {
                 .q-scroll::-webkit-scrollbar-thumb { background: #c7c9e0; border-radius: 9999px; }
             `}</style>
 
-            <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10">
+            <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10 max-md:px-2">
                 {/* ===== Intro box ===== */}
                 <div className="rounded-2xl px-3 sm:px-5 py-3 mb-3 text-white relative overflow-hidden"
                     style={{ background: `linear-gradient(120deg, ${themeColor} 0%, ${themeDark} 100%)` }}>
@@ -101,12 +101,12 @@ const QuotationInfoSheetView = ({ isMaster, currentUser }) => {
                 </div>
 
                 {/* ===== Toolbar ===== */}
-                <div className="flex items-center justify-between gap-2 mb-3">
-                    <div className="relative">
+                <div className="flex items-center justify-between gap-2 mb-3 max-md:flex-wrap">
+                    <div className="relative max-sm:flex-1">
                         <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                         <input value={query} onChange={(e) => setQuery(e.target.value)}
                             placeholder="Search quotations"
-                            className="w-48 sm:w-64 rounded-lg border border-gray-200 bg-white pl-8 pr-3 py-2 text-[13px] outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 text-black transition" />
+                            className="w-48 sm:w-64 max-sm:w-full rounded-lg border border-gray-200 bg-white pl-8 pr-3 py-2 text-[13px] outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 text-black transition" />
                     </div>
                     <button onClick={load} title="Refresh"
                         className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition">

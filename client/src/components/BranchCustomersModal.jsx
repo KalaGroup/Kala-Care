@@ -609,8 +609,8 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                     </div>
 
                     {/* Stats Cards - 4 Cards Layout */}
-                    <div className="px-4 sm:px-5 py-3.5 bg-gradient-to-b from-gray-50 to-white border-b border-gray-200">
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <div className="px-4 sm:px-5 py-3.5 bg-gradient-to-b from-gray-50 to-white border-b border-gray-200 max-md:px-2">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 max-lg:grid-cols-2 max-sm:grid-cols-1">
                             {/* 1st Card - Branch Allocation Summary */}
                             <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3">
                                 <h3 className="text-[11px] font-semibold text-black uppercase mb-2">
@@ -745,7 +745,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                     </div>
 
                     {/* Two Graphs Section - 65/35 Ratio */}
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 p-4 sm:p-5">
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 p-4 sm:p-5 max-md:p-2">
                         {/* Campaign-wise Customer Breakdown - 65% width (8 columns) */}
                         <div className="lg:col-span-8 bg-white rounded-xl shadow-sm p-3 border border-gray-100">
                             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 mb-4">
@@ -755,7 +755,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                     </h3>
                                     <p className="text-[10px] text-gray-500 mt-0.5">Remaining vs WIP vs FR vs Rejected vs NC vs Completed</p>
                                 </div>
-                                <div className="flex gap-1.5">
+                                <div className="flex gap-1.5 max-md:flex-wrap max-md:gap-2">
                                     <button
                                         onClick={() => setActiveCampaignFilter('all')}
                                         className={`px-2.5 py-1 text-[11px] rounded-lg transition-colors ${activeCampaignFilter === 'all' ? 'bg-[#2f3192] text-white' : 'bg-gray-100 text-black hover:bg-gray-200'}`}
@@ -824,7 +824,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                     </div>
 
                     {/* Campaign Table */}
-                    <div className="px-4 sm:px-5 py-3.5 bg-white">
+                    <div className="px-4 sm:px-5 py-3.5 bg-white max-md:px-2">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 mb-3.5">
                             <h4 className="text-sm font-semibold text-black">All Drives</h4>
                             {canExport && (
@@ -856,7 +856,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                             </div>
                         ) : (
                             <div className="overflow-x-auto">
-                                <table className="min-w-full border-collapse border border-gray-300">
+                                <table className="min-w-full border-collapse border border-gray-300 max-md:min-w-[1100px]">
                                     <thead className="bg-gray-100">
                                         <tr>
                                             <th className="border border-gray-300 px-5 py-2 text-center text-[11px] font-semibold text-black">Sr. No.</th>
@@ -918,10 +918,10 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
             {/* Campaign Details Modal */}
             {campaignDetailsOpen && selectedCampaign && (
                 <div className="fixed inset-0 z-50 overflow-y-auto">
-                    <div className="flex items-center justify-center min-h-screen p-4">
+                    <div className="flex items-center justify-center min-h-screen p-4 max-md:p-2">
                         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={closeCampaignDetails}></div>
 
-                        <div className="relative bg-white rounded-lg shadow-xl max-w-7xl w-full max-h-[90vh] overflow-hidden">
+                        <div className="relative bg-white rounded-lg shadow-xl max-w-7xl w-full max-h-[90vh] overflow-hidden max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh]">
                             {/* Modal Header */}
                             <div className="sticky top-0 z-10 px-5 py-3 border-b border-gray-200" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}>
                                 <div className="flex items-center justify-between">
@@ -1018,7 +1018,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
 
                                 {/* Customers Table */}
                                 <div className="overflow-x-auto">
-                                    <table className="min-w-full border-collapse border border-gray-300">
+                                    <table className="min-w-full border-collapse border border-gray-300 max-md:min-w-[1400px]">
                                         <thead className="bg-gray-100 sticky top-0">
                                             <tr>
                                                 <th className="border border-gray-300 px-2.5 py-1.5 text-center text-[10px] font-medium text-black">Sr. No.</th>

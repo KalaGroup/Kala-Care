@@ -135,6 +135,88 @@
 
 
 
+/* ============================================================
+   Global responsive safety net — applies ONLY below laptop
+   size (<1024px), so desktop/laptop rendering is unchanged.
+   ============================================================ */
+@media (max-width: 1023.98px) {
+  /* Never allow the page itself to scroll sideways */
+  html,
+  body {
+    overflow-x: hidden;
+  }
+
+  /* Tables become horizontally scrollable instead of
+     stretching the page wider than the screen */
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+  }
+
+  /* Media never overflows its container */
+  img,
+  svg,
+  video,
+  canvas {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* Long unbroken strings (emails, IDs, URLs) wrap instead
+     of pushing layouts wider than the viewport */
+  td,
+  th,
+  p,
+  span,
+  a {
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  /* Form controls can always shrink to fit their container */
+  input,
+  select,
+  textarea {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  /* SweetAlert dialogs fit small screens */
+  .swal2-popup {
+    width: 92vw !important;
+    max-width: 92vw !important;
+  }
+}
+
+@media (max-width: 767.98px) {
+  /* Button labels may wrap instead of overflowing their row.
+     (Utility classes like .whitespace-nowrap still win where set.) */
+  button {
+    white-space: normal;
+  }
+
+  /* Smooth touch scrolling for all horizontal scroll areas */
+  [class*="overflow-x-auto"],
+  [class*="overflow-auto"] {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Charts keep their height but never force sideways scroll */
+  .echarts-for-react,
+  .js-plotly-plot,
+  .recharts-wrapper {
+    max-width: 100% !important;
+  }
+
+  /* react-datepicker fits phone screens */
+  .react-datepicker {
+    max-width: 94vw !important;
+    overflow-x: auto !important;
+  }
+}
+
 /* Reduce SweetAlert font size and padding */
 .swal2-popup {
   font-size: 0.8rem !important;

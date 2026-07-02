@@ -625,7 +625,7 @@ const KnowledgeBook = () => {
                 .kb-scroll::-webkit-scrollbar-thumb:hover { background: #a9abce; }
             `}</style>
 
-            <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10">
+            <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10 max-md:px-2">
 
                 {/* ===== Hero header ===== */}
                 <div className="rounded-2xl px-3 sm:px-5 py-3 mb-3 text-white relative overflow-hidden"
@@ -735,7 +735,7 @@ const KnowledgeBook = () => {
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 max-md:flex-wrap">
                         {/* Category filter ONLY in the All Files tab */}
                         {categories.length > 0 && mode === 'all' && (
                             <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)}
@@ -744,11 +744,11 @@ const KnowledgeBook = () => {
                                 {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                             </select>
                         )}
-                        <div className="relative">
+                        <div className="relative max-sm:flex-1">
                             <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                             <input value={query} onChange={(e) => setQuery(e.target.value)}
                                 placeholder={mode === 'all' ? 'Search all files' : 'Search this folder'}
-                                className="w-40 sm:w-52 rounded-lg border border-gray-200 bg-white pl-8 pr-3 py-2 text-[13px] outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 text-black transition" />
+                                className="w-40 sm:w-52 max-sm:w-full rounded-lg border border-gray-200 bg-white pl-8 pr-3 py-2 text-[13px] outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 text-black transition" />
                         </div>
                         <button onClick={refresh} title="Refresh"
                             className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition">
@@ -796,7 +796,7 @@ const KnowledgeBook = () => {
                         </p>
                     </div>
                 ) : view === 'grid' ? (
-                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-0 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 max-sm:grid-cols-2 gap-0 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
                         {shownFolders.map((f) => (
                             <div key={f.id} className={`group flex flex-col h-full rounded-xl p-2.5 transition hover:bg-indigo-50/60 ${isAdmin && f.is_hidden ? 'opacity-60' : ''}`}>
                                 <button onClick={() => openFolder(f)} className="w-full flex flex-col items-center" title={f.description ? `${f.name}\n${f.description}` : f.name}>
@@ -1022,8 +1022,8 @@ const KnowledgeBook = () => {
             {/* ===== Preview modal ===== */}
             {preview && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setPreview(null)}>
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-[95vw] w-full max-h-[95vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-[95vw] w-full max-h-[95vh] overflow-hidden flex flex-col max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh] max-lg:overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 max-md:flex-wrap max-md:gap-2">
                             <div className="flex items-center gap-2.5 min-w-0">
                                 <span className="h-9 w-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: (KIND_META[preview.kind] || KIND_META.other).soft }}>
                                     {(() => { const I = (KIND_META[preview.kind] || KIND_META.other).Icon; return <I className="h-4 w-4" style={{ color: (KIND_META[preview.kind] || KIND_META.other).tint }} />; })()}
@@ -1038,8 +1038,8 @@ const KnowledgeBook = () => {
                                     {preview.description && <p className="text-[11px] text-gray-500 truncate">{preview.description}</p>}
                                 </div>
                             </div>
-                            <div className="flex items-center gap-1">
-                                <button onClick={() => downloadFile(preview)} className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: themeColor }}>
+                            <div className="flex items-center gap-1 max-md:flex-shrink-0">
+                                <button onClick={() => downloadFile(preview)} className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 max-sm:text-xs max-sm:px-2" style={{ backgroundColor: themeColor }}>
                                     <ArrowDownTrayIcon className="h-3.5 w-3.5" /> Download
                                 </button>
                                 <button onClick={() => setPreview(null)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 transition">

@@ -47,7 +47,7 @@ const MaintenanceScheduleMaster = ({ onBack }) => {
     return (
         <div className="min-h-screen">
             <style>{`.qm-scroll{scrollbar-width:thin;scrollbar-color:#c7c9e0 transparent}.qm-scroll::-webkit-scrollbar{height:6px;width:6px}.qm-scroll::-webkit-scrollbar-thumb{background:#c7c9e0;border-radius:9999px}`}</style>
-            <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10">
+            <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10 max-md:px-2">
                 {/* Intro */}
                 <div className="rounded-2xl px-3 sm:px-5 py-3 mb-3 text-white relative overflow-hidden"
                     style={{ background: `linear-gradient(120deg, ${themeColor} 0%, ${themeDark} 100%)` }}>
@@ -71,7 +71,7 @@ const MaintenanceScheduleMaster = ({ onBack }) => {
                 </div>
 
                 {/* Tabs */}
-                <div className="flex items-center gap-1.5 mb-4 border-b border-gray-200">
+                <div className="flex items-center gap-1.5 mb-4 border-b border-gray-200 max-sm:flex-wrap">
                     {tabs.map(({ id, label, Icon }) => (
                         <button key={id} onClick={() => setTab(id)}
                             className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-[13px] font-semibold border-b-2 -mb-px transition ${tab === id ? 'border-current' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
@@ -193,13 +193,13 @@ const MasterData = () => {
             <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
 
                 {/* Left side - Search */}
-                <div className="relative">
+                <div className="relative max-sm:w-full">
                     <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <input
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         placeholder="Search code, engine, KVA or part"
-                        className="w-56 sm:w-72 rounded-lg border border-gray-200 bg-white pl-8 pr-3 py-2 text-[13px] outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 text-black transition"
+                        className="w-56 sm:w-72 rounded-lg border border-gray-200 bg-white pl-8 pr-3 py-2 text-[13px] outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 text-black transition max-sm:w-full"
                     />
                 </div>
 
@@ -258,6 +258,7 @@ const MasterData = () => {
                 <div className="rounded-2xl border border-dashed border-gray-300 bg-white py-16 text-center text-gray-400 text-[13px]">{rows.length === 0 ? 'No records yet — add one or import a file.' : 'No records match.'}</div>
             ) : (
                 <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm overflow-x-auto qm-scroll">
+                    <div className="overflow-x-auto qm-scroll">
                     <table className="min-w-[820px] w-full border-collapse text-[12px]">
                         <thead>
                             <tr className="bg-gray-50 text-[10px] font-semibold text-black uppercase tracking-wider">
@@ -353,6 +354,7 @@ const MasterData = () => {
                             })}
                         </tbody>
                     </table>
+                    </div>
                 </div>
             )}
 
@@ -532,13 +534,13 @@ const AppFormModal = ({ initial, opts, existing, onClose, onSave }) => {
     };
 
     return (
-        <div className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto p-4" style={{ background: 'rgba(20,26,32,.55)' }}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl my-8">
-                <div className="flex items-center gap-2 px-5 py-3.5 border-b border-gray-200">
+        <div className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto p-4 max-md:p-2" style={{ background: 'rgba(20,26,32,.55)' }}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl my-8 max-lg:max-w-[95vw] max-md:my-3">
+                <div className="flex items-center gap-2 px-5 py-3.5 border-b border-gray-200 max-md:px-3">
                     <h3 className="text-[16px] font-bold text-gray-800">{isEdit ? 'Edit' : 'Add'} Application Code</h3>
                     <button onClick={onClose} disabled={saving} className="ml-auto rounded-lg p-1 text-gray-400 hover:bg-gray-100 disabled:opacity-50"><XMarkIcon className="h-5 w-5" /></button>
                 </div>
-                <div className="px-5 py-4 max-h-[64vh] overflow-y-auto">
+                <div className="px-5 py-4 max-h-[64vh] overflow-y-auto max-md:px-3">
                     {pendingDraft && (
                         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
                             <span className="flex-1 text-[12px] font-medium text-amber-900">
@@ -573,7 +575,7 @@ const AppFormModal = ({ initial, opts, existing, onClose, onSave }) => {
                             <Combo value={hdr.emission} onChange={(v) => setHdr((h) => ({ ...h, emission: v }))} options={opts.emiOpts} placeholder="e.g. CPCB IV+ (or type new)" fieldCls={field} /></div>
                     </div>
 
-                    <div className="flex items-center justify-between mt-5 mb-2">
+                    <div className="flex items-center justify-between mt-5 mb-2 max-md:flex-wrap max-md:gap-2">
                         <span className="text-[11px] uppercase tracking-wider font-bold text-gray-400">Service Parts <span className="text-red-500">*</span></span>
                         <button onClick={() => setParts((a) => [...a, blankPart()])} disabled={!allPartsComplete}
                             title={allPartsComplete ? 'Add another part line' : 'Fill every field in the current part line(s) first'}
@@ -615,7 +617,7 @@ const AppFormModal = ({ initial, opts, existing, onClose, onSave }) => {
                         <p className="text-[11px] font-medium text-red-500 mt-1">All fields are required — fill every application-code field and every column in each part line.</p>
                     )}
                 </div>
-                <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-gray-200">
+                <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-gray-200 max-md:px-3 max-md:flex-wrap">
                     <button onClick={onClose} disabled={saving} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[12px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
                     <button onClick={save} disabled={saving || !canSave} className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed" style={{ backgroundColor: themeColor }}>
                         {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Add to master')}
@@ -788,12 +790,12 @@ const ImportData = () => {
 
             {preview && (
                 <div className="rounded-2xl border border-gray-200 bg-white shadow-sm mt-5 overflow-hidden">
-                    <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 bg-gray-50">
+                    <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 bg-gray-50 max-sm:flex-wrap max-md:px-2">
                         <p className="text-[13px] font-semibold text-gray-800">Preview · {preview.fname}</p>
                         <span className="ml-auto text-[11px] text-gray-400 font-mono">sheet: {preview.sheet}</span>
                     </div>
                     <div className="p-4">
-                        <div className="grid grid-cols-3 gap-3 mb-4">
+                        <div className="grid grid-cols-3 gap-3 mb-4 max-sm:grid-cols-1 max-sm:gap-2">
                             {[['APP Codes in file', preview.items.length, 'text-gray-800'], ['New will add', preview.news.length, 'text-emerald-600'], ['Existing will replace', preview.reps.length, 'text-red-600']].map(([l, n, c], i) => (
                                 <div key={i} className="rounded-xl border border-gray-200 p-3 text-center">
                                     <div className={`text-2xl font-bold font-mono ${c}`}>{n}</div>
@@ -872,7 +874,7 @@ const ImportData = () => {
                                 </tbody>
                             </table>
                         </div>
-                        <div className="flex justify-end gap-2 mt-4">
+                        <div className="flex justify-end gap-2 mt-4 max-md:flex-wrap">
                             <button onClick={() => { setPreview(null); setOpenRows({}); if (fileRef.current) fileRef.current.value = ''; }} disabled={busy} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[12px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
                             <button onClick={confirmUpload} disabled={busy || !preview.items.length} className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: themeColor }}>
                                 {busy ? 'Uploading…' : 'Review & upload'}

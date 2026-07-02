@@ -2099,7 +2099,7 @@ const Profile = () => {
                 </div>
             )}
 
-            <main className="max-w-7xl mx-auto px-3 sm:px-5 lg:px-4">
+            <main className="max-w-7xl mx-auto px-3 sm:px-5 lg:px-4 max-md:px-2">
                 {/* Profile Card */}
                 <div className="bg-[url('/2.jpg')] bg-cover bg-center rounded-xl shadow-lg overflow-visible mb-2 sm:mb-2">
                     <div className="p-2 sm:p-2">
@@ -2391,7 +2391,7 @@ const Profile = () => {
                                         </div>
                                     </div>
 
-                                    <div className="flex justify-end space-x-2">
+                                    <div className="flex justify-end space-x-2 max-sm:flex-wrap max-sm:gap-y-2">
                                         <button
                                             type="button"
                                             onClick={() => setShowProfileEdit(false)}
@@ -2491,17 +2491,17 @@ const Profile = () => {
                             </div>
                         </div>
 
-                        <div className="p-4 sm:p-5">
+                        <div className="p-4 sm:p-5 max-md:px-2">
                             {activeAdminTab === 'employees' && (
                                 <>
-                                    <div className="flex flex-col sm:flex-row items-center justify-between space-y-3 sm:space-y-0 sm:space-x-4 mb-4">
+                                    <div className="flex flex-col sm:flex-row items-center justify-between space-y-3 sm:space-y-0 sm:space-x-4 mb-4 max-lg:flex-wrap max-lg:gap-y-2">
                                         <h3 className="text-sm sm:text-base font-semibold text-black flex items-center space-x-2 whitespace-nowrap">
                                             <FaUsers className="text-[#2f3192]" />
                                             <span>Employee Management</span>
                                         </h3>
 
                                         {(isMasterAdmin || isITAdmin) && (
-                                            <div className="flex space-x-2 whitespace-nowrap order-1 sm:order-2">
+                                            <div className="flex space-x-2 whitespace-nowrap order-1 sm:order-2 max-sm:flex-wrap max-sm:gap-y-2">
                                                 {user?.can_export && (
                                                     <button
                                                         onClick={handleExportEmployees}
@@ -2537,7 +2537,7 @@ const Profile = () => {
                                             </div>
                                         )}
 
-                                        <div className="relative flex-1 max-w-md sm:ml-auto order-2 sm:order-1 mr-2">
+                                        <div className="relative flex-1 max-w-md sm:ml-auto order-2 sm:order-1 mr-2 max-sm:w-full max-sm:min-w-0">
                                             <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
                                             <input
                                                 type="text"
@@ -2779,7 +2779,7 @@ const Profile = () => {
             {showAddModal && (isMasterAdmin || isITAdmin) && (
                 <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center p-4 z-50">
                     <div className="bg-white rounded-xl p-5 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto">
-                        <div className="flex justify-between items-center mb-4">
+                        <div className="flex justify-between items-center mb-4 max-md:flex-wrap max-md:gap-2">
                             <h3 className="text-base sm:text-lg font-semibold text-black flex items-center space-x-2">
                                 <FaUserPlus className="text-[#2f3192]" />
                                 <span>Add New Employee</span>
@@ -2954,8 +2954,8 @@ const Profile = () => {
             {/* Edit Employee Modal */}
             {editingUser && (
                 <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-xl p-5 max-w-4xl w-full shadow-2xl max-h-[90vh] overflow-y-auto">
-                        <div className="flex justify-between items-center mb-4">
+                    <div className="bg-white rounded-xl p-5 max-w-4xl w-full shadow-2xl max-h-[90vh] overflow-y-auto max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh] max-md:px-2">
+                        <div className="flex justify-between items-center mb-4 max-md:flex-wrap max-md:gap-2">
                             <h3 className="text-base sm:text-lg font-semibold text-black flex items-center space-x-2">
                                 <FaEdit className="text-[#2f3192]" />
                                 <span>Edit Employee</span>
@@ -3139,7 +3139,7 @@ const Profile = () => {
 
                                                 <div className="space-y-2 mb-3 max-h-40 overflow-y-auto">
                                                     {editingUserBranches.map(b => (
-                                                        <div key={b.id} className="flex items-center justify-between bg-gray-50 px-2 py-1.5 rounded-lg">
+                                                        <div key={b.id} className="flex items-center justify-between bg-gray-50 px-2 py-1.5 rounded-lg max-sm:flex-wrap max-sm:gap-1">
                                                             <div className="text-xs text-black flex items-center gap-2">
                                                                 {b.is_primary && <span className="text-yellow-500">★</span>}
                                                                 <span className="font-medium">{b.branch_name}</span>
@@ -3202,7 +3202,7 @@ const Profile = () => {
                                         )}
 
                                     <div className="space-y-3 pt-2">
-                                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg max-sm:flex-wrap max-sm:gap-2">
                                             <div className="flex items-center space-x-3">
                                                 <FaBan className={`text-sm ${editingUser.is_blocked ? 'text-red-500' : 'text-gray-400'}`} />
                                                 <div>
@@ -3224,7 +3224,7 @@ const Profile = () => {
                                         </div>
 
                                         {canGrantExport && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id && (
-                                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg max-sm:flex-wrap max-sm:gap-2">
                                                 <div className="flex items-center space-x-3">
                                                     <FaFileExport className={`text-sm ${editingUser.can_export ? 'text-blue-500' : 'text-gray-400'}`} />
                                                     <div>
@@ -3247,7 +3247,7 @@ const Profile = () => {
                                         )}
 
                                         {canGrantExpense && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id && (
-                                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg max-sm:flex-wrap max-sm:gap-2">
                                                 <div className="flex items-center space-x-3">
                                                     <FaBuilding className={`text-sm ${editingUser.can_access_expense ? 'text-emerald-500' : 'text-gray-400'}`} />
                                                     <div>
@@ -3270,7 +3270,7 @@ const Profile = () => {
                                         )}
 
                                         {canDeleteEmployee && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id && (
-                                            <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg border border-red-100">
+                                            <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg border border-red-100 max-sm:flex-wrap max-sm:gap-2">
                                                 <div className="flex items-center space-x-3">
                                                     <FaTrash className="text-sm text-red-500" />
                                                     <div>
@@ -3318,7 +3318,7 @@ const Profile = () => {
             {showImportModal && (isMasterAdmin || isITAdmin) && (
                 <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center p-4 z-50">
                     <div className="bg-white rounded-xl p-5 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto">
-                        <div className="flex justify-between items-center mb-4">
+                        <div className="flex justify-between items-center mb-4 max-md:flex-wrap max-md:gap-2">
                             <h3 className="text-base sm:text-lg font-semibold text-black flex items-center space-x-2">
                                 <CiImport className="text-[#2f3192]" />
                                 <span>Import Employees</span>
@@ -3451,8 +3451,8 @@ const Profile = () => {
             {/* Banner Management Modal */}
             {showBannerModal && (isMasterAdmin || isITAdmin || isBranchAdmin) && (
                 <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-xl p-5 max-w-4xl w-full shadow-2xl max-h-[90vh] overflow-y-auto">
-                        <div className="flex justify-between items-center mb-4">
+                    <div className="bg-white rounded-xl p-5 max-w-4xl w-full shadow-2xl max-h-[90vh] overflow-y-auto max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh] max-md:px-2">
+                        <div className="flex justify-between items-center mb-4 max-md:flex-wrap max-md:gap-2">
                             <h3 className="text-base sm:text-lg font-semibold text-black flex items-center space-x-2">
                                 <FaImage className="text-[#2f3192]" />
                                 <span>Manage Banners</span>
@@ -3760,7 +3760,9 @@ const Profile = () => {
             -webkit-overflow-scrolling: touch;
         }
         
-        input, select, textarea, button {
+        /* 16px stops iOS auto-zoom on focus — only form fields need it;
+           forcing it on buttons broke their responsive sizing */
+        input, select, textarea {
             font-size: 16px !important;
         }
     }

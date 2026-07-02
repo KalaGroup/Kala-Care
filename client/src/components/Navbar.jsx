@@ -177,7 +177,7 @@ function Navbar({ children }) {
     if (!showTerminologyModal) return null;
 
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 max-md:p-2 bg-black/50 backdrop-blur-sm">
         <div className="bg-white rounded-lg shadow-2xl max-w-2xl w-full max-h-[85vh] overflow-hidden">
           {/* Modal Header - Compact */}
           <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-2 flex justify-between items-center">
@@ -947,7 +947,7 @@ function Navbar({ children }) {
           saved to the SEPARATE campaign_drive_meta table — the real drive is
           never changed. */}
       {showDriveNamesModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 max-md:p-2 bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-lg shadow-2xl max-w-[95vw] w-full max-h-[95vh] overflow-hidden flex flex-col">
             <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-2 flex justify-between items-center">
               <h2 className="text-base font-semibold text-gray-900">Drive List Information</h2>
@@ -968,7 +968,7 @@ function Navbar({ children }) {
             {/* Filters */}
             <div className="px-4 py-2 border-b border-gray-100">
               <div className="flex flex-wrap items-end gap-2">
-                <div className="flex flex-col flex-1 min-w-[180px]">
+                <div className="flex flex-col flex-1 min-w-[180px] max-sm:min-w-full">
                   <label className="text-[10px] font-medium text-gray-500 mb-0.5">Search</label>
                   <input
                     value={driveSearch}
@@ -978,12 +978,12 @@ function Navbar({ children }) {
                     style={{ '--tw-ring-color': themeColor }}
                   />
                 </div>
-                <div className="flex flex-col">
+                <div className="flex flex-col max-sm:w-full">
                   <label className="text-[10px] font-medium text-gray-500 mb-0.5">Status</label>
                   <select
                     value={driveStatusFilter}
                     onChange={(e) => setDriveStatusFilter(e.target.value)}
-                    className="border border-gray-300 rounded px-2 py-1 text-xs text-black bg-white focus:outline-none focus:ring-2"
+                    className="border border-gray-300 rounded px-2 py-1 text-xs text-black bg-white focus:outline-none focus:ring-2 max-sm:w-full"
                     style={{ '--tw-ring-color': themeColor }}
                   >
                     <option value="all">All</option>
@@ -991,47 +991,47 @@ function Navbar({ children }) {
                     <option value="inactive">Inactive</option>
                   </select>
                 </div>
-                <div className="flex flex-col">
+                <div className="flex flex-col max-sm:w-full">
                   <label className="text-[10px] font-medium text-gray-500 mb-0.5">Start Date (from)</label>
                   <input
                     type="date"
                     value={driveDateFrom}
                     max={driveDateTo || undefined}
                     onChange={(e) => setDriveDateFrom(e.target.value)}
-                    className="border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2"
+                    className="border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2 max-sm:w-full"
                     style={{ '--tw-ring-color': themeColor }}
                   />
                 </div>
-                <div className="flex flex-col">
+                <div className="flex flex-col max-sm:w-full">
                   <label className="text-[10px] font-medium text-gray-500 mb-0.5">End Date (to)</label>
                   <input
                     type="date"
                     value={driveDateTo}
                     min={driveDateFrom || undefined}
                     onChange={(e) => setDriveDateTo(e.target.value)}
-                    className="border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2"
+                    className="border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2 max-sm:w-full"
                     style={{ '--tw-ring-color': themeColor }}
                   />
                 </div>
-                <div className="flex flex-col">
+                <div className="flex flex-col max-sm:w-full">
                   <label className="text-[10px] font-medium text-gray-500 mb-0.5">Data Duration (from)</label>
                   <input
                     type="month"
                     value={durationFrom}
                     max={durationTo || undefined}
                     onChange={(e) => setDurationFrom(e.target.value)}
-                    className="border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2"
+                    className="border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2 max-sm:w-full"
                     style={{ '--tw-ring-color': themeColor }}
                   />
                 </div>
-                <div className="flex flex-col">
+                <div className="flex flex-col max-sm:w-full">
                   <label className="text-[10px] font-medium text-gray-500 mb-0.5">Data Duration (to)</label>
                   <input
                     type="month"
                     value={durationTo}
                     min={durationFrom || undefined}
                     onChange={(e) => setDurationTo(e.target.value)}
-                    className="border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2"
+                    className="border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2 max-sm:w-full"
                     style={{ '--tw-ring-color': themeColor }}
                   />
                 </div>
@@ -1043,7 +1043,7 @@ function Navbar({ children }) {
                       setDurationFrom(''); setDurationTo('');
                       setDriveStatusFilter('all');
                     }}
-                    className="px-2 py-1 text-[11px] font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50 transition-colors whitespace-nowrap"
+                    className="px-2 py-1 text-[11px] font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50 transition-colors whitespace-nowrap max-sm:w-full"
                   >
                     Clear filters
                   </button>
@@ -1059,7 +1059,7 @@ function Navbar({ children }) {
                 <div className="text-center py-8 text-xs text-gray-500">No drives found.</div>
               ) : (
                 <div className="flex-1 min-h-0 overflow-auto border border-gray-200 rounded-lg">
-                  <table className="w-full text-xs border-collapse table-fixed">
+                  <table className="w-full text-xs border-collapse table-fixed max-md:min-w-[1000px]">
                     <colgroup>
                       <col className="w-12" />{/* Sr. No. */}
                       <col className="w-40" />{/* Drive Name (real/original) */}
@@ -1194,7 +1194,7 @@ function Navbar({ children }) {
             </div>
 
             {!driveNamesLoading && driveCampaigns.length > 0 && (
-              <div className="sticky bottom-0 bg-white border-t border-gray-200 px-3 py-1.5 flex justify-between items-center">
+              <div className="sticky bottom-0 bg-white border-t border-gray-200 px-3 py-1.5 flex justify-between items-center max-md:flex-wrap max-md:gap-2">
                 <span className="text-[11px] text-gray-400">
                   {visibleDrives.length} of {driveCampaigns.length} drive(s)
                 </span>
@@ -1220,7 +1220,7 @@ function Navbar({ children }) {
       {/* Drive View / Edit detail modal — edits write ONLY to campaign_drive_meta.
           The real drive name / product / dates are never modified. */}
       {driveModalMode && activeDrive && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 max-md:p-2 bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-lg shadow-2xl max-w-lg w-full max-h-[88vh] overflow-hidden flex flex-col">
             <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-2 flex justify-between items-center">
               <h2 className="text-base font-semibold text-gray-900">
@@ -1307,7 +1307,7 @@ function Navbar({ children }) {
 
                   <div className="flex flex-col gap-1">
                     <label className="text-[11px] font-medium text-gray-600">Data Duration</label>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 max-sm:flex-col max-sm:items-stretch">
                       <input
                         type="month"
                         value={editForm.data_start}
@@ -1316,7 +1316,7 @@ function Navbar({ children }) {
                         className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-2"
                         style={{ '--tw-ring-color': themeColor }}
                       />
-                      <span className="text-gray-400 text-[11px]">to</span>
+                      <span className="text-gray-400 text-[11px] max-sm:text-center">to</span>
                       <input
                         type="month"
                         value={editForm.data_end}
@@ -1343,7 +1343,7 @@ function Navbar({ children }) {
               )}
             </div>
 
-            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-3 py-2 flex justify-end gap-2">
+            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-3 py-2 flex justify-end gap-2 max-md:flex-wrap">
               {driveModalMode === 'edit' ? (
                 <>
                   <button
@@ -2244,7 +2244,7 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
       <main className="flex-1 flex flex-col h-full overflow-auto">
         {/* Mobile Header */}
         {isMobile && (
-          <header className="sticky top-0 z-10 bg-white backdrop-blur-xl border-b border-gray-200/50 px-3 h-14 flex items-center justify-between">
+          <header className="sticky top-0 z-10 bg-white backdrop-blur-xl border-b border-gray-200/50 px-3 h-14 max-sm:h-16 flex items-center justify-between">
             <div className="flex items-center gap-1.5 min-w-0">
               <Logo />
             </div>

@@ -172,7 +172,7 @@ const HOExpenseDash = () => {
               </div>
             </div>
 
-            <div className="flex gap-1 sm:gap-2 bg-gray-100 rounded-lg p-1">
+            <div className="flex gap-1 sm:gap-2 bg-gray-100 rounded-lg p-1 max-md:flex-wrap">
               {[
                 { id: 'tada', label: 'TA-DA' },
                 { id: 'office', label: 'Office Expense' },
@@ -536,14 +536,14 @@ const ExpenseSection = ({ config }) => {
       </div>
 
       {/* Box 1 – Verified */}
-      <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg p-5 border border-gray-100">
+      <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg p-5 border border-gray-100 max-md:p-3">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div className="flex-shrink-0">
             <h3 className="text-base font-bold text-gray-800">{config.titles.verified}</h3>
             <p className="text-xs text-gray-500 mt-0.5">{config.titles.verifiedSub}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-lg bg-white">
+            <div className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-lg bg-white max-md:flex-wrap">
               <span className="text-[10px] font-bold text-gray-500 uppercase">{config.dateLabel}:</span>
               <input type="date" value={dateFrom}
                 onChange={e => setDateFrom(e.target.value)}
@@ -578,7 +578,7 @@ const ExpenseSection = ({ config }) => {
       </div>
 
       {/* Box 2 – Monthly */}
-      <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg p-5 border border-gray-100">
+      <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg p-5 border border-gray-100 max-md:p-3">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div className="flex-shrink-0">
             <h3 className="text-base font-bold text-gray-800">{config.titles.monthly}</h3>
@@ -609,7 +609,7 @@ const ExpenseSection = ({ config }) => {
       </div>
 
       {/* Box 3 – Unverified */}
-      <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg p-5 border border-gray-100">
+      <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg p-5 border border-gray-100 max-md:p-3">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div className="flex-shrink-0">
             <h3 className="text-base font-bold text-gray-800">{config.titles.unverified}</h3>

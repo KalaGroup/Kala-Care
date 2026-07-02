@@ -3857,7 +3857,7 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     return (
       <div className="mt-1">
         <div className="overflow-x-auto border border-gray-200 rounded-lg">
-          <table className="w-full text-[11px]">
+          <table className="w-full text-[11px] max-md:min-w-[640px]">
             <thead className="bg-gray-100">
               <tr>
                 {visible.map(c => (
@@ -5372,14 +5372,14 @@ ${f.start_para}`;
           <div className="border-gray-200 pb-3">
             <div className="space-y-2">
               {/* Header Row - Hide on mobile, show on larger screens */}
-              <div className="hidden sm:grid sm:grid-cols-3 gap-40">
+              <div className="hidden sm:grid sm:grid-cols-3 gap-40 max-lg:gap-4">
                 <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Quotation Type</p>
                 <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Created Date</p>
                 <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Expiry Date</p>
               </div>
 
               {/* Row 1: Anubandhan Plus - Mobile responsive */}
-              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40">
+              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:sm:gap-4">
                 <div className="flex justify-between sm:justify-center items-center sm:block">
                   <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                   <p className="text-xs text-black font-normal text-left sm:text-center">{anubandhanPlus?.quotation_type || '-'}</p>
@@ -5395,7 +5395,7 @@ ${f.start_para}`;
               </div>
 
               {/* Row 2: Anubandhan - Mobile responsive */}
-              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40">
+              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:sm:gap-4">
                 <div className="flex justify-between sm:justify-center items-center sm:block">
                   <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                   <p className="text-xs text-black font-normal text-left sm:text-center">{anubandhan?.quotation_type || '-'}</p>
@@ -5411,7 +5411,7 @@ ${f.start_para}`;
               </div>
 
               {/* Row 3: Bandhan Plus - Mobile responsive */}
-              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40">
+              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:sm:gap-4">
                 <div className="flex justify-between sm:justify-center items-center sm:block">
                   <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                   <p className="text-xs text-black font-normal text-left sm:text-center">{bandhanPlus?.quotation_type || '-'}</p>
@@ -5427,7 +5427,7 @@ ${f.start_para}`;
               </div>
 
               {/* Row 4: Pulse Quotation - Mobile responsive */}
-              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40">
+              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:sm:gap-4">
                 <div className="flex justify-between sm:justify-center items-center sm:block">
                   <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                   <p className="text-xs text-black font-normal text-left sm:text-center">
@@ -5904,11 +5904,11 @@ ${f.start_para}`;
           </div>
 
           <div className="bg-white rounded-xl shadow-sm px-3 py-1 mb-1.5">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center justify-between gap-3 max-md:flex-wrap">
 
               {/* LEFT SIDE : Flag Filters */}
               <div
-                className="flex flex-nowrap items-center gap-1 overflow-x-auto"
+                className="flex flex-nowrap items-center gap-1 overflow-x-auto max-lg:min-w-0 max-md:w-full"
                 style={{ scrollbarWidth: "thin" }}
               >
                 {/* All Button */}
@@ -6016,7 +6016,7 @@ ${f.start_para}`;
                     setTableScrollTop(0);
                     fetchNonCampaignCustomers(1, true, newVal); // reset + override
                   }}
-                  className={`px-3 py-1.5 text-sm rounded-md flex items-center gap-2 transition-all ${showCompletedFirst
+                  className={`px-3 py-1.5 text-sm rounded-md flex items-center gap-2 transition-all max-sm:text-xs max-sm:px-2 max-sm:whitespace-nowrap ${showCompletedFirst
                     ? "bg-[#2f3192] text-white"
                     : "text-black hover:underline"
                     }`}
@@ -7103,7 +7103,7 @@ ${f.start_para}`;
             <div className="bg-white rounded-xl shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
               {/* Header */}
               <div
-                className="px-4 py-3 border-b border-gray-200 flex justify-between items-center"
+                className="px-4 py-3 border-b border-gray-200 flex justify-between items-center max-sm:flex-wrap max-sm:gap-2"
                 style={{ background: `linear-gradient(135deg, ${themeColor} 0%, ${themeShades.dark} 100%)` }}
               >
                 <div>
@@ -7164,7 +7164,7 @@ ${f.start_para}`;
                       autoFocus
                     />
                   </div>
-                  <div className="flex justify-end gap-2 mt-2">
+                  <div className="flex justify-end gap-2 mt-2 max-md:flex-wrap">
                     <button
                       onClick={() => {
                         setShowAddDieryForm(false);
@@ -7211,7 +7211,7 @@ ${f.start_para}`;
                       style={{ '--tw-ring-color': themeColor, whiteSpace: 'pre-wrap' }}
                     />
                   </div>
-                  <div className="flex justify-end gap-2 mt-2">
+                  <div className="flex justify-end gap-2 mt-2 max-md:flex-wrap">
                     <button
                       onClick={() => {
                         setEditingDieryEntry(null);
@@ -7737,7 +7737,7 @@ ${f.start_para}`;
           className="bg-white rounded-xl shadow-lg p-3 sm:p-4 mt-3 mb-3 border-2 scroll-mt-20"
           style={{ borderColor: themeColor }}
         >
-          <div className="flex justify-between items-center mb-3">
+          <div className="flex justify-between items-center mb-3 max-md:flex-col max-md:items-start max-md:gap-2">
             <h3
               className="text-sm sm:text-base font-semibold"
               style={{ color: "black" }}
@@ -8486,7 +8486,7 @@ ${f.start_para}`;
           )}
 
           {/* Form Actions */}
-          <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
+          <div className="flex justify-end gap-2 pt-3 border-t border-gray-200 max-md:flex-wrap">
             <button
               type="button"
               onClick={() => {
@@ -8685,7 +8685,7 @@ ${f.start_para}`;
                   </button>
                 </div>
                 <div className="p-3 space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-2 max-sm:grid-cols-1">
                     <div>
                       <label className="text-[11px] text-black">Date</label>
                       <p className="font-medium text-xs">
@@ -8759,7 +8759,7 @@ ${f.start_para}`;
                   </div>
 
                   {selectedFollowup.quotation_sent && (
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-2 max-sm:grid-cols-1">
                       <div>
                         <label className="text-[11px] text-black">
                           Quotation No.
@@ -8810,7 +8810,7 @@ ${f.start_para}`;
                     </p>
                   </div>
                 </div>
-                <div className="p-3 border-t border-gray-200 flex justify-end gap-2">
+                <div className="p-3 border-t border-gray-200 flex justify-end gap-2 max-md:flex-wrap">
                   {canEditFollowup(selectedFollowup) && (
                     <button
                       onClick={() => handleEditFollowup(selectedFollowup)}
@@ -9120,7 +9120,7 @@ ${f.start_para}`;
         {/* PDF Chat Panel */}
         {showPdfViewer && pdfViewerCampaign && (
           <div
-            className={`fixed z-50 transition-all duration-300 ease-in-out ${isDragging ? 'cursor-grabbing' : ''} ${isPdfPanelMinimized ? 'w-36 xs:w-48 sm:w-72 h-10 xs:h-12' : `${pdfPanelWidth} h-[350px] xs:h-[400px] sm:h-[450px] md:h-[500px] lg:h-[550px]`}`}
+            className={`fixed z-50 max-lg:max-w-[95vw] transition-all duration-300 ease-in-out ${isDragging ? 'cursor-grabbing' : ''} ${isPdfPanelMinimized ? 'w-36 xs:w-48 sm:w-72 h-10 xs:h-12' : `${pdfPanelWidth} h-[350px] xs:h-[400px] sm:h-[450px] md:h-[500px] lg:h-[550px]`}`}
             style={{
               left: `${Math.min(Math.max(panelPosition.x, 0), (typeof window !== 'undefined' ? window.innerWidth : 1200) - (isPdfPanelMinimized ? 144 : 280))}px`,
               top: `${Math.min(Math.max(panelPosition.y, 0), (typeof window !== 'undefined' ? window.innerHeight : 800) - (isPdfPanelMinimized ? 40 : 350))}px`,
@@ -9315,7 +9315,7 @@ ${f.start_para}`;
                   autoFocus
                 />
               </div>
-              <div className="p-3 border-t border-gray-200 flex justify-end gap-2">
+              <div className="p-3 border-t border-gray-200 flex justify-end gap-2 max-md:flex-wrap">
                 <button
                   onClick={() => {
                     setShowActivityModal(false);
@@ -9413,7 +9413,7 @@ ${f.start_para}`;
                   autoFocus
                 />
               </div>
-              <div className="p-3 border-t border-gray-200 flex justify-end gap-2">
+              <div className="p-3 border-t border-gray-200 flex justify-end gap-2 max-md:flex-wrap">
                 <button
                   onClick={() => {
                     setShowRRModal(false);
@@ -9483,7 +9483,7 @@ ${f.start_para}`;
         {viewLetterHtml && (
           <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center z-[60] p-3">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-hidden flex flex-col">
-              <div className="px-4 py-3 flex justify-between items-center border-b border-gray-200"
+              <div className="px-4 py-3 flex justify-between items-center border-b border-gray-200 max-sm:flex-wrap max-sm:gap-2"
                 style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
                 <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                   <DocumentTextIcon className="h-4 w-4 text-white" /> Letter
@@ -9780,7 +9780,7 @@ ${f.start_para}`;
                                 />
 
                                 <div className="mt-1 overflow-x-auto border border-gray-300 rounded-lg shadow-sm bg-white">
-                                  <table className="w-full text-[11px] border-collapse">
+                                  <table className="w-full text-[11px] border-collapse max-md:min-w-[480px]">
                                     <thead>
                                       <tr className="bg-gradient-to-b from-gray-50 to-gray-100 text-gray-600">
                                         {SERVICE_CYCLE_COLS.map(c => (
@@ -10004,7 +10004,7 @@ ${f.start_para}`;
 
                     {/* Attachments */}
                     <div className="border border-gray-200 rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center justify-between mb-2 max-sm:flex-wrap max-sm:gap-2">
                         <p className="text-[11px] font-bold text-black uppercase">Attachments ({letterAttachments.length})</p>
                         <div className="flex items-center gap-2">
                           <input type="file" multiple accept=".mp4,.jpg,.jpeg,.png,.pdf,.doc,.docx,.xlsx,.xls,.csv"
@@ -10046,7 +10046,7 @@ ${f.start_para}`;
                 {letterStep === 3 && (
                   <div className="space-y-3 max-w-3xl mx-auto">
                     <div className="border border-gray-200 rounded-lg overflow-hidden">
-                      <div className="px-3 py-1.5 bg-gray-50 text-xs font-bold text-black flex items-center justify-between">
+                      <div className="px-3 py-1.5 bg-gray-50 text-xs font-bold text-black flex items-center justify-between max-sm:flex-wrap max-sm:gap-1.5">
                         <span>Letter Preview</span>
                         <div className="flex items-center gap-1.5">
                           <button onClick={handleSaveLetterPdf} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-white rounded hover:opacity-90" style={{ backgroundColor: themeColor }}>
@@ -10187,7 +10187,7 @@ ${f.start_para}`;
               </div>
 
               {/* Footer / navigation */}
-              <div className="px-4 py-3 border-t border-gray-200 flex justify-between gap-2 bg-white">
+              <div className="px-4 py-3 border-t border-gray-200 flex justify-between gap-2 bg-white max-sm:flex-wrap">
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => letterStep > 1 ? setLetterStep(letterStep - 1) : setShowLetterWizard(false)}
@@ -10525,7 +10525,7 @@ ${f.start_para}`;
                     style={{ "--tw-ring-color": themeColor }}
                   />
                 </div>
-                <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
+                <div className="flex justify-end gap-2 pt-3 border-t border-gray-200 max-md:flex-wrap">
                   <button
                     type="button"
                     onClick={() => setShowEditCustomerModal(false)}

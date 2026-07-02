@@ -339,7 +339,7 @@ const TADAHistoryModal = ({ branch, themeColor, onClose, canExport = false }) =>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-[98vw] max-h-[92vh] overflow-hidden flex flex-col">
 
         {/* Header + tabs */}
-        <div className="px-4 py-2 flex justify-between items-center shrink-0 gap-3 flex-wrap" style={{ background: themeColor }}>
+        <div className="px-4 py-2 flex justify-between items-center shrink-0 gap-3 flex-wrap max-md:px-2 max-md:gap-2" style={{ background: themeColor }}>
           <h2 className="text-sm font-semibold text-white whitespace-nowrap">History — {branch?.branch_name}</h2>
           {!loading && (
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -366,8 +366,8 @@ const TADAHistoryModal = ({ branch, themeColor, onClose, canExport = false }) =>
 
         {/* Filter bar (voucher list only) */}
         {!loading && !selectedVoucher && (
-          <div className="shrink-0 px-4 py-2 border-b bg-gray-100 flex items-center gap-2 flex-wrap">
-            <div className="relative flex-1 min-w-[220px]">
+          <div className="shrink-0 px-4 py-2 border-b bg-gray-100 flex items-center gap-2 flex-wrap max-md:px-2">
+            <div className="relative flex-1 min-w-[220px] max-md:w-full max-md:min-w-0">
               <svg className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
@@ -430,7 +430,7 @@ const TADAHistoryModal = ({ branch, themeColor, onClose, canExport = false }) =>
             filteredGroups.length === 0 ? (
               <div className="text-center py-20 text-sm text-gray-500">No vouchers found</div>
             ) : (
-              <table className="border-collapse w-full">
+              <table className="border-collapse w-full max-md:min-w-[1100px]">
                 <thead className="sticky top-0 z-10">
                   <tr style={{ backgroundColor: '#f0f1ff' }}>
                     {['Sr. No.', ...(isAll ? ['Source'] : []), 'Voucher No.', 'Submitted By', 'Verified By', 'Period', 'Engineers', 'Records', 'Total Amount', 'Paid Date (whole voucher)'].map((h, i) => (
@@ -504,7 +504,7 @@ const TADAHistoryModal = ({ branch, themeColor, onClose, canExport = false }) =>
           ) : !selectedEngineer ? (
             /* ── LEVEL 2: ENGINEER / CUSTOMER LIST ── */
             <>
-              <div className="px-4 py-2 border-b bg-white flex items-center gap-2 flex-wrap">
+              <div className="px-4 py-2 border-b bg-white flex items-center gap-2 flex-wrap max-md:px-2">
                 <button onClick={() => setSelectedVoucher(null)}
                   className="inline-flex items-center gap-1 text-sm font-bold underline" style={{ color: themeColor }}>
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
@@ -520,7 +520,7 @@ const TADAHistoryModal = ({ branch, themeColor, onClose, canExport = false }) =>
                 <span className="text-[10px] text-gray-500">Verified by: <strong>{selectedVoucher.verified_by || '-'}</strong></span>
                 <div className="ml-auto"><ExportBtn onClick={() => exportRecords(voucherRecords, detailSrc, `Voucher_${selectedVoucher.voucher_no}`)} /></div>
               </div>
-              <table className="border-collapse w-full">
+              <table className="border-collapse w-full max-md:min-w-[560px]">
                 <thead className="sticky top-0 z-10">
                   <tr style={{ backgroundColor: detailMeta.bg }}>
                     {['Sr. No.', 'Engineer Name', 'No. of Records', 'Total Amount', 'Paid'].map((h, i) => (
@@ -561,7 +561,7 @@ const TADAHistoryModal = ({ branch, themeColor, onClose, canExport = false }) =>
           ) : (
             /* ── LEVEL 3: ENGINEER'S RECORDS — SOURCE-SPECIFIC COLUMNS ── */
             <>
-              <div className="px-4 py-2 border-b bg-white flex items-center gap-2 flex-wrap">
+              <div className="px-4 py-2 border-b bg-white flex items-center gap-2 flex-wrap max-md:px-2">
                 <button onClick={() => setSelectedEngineer(null)}
                   className="inline-flex items-center gap-1 text-sm font-bold underline" style={{ color: themeColor }}>
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
@@ -613,7 +613,7 @@ const TADAHistoryModal = ({ branch, themeColor, onClose, canExport = false }) =>
         </div>
 
         {/* Footer */}
-        <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-end">
+        <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-end max-md:px-2">
           <button onClick={onClose} className="px-4 py-1.5 border rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100">Close</button>
         </div>
       </div>

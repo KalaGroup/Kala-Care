@@ -2511,7 +2511,7 @@ const Campaign = () => {
           box-shadow: inset 0 0 0 1px #ef4444;
         }
       `}</style>
-      <div className="max-w-7xl mx-auto px-4 sm:px-3">
+      <div className="max-w-7xl mx-auto px-4 sm:px-3 max-md:px-2">
         {/* Header Section */}
         <div className="flex flex-wrap items-start sm:items-center justify-between gap-2 sm:gap-3 mb-4 sm:mb-3">
           <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -2520,7 +2520,7 @@ const Campaign = () => {
             </h1>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end max-md:flex-wrap">
             <div className="flex sm:hidden items-center gap-1.5">
               <div className="bg-white rounded-lg shadow-sm px-2 py-1.5">
                 <div className="flex items-center gap-1">
@@ -2559,7 +2559,7 @@ const Campaign = () => {
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 sm:gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 max-md:flex-wrap">
               <button
                 onClick={() => {
                   resetForm();
@@ -2839,7 +2839,7 @@ const Campaign = () => {
 
                           {invalidAssets.length > 0 && (
                             <div className="bg-red-50 border border-red-200 rounded-md p-3">
-                              <div className="flex items-center justify-between mb-1.5">
+                              <div className="flex items-center justify-between mb-1.5 max-sm:flex-wrap max-sm:gap-1">
                                 <p className="text-xs font-semibold text-red-700">
                                   ✗ Not Found in Database ({invalidAssets.length}):
                                 </p>
@@ -3259,7 +3259,7 @@ const Campaign = () => {
                 </div>
               </div>
 
-              <div className="px-4 lg:px-5 py-3 border-t flex gap-3">
+              <div className="px-4 lg:px-5 py-3 border-t flex gap-3 max-sm:flex-col max-sm:items-stretch">
                 <button
                   onClick={() => !createLoading && setShowTransferModal(false)}
                   disabled={createLoading}
@@ -3421,7 +3421,7 @@ const Campaign = () => {
 
                           {invalidAssets.length > 0 && (
                             <div className="bg-red-50 border border-red-200 rounded-md p-3">
-                              <div className="flex items-center justify-between mb-1.5">
+                              <div className="flex items-center justify-between mb-1.5 max-sm:flex-wrap max-sm:gap-1">
                                 <p className="text-xs font-semibold text-red-700">
                                   ✗ Not Found in Database ({invalidAssets.length}):
                                 </p>
@@ -3966,7 +3966,7 @@ const Campaign = () => {
                   <p className="text-xs text-gray-500">
                     {letterFormats.length} format{letterFormats.length !== 1 ? 's' : ''} saved
                   </p>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 max-sm:flex-wrap max-sm:gap-2">
                     <button
                       onClick={openBranchEmailMaster}
                       className="inline-flex items-center gap-1 px-3 py-1.5 text-xs text-white font-medium rounded-md transition-all shadow-sm hover:shadow-md whitespace-nowrap"
@@ -4208,7 +4208,8 @@ const Campaign = () => {
                       Enter the email address for each branch. Leave blank if not applicable.
                     </p>
                     <div className="border border-gray-200 rounded-lg overflow-hidden">
-                      <table className="w-full text-xs" style={{ tableLayout: 'fixed' }}>
+                      <div className="overflow-x-auto">
+                      <table className="w-full text-xs max-lg:min-w-[560px]" style={{ tableLayout: 'fixed' }}>
                         <colgroup>
                           <col style={{ width: '40px' }} />
                           <col style={{ width: '120px' }} />
@@ -4296,13 +4297,14 @@ const Campaign = () => {
                           ))}
                         </tbody>
                       </table>
+                      </div>
                     </div>
                   </>
                 )}
               </div>
 
               {/* Footer */}
-              <div className="px-4 lg:px-5 py-3 border-t bg-white flex items-center justify-between gap-3">
+              <div className="px-4 lg:px-5 py-3 border-t bg-white flex items-center justify-between gap-3 max-sm:flex-wrap">
                 <p className="text-xs text-gray-500">
                   {branchEmails.filter(b => b.emails.length > 0).length} of {branchEmails.length} branches have emails
                 </p>
@@ -4500,7 +4502,7 @@ const Campaign = () => {
                     Customer Details to show in Reference{' '}
                     <span className="text-gray-400 font-normal">(optional)</span>
                   </label>
-                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1.5">
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1.5 max-sm:grid-cols-1">
                     {CUSTOMER_DETAIL_OPTIONS.map(opt => {
                       const isDefault = opt.value === 'instance_id';
                       return (
@@ -4581,7 +4583,7 @@ const Campaign = () => {
                         </div>
 
                         <div className="overflow-x-auto border border-gray-300 rounded-lg bg-white shadow-sm">
-                          <table className="w-full text-[11px] border-collapse">
+                          <table className="w-full text-[11px] border-collapse max-md:min-w-[480px]">
                             <thead>
                               <tr className="bg-gradient-to-b from-gray-50 to-gray-100 text-gray-600">
                                 {SERVICE_CYCLE_COLS.map(c => (
@@ -4762,7 +4764,7 @@ const Campaign = () => {
                               {available.length === 0 ? (
                                 <p className="text-[11px] text-gray-400 italic">All branches assigned to earlier rules.</p>
                               ) : (
-                                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 max-sm:grid-cols-1">
                                   {available.map(b => (
                                     <label key={b.code} className="flex items-center gap-1.5 cursor-pointer group">
                                       <input
@@ -5161,7 +5163,7 @@ const Campaign = () => {
                       <span className="text-sm text-gray-400">No rows configured</span>
                     ) : (
                       <div className="overflow-x-auto border border-gray-200 rounded-lg">
-                        <table className="w-full text-[11px]">
+                        <table className="w-full text-[11px] max-md:min-w-[420px]">
                           <thead className="bg-gray-100">
                             <tr>
                               {SERVICE_CYCLE_COLS.map(c => (
@@ -5398,7 +5400,7 @@ const Campaign = () => {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div className="grid grid-cols-2 gap-3 mb-3 max-sm:grid-cols-1">
                     <div className="flex items-center gap-1.5 text-sm min-w-0">
                       <CalendarIcon className="h-3.5 w-3.5 shrink-0" style={{ color: themeColor }} />
                       <span className="text-black truncate">
@@ -5413,7 +5415,7 @@ const Campaign = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between pt-3 border-t mt-auto">
+                  <div className="flex items-center justify-between pt-3 border-t mt-auto max-sm:flex-wrap max-sm:gap-2">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-medium px-2 py-1 bg-blue-100 text-blue-800 rounded-full truncate max-w-[120px]">
                         {campaign.service}

@@ -418,13 +418,13 @@ const Pagination = ({ currentPage, totalPages, onPageChange, totalCount, pageSiz
   const endRecord = Math.min(currentPage * pageSize, totalCount);
 
   return (
-    <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-3">
+    <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-3 max-md:px-2">
       <div className="text-xs text-black">
         Showing <span className="font-medium">{startRecord}</span> to <span className="font-medium">{endRecord}</span> of{' '}
         <span className="font-medium">{totalCount}</span> records
       </div>
 
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 max-sm:flex-wrap max-sm:justify-center">
         <button
           onClick={() => onPageChange(1)}
           disabled={currentPage === 1}
@@ -1394,7 +1394,7 @@ const Customer = () => {
             <div className="h-0.5"></div>
           </div>
 
-          <div ref={tableContainerRef} className="h-[calc(100vh-280px)] sm:h-[650px] lg:h-[750px] overflow-auto scrollbar-thin">
+          <div ref={tableContainerRef} className="h-[calc(100vh-280px)] sm:h-[650px] lg:h-[750px] max-lg:h-[calc(100vh-280px)] overflow-auto scrollbar-thin">
             {loading && tableData.length === 0 ? (
               <div className="p-10 text-center">
                 <ArrowPathIcon className="h-10 w-10 animate-spin mx-auto" style={{ color: themeColor }} />
@@ -1499,8 +1499,8 @@ const Customer = () => {
       {/* View Modal */}
       {showViewModal && selectedRecord && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-3 z-50 animate-fadeIn">
-          <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white flex justify-between items-center shrink-0">
+          <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-xl overflow-hidden max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh]">
+            <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white flex justify-between items-center shrink-0 max-md:flex-wrap max-md:gap-2">
               <h3 className="text-sm font-semibold text-black flex items-center gap-1.5">
                 <EyeIcon className="h-4 w-4" style={{ color: themeColor }} />
                 {currentTable.id === 'customers' ? `Customer Details - ${selectedRecord.customer_name || selectedRecord.instance_id}` : `Record Details - ID: ${selectedRecord.id}`}

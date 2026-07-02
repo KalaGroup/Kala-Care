@@ -133,10 +133,10 @@ const EmployeeRRModal = ({
     if (!isOpen) return null;
 
     return ReactDOM.createPortal(
-        <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3">
-            <div className="bg-white rounded-xl shadow-xl max-w-7xl w-full max-h-[92vh] overflow-hidden flex flex-col">
+        <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3 max-md:px-2">
+            <div className="bg-white rounded-xl shadow-xl max-w-7xl w-full max-h-[92vh] max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh] overflow-hidden flex flex-col">
                 <div
-                    className="px-4 py-3 border-b border-gray-200 flex justify-between items-center"
+                    className="px-4 py-3 border-b border-gray-200 flex justify-between items-center max-lg:flex-wrap max-lg:gap-2 max-md:px-2"
                     style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
                 >
                     <div>
@@ -150,7 +150,7 @@ const EmployeeRRModal = ({
                             )}
                         </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 max-lg:flex-wrap">
                         <div className="flex items-center gap-1">
                             <label className="text-[11px] text-white whitespace-nowrap">From:</label>
                             <input
@@ -195,7 +195,7 @@ const EmployeeRRModal = ({
                             placeholder="Search customer, drive, remark..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-64 bg-white focus:outline-none"
+                            className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-64 max-md:w-full max-md:min-w-0 bg-white focus:outline-none"
                         />
                         <button
                             onClick={onClose}

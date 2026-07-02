@@ -92,7 +92,7 @@ const EmpQuery = ({ user, onClose, showToast }) => {
     return (
         <div className="bg-white rounded-2xl shadow-lg overflow-hidden border border-gray-200">
             {/* Header */}
-            <div className="px-4 py-3 border-b border-gray-200 flex justify-between items-center bg-gradient-to-r from-[#2f3192]/8 to-transparent">
+            <div className="px-4 py-3 border-b border-gray-200 flex justify-between items-center bg-gradient-to-r from-[#2f3192]/8 to-transparent max-md:px-2 max-md:flex-wrap max-md:gap-2 max-sm:flex-wrap max-sm:gap-2">
                 <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-lg bg-[#2f3192]/15 flex items-center justify-center">
                         <FaPaperPlane className="text-[#2f3192] text-sm" />
@@ -118,7 +118,7 @@ const EmpQuery = ({ user, onClose, showToast }) => {
                 </div>
             </div>
 
-            <div className="p-4">
+            <div className="p-4 max-md:px-2">
                 {!showMyQueries ? (
                     /* New Query Form */
                     <form onSubmit={handleSubmit} className="space-y-3.5">

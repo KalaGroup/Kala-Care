@@ -4582,7 +4582,7 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         return (
             <div className="mt-1">
                 <div className="overflow-x-auto border border-gray-200 rounded-lg">
-                    <table className="w-full text-[11px]">
+                    <table className="w-full text-[11px] max-lg:min-w-[640px]">
                         <thead className="bg-gray-100">
                             <tr>
                                 {visible.map(c => (
@@ -6015,14 +6015,14 @@ ${f.start_para}`;
                     <div className="border-gray-200 pb-3">
                         <div className="space-y-2">
                             {/* Header Row - Hide on mobile, show on larger screens */}
-                            <div className="hidden sm:grid sm:grid-cols-3 gap-40">
+                            <div className="hidden sm:grid sm:grid-cols-3 gap-40 max-lg:gap-4">
                                 <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Quotation Type</p>
                                 <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Created Date</p>
                                 <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Expiry Date</p>
                             </div>
 
                             {/* Row 1: Anubandhan Plus - Mobile responsive */}
-                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40">
+                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:gap-4">
                                 <div className="flex justify-between sm:justify-center items-center sm:block">
                                     <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                                     <p className="text-xs text-black font-normal text-left sm:text-center">{anubandhanPlus?.quotation_type || '-'}</p>
@@ -6038,7 +6038,7 @@ ${f.start_para}`;
                             </div>
 
                             {/* Row 2: Anubandhan - Mobile responsive */}
-                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40">
+                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:gap-4">
                                 <div className="flex justify-between sm:justify-center items-center sm:block">
                                     <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                                     <p className="text-xs text-black font-normal text-left sm:text-center">{anubandhan?.quotation_type || '-'}</p>
@@ -6054,7 +6054,7 @@ ${f.start_para}`;
                             </div>
 
                             {/* Row 3: Bandhan Plus - Mobile responsive */}
-                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40">
+                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:gap-4">
                                 <div className="flex justify-between sm:justify-center items-center sm:block">
                                     <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                                     <p className="text-xs text-black font-normal text-left sm:text-center">{bandhanPlus?.quotation_type || '-'}</p>
@@ -6070,7 +6070,7 @@ ${f.start_para}`;
                             </div>
 
                             {/* Row 4: Pulse Quotation - Mobile responsive */}
-                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40">
+                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:gap-4">
                                 <div className="flex justify-between sm:justify-center items-center sm:block">
                                     <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                                     <p className="text-xs text-black font-normal text-left sm:text-center">
@@ -6499,7 +6499,7 @@ ${f.start_para}`;
                 return (
                     <div className="p-3 sm:p-4">
                         <div className="overflow-x-auto">
-                            <table className="w-full table-fixed">
+                            <table className="w-full table-fixed max-lg:min-w-[700px]">
                                 <thead>
                                     <tr>
                                         <th className="px-2 py-1 text-left text-[11px] font-bold text-black whitespace-nowrap">GOEM/OEM</th>                                        <th className="px-2 py-1 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Number</th>
@@ -6584,7 +6584,7 @@ ${f.start_para}`;
     if (!showCustomerDetails) {
         return (
             <div className="min-h-screen">
-                <div className="max-w-7xl mx-auto px-4 sm:px-3">
+                <div className="max-w-7xl mx-auto px-4 sm:px-3 max-sm:px-2">
 
                     {/* Row 1 : Title + Filters */}
                     <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3 mb-2">
@@ -6699,8 +6699,8 @@ ${f.start_para}`;
                     </div>
 
                     {/* Row 2 : Flag + Campaign (Left = drive filter, Right = flag filter fixed) */}
-                    <div className="bg-white rounded-xl shadow-sm px-3 py-1 mb-2">
-                        <div className="flex items-stretch gap-2">
+                    <div className="bg-white rounded-xl shadow-sm px-3 py-1 mb-2 max-sm:px-2">
+                        <div className="flex items-stretch gap-2 max-lg:flex-wrap">
                             {/* ===== LEFT: Customers/Assets 2-row column + campaign chips wrapping ===== */}
                             <div className="flex items-stretch gap-2 flex-1 min-w-0">
                                 {/* Fixed 2-row column: Customers on top, Assets below */}
@@ -6819,7 +6819,7 @@ ${f.start_para}`;
                             </div>
 
                             {/* ===== RIGHT: Flag filter — fixed, never moves ===== */}
-                            <div className="border-l border-gray-200 pl-3 flex flex-col gap-0 justify-center flex-shrink-0">
+                            <div className="border-l border-gray-200 pl-3 flex flex-col gap-0 justify-center flex-shrink-0 max-lg:w-full max-lg:border-l-0 max-lg:pl-0 max-lg:border-t max-lg:border-gray-200 max-lg:pt-1 max-lg:overflow-x-auto">
 
                                 {/* ---- Top section: All (spans 2 rows) + C1–C7 ---- */}
                                 <div className="grid gap-x-0.5 gap-y-0" style={{ gridTemplateColumns: 'repeat(5, auto)' }}>
@@ -8112,7 +8112,7 @@ ${f.start_para}`;
                                                     autoFocus
                                                 />
                                             </div>
-                                            <div className="flex justify-end gap-2 mt-2">
+                                            <div className="flex justify-end gap-2 mt-2 max-md:flex-wrap">
                                                 <button
                                                     onClick={() => {
                                                         setShowAddDieryForm(false);
@@ -8126,7 +8126,7 @@ ${f.start_para}`;
                                                 <button
                                                     onClick={handleAddNewDieryEntry}
                                                     disabled={savingDieryNew || !dieryNewForm.content.trim()}
-                                                    className="px-3 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+                                                    className="px-3 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5 max-sm:justify-center"
                                                     style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}
                                                 >
                                                     {savingDieryNew && <ArrowPathIcon className="h-3 w-3 animate-spin" />}
@@ -8159,7 +8159,7 @@ ${f.start_para}`;
                                                     style={{ '--tw-ring-color': themeColor, whiteSpace: 'pre-wrap' }}
                                                 />
                                             </div>
-                                            <div className="flex justify-end gap-2 mt-2">
+                                            <div className="flex justify-end gap-2 mt-2 max-md:flex-wrap">
                                                 <button
                                                     onClick={() => {
                                                         setEditingDieryEntry(null);
@@ -8658,11 +8658,11 @@ ${f.start_para}`;
                     className="bg-white rounded-xl shadow-lg p-3 sm:p-4 mt-3 mb-3 border-2 scroll-mt-20"
                     style={{ borderColor: themeColor }}
                 >
-                    <div className="flex justify-between items-center mb-3">
+                    <div className="flex justify-between items-center mb-3 max-md:flex-wrap max-md:gap-2">
                         <h3 className="text-sm sm:text-base font-semibold" style={{ color: "black" }}>
                             {editingFollowup ? 'Edit Follow-up' : 'Create New Follow-ups'}
                         </h3>
-                        <div className="flex gap-1.5">
+                        <div className="flex gap-1.5 max-md:flex-wrap">
                             {isAdmin && (
                                 <button
                                     onClick={openLetterWizard}
@@ -8708,7 +8708,7 @@ ${f.start_para}`;
                     <div className="mb-3">
                         <label className="block text-[11px] font-semibold text-black mb-1.5">Select Drives for Follow-up *</label>
 
-                        <div className="grid grid-cols-[7fr_3fr] gap-2">
+                        <div className="grid grid-cols-[7fr_3fr] gap-2 max-md:grid-cols-1">
                             {/* Enrolled campaigns */}
                             <div className="border border-gray-200 rounded-lg p-2 min-w-0">
                                 <p className="text-[10px] font-bold text-black uppercase mb-1.5">Enrolled Drives</p>
@@ -9398,7 +9398,7 @@ ${f.start_para}`;
                     )}
 
                     {/* Form Actions */}
-                    <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
+                    <div className="flex justify-end gap-2 pt-3 border-t border-gray-200 max-md:flex-wrap max-sm:flex-col max-sm:items-stretch">
                         <button
                             type="button"
                             onClick={() => {
@@ -9421,7 +9421,7 @@ ${f.start_para}`;
                         <button
                             onClick={handleSubmitFollowup}
                             disabled={loading || selectedCampaignsForFollowup.length === 0}
-                            className="px-3 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+                            className="px-3 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5 max-sm:justify-center"
                             style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}
                         >
                             {loading && <ArrowPathIcon className="h-3 w-3 animate-spin" />}
@@ -9549,7 +9549,7 @@ ${f.start_para}`;
                                     </button>
                                 </div>
                                 <div className="p-3 space-y-2">
-                                    <div className="grid grid-cols-2 gap-2">
+                                    <div className="grid grid-cols-2 gap-2 max-sm:grid-cols-1">
                                         <div>
                                             <label className="text-[11px] text-black">Date</label>
                                             <p className="font-medium text-[11px] text-black">{formatDateTime(selectedFollowup.followup_date)}</p>
@@ -9590,7 +9590,7 @@ ${f.start_para}`;
                                     </div>
 
                                     {selectedFollowup.quotation_sent && (
-                                        <div className="grid grid-cols-2 gap-2">
+                                        <div className="grid grid-cols-2 gap-2 max-sm:grid-cols-1">
                                             <div>
                                                 <label className="text-[11px] text-black">Quotation No.</label>
                                                 <p className="font-medium text-[11px] text-black">{selectedFollowup.quotation_no || '-'}</p>
@@ -9625,7 +9625,7 @@ ${f.start_para}`;
                                         <p className="font-medium text-[11px] text-black">{formatDateTime(selectedFollowup.created_at)}</p>
                                     </div>
                                 </div>
-                                <div className="p-3 border-t border-gray-200 flex justify-end gap-2">
+                                <div className="p-3 border-t border-gray-200 flex justify-end gap-2 max-md:flex-wrap">
                                     {canEditFollowup(selectedFollowup) && (
                                         <button
                                             onClick={() => handleEditFollowup(selectedFollowup)}
@@ -9933,7 +9933,7 @@ ${f.start_para}`;
                 {/* PDF Chat Panel */}
                 {showPdfViewer && pdfViewerCampaign && (
                     <div
-                        className={`fixed z-50 transition-all duration-300 ease-in-out ${isDragging ? 'cursor-grabbing' : ''
+                        className={`fixed z-50 transition-all duration-300 ease-in-out max-sm:max-w-[calc(100vw-8px)] ${isDragging ? 'cursor-grabbing' : ''
                             } ${isPdfPanelMinimized
                                 ? 'w-48 sm:w-72 h-12'
                                 : `${pdfPanelWidth} h-[400px] sm:h-[450px] md:h-[500px] lg:h-[550px]`
@@ -10135,7 +10135,7 @@ ${f.start_para}`;
                                     autoFocus
                                 />
                             </div>
-                            <div className="p-3 border-t border-gray-200 flex justify-end gap-2">
+                            <div className="p-3 border-t border-gray-200 flex justify-end gap-2 max-md:flex-wrap">
                                 <button
                                     onClick={() => {
                                         setShowActivityModal(false);
@@ -10233,7 +10233,7 @@ ${f.start_para}`;
                                     autoFocus
                                 />
                             </div>
-                            <div className="p-3 border-t border-gray-200 flex justify-end gap-2">
+                            <div className="p-3 border-t border-gray-200 flex justify-end gap-2 max-md:flex-wrap">
                                 <button
                                     onClick={() => {
                                         setShowRRModal(false);
@@ -10303,12 +10303,12 @@ ${f.start_para}`;
                 {viewLetterHtml && (
                     <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center z-[60] p-3">
                         <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-hidden flex flex-col">
-                            <div className="px-4 py-3 flex justify-between items-center border-b border-gray-200"
+                            <div className="px-4 py-3 flex justify-between items-center border-b border-gray-200 max-sm:flex-wrap max-sm:gap-2"
                                 style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
                                 <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                                     <DocumentTextIcon className="h-4 w-4 text-white" /> Letter
                                 </h3>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 max-sm:flex-wrap">
                                     <button onClick={saveViewedLetterPdf}
                                         className="px-2 py-1 bg-white text-[11px] rounded-md font-medium hover:bg-gray-100 flex items-center gap-1"
                                         style={{ color: themeColor }}>
@@ -10605,7 +10605,7 @@ ${f.start_para}`;
                                                                 />
 
                                                                 <div className="mt-1 overflow-x-auto border border-gray-300 rounded-lg shadow-sm bg-white">
-                                                                    <table className="w-full text-[11px] border-collapse">
+                                                                    <table className="w-full text-[11px] border-collapse max-lg:min-w-[520px]">
                                                                         <thead>
                                                                             <tr className="bg-gradient-to-b from-gray-50 to-gray-100 text-gray-600">
                                                                                 {SERVICE_CYCLE_COLS.map(c => (
@@ -10835,9 +10835,9 @@ ${f.start_para}`;
 
                                         {/* Attachments */}
                                         <div className="border border-gray-200 rounded-lg p-3">
-                                            <div className="flex items-center justify-between mb-2">
+                                            <div className="flex items-center justify-between mb-2 max-sm:flex-wrap max-sm:gap-2">
                                                 <p className="text-[11px] font-bold text-black uppercase">Attachments ({letterAttachments.length})</p>
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex items-center gap-2 max-sm:flex-wrap">
                                                     <input type="file" multiple accept=".mp4,.jpg,.jpeg,.png,.pdf,.doc,.docx,.xlsx,.xls,.csv"
                                                         onChange={handleLetterAddAttachment} className="hidden" id="letter-extra-attach" />
                                                     <label htmlFor="letter-extra-attach"
@@ -10877,9 +10877,9 @@ ${f.start_para}`;
                                 {letterStep === 3 && (
                                     <div className="space-y-3 max-w-3xl mx-auto">
                                         <div className="border border-gray-200 rounded-lg overflow-hidden">
-                                            <div className="px-3 py-1.5 bg-gray-50 text-xs font-bold text-black flex items-center justify-between">
+                                            <div className="px-3 py-1.5 bg-gray-50 text-xs font-bold text-black flex items-center justify-between max-sm:flex-wrap max-sm:gap-1.5">
                                                 <span>Letter Preview</span>
-                                                <div className="flex items-center gap-1.5">
+                                                <div className="flex items-center gap-1.5 max-sm:flex-wrap">
                                                     <button onClick={handleSaveLetterPdf} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-white rounded hover:opacity-90" style={{ backgroundColor: themeColor }}>
                                                         <ArrowDownTrayIcon className="h-3 w-3" /> Download
                                                     </button>
@@ -11030,12 +11030,12 @@ ${f.start_para}`;
                             </div>
 
                             {/* Footer / navigation */}
-                            <div className="px-4 py-3 border-t border-gray-200 flex justify-between gap-2 bg-white">
-                                <div className="flex items-center gap-2">
+                            <div className="px-4 py-3 border-t border-gray-200 flex justify-between gap-2 bg-white max-md:flex-wrap max-sm:flex-col max-sm:items-stretch">
+                                <div className="flex items-center gap-2 max-sm:w-full">
                                     <button
                                         onClick={() => letterStep > 1 ? setLetterStep(letterStep - 1) : setShowLetterWizard(false)}
                                         disabled={letterSending}
-                                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-[11px] font-medium text-black hover:bg-gray-50 disabled:opacity-50"
+                                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-[11px] font-medium text-black hover:bg-gray-50 disabled:opacity-50 max-sm:flex-1 max-sm:px-2"
                                     >
                                         {letterStep > 1 ? 'Back' : 'Cancel'}
                                     </button>
@@ -11043,7 +11043,7 @@ ${f.start_para}`;
                                         <button
                                             onClick={handleSaveLetterDraft}
                                             disabled={letterSending || letterAttachmentsHydrating}
-                                            className="px-3 py-1.5 border rounded-lg text-[11px] font-medium hover:bg-gray-50 disabled:opacity-50"
+                                            className="px-3 py-1.5 border rounded-lg text-[11px] font-medium hover:bg-gray-50 disabled:opacity-50 max-sm:flex-1 max-sm:px-2"
                                             style={{ color: themeColor, borderColor: themeColor }}
                                         >
                                             Save as Draft
@@ -11054,7 +11054,7 @@ ${f.start_para}`;
                                     <button
                                         onClick={() => goToLetterStep(letterStep + 1)}
                                         disabled={letterStepLoading}
-                                        className="px-4 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 disabled:opacity-60 flex items-center gap-1.5"
+                                        className="px-4 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 disabled:opacity-60 flex items-center gap-1.5 max-sm:w-full max-sm:justify-center"
                                         style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}
                                     >
                                         {letterStepLoading
@@ -11065,7 +11065,7 @@ ${f.start_para}`;
                                     <button
                                         onClick={handleSendLetter}
                                         disabled={letterSending || letterAttachmentsHydrating}
-                                        className="px-4 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+                                        className="px-4 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5 max-sm:w-full max-sm:justify-center"
                                         style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}
                                     >
                                         {(letterSending || letterAttachmentsHydrating) ? <ArrowPathIcon className="h-3 w-3 animate-spin" /> : <PaperAirplaneIcon className="h-3 w-3" />}
@@ -11366,7 +11366,7 @@ ${f.start_para}`;
                                         style={{ "--tw-ring-color": themeColor }}
                                     />
                                 </div>
-                                <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
+                                <div className="flex justify-end gap-2 pt-3 border-t border-gray-200 max-md:flex-wrap max-sm:flex-col max-sm:items-stretch">
                                     <button
                                         type="button"
                                         onClick={() => setShowEditCustomerModal(false)}
@@ -11378,7 +11378,7 @@ ${f.start_para}`;
                                     <button
                                         type="submit"
                                         disabled={editCustomerLoading}
-                                        className="px-3 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+                                        className="px-3 py-1.5 text-white rounded-lg text-[11px] font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5 max-sm:justify-center"
                                         style={{
                                             background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})`,
                                         }}

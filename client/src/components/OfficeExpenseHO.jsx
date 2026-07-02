@@ -173,7 +173,7 @@ const OfficeExpenseHO = ({
   return (
     <div className="bg-white rounded-xl shadow-lg overflow-hidden">
       {/* Header / Toolbar */}
-      <div className="px-3 py-2 border-b flex flex-wrap justify-between items-center gap-2" style={{ backgroundColor: themeShades.light }}>
+      <div className="px-3 py-2 border-b flex flex-wrap justify-between items-center gap-2 max-md:px-2" style={{ backgroundColor: themeShades.light }}>
         <div className="flex items-center gap-2 flex-wrap">
           <h2 className="text-xs font-bold text-black">Office Expense — Voucher Wise Verification</h2>
           {!selected && !branchFilter && (
@@ -231,7 +231,7 @@ const OfficeExpenseHO = ({
               <span className="text-[11px] font-bold text-purple-700">{selected.submitted_by}</span>
             </div>
 
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex items-center gap-2 max-md:flex-wrap">
               {canExport && (
                 <button
                   onClick={() => exportToExcel(
@@ -311,7 +311,7 @@ const OfficeExpenseHO = ({
           visibleGroups.length === 0 ? (
             <div className="text-center py-16 text-xs text-gray-500">No vouchers found</div>
           ) : (
-            <table className="border-collapse w-full">
+            <table className="border-collapse w-full max-md:min-w-[900px]">
               <thead className="sticky top-0 z-10"><tr style={{ backgroundColor: '#f0f1ff' }}>
                 {['Sr. No.', 'Voucher No.', 'Period (Start → End)', 'Submitted By', 'Records', 'Total Amount', 'Verified Amount', 'Branch Name'].map((c, i) => (
                   <th key={i} className="px-3 py-2 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 last:border-r-0 uppercase text-center whitespace-nowrap" style={{ backgroundColor: '#f0f1ff' }}>{c}</th>

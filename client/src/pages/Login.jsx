@@ -329,7 +329,7 @@ const Login = () => {
                 </div>
 
                 {/* Right side - Login box */}
-                <div className="w-full lg:w-1/3 xl:w-[30%] bg-white rounded-3xl md:rounded-bl-[50px] md:rounded-tr-[50px] shadow-2xl pt-0 pr-6 pb-6 pl-6 flex items-center justify-center animate-slideUp border border-gray-100">
+                <div className="w-full lg:w-1/3 xl:w-[30%] bg-white rounded-3xl md:rounded-bl-[50px] md:rounded-tr-[50px] shadow-2xl pt-0 max-lg:pt-6 pr-6 pb-6 pl-6 max-sm:pr-5 max-sm:pl-5 flex items-center justify-center animate-slideUp border border-gray-100">
                     <div className="w-full max-w-sm mx-auto space-y-6 md:space-y-8">
                         {/* Logo - Centered and Bigger */}
                         <div className="flex justify-center mb-4 md:mb-6">

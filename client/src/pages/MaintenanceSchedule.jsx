@@ -46,7 +46,7 @@ const PrintSheet = ({ app, services, parts, onClose }) => {
                     .mx-sheet table, .mx-sheet th, .mx-sheet td { border-color: #9ca3af !important; }
                 }
             `}</style>
-            <div className="mx-print-bar flex items-center gap-3 px-5 py-2.5 text-white" style={{ background: themeDark }}>
+            <div className="mx-print-bar flex items-center gap-3 px-5 py-2.5 text-white max-md:flex-wrap max-md:gap-2 max-md:px-2" style={{ background: themeDark }}>
                 <span className="text-[13px] font-semibold">PDF Preview · <span className="text-amber-300 font-bold">FOR INTERNAL USE ONLY</span></span>
                 <div className="flex-1" />
                 <button onClick={() => window.print()}
@@ -58,7 +58,7 @@ const PrintSheet = ({ app, services, parts, onClose }) => {
                     <XMarkIcon className="h-4 w-4" /> Close
                 </button>
             </div>
-            <div className="mx-print-scroll flex-1 overflow-auto p-7 flex justify-center">
+            <div className="mx-print-scroll flex-1 overflow-auto p-7 flex justify-center max-md:p-2">
                 <div className="mx-sheet relative bg-white shadow-2xl" style={{ width: 880, maxWidth: '100%', minHeight: 1100, padding: '48px 52px', color: '#13181d', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>
                     <div className="absolute inset-0 pointer-events-none flex items-center justify-center overflow-hidden">
                         <div style={{ transform: 'rotate(-30deg)', fontSize: 64, fontWeight: 800, letterSpacing: '0.04em', whiteSpace: 'nowrap', color: 'rgba(191,55,46,0.07)' }}>FOR INTERNAL USE ONLY</div>
@@ -195,7 +195,7 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
         <div className="min-h-screen">
             <style>{`.q-scroll{scrollbar-width:thin;scrollbar-color:#c7c9e0 transparent}.q-scroll::-webkit-scrollbar{height:6px;width:6px}.q-scroll::-webkit-scrollbar-thumb{background:#c7c9e0;border-radius:9999px}`}</style>
 
-            <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10">
+            <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10 max-md:px-2">
                 {/* Intro */}
                 <div className="rounded-2xl px-3 sm:px-5 py-3 mb-3 text-white relative overflow-hidden"
                     style={{ background: `linear-gradient(120deg, ${themeColor} 0%, ${themeDark} 100%)` }}>
@@ -257,7 +257,7 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
 
                             {/* Service multi-select */}
                             <div className="mt-4 pt-3 border-t border-gray-100">
-                                <div className="flex items-center gap-2 mb-2">
+                                <div className="flex items-center gap-2 mb-2 max-sm:flex-wrap">
                                     <span className="text-[11px] uppercase tracking-wider font-bold text-gray-400">Type of Service · multiple selection</span>
                                     <div className="ml-auto text-[11px]">
                                         <button onClick={() => setSelSvc(new Set(availIds))} className="font-semibold" style={{ color: themeColor }}>All</button>
@@ -297,7 +297,7 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
 
                         {/* Parts table */}
                         <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm">
-                            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 bg-gray-50">
+                            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 bg-gray-50 max-sm:flex-wrap max-md:px-2">
                                 <p className="text-[13px] font-semibold text-gray-800">Service Parts &amp; Consumables</p>
                                 <span className="text-[11px] text-gray-400 font-mono">{parts.length} lines · {chosen.length} service{chosen.length === 1 ? '' : 's'}</span>
                             </div>

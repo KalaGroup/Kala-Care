@@ -573,7 +573,7 @@ const Import = () => {
 
     return (
         <div className="min-h-screen from-gray-50 to-gray-100 py-0">
-            <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-4">
+            <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-4 max-md:px-2">
                 {/* Header Section */}
                 <div className="mb-3 sm:mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
                     <div className="flex items-center gap-2 sm:gap-3">
@@ -636,14 +636,14 @@ const Import = () => {
 
                                 {/* Last Updated Info — newest updated_at for the selected file type */}
                                 {selectedFileType && (
-                                    <div className="flex md:justify-end shrink-0">
+                                    <div className="flex md:justify-end shrink-0 max-md:w-full">
                                         {lastUpdatedLoading ? (
                                             <span className="text-[10px] sm:text-xs text-black flex items-center gap-1.5">
                                                 <ArrowPathIcon className="animate-spin h-3 w-3" style={{ color: themeColor }} />
                                                 Checking last update...
                                             </span>
                                         ) : lastUpdatedInfo && lastUpdatedInfo.last_updated ? (
-                                            <div className="inline-flex items-center gap-3 whitespace-nowrap px-3 py-2 border rounded-md bg-gray-50">
+                                            <div className="inline-flex items-center gap-3 whitespace-nowrap px-3 py-2 border rounded-md bg-gray-50 max-md:flex-wrap max-md:whitespace-normal max-md:w-full">
                                                 <ClockIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" style={{ color: themeColor }} />
                                                 <span className="text-[10px] sm:text-xs text-black">
                                                     <span className="font-semibold">Last data update:</span>{" "}
@@ -772,7 +772,7 @@ const Import = () => {
 
                                 {/* Action Buttons */}
                                 {files.length > 0 && !uploading && (
-                                    <div className="flex items-center justify-end gap-1.5 mt-2">
+                                    <div className="flex items-center justify-end gap-1.5 mt-2 max-sm:flex-wrap max-md:flex-wrap max-md:gap-2">
                                         {filePreview && (
                                             <button
                                                 onClick={togglePreview}
@@ -964,7 +964,7 @@ const Import = () => {
                                                         {result.message}
                                                     </p>
                                                     {result.status === 'success' && result.imported_count !== undefined && (
-                                                        <div className="mt-0.5 flex gap-2 text-[10px]">
+                                                        <div className="mt-0.5 flex gap-2 text-[10px] max-sm:flex-wrap">
                                                             <span className="text-green-600">New: {result.imported_count}</span>
                                                             <span className="text-blue-600">Updated: {result.updated_count}</span>
                                                             <span className="text-black">Total: {result.total_processed}</span>

@@ -71,14 +71,14 @@ export default function DraggableScrollButtons({
   return (
     <div
       ref={containerRef}
-      className="fixed bottom-6 z-40 flex items-center gap-1.5"
+      className="fixed bottom-6 max-md:bottom-4 z-40 flex items-center gap-1.5 max-lg:max-w-full"
       style={style}
     >
       {/* Drag handle — grab this to slide the buttons left/right */}
       <div
         onPointerDown={handlePointerDown}
         title="Drag left / right"
-        className="cursor-ew-resize flex items-center justify-center w-4 h-8 rounded text-gray-400 hover:text-gray-600 touch-none select-none"
+        className="cursor-ew-resize flex items-center justify-center w-4 h-8 max-md:w-6 max-md:h-10 rounded text-gray-400 hover:text-gray-600 touch-none select-none"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
           <circle cx="9" cy="6" r="1.6" />

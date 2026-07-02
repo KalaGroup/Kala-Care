@@ -392,11 +392,11 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
 
             {/* Modal */}
-            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden">
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh]">
 
                 {/* ── Header ── */}
                 <div
-                    className="flex items-center justify-between px-5 py-4 border-b border-blue-900 flex-shrink-0"
+                    className="flex items-center justify-between px-5 py-4 border-b border-blue-900 flex-shrink-0 max-md:px-3"
                     style={{ background: themeColor }}
                 >
                     <div className="min-w-0">
@@ -418,7 +418,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                 </div>
 
                 {/* ── Date filter bar ── */}
-                <div className="px-5 py-3 border-b border-gray-200 bg-gray-50 flex-shrink-0">
+                <div className="px-5 py-3 border-b border-gray-200 bg-gray-50 flex-shrink-0 max-md:px-2">
                     <div className="flex flex-wrap gap-2 items-center">
 
                         {quickBtns.map(btn => (
@@ -465,13 +465,13 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                             </button>
                         </div>
 
-                        <div className="ml-auto flex items-center gap-2">
+                        <div className="ml-auto flex items-center gap-2 max-md:ml-0 max-md:w-full">
                             <input
                                 type="text"
                                 placeholder="Search Drive…"
                                 value={search}
                                 onChange={e => setSearch(e.target.value)}
-                                className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#2f3192] w-64 bg-white"
+                                className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#2f3192] w-64 bg-white max-md:w-full"
                             />
                         </div>
                     </div>
@@ -488,7 +488,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
 
                 {/* ── Summary cards ── */}
                 {!loading && campaigns.length > 0 && (
-                    <div className="px-5 py-3 border-b border-gray-100 grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-8 gap-2 flex-shrink-0">
+                    <div className="px-5 py-3 border-b border-gray-100 grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-8 gap-2 flex-shrink-0 max-md:px-2 max-sm:grid-cols-2">
                         {[
                             { label: 'Drives', value: campaigns.length, color: 'black' },
                             { label: 'Attended Assets', value: totals.unique, color: 'black', clickable: true },
@@ -569,7 +569,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                     )}
 
                     {!loading && !error && sorted.length > 0 && (
-                        <table className="min-w-full border-collapse text-xs">
+                        <table className="min-w-full border-collapse text-xs max-lg:min-w-[900px]">
                             <thead className="bg-gray-50 sticky top-0 z-10">
                                 <tr>
                                     <th className="px-3 py-2 text-center font-bold text-black border border-gray-200 w-10">Sr.No.</th>
@@ -701,7 +701,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                 </div>
 
                 {/* ── Footer ── */}
-                <div className="px-5 py-3 border-t border-gray-100 flex justify-between items-center bg-gray-50 flex-shrink-0">
+                <div className="px-5 py-3 border-t border-gray-100 flex justify-between items-center bg-gray-50 flex-shrink-0 max-md:px-2">
                     <p className="text-xs text-gray-500">
                     </p>
                     <button
@@ -718,11 +718,11 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
             {/* ════════════════════════════════════ ATTENDED ASSETS MODAL ═══════════════════════════════════ */}
             {showAssetsModal && ReactDOM.createPortal(
                 <div className="fixed inset-0 backdrop-blur-sm bg-black/50 flex items-center justify-center z-[10000] p-3">
-                    <div className="bg-white rounded-xl shadow-2xl max-w-7xl w-full max-h-[92vh] overflow-hidden flex flex-col">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-7xl w-full max-h-[92vh] overflow-hidden flex flex-col max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh]">
 
                         {/* Header */}
                         <div
-                            className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2"
+                            className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2 max-md:px-2"
                             style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
                         >
                             <div className="min-w-0">
@@ -816,7 +816,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                                     placeholder="Search customer, phone, email…"
                                     value={assetsSearch}
                                     onChange={(e) => setAssetsSearch(e.target.value)}
-                                    className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 bg-white focus:outline-none"
+                                    className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 bg-white focus:outline-none max-sm:w-full"
                                 />
 
                                 {/* Close */}
@@ -919,7 +919,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                         </div>
 
                         {/* Footer */}
-                        <div className="px-4 py-2 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+                        <div className="px-4 py-2 border-t border-gray-200 bg-gray-50 flex justify-between items-center max-md:flex-wrap max-md:gap-2 max-md:px-2">
                             <p className="text-[11px] text-gray-500">
                                 Showing the most recent follow-up per customer per drive in the selected period.
                             </p>

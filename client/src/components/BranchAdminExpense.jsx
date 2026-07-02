@@ -1045,7 +1045,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
 
           return (
             <>
-              <div className="px-4 py-3" style={{ overflowY: 'auto', flex: '0 1 auto', scrollbarWidth: 'thin' }}>
+              <div className="px-4 py-3 max-md:px-2" style={{ overflowY: 'auto', flex: '0 1 auto', scrollbarWidth: 'thin' }}>
 
                 {/* Mode toggle */}
                 <div className="flex items-center gap-1.5 mb-3 flex-wrap">
@@ -1095,7 +1095,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
                   /* ─── NO SR NUMBER: top row 4 fields, second row 5 fields ─── */
                   <>
                     {/* FIRST ROW - 4 fields */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-2.5 gap-y-2 mb-3">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-2.5 gap-y-2 mb-3 max-sm:grid-cols-1">
                       {[
                         { key: 'Installation Site Address', type: 'text', required: true },
                         { key: 'Account', type: 'text', required: true },
@@ -1105,7 +1105,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
                     </div>
 
                     {/* SECOND ROW - 5 fields: SR Reach at Site Date & Time, Service Engineer Name, Service Engineer UID, Employee ID, KMs Travelled */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-2.5 gap-y-2">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-2.5 gap-y-2 max-sm:grid-cols-1">
                       {[
                         { key: 'SR Reach at Site Date & Time', type: 'datetime-local', required: true },
                         { key: 'Service Engineer Name', type: 'engineer_select', required: true },
@@ -1132,10 +1132,10 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
                   return (
                     <>
                       {/* Top: SR No. + all other auto-filled fields, 5 per row */}
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-2.5 gap-y-2">
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-2.5 gap-y-2 max-sm:grid-cols-1">
                         {/* Service Request No. — always first & editable */}
-                        <div key="sr" className={!pickedSr ? 'col-span-2 md:col-span-3 lg:col-span-5 flex items-end gap-3' : ''}>
-                          <div className={!pickedSr ? 'w-64 shrink-0' : ''}>
+                        <div key="sr" className={!pickedSr ? 'col-span-2 md:col-span-3 lg:col-span-5 flex items-end gap-3 max-sm:flex-wrap max-sm:col-span-1' : ''}>
+                          <div className={!pickedSr ? 'w-64 shrink-0 max-sm:w-full' : ''}>
                             <label className="block text-[9px] font-bold text-gray-500 uppercase tracking-wide mb-0.5 leading-tight">
                               Service Request No. <span className="text-red-500">*</span>
                             </label>
@@ -1218,7 +1218,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
 
                       {/* Last row: exactly 6 fields */}
                       {lastRowFields.length > 0 && (
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-x-2.5 gap-y-2 mt-2">
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-x-2.5 gap-y-2 mt-2 max-sm:grid-cols-1">
                           {lastRowFields.map((f, fi) => renderManualField(f, fi, EDITABLE_AFTER_FILL.has(f.key)))}
                         </div>
                       )}
@@ -1227,7 +1227,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
                 })()}
               </div>
 
-              <div className="border-t px-4 py-2.5 flex justify-between items-center bg-gray-50" style={{ flexShrink: 0 }}>
+              <div className="border-t px-4 py-2.5 flex justify-between items-center bg-gray-50 max-md:px-2 max-sm:flex-wrap max-sm:gap-2" style={{ flexShrink: 0 }}>
                 <button onClick={handleClear} className="px-3 py-1.5 border border-gray-300 rounded-md text-[11px] font-semibold text-gray-700 hover:bg-gray-100">
                   Clear Form
                 </button>
@@ -1259,7 +1259,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
         {/* ─────── SALES & BM TADA TAB ─────── */}
         {activeTab === 'sales_bm' && (
           <>
-            <div className="px-4 py-3" style={{ overflowY: 'auto', flex: '0 1 auto', scrollbarWidth: 'thin' }}>
+            <div className="px-4 py-3 max-md:px-2" style={{ overflowY: 'auto', flex: '0 1 auto', scrollbarWidth: 'thin' }}>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-3 gap-y-2.5">
 
                 {/* Date */}
@@ -1394,7 +1394,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
               </div>
             </div>
 
-            <div className="border-t px-4 py-2.5 flex justify-between items-center bg-gray-50" style={{ flexShrink: 0 }}>
+            <div className="border-t px-4 py-2.5 flex justify-between items-center bg-gray-50 max-md:px-2 max-sm:flex-wrap max-sm:gap-2" style={{ flexShrink: 0 }}>
               <button
                 onClick={() => {
                   setSalesBmForm(SALES_BM_INITIAL);
@@ -1421,10 +1421,10 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
         {/* ─────── BILL WISE TAB (two sub-tabs: Service Engineer / Branch Manager) ─────── */}
         {activeTab === 'bill_wise' && (
           <>
-            <div className="px-4 py-3" style={{ overflowY: 'auto', flex: '0 1 auto', scrollbarWidth: 'thin' }}>
+            <div className="px-4 py-3 max-md:px-2" style={{ overflowY: 'auto', flex: '0 1 auto', scrollbarWidth: 'thin' }}>
 
               {/* Sub-tab toggle */}
-              <div className="flex items-center gap-1.5 mb-3">
+              <div className="flex items-center gap-1.5 mb-3 max-sm:flex-wrap">
                 {[
                   { id: 'se', label: 'Service Engineer' },
                   { id: 'bm', label: 'Branch Manager' },
@@ -1448,7 +1448,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
               {/* ===== SERVICE ENGINEER SUB-TAB ===== */}
               {billWiseSubTab === 'se' && (
                 <>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-2 gap-y-2">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-2 gap-y-2 max-sm:grid-cols-1">
                     {/* Service Engineer Name */}
                     <div>
                       <label className={labelCls}>Service Engineer Name <span className="text-red-500">*</span></label>
@@ -1546,7 +1546,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
                   </div>
 
                   {/* Auto-filled SR fields (read-only) — 4 per row */}
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-2 gap-y-2 mt-2">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-2 gap-y-2 mt-2 max-sm:grid-cols-1">
                     {[
                       ['Appointment Number', 'appointment_number'],
                       ['Account', 'account'],
@@ -1610,8 +1610,8 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
 
                   {/* Added bills list (bottom of form) */}
                   {bwSeBills.length > 0 && (
-                    <div className="mt-3 border rounded-lg overflow-hidden">
-                      <table className="w-full border-collapse">
+                    <div className="mt-3 border rounded-lg overflow-hidden max-lg:overflow-x-auto">
+                      <table className="w-full border-collapse max-md:min-w-[540px]">
                         <thead>
                           <tr style={{ backgroundColor: '#f0f1ff' }}>
                             {['Sr.', 'Date', 'Expense Head', 'Amount (₹)', 'Bill Submitted', ''].map((h, i) => (
@@ -1747,8 +1747,8 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
 
                   {/* Added bills list */}
                   {bwBmBills.length > 0 && (
-                    <div className="mt-3 border rounded-lg overflow-hidden">
-                      <table className="w-full border-collapse">
+                    <div className="mt-3 border rounded-lg overflow-hidden max-lg:overflow-x-auto">
+                      <table className="w-full border-collapse max-md:min-w-[540px]">
                         <thead>
                           <tr style={{ backgroundColor: '#f0f1ff' }}>
                             {['Sr.', 'Date', 'Expense Head', 'Amount (₹)', 'Bill Submitted', ''].map((h, i) => (
@@ -1791,7 +1791,7 @@ const ManualEntryModalComponent = ({ show, onClose, onSubmit, submitting, userBr
               )}
             </div>
 
-            <div className="border-t px-4 py-2.5 flex justify-between items-center bg-gray-50" style={{ flexShrink: 0 }}>
+            <div className="border-t px-4 py-2.5 flex justify-between items-center bg-gray-50 max-md:px-2 max-sm:flex-wrap max-sm:gap-2" style={{ flexShrink: 0 }}>
               <button
                 onClick={() => {
                   if (billWiseSubTab === 'se') {
@@ -5451,7 +5451,7 @@ const BranchAdminExpense = () => {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
         <div className="bg-white rounded-2xl shadow-2xl max-w-7xl w-full max-h-[92vh] flex flex-col">
-          <div className="flex-shrink-0 px-6 py-4 flex justify-between items-center rounded-t-2xl"
+          <div className="flex-shrink-0 px-6 py-4 flex justify-between items-center rounded-t-2xl max-md:px-3"
             style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeDark})` }}>
             <h2 className="text-sm font-bold text-white tracking-wide">Import TADA Data</h2>
             <button
@@ -5464,7 +5464,7 @@ const BranchAdminExpense = () => {
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6 space-y-5">
+          <div className="flex-1 overflow-y-auto p-6 space-y-5 max-md:p-3">
             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
               <h3 className="text-xs font-bold text-blue-800 mb-2">Expected Columns ({expectedCols.length}):</h3>
               <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
@@ -5681,7 +5681,7 @@ const BranchAdminExpense = () => {
             )}
           </div>
 
-          <div className="flex-shrink-0 border-t px-6 py-4 flex justify-between items-center rounded-b-2xl bg-gray-50">
+          <div className="flex-shrink-0 border-t px-6 py-4 flex justify-between items-center rounded-b-2xl bg-gray-50 max-md:px-3 max-md:flex-wrap max-md:gap-2">
             <div className="text-[11px] text-gray-500">
               {uploadResult ? (
                 <span className="flex items-center gap-1.5">
@@ -6004,7 +6004,7 @@ const BranchAdminExpense = () => {
   ═══════════════════════════════════════════════════════════════════════════ */
   return (
     <div className="min-h-screen">
-      <div className="max-w-full mx-auto px-3 sm:px-4">
+      <div className="max-w-full mx-auto px-3 sm:px-4 max-md:px-2">
 
         <div className="mb-3">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -6015,7 +6015,7 @@ const BranchAdminExpense = () => {
               </p>
             </div>
 
-            <div className="flex gap-1 bg-gray-100 rounded-lg p-1 self-start sm:self-auto">
+            <div className="flex gap-1 bg-gray-100 rounded-lg p-1 self-start sm:self-auto max-sm:overflow-x-auto max-sm:max-w-full">
               {[{ id: 'tada', label: 'TA-DA' }, { id: 'office', label: 'Office Expense' }, { id: 'vendor', label: 'Local Vendor Bills' }].map(t => (
                 <button key={t.id} onClick={() => setActiveTab(t.id)}
                   className="px-3 py-1.5 text-[11px] sm:text-xs font-medium rounded-md transition-all whitespace-nowrap"
@@ -6299,7 +6299,7 @@ const BranchAdminExpense = () => {
                   )}
                 </div>
 
-                <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center max-lg:flex-wrap">
 
                   {/* Search box */}
                   <div className="relative">
@@ -6881,8 +6881,8 @@ const BranchAdminExpense = () => {
                 <>
                   {/* ── Inner tabs (Verified view) ── */}
                   {tadaSubTab === 'verified' && (
-                    <div className="px-3 py-1.5 border-b bg-white flex items-center gap-1.5">
-                      <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+                    <div className="px-3 py-1.5 border-b bg-white flex items-center gap-1.5 max-md:flex-wrap max-md:px-2">
+                      <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 max-sm:overflow-x-auto max-sm:max-w-full">
                         {[
                           { id: 'se', label: 'Service Engineer' },
                           { id: 'sales_bm', label: 'Sales & BM TADA' },
@@ -6903,7 +6903,7 @@ const BranchAdminExpense = () => {
                         ))}
                       </div>
                       {verifiedInnerTab === 'sales_bm' && (
-                        <div className="ml-auto flex items-center gap-2">
+                        <div className="ml-auto flex items-center gap-2 max-md:flex-wrap">
                           {canExport && salesBmDrafts.length > 0 && (
                             <button
                               onClick={() => {
@@ -6950,7 +6950,7 @@ const BranchAdminExpense = () => {
                         </div>
                       )}
                       {verifiedInnerTab === 'bill_wise' && (
-                        <div className="ml-auto flex items-center gap-2">
+                        <div className="ml-auto flex items-center gap-2 max-md:flex-wrap">
                           {canExport && billWiseDrafts.length > 0 && (
                             <button
                               onClick={() => {
@@ -7008,8 +7008,8 @@ const BranchAdminExpense = () => {
 
                   {/* ── Inner tabs (Submitted view) ── */}
                   {tadaSubTab === 'submitted' && (
-                    <div className="px-3 py-1.5 border-b bg-white flex items-center gap-1.5">
-                      <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+                    <div className="px-3 py-1.5 border-b bg-white flex items-center gap-1.5 max-md:flex-wrap max-md:px-2">
+                      <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 max-sm:overflow-x-auto max-sm:max-w-full">
                         {[
                           { id: 'se', label: 'Service Engineer' },
                           { id: 'sales', label: 'Sales & BM TADA' },
@@ -9037,7 +9037,7 @@ const BranchAdminExpense = () => {
               </div>
 
               {/* Body */}
-              <div className="flex-1 overflow-y-auto p-5" style={{ scrollbarWidth: 'thin' }}>
+              <div className="flex-1 overflow-y-auto p-5 max-md:p-3" style={{ scrollbarWidth: 'thin' }}>
                 {!myBranchRateInfo ? (
                   <div className="text-center py-10">
                     <svg className="h-12 w-12 mx-auto text-gray-200 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">

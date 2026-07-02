@@ -2636,7 +2636,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     className="group bg-white rounded-lg shadow-sm p-2.5 sm:p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all cursor-pointer h-full"
                     title="Click to view all letters you have sent"
                 >
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center justify-between gap-2 max-sm:flex-wrap">
                         <div className="flex items-center gap-2">
                             <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${themeColor}15` }}>
                                 <svg className="w-4 h-4" fill="none" stroke={themeColor} viewBox="0 0 24 24">
@@ -2679,7 +2679,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     </p>
                                 </div>
 
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 max-md:flex-wrap max-md:gap-2">
                                     {/* Filter Dropdown */}
                                     <div className="relative">
                                         <select
@@ -3027,7 +3027,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 )}
 
                 {showCspModal && ReactDOM.createPortal(
-                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3">
+                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3 max-md:px-2">
                         <div className="bg-white rounded-xl shadow-xl max-w-[95vw] w-full max-h-[92vh] overflow-hidden flex flex-col">
                             <div
                                 className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2"
@@ -3122,7 +3122,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         placeholder="Search instance, customer, SR..."
                                         value={cspSearchTerm}
                                         onChange={(e) => setCspSearchTerm(e.target.value)}
-                                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 bg-white focus:outline-none"
+                                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 max-md:w-full max-md:min-w-0 bg-white focus:outline-none"
                                     />
 
                                     <button
@@ -3242,7 +3242,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 )}
 
                 {showOpenCspModal && ReactDOM.createPortal(
-                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3">
+                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3 max-md:px-2">
                         <div className="bg-white rounded-xl shadow-xl max-w-[95vw] w-full max-h-[92vh] overflow-hidden flex flex-col">
                             <div
                                 className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2"
@@ -3338,7 +3338,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         placeholder="Search instance, customer, SR..."
                                         value={openCspSearchTerm}
                                         onChange={(e) => setOpenCspSearchTerm(e.target.value)}
-                                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 bg-white focus:outline-none"
+                                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 max-md:w-full max-md:min-w-0 bg-white focus:outline-none"
                                     />
 
                                     <button
@@ -3456,11 +3456,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 )}
 
                 {showAllFollowupsModal && ReactDOM.createPortal(
-                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3">
-                        <div className="bg-white rounded-xl shadow-xl max-w-7xl w-full max-h-[92vh] overflow-hidden flex flex-col">
+                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3 max-md:px-2">
+                        <div className="bg-white rounded-xl shadow-xl max-w-7xl w-full max-h-[92vh] max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh] overflow-hidden flex flex-col">
                             {/* Header — themed gradient like BranchCustomersModal */}
                             <div
-                                className="px-4 py-3 border-b border-gray-200 flex justify-between items-center"
+                                className="px-4 py-3 border-b border-gray-200 flex justify-between items-center max-lg:flex-wrap max-lg:gap-2 max-md:px-2"
                                 style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
                             >
                                 <div>
@@ -3481,7 +3481,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         {getDateRangeText()} • Total: {displayedFollowups.length} {followupView === 'unique' ? 'unique ' : followupView === 'unique_drive' ? 'unique drive ' : ''}follow-up(s)
                                     </p>
                                 </div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 max-lg:flex-wrap">
                                     {/* Created At - From */}
                                     <div className="flex items-center gap-1">
                                         <label className="text-[11px] text-white whitespace-nowrap">Created From:</label>
@@ -3571,7 +3571,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         placeholder="Search customer, drive, remark..."
                                         value={followupSearchTerm}
                                         onChange={(e) => setFollowupSearchTerm(e.target.value)}
-                                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-64 bg-white focus:outline-none"
+                                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-64 max-md:w-full max-md:min-w-0 bg-white focus:outline-none"
                                     />
 
                                     {/* Export — permission-gated, exports only the filtered rows */}
@@ -3718,7 +3718,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 )}
 
                 {showCancelledCspModal && ReactDOM.createPortal(
-                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3">
+                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3 max-md:px-2">
                         <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden flex flex-col">
                             <div
                                 className="px-4 py-3 border-b border-gray-200 flex justify-between items-center"
@@ -3759,7 +3759,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 )}
 
                 {showAddSrModal && ReactDOM.createPortal(
-                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3">
+                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3 max-md:px-2">
                         <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[88vh] overflow-hidden flex flex-col">
                             <div className="px-3 py-2 border-b border-gray-200 flex justify-between items-center"
                                 style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}>
@@ -3798,7 +3798,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     )}
                                 </div>
 
-                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-sm:grid-cols-1">
                                     <div>
                                         <label className="block text-[11px] font-semibold text-black mb-0.5">Asset No. (Instance ID) *</label>
                                         <input type="text" value={srForm.asset_number}
@@ -3875,7 +3875,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 </div>
                             </div>
 
-                            <div className="px-3 py-2 border-t border-gray-200 bg-gray-50 flex justify-end gap-2">
+                            <div className="px-3 py-2 border-t border-gray-200 bg-gray-50 flex justify-end gap-2 max-md:flex-wrap">
                                 <button onClick={() => setShowAddSrModal(false)}
                                     className="px-3 py-1 border border-gray-300 rounded-md text-xs font-medium hover:bg-white text-black">
                                     Cancel
@@ -3892,8 +3892,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 )}
 
                 {showLetterModal && ReactDOM.createPortal(
-                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3">
-                        <div className="bg-white rounded-xl shadow-xl max-w-7xl w-full max-h-[92vh] overflow-hidden flex flex-col">
+                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3 max-md:px-2">
+                        <div className="bg-white rounded-xl shadow-xl max-w-7xl w-full max-h-[92vh] max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh] overflow-hidden flex flex-col">
                             <div
                                 className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2"
                                 style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
@@ -3965,7 +3965,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         placeholder="Search ref, instance, subject..."
                                         value={letterSearchTerm}
                                         onChange={(e) => setLetterSearchTerm(e.target.value)}
-                                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 bg-white focus:outline-none"
+                                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 max-md:w-full max-md:min-w-0 bg-white focus:outline-none"
                                     />
 
                                     {/* Clear filters */}
@@ -4168,14 +4168,14 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 )}
 
                 {showLetterPdfModal && ReactDOM.createPortal(
-                    <div className="fixed inset-0 backdrop-blur-sm bg-black/50 flex items-center justify-center z-[10001] p-3">
-                        <div className="bg-white rounded-xl shadow-xl max-w-5xl w-full h-[92vh] overflow-hidden flex flex-col">
+                    <div className="fixed inset-0 backdrop-blur-sm bg-black/50 flex items-center justify-center z-[10001] p-3 max-md:px-2">
+                        <div className="bg-white rounded-xl shadow-xl max-w-5xl w-full h-[92vh] max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh] overflow-hidden flex flex-col">
                             <div
-                                className="px-4 py-2.5 border-b border-gray-200 flex justify-between items-center gap-2"
+                                className="px-4 py-2.5 border-b border-gray-200 flex justify-between items-center gap-2 max-md:flex-wrap max-md:gap-2"
                                 style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
                             >
                                 <h3 className="text-sm font-semibold text-white truncate">Letter — {letterPdfName}</h3>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 max-md:flex-wrap">
                                     <button
                                         onClick={() => {
                                             const link = document.createElement('a');
@@ -4183,7 +4183,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                             link.download = `${letterPdfName}.pdf`;
                                             link.click();
                                         }}
-                                        className="px-3 py-1.5 bg-white text-[#2f3192] rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 hover:bg-gray-100"
+                                        className="px-3 py-1.5 bg-white text-[#2f3192] rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 hover:bg-gray-100 max-sm:px-2"
                                     >
                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -4192,7 +4192,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     </button>
                                     <button
                                         onClick={handlePrintLetterPdf}
-                                        className="px-3 py-1.5 bg-white text-[#2f3192] rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 hover:bg-gray-100"
+                                        className="px-3 py-1.5 bg-white text-[#2f3192] rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 hover:bg-gray-100 max-sm:px-2"
                                     >
                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
@@ -4237,8 +4237,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 )}
 
                 {showNonCampaignModal && ReactDOM.createPortal(
-                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3">
-                        <div className="bg-white rounded-xl shadow-xl max-w-7xl w-full max-h-[92vh] overflow-hidden flex flex-col">
+                    <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3 max-md:px-2">
+                        <div className="bg-white rounded-xl shadow-xl max-w-7xl w-full max-h-[92vh] max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh] overflow-hidden flex flex-col">
                             <div
                                 className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2"
                                 style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
@@ -4317,7 +4317,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         placeholder="Search customer, instance, service..."
                                         value={nonCampaignSearchTerm}
                                         onChange={(e) => setNonCampaignSearchTerm(e.target.value)}
-                                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 bg-white focus:outline-none"
+                                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 max-md:w-full max-md:min-w-0 bg-white focus:outline-none"
                                     />
 
                                     {/* Export — permission-gated */}

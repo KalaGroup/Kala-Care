@@ -293,8 +293,8 @@ const ImprestModal = ({
   const totalEntries = branches.reduce((n, b) => n + b.entries.length, 0);
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <div className="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[85vh] overflow-hidden">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm max-md:p-2">
+      <div className="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[85vh] overflow-hidden max-lg:max-w-[95vw] max-lg:max-h-[90vh]">
         {/* Header */}
         <div
           className="sticky top-0 px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center"
@@ -341,7 +341,7 @@ const ImprestModal = ({
                   >
                     {/* Branch header */}
                     <div
-                      className="px-3 sm:px-4 py-2 sm:py-3 flex justify-between items-center"
+                      className="px-3 sm:px-4 py-2 sm:py-3 flex justify-between items-center max-sm:flex-wrap max-sm:gap-1.5"
                       style={{ backgroundColor: themeLight }}
                     >
                       <div>
@@ -378,7 +378,7 @@ const ImprestModal = ({
                             return (
                               <div
                                 key={key}
-                                className="flex items-center gap-2 pl-3 border-l-2"
+                                className="flex items-center gap-2 pl-3 border-l-2 max-sm:flex-wrap"
                                 style={{ borderColor: 'rgba(64, 96, 147, 0.5)' }}
                               >
                                 <input
@@ -434,7 +434,7 @@ const ImprestModal = ({
         </div>
 
         {/* Footer */}
-        <div className="sticky bottom-0 bg-white border-t px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center">
+        <div className="sticky bottom-0 bg-white border-t px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center max-md:flex-wrap max-md:gap-2 max-md:px-2">
           <div className="text-[10px] sm:text-[11px] text-black">
             <span className="font-semibold">{branches.length}</span> branch(es) ·{' '}
             <span className="font-semibold">{totalEntries}</span> entries · Grand Total{' '}
@@ -442,7 +442,7 @@ const ImprestModal = ({
               ₹{grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
             </span>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 max-md:flex-wrap">
             <button
               onClick={onClose}
               disabled={saving}
@@ -4270,7 +4270,7 @@ const HOExpense = () => {
               </div>
             </div>
 
-            <div className="flex gap-1 sm:gap-2 bg-gray-100 rounded-lg p-1">
+            <div className="flex gap-1 sm:gap-2 bg-gray-100 rounded-lg p-1 max-md:flex-wrap">
               <button
                 onClick={() => {
                   setActiveTab('tada');
@@ -4318,9 +4318,9 @@ const HOExpense = () => {
             {/* Branch Table View (First Table) */}
             {!selectedBranchForSummary && !selectedEngineerDetail && (
               <>
-                <div className="px-2 sm:px-3 py-1 sm:py-1 border-b flex justify-between items-center" style={{ backgroundColor: themeShades.light, borderColor: '#E5E7EB' }}>
+                <div className="px-2 sm:px-3 py-1 sm:py-1 border-b flex justify-between items-center max-md:flex-wrap max-md:gap-2" style={{ backgroundColor: themeShades.light, borderColor: '#E5E7EB' }}>
                   <h2 className="text-[11px] sm:text-xs font-semibold text-black">Branch List</h2>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 max-md:flex-wrap">
                     <button
                       onClick={refreshCurrentView2}
                       disabled={refreshing}
@@ -4380,7 +4380,7 @@ const HOExpense = () => {
                   </div>
                 </div>
 
-                <div className="p-4">
+                <div className="p-4 max-md:px-2">
                   {loadingBranches ? (
                     <div className="text-center py-8">
                       <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
@@ -4390,7 +4390,7 @@ const HOExpense = () => {
                     <div className="text-center py-8 text-gray-500">No branches found</div>
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className="min-w-full border-collapse border border-gray-200">
+                      <table className="min-w-full border-collapse border border-gray-200 max-md:min-w-[760px]">
                         <thead className="bg-gray-50">
                           <tr>
                             <th className="border border-gray-300 px-4 py-2 text-center text-xs font-semibold text-black">Sr. No.</th>
@@ -4470,8 +4470,8 @@ const HOExpense = () => {
               <>
                 {!selectedSalesPeriod && !selectedKmWisePeriod && !selectedBillWisePeriod && !selectedSalesBMVoucher && !selectedSalesBMEngineer && (
                   <>
-                    <div className="px-2 sm:px-3 py-1 sm:py-1 border-b flex justify-between items-center">
-                      <div className="flex items-center gap-2">
+                    <div className="px-2 sm:px-3 py-1 sm:py-1 border-b flex justify-between items-center max-md:flex-wrap max-md:gap-2">
+                      <div className="flex items-center gap-2 max-md:flex-wrap">
                         <button
                           onClick={handleBackToBranches}
                           className="inline-flex items-center gap-1 text-sm font-bold underline hover:font-extrabold transition-all"
@@ -4503,7 +4503,7 @@ const HOExpense = () => {
                           {selectedBranchForSummary.branch_code}
                         </span>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 max-md:flex-wrap">
                         <button
                           onClick={refreshCurrentView2}
                           disabled={refreshing}
@@ -4583,7 +4583,7 @@ const HOExpense = () => {
                       </div>
                     </div>
 
-                    <div className="p-4">
+                    <div className="p-4 max-md:px-2">
                       {loadingEngineerSummary ? (
                         <div className="text-center py-8">
                           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
@@ -4595,7 +4595,7 @@ const HOExpense = () => {
                           <div className="text-center py-8 text-gray-500">No vouchers found for this branch</div>
                         ) : (
                           <div className="overflow-x-auto">
-                            <table className="min-w-full border-collapse border border-gray-200">
+                            <table className="min-w-full border-collapse border border-gray-200 max-md:min-w-[680px]">
                               <thead className="bg-gray-50">
                                 <tr>
                                   <th className="border border-gray-300 px-2 py-1 text-center text-xs font-semibold text-black">Sr. No.</th>
@@ -4662,7 +4662,7 @@ const HOExpense = () => {
                           <div className="text-center py-8 text-gray-500">No engineers found for this voucher</div>
                         ) : (
                           <div className="overflow-x-auto">
-                            <table className="min-w-full border-collapse border border-gray-200">
+                            <table className="min-w-full border-collapse border border-gray-200 max-md:min-w-[720px]">
                               <thead className="bg-gray-50">
                                 <tr>
                                   <th className="border border-gray-300 px-2 py-1 text-center text-xs font-semibold text-black">Sr. No.</th>
@@ -4732,8 +4732,8 @@ const HOExpense = () => {
                 {/* ═══════════ SALES & BM (merged, voucher-wise like Service Engineer) ═══════════ */}
                 {selectedBranchForSummary && !selectedEngineerDetail && !selectedVoucher && !selectedBillWisePeriod && (
                   <>
-                    <div className="px-2 sm:px-3 py-1 border-b border-t flex justify-between items-center" style={{ backgroundColor: themeShades.light, borderColor: '#E5E7EB' }}>
-                      <div className="flex items-center gap-2">
+                    <div className="px-2 sm:px-3 py-1 border-b border-t flex justify-between items-center max-md:flex-wrap max-md:gap-2" style={{ backgroundColor: themeShades.light, borderColor: '#E5E7EB' }}>
+                      <div className="flex items-center gap-2 max-md:flex-wrap">
                         {selectedSalesBMEngineer ? (
                           <>
                             <button onClick={handleBackToBranches}
@@ -4769,7 +4769,7 @@ const HOExpense = () => {
                               : <>Sales &amp; BM — {selectedBranchForSummary.branch_name}</>}
                         </h2>
                       </div>
-                      <div className="flex gap-2 items-center">
+                      <div className="flex gap-2 items-center max-md:flex-wrap">
                         {selectedSalesBMVoucher && (
                           <button
                             onClick={refreshSalesBM}
@@ -4966,7 +4966,7 @@ const HOExpense = () => {
                           <div className="text-center py-6 text-xs text-gray-500">No Sales &amp; BM records for this branch</div>
                         ) : (
                           <div className="overflow-x-auto">
-                            <table className="min-w-full border-collapse border border-gray-200">
+                            <table className="min-w-full border-collapse border border-gray-200 max-md:min-w-[680px]">
                               <thead className="bg-gray-50"><tr>
                                 {['Sr. No.', 'Voucher No.', 'Submitted By', 'Engineers', 'Total SR', 'Verified SR', 'Total Amount'].map(h =>
                                   <th key={h} className="border border-gray-300 px-2 py-1 text-center text-xs font-semibold text-black">{h}</th>)}
@@ -5003,7 +5003,7 @@ const HOExpense = () => {
                       ) : !selectedSalesBMEngineer ? (
                         /* ── ENGINEERS IN VOUCHER ── */
                         <div className="overflow-x-auto">
-                          <table className="min-w-full border-collapse border border-gray-200">
+                          <table className="min-w-full border-collapse border border-gray-200 max-md:min-w-[720px]">
                             <thead className="bg-gray-50"><tr>
                               {['Sr. No.', 'Engineer Name', 'Engineer UID', 'Period', 'Total SR', 'Verified SR', 'Total Amount'].map(h =>
                                 <th key={h} className="border border-gray-300 px-2 py-1 text-center text-xs font-semibold text-black">{h}</th>)}
@@ -5123,8 +5123,8 @@ const HOExpense = () => {
                 {/* ═══════════ BILL WISE VOUCHER SUMMARY TABLE ═══════════ */}
                 {selectedBranchForSummary && !selectedEngineerDetail && !selectedVoucher && !selectedBillWisePeriod && !selectedSalesPeriod && !selectedKmWisePeriod && !selectedSalesBMVoucher && !selectedSalesBMEngineer && (
                   <>
-                    <div className="px-2 sm:px-3 py-1 border-b border-t flex justify-between items-center" style={{ backgroundColor: themeShades.light, borderColor: '#E5E7EB' }}>
-                      <div className="flex items-center gap-2">
+                    <div className="px-2 sm:px-3 py-1 border-b border-t flex justify-between items-center max-md:flex-wrap max-md:gap-2" style={{ backgroundColor: themeShades.light, borderColor: '#E5E7EB' }}>
+                      <div className="flex items-center gap-2 max-md:flex-wrap">
                         <h2 className="text-[11px] sm:text-xs font-semibold text-black">
                           Bill Wise — {selectedBranchForSummary.branch_name}
                         </h2>
@@ -5152,7 +5152,7 @@ const HOExpense = () => {
                       )}
                     </div>
 
-                    <div className="p-4">
+                    <div className="p-4 max-md:px-2">
                       {loadingBillWiseSummary ? (
                         <div className="text-center py-6">
                           <svg className="animate-spin h-6 w-6 mx-auto mb-2" style={{ color: themeColor }} viewBox="0 0 24 24">
@@ -5165,7 +5165,7 @@ const HOExpense = () => {
                         <div className="text-center py-6 text-xs text-gray-500">No Bill Wise vouchers for this branch</div>
                       ) : (
                         <div className="overflow-x-auto">
-                          <table className="min-w-full border-collapse border border-gray-200">
+                          <table className="min-w-full border-collapse border border-gray-200 max-md:min-w-[700px]">
                             <thead className="bg-gray-50">
                               <tr>
                                 {['Sr. No.', 'Voucher No.', 'Submitted By', 'No. of Activity', 'Verified', 'Total Amount', 'Verified Amount'].map(h =>
@@ -5275,7 +5275,7 @@ const HOExpense = () => {
                           Submitted by: {selectedBillWisePeriod.submitted_by || '-'}
                         </span>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 max-md:flex-wrap">
                         <button
                           onClick={refreshBillWise}
                           disabled={refreshingBillWise}
@@ -5420,8 +5420,8 @@ const HOExpense = () => {
                         return groups.length === 0 ? (
                           <div className="text-center py-8 text-xs text-gray-500">No records in this voucher</div>
                         ) : (
-                          <div className="p-4 overflow-x-auto">
-                            <table className="min-w-full border-collapse border border-gray-200">
+                          <div className="p-4 overflow-x-auto max-md:px-2">
+                            <table className="min-w-full border-collapse border border-gray-200 max-md:min-w-[700px]">
                               <thead className="bg-gray-50"><tr>
                                 {['Sr. No.', 'Type', 'Engineer Name', 'No. of Activity', 'Verified', 'Total Amount', 'Verified Amount'].map(h =>
                                   <th key={h} className="border border-gray-300 px-2 py-1.5 text-center text-xs font-semibold text-black">{h}</th>)}
@@ -5688,8 +5688,8 @@ const HOExpense = () => {
             {/* Engineer Details View (Third Table - Detailed Records) */}
             {selectedEngineerDetail && (
               <>
-                <div className="px-2 sm:px-3 py-1 sm:py-1 border-b flex justify-between items-center" style={{ backgroundColor: themeShades.light, borderColor: '#E5E7EB' }}>
-                  <div className="flex items-center gap-2">
+                <div className="px-2 sm:px-3 py-1 sm:py-1 border-b flex justify-between items-center max-md:flex-wrap max-md:gap-2" style={{ backgroundColor: themeShades.light, borderColor: '#E5E7EB' }}>
+                  <div className="flex items-center gap-2 max-md:flex-wrap">
                     <button
                       onClick={handleBackToBranches}
                       className="inline-flex items-center gap-1 text-sm font-bold underline hover:font-extrabold transition-all"
@@ -5717,7 +5717,7 @@ const HOExpense = () => {
                       Total: {engineerRecords.length}
                     </span>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 max-md:flex-wrap">
                     <button
                       onClick={refreshCurrentView2}
                       disabled={refreshing}
@@ -6011,7 +6011,7 @@ const HOExpense = () => {
                           <div
                             onMouseEnter={() => setShowInfoPopover(true)}
                             onMouseLeave={() => setShowInfoPopover(false)}
-                            className="bg-white rounded-lg shadow-2xl border border-gray-200 min-w-[320px] overflow-hidden"
+                            className="bg-white rounded-lg shadow-2xl border border-gray-200 min-w-[320px] overflow-hidden max-lg:min-w-0 max-lg:max-w-[90vw]"
                             style={{
                               position: 'fixed',
                               top: `${infoPopoverPos.top}px`,
@@ -6146,7 +6146,7 @@ const HOExpense = () => {
 
                     {/* Middle: SR Reach at Site Date Filter + Two Way KM Filter */}
                     <div className="flex flex-wrap items-center gap-2">
-                      <div className="flex items-center gap-1 px-2 py-1 border border-blue-200 rounded-lg bg-blue-50">
+                      <div className="flex items-center gap-1 px-2 py-1 border border-blue-200 rounded-lg bg-blue-50 max-sm:flex-wrap">
                         <span className="text-[10px] font-bold text-blue-600 uppercase whitespace-nowrap">SR Reach at Site Date:</span>
                         <input
                           type="date"
@@ -6204,7 +6204,7 @@ const HOExpense = () => {
                     </div>
 
                     {/* Right: Verify + Submit buttons */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 max-md:flex-wrap">
                       {/* <button
                         onClick={handleBulkVerify}
                         disabled={selectedCount === 0 || bulkVerifying}
@@ -6273,7 +6273,7 @@ const HOExpense = () => {
                     <p className="text-sm text-gray-500 mb-5">
                       No pending records for <strong>{selectedEngineerDetail?.name}</strong>. Every verified record has been moved to history.
                     </p>
-                    <div className="flex items-center justify-center gap-2">
+                    <div className="flex items-center justify-center gap-2 max-md:flex-wrap">
                       <button
                         onClick={handleBackToEngineersList}
                         className="inline-flex items-center gap-1 text-sm font-bold underline hover:font-extrabold transition-all"
@@ -6474,10 +6474,10 @@ const HOExpense = () => {
             {/* Vendor List Modal */}
             {showVendorListModal && (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-2 bg-black/50 backdrop-blur-sm">
-                <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+                <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col max-lg:max-w-[95vw] max-lg:max-h-[90vh]">
                   {/* Header */}
                   <div className="px-4 py-3 flex justify-between items-center shrink-0" style={{ background: themeColor }}>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 max-md:flex-wrap">
                       <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
                       </svg>
@@ -6500,7 +6500,7 @@ const HOExpense = () => {
                   {!loadingVendorList && vendorList.length > 0 && (
                     <div className="shrink-0 px-4 py-2 border-b bg-gray-50 flex flex-wrap items-center gap-2">
                       {/* Search */}
-                      <div className="relative flex-1 min-w-[180px]">
+                      <div className="relative flex-1 min-w-[180px] max-sm:min-w-0">
                         <svg className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </svg>
@@ -6610,7 +6610,7 @@ const HOExpense = () => {
                           <button onClick={() => { setVendorSearch(''); setVendorBranchFilter(''); }} className="mt-2 text-xs text-blue-600 hover:underline">Clear</button>
                         </div>
                       ) : (
-                        <table className="border-collapse w-full">
+                        <table className="border-collapse w-full max-md:min-w-[620px]">
                           <thead className="sticky top-0 z-10">
                             <tr style={{ backgroundColor: '#f0f1ff' }}>
                               {['Sr.', 'Vendor Name', 'GST No.', 'Branch', 'State', 'Address'].map((col, i) => (
@@ -6648,7 +6648,7 @@ const HOExpense = () => {
                   </div>
 
                   {/* Footer */}
-                  <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-between items-center">
+                  <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-between items-center max-md:flex-wrap max-md:gap-2 max-md:px-2">
                     <span className="text-xs text-gray-500">
                       {vendorSearch || vendorBranchFilter ? (
                         (() => {
@@ -6683,7 +6683,7 @@ const HOExpense = () => {
         {/* KM Rate Modal */}
         {showKMRateModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-3 bg-black/50 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] sm:max-h-[85vh] overflow-hidden">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] sm:max-h-[85vh] overflow-hidden max-lg:max-w-[95vw]">
               <div className="sticky top-0 px-3 sm:px-4 py-3 flex justify-between items-center" style={{ background: themeColor }}>
                 <h2 className="text-xs sm:text-sm font-semibold text-white">Branch KM & DA Rates</h2>
                 <button onClick={() => setShowKMRateModal(false)} className="w-6 h-6 bg-white rounded-lg flex items-center justify-center transition-all">
@@ -6699,7 +6699,7 @@ const HOExpense = () => {
                     const branchData = kmRates[branchCode] || {};
                     return (
                       <div key={branchCode} className="bg-gray-50 rounded-lg p-2 sm:p-3 hover:shadow-md transition-shadow">
-                        <div className="flex items-center justify-between mb-2 pb-1.5 border-b" style={{ borderColor: themeColor + '40' }}>
+                        <div className="flex items-center justify-between mb-2 pb-1.5 border-b max-sm:flex-wrap max-sm:gap-1.5" style={{ borderColor: themeColor + '40' }}>
                           <h3 className="text-xs sm:text-sm font-bold text-gray-800">
                             {branchName} ({branchCode})
                           </h3>
@@ -6727,7 +6727,7 @@ const HOExpense = () => {
                               <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wide">
                                 {slab.title}
                               </label>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 max-md:flex-wrap">
                                 <div className="flex-1">
                                   <span className="block text-[9px] text-gray-400 mb-0.5">Rate (₹/km)</span>
                                   <div className="flex items-center gap-1">
@@ -6774,7 +6774,7 @@ const HOExpense = () => {
         )}
 
         {showAddEmployeeModal && (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm max-md:p-2">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col" style={{ maxHeight: '90vh' }}>
 
               {/* Header */}
@@ -6815,7 +6815,7 @@ const HOExpense = () => {
                 </div>
 
                 {/* Name + ID row */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
                   <div>
                     <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">
                       Employee Name <span className="text-red-500">*</span>
@@ -6844,7 +6844,7 @@ const HOExpense = () => {
                 </div>
 
                 {/* UID + Designation row */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
                   <div>
                     <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">
                       Employee UID
@@ -7184,8 +7184,8 @@ const HOExpense = () => {
 
         {/* Expense Head Modal */}
         {showExpenseHeadModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[85vh] overflow-hidden">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm max-md:p-2">
+            <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[85vh] overflow-hidden max-lg:max-w-[95vw] max-lg:max-h-[90vh]">
               <div className="sticky top-0 px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center" style={{ background: themeColor }}>
                 <h2 className="text-sm sm:text-base font-semibold text-white">Manage Expense Heads</h2>
                 <button onClick={() => setShowExpenseHeadModal(false)} className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100 transition-colors"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
@@ -7193,7 +7193,7 @@ const HOExpense = () => {
               <div className="p-4 sm:p-6 overflow-y-auto max-h-[calc(85vh-80px)]">
                 <div className="mb-6 p-3 sm:p-4 rounded-lg" style={{ backgroundColor: themeShades.light }}>
                   <h3 className="text-[11px] sm:text-xs font-semibold text-black mb-2 sm:mb-3">Add New Expense Head</h3>
-                  <div className="flex gap-2"><input type="text" value={newExpenseHead} onChange={(e) => setNewExpenseHead(e.target.value)} onKeyPress={(e) => handleKeyPress(e, addExpenseHead)} placeholder="Enter expense head name" className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 border rounded-lg text-[11px] sm:text-xs focus:outline-none focus:ring-2 transition-all text-black" style={{ borderColor: '#D1D5DB' }} /><button onClick={addExpenseHead} disabled={addingHead || !newExpenseHead.trim()} className="px-3 sm:px-4 py-1.5 sm:py-2 text-white text-[11px] sm:text-xs font-medium rounded-lg transition-all disabled:opacity-50" style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>{addingHead ? 'Adding...' : 'Add Head'}</button></div>
+                  <div className="flex gap-2 max-md:flex-wrap"><input type="text" value={newExpenseHead} onChange={(e) => setNewExpenseHead(e.target.value)} onKeyPress={(e) => handleKeyPress(e, addExpenseHead)} placeholder="Enter expense head name" className="flex-1 px-2 sm:px-3 py-1.5 sm:py-2 border rounded-lg text-[11px] sm:text-xs focus:outline-none focus:ring-2 transition-all text-black" style={{ borderColor: '#D1D5DB' }} /><button onClick={addExpenseHead} disabled={addingHead || !newExpenseHead.trim()} className="px-3 sm:px-4 py-1.5 sm:py-2 text-white text-[11px] sm:text-xs font-medium rounded-lg transition-all disabled:opacity-50" style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>{addingHead ? 'Adding...' : 'Add Head'}</button></div>
                 </div>
                 <div className="space-y-3 sm:space-y-4">
                   {expenseHeads.map((head) => (
@@ -7201,7 +7201,7 @@ const HOExpense = () => {
                       <div className="px-3 sm:px-4 py-2 sm:py-3 flex justify-between items-center" style={{ backgroundColor: themeShades.light }}>
                         {editingHead?.id === head.id ? (
                           <div className="flex-1 flex gap-2"><input type="text" value={editingHead.name} onChange={(e) => setEditingHead({ ...editingHead, name: e.target.value })} onKeyPress={(e) => handleKeyPress(e, () => updateExpenseHead(head.id))} className="flex-1 px-2 sm:px-3 py-1 border rounded-lg text-[11px] sm:text-xs focus:outline-none focus:ring-2" autoFocus /><button onClick={() => updateExpenseHead(head.id)} className="p-1 text-green-600 hover:text-green-800"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg></button><button onClick={() => setEditingHead(null)} className="p-1 text-gray-600 hover:text-gray-800"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button></div>
-                        ) : (<><h3 className="text-[11px] sm:text-xs font-semibold text-black">{head.name}</h3><div className="flex gap-2"><button onClick={() => setEditingHead({ id: head.id, name: head.name })} className="p-1 text-blue-600 hover:text-blue-800"><svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg></button><button onClick={() => deleteExpenseHead(head.id)} className="p-1 text-red-600 hover:text-red-800"><svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button></div></>)}
+                        ) : (<><h3 className="text-[11px] sm:text-xs font-semibold text-black">{head.name}</h3><div className="flex gap-2 max-md:flex-wrap"><button onClick={() => setEditingHead({ id: head.id, name: head.name })} className="p-1 text-blue-600 hover:text-blue-800"><svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg></button><button onClick={() => deleteExpenseHead(head.id)} className="p-1 text-red-600 hover:text-red-800"><svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button></div></>)}
                       </div>
                       <div className="px-3 sm:px-4 py-2 sm:py-3"><h4 className="text-[10px] sm:text-xs font-medium text-black mb-2">Subheads:</h4>{head.subheads && head.subheads.length > 0 && (<div className="space-y-1.5 mb-3">{head.subheads.map((subhead) => (<div key={subhead.id} className="flex justify-between items-center pl-3 border-l-2" style={{ borderColor: themeShades.medium }}>{editingSubhead?.headId === head.id && editingSubhead?.subheadId === subhead.id ? (<div className="flex-1 flex gap-2"><input type="text" value={editingSubhead.newName} onChange={(e) => setEditingSubhead({ ...editingSubhead, newName: e.target.value })} onKeyPress={(e) => handleKeyPress(e, () => updateSubhead(head.id, subhead.id, editingSubhead.newName))} className="flex-1 px-2 py-0.5 border rounded text-[10px] sm:text-xs focus:outline-none focus:ring-2" autoFocus /><button onClick={() => updateSubhead(head.id, subhead.id, editingSubhead.newName)} className="text-green-600"><svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg></button><button onClick={() => setEditingSubhead(null)} className="text-gray-600"><svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button></div>) : (<><span className="text-[10px] sm:text-xs text-black">{subhead.name}</span><div className="flex gap-1"><button onClick={() => setEditingSubhead({ headId: head.id, subheadId: subhead.id, newName: subhead.name })} className="p-0.5 text-blue-600 hover:text-blue-800"><svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg></button><button onClick={() => deleteSubhead(head.id, subhead.id)} className="p-0.5 text-red-600 hover:text-red-800"><svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button></div></>)}</div>))}</div>)}<div className="flex gap-2 mt-2"><input type="text" value={subheadInputs[head.id] || ''} onChange={(e) => setSubheadInputs(prev => ({ ...prev, [head.id]: e.target.value }))} onKeyPress={(e) => handleKeyPress(e, () => addSubhead(head.id))} placeholder="Add new subhead..." className="flex-1 px-2 sm:px-3 py-1 border rounded-lg text-[10px] sm:text-xs focus:outline-none focus:ring-2" style={{ borderColor: '#D1D5DB' }} /><button onClick={() => addSubhead(head.id)} disabled={!subheadInputs[head.id]?.trim() || addingSubheadForId === head.id} className="px-2 py-1 text-white text-[10px] font-medium rounded-lg disabled:opacity-50 whitespace-nowrap" style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>{addingSubheadForId === head.id ? 'Adding...' : 'Add Subhead'}</button></div></div>
                     </div>
@@ -7258,7 +7258,7 @@ const HOExpense = () => {
                 {loadingDayLimits ? (
                   <div style={{ padding: '40px', textAlign: 'center', color: '#888' }}>Loading…</div>
                 ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <table className="max-md:min-w-[540px]" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                     <thead style={{ position: 'sticky', top: 0, background: '#f0f1ff', zIndex: 1 }}>
                       <tr>
                         <th style={{ padding: '8px 10px', fontWeight: 500, color: '#555', borderBottom: '1px solid #ddd', fontSize: '12px', width: '36px' }}>Sr.No</th>
@@ -7320,7 +7320,7 @@ const HOExpense = () => {
               </div>
 
               {/* Footer */}
-              <div style={{
+              <div className="max-sm:flex-wrap max-sm:gap-2" style={{
                 padding: '12px 18px', borderTop: '1px solid #eee', background: '#fafafa',
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
               }}>
@@ -7495,7 +7495,7 @@ const HOExpense = () => {
               </div>
 
               {/* Footer */}
-              <div style={{
+              <div className="max-sm:flex-wrap max-sm:gap-2" style={{
                 padding: '12px 18px', borderTop: '1px solid #eee', background: '#fafafa',
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
               }}>

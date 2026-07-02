@@ -116,8 +116,8 @@ const BranchLVBHistory = ({ branchCode, branchName, themeColor = '#2f3192', canE
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-[98vw] max-h-[92vh] overflow-hidden flex flex-col">
 
         {/* Header */}
-        <div className="px-4 py-3 flex justify-between items-center shrink-0" style={{ background: themeColor }}>
-          <div className="flex items-center gap-2">
+        <div className="px-4 py-3 flex justify-between items-center shrink-0 max-md:px-2 max-md:flex-wrap max-md:gap-2" style={{ background: themeColor }}>
+          <div className="flex items-center gap-2 max-md:flex-wrap">
             <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
@@ -139,7 +139,7 @@ const BranchLVBHistory = ({ branchCode, branchName, themeColor = '#2f3192', canE
 
         {/* Toolbar */}
         {!loading && (
-          <div className="shrink-0 px-4 py-2 border-b bg-gray-100 flex items-center gap-2 flex-wrap">
+          <div className="shrink-0 px-4 py-2 border-b bg-gray-100 flex items-center gap-2 flex-wrap max-md:px-2">
             {!selected ? (
               <>
                 <span className="text-[10px] font-bold text-gray-500 uppercase">Branch:</span>
@@ -274,7 +274,7 @@ const BranchLVBHistory = ({ branchCode, branchName, themeColor = '#2f3192', canE
             groups.length === 0 ? (
               <div className="text-center py-20 text-xs text-gray-500">No vouchers found for this branch</div>
             ) : (
-              <table className="border-collapse w-full">
+              <table className="border-collapse w-full max-md:min-w-[900px]">
                 <thead className="sticky top-0 z-10"><tr style={{ backgroundColor: '#f0f1ff' }}>
                   {['Sr. No.', 'Voucher No.', 'Period (Start → End)', 'Submitted By', 'Verified By', 'Records', 'Total Amount', 'HO Paid Date'].map((c, i) => (
                     <th key={i} className="px-3 py-2 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 last:border-r-0 uppercase text-center" style={{ backgroundColor: '#f0f1ff' }}>{c}</th>
@@ -355,7 +355,7 @@ const BranchLVBHistory = ({ branchCode, branchName, themeColor = '#2f3192', canE
         </div>
 
         {/* Footer */}
-        <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-end">
+        <div className="shrink-0 px-4 py-2 border-t bg-gray-50 flex justify-end max-md:px-2">
           <button onClick={onClose} className="px-4 py-1.5 border rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100">Close</button>
         </div>
       </div>

@@ -179,7 +179,7 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
 
                 <div className="relative w-screen h-screen max-w-none bg-white shadow-2xl overflow-hidden rounded-none">
                     {/* Header */}
-                    <div className="relative px-3 sm:px-5 py-2 sm:py-3" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}>
+                    <div className="relative px-3 sm:px-5 py-2 sm:py-3 max-md:px-2" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}>
                         <div className="absolute top-0 right-0 w-48 sm:w-64 h-48 sm:h-64 bg-white/5 rounded-full -mr-24 sm:-mr-32 -mt-24 sm:-mt-32"></div>
                         <div className="absolute bottom-0 left-0 w-36 sm:w-48 h-36 sm:h-48 bg-white/5 rounded-full -ml-18 sm:-ml-24 -mb-18 sm:-mb-24"></div>
 
@@ -216,7 +216,7 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                     </div>
 
                     {/* Search and Export Bar */}
-                    <div className="px-3 sm:px-5 py-2 border-b border-gray-200 bg-white flex flex-col sm:flex-row justify-between items-center gap-2">
+                    <div className="px-3 sm:px-5 py-2 border-b border-gray-200 bg-white flex flex-col sm:flex-row justify-between items-center gap-2 max-md:px-2 max-md:flex-wrap">
                         <div className="relative w-full sm:w-72 md:w-80">
                             <input
                                 type="text"

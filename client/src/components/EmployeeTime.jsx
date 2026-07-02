@@ -107,8 +107,8 @@ const EmployeeTime = ({ isOpen, onClose, userData }) => {
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 max-md:px-2 bg-black/50 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] max-lg:w-[95vw] max-lg:max-w-[95vw] overflow-hidden flex flex-col">
                 {/* Header */}
                 <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200" style={{ backgroundColor: themeColor }}>
                     <h2 className="text-base font-semibold text-white">Employee Login / Work Time</h2>
@@ -134,7 +134,7 @@ const EmployeeTime = ({ isOpen, onClose, userData }) => {
                             value={reportDate}
                             max={getTodayStr()}
                             onChange={(e) => setReportDate(e.target.value)}
-                            className="px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] text-black"
+                            className="px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] text-black max-sm:w-full"
                         />
                     </div>
                     <div>
@@ -142,7 +142,7 @@ const EmployeeTime = ({ isOpen, onClose, userData }) => {
                         <select
                             value={branchFilter}
                             onChange={(e) => setBranchFilter(e.target.value)}
-                            className="px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] bg-white text-black"
+                            className="px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] bg-white text-black max-sm:w-full max-sm:min-w-0"
                         >
                             <option value="">All Branches</option>
                             {Object.entries(branchNameMap).map(([code, name]) => (
@@ -150,7 +150,7 @@ const EmployeeTime = ({ isOpen, onClose, userData }) => {
                             ))}
                         </select>
                     </div>
-                    <div className="flex-1 min-w-[180px]">
+                    <div className="flex-1 min-w-[180px] max-lg:min-w-0 max-sm:w-full">
                         <label className="block text-[11px] font-medium text-gray-600 mb-1">Search (ID or Name)</label>
                         <input
                             type="text"
@@ -181,7 +181,7 @@ const EmployeeTime = ({ isOpen, onClose, userData }) => {
                         </div>
                     ) : (
                         <div className="border border-gray-200 rounded-lg overflow-x-auto">
-                            <table className="min-w-full border-collapse text-xs">
+                            <table className="min-w-full max-md:min-w-[700px] border-collapse text-xs">
                                 <thead className="bg-gray-50 sticky top-0">
                                     <tr>
                                         {['Sr. No.', 'User ID', 'Employee', 'Branch', 'Login Time', 'Logout Time', 'Type'].map(h => (

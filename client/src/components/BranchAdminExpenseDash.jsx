@@ -113,7 +113,7 @@ const BranchAdminExpenseDash = ({ branchCode: propBranchCode }) => {
               </span>
             </div>
 
-            <div className="flex gap-1 sm:gap-2 bg-gray-100 rounded-lg p-1">
+            <div className="flex gap-1 sm:gap-2 bg-gray-100 rounded-lg p-1 max-md:flex-wrap">
               {[
                 { id: 'tada',   label: 'TA-DA' },
                 { id: 'office', label: 'Office Expense' },
@@ -703,7 +703,7 @@ const KpiCard = ({ label, value, tone = 'theme' }) => {
 };
 
 const ChartCard = ({ title, subtitle, rightSlot, children }) => (
-  <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg p-5 border border-gray-100">
+  <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg p-5 border border-gray-100 max-md:p-3">
     <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div className="flex-shrink-0">
         <h3 className="text-base font-bold text-gray-800">{title}</h3>
@@ -717,7 +717,7 @@ const ChartCard = ({ title, subtitle, rightSlot, children }) => (
 
 const DateRangeSlot = ({ label, dateFrom, dateTo, setDateFrom, setDateTo, onApply, onClear, totalChip }) => (
   <>
-    <div className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-lg bg-white">
+    <div className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-lg bg-white max-md:flex-wrap">
       <span className="text-[10px] font-bold text-gray-500 uppercase">{label}:</span>
       <input type="date" value={dateFrom}
         onChange={e => setDateFrom(e.target.value)}

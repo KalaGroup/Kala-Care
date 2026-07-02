@@ -47,7 +47,7 @@ const MaintenanceReports = () => {
                 .r-scroll::-webkit-scrollbar-thumb { background: #c7c9e0; border-radius: 9999px; }
             `}</style>
 
-            <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10">
+            <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10 max-md:px-2">
                 {/* ===== Intro box ===== */}
                 <div className="rounded-2xl px-3 sm:px-5 py-3 mb-3 text-white relative overflow-hidden"
                     style={{ background: `linear-gradient(120deg, ${themeColor} 0%, ${themeDark} 100%)` }}>
@@ -70,7 +70,7 @@ const MaintenanceReports = () => {
                 </div>
 
                 {/* ===== Tabs ===== */}
-                <div className="flex items-center gap-1.5 mb-4 border-b border-gray-200">
+                <div className="flex items-center gap-1.5 mb-4 border-b border-gray-200 max-sm:flex-wrap">
                     {[
                         { id: 'coverage', label: 'Service Applicability', Icon: Squares2X2Icon },
                         { id: 'activity', label: 'Search Activity Count', Icon: ClockIcon },
@@ -129,7 +129,7 @@ const CoverageReport = ({ master, services }) => {
 
     return (
         <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm">
-            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 bg-gray-50">
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 bg-gray-50 max-sm:flex-wrap max-md:px-2">
                 <ChartBarIcon className="h-4 w-4" style={{ color: themeColor }} />
                 <p className="text-[13px] font-semibold text-gray-800">Service Coverage Matrix</p>
                 <span className="text-[11px] text-gray-400 hidden sm:inline">{master.length} codes × {cols.length} services · ✓ has parts · ✗ none</span>
@@ -262,7 +262,7 @@ const ActivityReport = ({ master, activity }) => {
             ) : (
                 <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm">
                     {/* Header: title + date range + employee filter + export (beside the title) */}
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 border-b border-gray-200 bg-gray-50">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 border-b border-gray-200 bg-gray-50 max-md:px-2">
                         <div className="flex items-center gap-2">
                             <ClockIcon className="h-4 w-4" style={{ color: themeColor }} />
                             <p className="text-[13px] font-semibold text-gray-800 whitespace-nowrap">Activity Log — who &amp; when</p>
@@ -282,7 +282,7 @@ const ActivityReport = ({ master, activity }) => {
                                     className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-[12px] text-black outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition" />
                             </div>
                             <select value={employee} onChange={(e) => setEmployee(e.target.value)}
-                                className="max-w-[200px] rounded-lg border border-gray-200 bg-white px-2 py-1 text-[12px] text-black outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition">
+                                className="max-w-[200px] rounded-lg border border-gray-200 bg-white px-2 py-1 text-[12px] text-black outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition max-sm:w-full max-sm:max-w-full">
                                 <option value="">All employees</option>
                                 {employees.map((emp) => <option key={emp} value={emp}>{emp}</option>)}
                             </select>

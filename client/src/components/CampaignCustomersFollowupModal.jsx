@@ -436,9 +436,9 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={onClose}></div>
 
                 {/* Modal */}
-                <div className="relative w-screen h-screen max-w-none bg-white shadow-2xl overflow-hidden rounded-none">
+                <div className="relative w-screen h-screen max-w-none bg-white shadow-2xl overflow-hidden rounded-none max-lg:overflow-y-auto">
                     {/* Header */}
-                    <div className="relative px-3 sm:px-5 py-2 sm:py-3" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}>
+                    <div className="relative px-3 sm:px-5 py-2 sm:py-3 max-md:px-2" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}>
                         <div className="absolute top-0 right-0 w-48 sm:w-64 h-48 sm:h-64 bg-white/5 rounded-full -mr-24 sm:-mr-32 -mt-24 sm:-mt-32"></div>
                         <div className="absolute bottom-0 left-0 w-36 sm:w-48 h-36 sm:h-48 bg-white/5 rounded-full -ml-18 sm:-ml-24 -mb-18 sm:-mb-24"></div>
 
@@ -580,7 +580,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                             )}
 
                             {/* Last Follow-up date range filter */}
-                            <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                            <div className="flex items-center gap-1.5 w-full sm:w-auto max-sm:flex-wrap">
                                 <span className="text-white/80 text-[11px] sm:text-xs flex-shrink-0 whitespace-nowrap">Last F/U:</span>
                                 <input
                                     type="date"

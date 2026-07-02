@@ -144,7 +144,7 @@ const AdminQueries = ({ user, onClose, showToast, onUnresolvedCount }) => {
     return (
         <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
             {/* Header */}
-            <div className="p-3 border-b border-gray-200 bg-gradient-to-r from-[#2f3192]/5 to-transparent flex justify-between items-center">
+            <div className="p-3 border-b border-gray-200 bg-gradient-to-r from-[#2f3192]/5 to-transparent flex justify-between items-center max-md:flex-wrap max-md:gap-2 max-sm:flex-wrap max-sm:gap-1.5">
                 <h3 className="text-sm sm:text-base font-semibold text-black flex items-center space-x-1.5">
                     <FaExclamationCircle className="text-[#2f3192] text-sm" />
                     <span>Employee Queries Management</span>
@@ -166,7 +166,7 @@ const AdminQueries = ({ user, onClose, showToast, onUnresolvedCount }) => {
 
             {/* Filter Tabs */}
             <div className="px-3 pt-2">
-                <div className="flex space-x-1.5">
+                <div className="flex space-x-1.5 max-sm:flex-wrap max-sm:gap-y-1.5">
                     <button
                         onClick={() => setFilter('all')}
                         className={`px-2.5 py-1 text-xs rounded-lg transition-colors flex items-center space-x-1 ${filter === 'all'
@@ -227,7 +227,7 @@ const AdminQueries = ({ user, onClose, showToast, onUnresolvedCount }) => {
                                 className={`border rounded-lg p-3 transition-shadow hover:shadow-md ${q.is_resolved ? 'border-green-300 bg-green-50/30' : 'border-gray-300'
                                     }`}
                             >
-                                <div className="flex items-start justify-between mb-2">
+                                <div className="flex items-start justify-between mb-2 max-sm:flex-wrap max-sm:gap-1">
                                     <div className="flex items-center space-x-2">
                                         <div className="w-7 h-7 rounded-full bg-gradient-to-r from-[#2f3192] to-[#335478] flex items-center justify-center text-white text-xs font-bold">
                                             {q.user_name ? q.user_name.charAt(0).toUpperCase() : 'U'}
@@ -260,7 +260,7 @@ const AdminQueries = ({ user, onClose, showToast, onUnresolvedCount }) => {
                                     {q.query}
                                 </p>
 
-                                <div className="flex justify-end space-x-1.5">
+                                <div className="flex justify-end space-x-1.5 max-sm:flex-wrap max-sm:gap-y-1.5">
                                     <button
                                         onClick={() => handleToggleResolve(q.id, q.is_resolved)}
                                         className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors flex items-center space-x-1 ${q.is_resolved

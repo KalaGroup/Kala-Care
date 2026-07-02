@@ -45,7 +45,8 @@
     "react-window": "^2.2.7",
     "recharts": "^3.8.1",
     "sweetalert2": "^11.26.24",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "xlsx-js-style": "^1.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

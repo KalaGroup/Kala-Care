@@ -827,7 +827,7 @@ const BranchOE = ({
             <div className="space-y-3">
                 {/* Form Section */}
                 <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-                    <div className="px-4 py-2.5 flex items-center justify-between" style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeDark})` }}>
+                    <div className="px-4 py-2.5 flex items-center justify-between max-md:px-2 max-md:flex-wrap max-md:gap-2" style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeDark})` }}>
                         <div className="flex items-center gap-2">
                             <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -849,7 +849,7 @@ const BranchOE = ({
                     </div>
 
                     <form onSubmit={handleSubmitOfficeExpense} className="p-4">
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-sm:grid-cols-1">
 
                             <div>
                                 <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Expense Date *</label>
@@ -1015,7 +1015,7 @@ const BranchOE = ({
                             </div>
                         </div>
 
-                        <div className="mt-3 flex justify-end gap-2">
+                        <div className="mt-3 flex justify-end gap-2 max-md:flex-wrap max-sm:flex-col max-sm:items-stretch">
                             <button
                                 type="button"
                                 onClick={() => setOfficeExpenseForm({
@@ -1031,7 +1031,7 @@ const BranchOE = ({
                             <button
                                 type="submit"
                                 disabled={submittingExpense}
-                                className="px-5 py-1.5 text-white text-xs font-bold rounded-lg shadow-sm hover:shadow-md transition-all disabled:opacity-50 flex items-center gap-1.5"
+                                className="px-5 py-1.5 text-white text-xs font-bold rounded-lg shadow-sm hover:shadow-md transition-all disabled:opacity-50 flex items-center gap-1.5 max-sm:justify-center"
                                 style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeDark})` }}
                             >
                                 {submittingExpense ? (
@@ -1052,7 +1052,7 @@ const BranchOE = ({
 
                 {/* ── DRAFTS TABLE ─────────────────────────────────────────────────── */}
                 <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-                    <div className="px-4 py-2.5 border-b flex justify-between items-center" style={{ backgroundColor: themeLight }}>
+                    <div className="px-4 py-2.5 border-b flex justify-between items-center max-md:flex-wrap max-md:gap-2 max-md:px-2" style={{ backgroundColor: themeLight }}>
                         <div className="flex items-center gap-2 flex-wrap">
                             <h2 className="text-xs font-bold text-black">Drafts (Pending Submit)</h2>
                             <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold text-white" style={{ backgroundColor: themeColor }}>
@@ -1090,7 +1090,7 @@ const BranchOE = ({
                                 </span>
                             )}
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 max-md:flex-wrap">
                             {canExport && oeTempDrafts.length > 0 && (
                                 <button
                                     onClick={() => exportToExcel(
@@ -1288,7 +1288,7 @@ const BranchOE = ({
 
                 {/* Table — Period summary by default, drill-in to detail when a row is clicked */}
                 <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-                    <div className="px-4 py-2.5 border-b flex justify-between items-center" style={{ backgroundColor: themeLight }}>
+                    <div className="px-4 py-2.5 border-b flex justify-between items-center max-md:flex-wrap max-md:gap-2 max-md:px-2" style={{ backgroundColor: themeLight }}>
                         <div className="flex items-center gap-2 flex-wrap">
                             <h2 className="text-xs font-bold text-black">
                                 {selectedOEPeriod ? 'Period Details' : 'Expense Records (By Period)'}
@@ -1339,7 +1339,7 @@ const BranchOE = ({
                                 </>
                             )}
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 max-md:flex-wrap">
                             {selectedOEPeriod && (
                                 <button
                                     onClick={() => setSelectedOEPeriod(null)}
@@ -1429,7 +1429,7 @@ const BranchOE = ({
                             <div className="px-3 py-2 border-b bg-gray-50 flex flex-wrap items-center gap-2">
                                 <span className="text-[10px] font-bold text-gray-600 uppercase whitespace-nowrap">Filter records:</span>
 
-                                <div className="relative flex-1 min-w-[180px]">
+                                <div className="relative flex-1 min-w-[180px] max-md:w-full max-md:min-w-0">
                                     <svg className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                                     </svg>
@@ -1716,7 +1716,7 @@ const BranchOE = ({
                     <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col" style={{ maxHeight: '90vh' }}>
 
                         {/* Header */}
-                        <div className="px-5 py-3 flex justify-between items-center shrink-0" style={{ background: themeColor }}>
+                        <div className="px-5 py-3 flex justify-between items-center shrink-0 max-md:px-2 max-md:flex-wrap max-md:gap-2" style={{ background: themeColor }}>
                             <div className="flex items-center gap-2 flex-wrap">
                                 <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -1740,7 +1740,7 @@ const BranchOE = ({
                         </div>
 
                         {/* Body */}
-                        <div className="flex-1 overflow-y-auto p-5" style={{ scrollbarWidth: 'thin' }}>
+                        <div className="flex-1 overflow-y-auto p-5 max-md:p-3" style={{ scrollbarWidth: 'thin' }}>
                             {loadingBranchImprest ? (
                                 <div className="text-center py-10">
                                     <svg className="animate-spin h-7 w-7 mx-auto mb-3" style={{ color: themeColor }} viewBox="0 0 24 24">
@@ -1823,7 +1823,7 @@ const BranchOE = ({
                         </div>
 
                         {/* Footer */}
-                        <div className="shrink-0 px-5 py-3 border-t bg-gray-50 flex justify-end gap-2">
+                        <div className="shrink-0 px-5 py-3 border-t bg-gray-50 flex justify-end gap-2 max-md:flex-wrap max-md:px-2 max-sm:flex-col max-sm:items-stretch">
                             {canExport && branchImprestData.entries.length > 0 && (
                                 <button
                                     onClick={() => exportToExcel(
@@ -1834,7 +1834,7 @@ const BranchOE = ({
                                             { key: 'amount', label: 'Amount (₹)' },
                                         ]
                                     )}
-                                    className="px-4 py-1.5 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5"
+                                    className="px-4 py-1.5 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 max-sm:w-full max-sm:justify-center"
                                     style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                                 >
                                     <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1846,7 +1846,7 @@ const BranchOE = ({
                             <button
                                 onClick={openBranchImprestModal}
                                 disabled={loadingBranchImprest}
-                                className="px-4 py-1.5 border border-gray-300 text-xs font-semibold text-gray-700 rounded-lg hover:bg-gray-100 disabled:opacity-50 flex items-center gap-1.5"
+                                className="px-4 py-1.5 border border-gray-300 text-xs font-semibold text-gray-700 rounded-lg hover:bg-gray-100 disabled:opacity-50 flex items-center gap-1.5 max-sm:w-full max-sm:justify-center"
                             >
                                 <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -1855,7 +1855,7 @@ const BranchOE = ({
                             </button>
                             <button
                                 onClick={() => setShowBranchImprestModal(false)}
-                                className="px-5 py-1.5 text-white text-xs font-bold rounded-lg shadow-sm"
+                                className="px-5 py-1.5 text-white text-xs font-bold rounded-lg shadow-sm max-sm:w-full"
                                 style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeDark})` }}
                             >
                                 Close

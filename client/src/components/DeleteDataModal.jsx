@@ -215,7 +215,7 @@ const DeleteDataModal = ({ onClose, showToast }) => {
 
     return (
         <div className="fixed inset-0 backdrop-blur-sm bg-black/50 flex items-center justify-center p-3 z-50 overflow-y-auto">
-            <div className="bg-white rounded-xl p-5 max-w-2xl w-full shadow-2xl max-h-[80vh] overflow-y-auto">
+            <div className="bg-white rounded-xl p-5 max-w-2xl w-full shadow-2xl max-h-[80vh] overflow-y-auto max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh] max-lg:overflow-y-auto max-md:p-3">
                 <div className="flex justify-between items-center mb-3 bg-white pb-2">
                     <h3 className="text-base font-semibold text-red-600 flex items-center space-x-1.5">
                         <FaTrash className="text-red-600 text-sm" />
@@ -250,7 +250,7 @@ const DeleteDataModal = ({ onClose, showToast }) => {
                     <div className="space-y-2.5">
                         {dataOptions.map((option) => (
                             <div key={option.id} className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 transition-colors">
-                                <div className="flex items-start justify-between">
+                                <div className="flex items-start justify-between max-sm:flex-col max-sm:gap-2">
                                     <div className="flex items-start space-x-2.5 flex-1">
                                         <input
                                             type="checkbox"
@@ -273,7 +273,7 @@ const DeleteDataModal = ({ onClose, showToast }) => {
                                     <button
                                         onClick={() => handleBackup(option.id)}
                                         disabled={backupLoading}
-                                        className="ml-3 px-2.5 py-1 bg-green-500 hover:bg-green-600 text-white rounded-lg text-[11px] font-medium transition-colors flex items-center space-x-1 whitespace-nowrap disabled:opacity-50"
+                                        className="ml-3 px-2.5 py-1 bg-green-500 hover:bg-green-600 text-white rounded-lg text-[11px] font-medium transition-colors flex items-center space-x-1 whitespace-nowrap disabled:opacity-50 max-sm:ml-0 max-sm:self-start"
                                     >
                                         <FaDownload className="text-[10px]" />
                                         <span>Backup</span>
@@ -308,7 +308,7 @@ const DeleteDataModal = ({ onClose, showToast }) => {
                     </div>
                 )}
 
-                <div className="flex space-x-2.5 pt-1.5">
+                <div className="flex space-x-2.5 pt-1.5 max-sm:flex-col max-sm:space-x-0 max-sm:space-y-2 max-sm:items-stretch">
                     <button
                         type="button"
                         onClick={handleDeleteData}
