@@ -708,12 +708,15 @@ class EmployeePerformanceController:
             # Step 4: Track unique (instance_id + campaign_id) combinations for assets
             # Key: f"{instance_id}_{campaign_id}"
             asset_combination_tracker = {}
-            
+
+            # Hoisted: set membership is O(1) vs O(n) list scan per follow-up
+            active_campaign_ids_set = set(active_campaign_ids)
+
             for fu in all_followups:
                 instance_id = fu.customer_instance_id
                 campaign_id = fu.campaign_id
-                
-                if instance_id and campaign_id in active_campaign_ids:
+
+                if instance_id and campaign_id in active_campaign_ids_set:
                     key = f"{instance_id}_{campaign_id}"
                     followup_date = fu.followup_date if fu.followup_date else fu.created_at
                     
@@ -974,52 +977,93 @@ class EmployeePerformanceController:
             ).all()
             
             campaign_performances = []
-            
+
+            # ================= BATCHED PREFETCH (fixes N+1) =================
+            # The loop below used to run 6 queries PER campaign. All of them are
+            # keyed by campaign_id, so run them ONCE for all campaigns (chunked
+            # IN() to stay well under MSSQL's 2100-parameter cap) and build
+            # per-campaign maps consumed inside the loop.
+            all_campaign_ids = [c.id for c in campaigns]
+            followup_only_by_campaign = {}    # cid -> set(instance_id) status != completed (NO time filter, as before)
+            attended_by_campaign = {}         # cid -> set(instance_id) with time filter
+            followups_by_campaign = {}        # cid -> [FollowUp rows] (instance not null, time filter)
+            completed_count_by_campaign = {}  # cid -> count(status == 'completed', time filter)
+
+            CHUNK = 1000
+            for i in range(0, len(all_campaign_ids), CHUNK):
+                chunk = all_campaign_ids[i:i + CHUNK]
+
+                # Same filters as the old per-campaign "followup_only_customers_query"
+                followup_only_rows = db.query(
+                    FollowUp.campaign_id, FollowUp.customer_instance_id
+                ).filter(
+                    FollowUp.campaign_id.in_(chunk),
+                    FollowUp.customer_instance_id.isnot(None),
+                    FollowUp.status != 'completed'  # Ignore completed customers
+                ).distinct().all()
+                for cid, iid in followup_only_rows:
+                    if iid:
+                        followup_only_by_campaign.setdefault(cid, set()).add(iid)
+
+                # Same filters as the old per-campaign "all_customers_with_followups_query"
+                attended_query = db.query(
+                    FollowUp.campaign_id, FollowUp.customer_instance_id
+                ).filter(
+                    FollowUp.campaign_id.in_(chunk),
+                    FollowUp.customer_instance_id.isnot(None)
+                )
+                attended_query = EmployeePerformanceController.apply_time_filter(
+                    attended_query, FollowUp, time_period, start_date, end_date
+                ).distinct()
+                for cid, iid in attended_query.all():
+                    if iid:
+                        attended_by_campaign.setdefault(cid, set()).add(iid)
+
+                # Same filters as the old per-campaign "filtered_query" (STEP 2)
+                followups_query = db.query(FollowUp).filter(
+                    FollowUp.campaign_id.in_(chunk),
+                    FollowUp.customer_instance_id.isnot(None)
+                )
+                followups_query = EmployeePerformanceController.apply_time_filter(
+                    followups_query, FollowUp, time_period, start_date, end_date
+                )
+                for fu in followups_query.all():
+                    followups_by_campaign.setdefault(fu.campaign_id, []).append(fu)
+
+                # Same filters as the old per-campaign completed COUNT (STEPs 4 & 6)
+                completed_query = db.query(
+                    FollowUp.campaign_id, func.count(FollowUp.id)
+                ).filter(
+                    FollowUp.campaign_id.in_(chunk),
+                    FollowUp.status == 'completed'
+                )
+                completed_query = EmployeePerformanceController.apply_time_filter(
+                    completed_query, FollowUp, time_period, start_date, end_date
+                ).group_by(FollowUp.campaign_id)
+                for cid, cnt in completed_query.all():
+                    completed_count_by_campaign[cid] = int(cnt or 0)
+            # ================ END BATCHED PREFETCH ================
+
             for campaign in campaigns:
                 asset_numbers = campaign.asset_numbers or []
                 asset_numbers_set = set(asset_numbers)
-                
+
                 # Get unique instance_ids from followups table for this campaign where status is NOT completed
-                followup_only_customers_query = db.query(FollowUp.customer_instance_id).filter(
-                    FollowUp.campaign_id == campaign.id,
-                    FollowUp.customer_instance_id.isnot(None),
-                    FollowUp.status != 'completed'  # Ignore completed customers
-                ).distinct()
-                
-                followup_only_customers = set([row[0] for row in followup_only_customers_query.all() if row[0]])
-                
+                followup_only_customers = followup_only_by_campaign.get(campaign.id, set())
+
                 # Remove those that are already in asset_numbers
                 asset_numbers_set = set(asset_numbers)
                 additional_customers = followup_only_customers - asset_numbers_set
-                
+
                 # Total remaining = asset_numbers_count + additional customers from followups (excluding completed)
                 remaining_count = len(asset_numbers) + len(additional_customers)
-                
+
                 # ========== STEP 1: Get customers with follow-ups in this campaign - WITH TIME FILTER ==========
-                all_customers_with_followups_query = db.query(FollowUp.customer_instance_id).filter(
-                    FollowUp.campaign_id == campaign.id,
-                    FollowUp.customer_instance_id.isnot(None)
-                )
-                all_customers_with_followups_query = EmployeePerformanceController.apply_time_filter(
-                    all_customers_with_followups_query, FollowUp, time_period, start_date, end_date
-                ).distinct()
-                
-                all_customers_with_followups = [row[0] for row in all_customers_with_followups_query.all() if row[0]]
-                
-                attended_customers_count = len(all_customers_with_followups)
-                
+                attended_customers_count = len(attended_by_campaign.get(campaign.id, set()))
+
                 # ========== STEP 2: Get latest follow-up for each customer (with time filter) ==========
-                # Get all follow-ups for this campaign with time filter
-                base_query = db.query(FollowUp).filter(
-                    FollowUp.campaign_id == campaign.id,
-                    FollowUp.customer_instance_id.isnot(None)
-                )
-                
-                # Apply time filter
-                filtered_query = EmployeePerformanceController.apply_time_filter(base_query, FollowUp, time_period, start_date, end_date)
-                
-                # Get all follow-ups within time period
-                all_followups = filtered_query.all()
+                # All follow-ups for this campaign within time period (prefetched above)
+                all_followups = followups_by_campaign.get(campaign.id, [])
                 
                 # Track latest follow-up per customer (by customer_instance_id)
                 latest_followup_map = {}
@@ -1066,28 +1110,17 @@ class EmployeePerformanceController:
                         flag_counts[flag] = flag_counts.get(flag, 0) + 1
                 
                 # ========== STEP 4: Total completed follow-ups (all completed records, not just latest) ==========
-                completed_query = db.query(FollowUp).filter(
-                    FollowUp.campaign_id == campaign.id,
-                    FollowUp.status == 'completed'
-                )
-                
-                # Apply time filter to completed count
-                completed_filtered_query = EmployeePerformanceController.apply_time_filter(completed_query, FollowUp, time_period, start_date, end_date)
-                total_completed_followups = completed_filtered_query.count()
-                
+                # Prefetched grouped COUNT (same filters: campaign + completed + time filter)
+                total_completed_followups = completed_count_by_campaign.get(campaign.id, 0)
+
                 # ========== STEP 5: Total follow-ups in time period ==========
-                total_followups = filtered_query.count()
-                
+                # Same filters as the prefetched follow-up list -> its length IS the count
+                total_followups = len(all_followups)
+
                 # ========== STEP 6: Total customers (asset_numbers + period completed) ==========
-                period_completed_query = db.query(FollowUp).filter(
-                    FollowUp.campaign_id == campaign.id,
-                    FollowUp.status == 'completed'
-                )
-                period_completed_query = EmployeePerformanceController.apply_time_filter(
-                    period_completed_query, FollowUp, time_period, start_date, end_date
-                )
-                period_completed = period_completed_query.count()
-                
+                # Identical query to STEP 4 -> reuse the same prefetched count
+                period_completed = completed_count_by_campaign.get(campaign.id, 0)
+
                 total_customers = remaining_count + period_completed
                 
                 # ========== STEP 7: Success percentage ==========
@@ -1245,47 +1278,80 @@ class EmployeePerformanceController:
                 campaigns = db.query(Campaign).filter(Campaign.id.in_(campaign_ids)).all()
             else:
                 campaigns = db.query(Campaign).filter(Campaign.status == 'active').all()
-            
-            for campaign in campaigns:
-                asset_numbers = campaign.asset_numbers or []
-                asset_numbers_set = set(asset_numbers)
-                asset_numbers_count = len(asset_numbers)
-                
-                # Get additional customers from followups - WITH TIME FILTER
-                followup_only_customers_query = db.query(FollowUp.customer_instance_id).filter(
-                    FollowUp.campaign_id == campaign.id,
+
+            # ===== BATCHED PREFETCH (fixes N+1: was 3 queries per campaign) =====
+            selected_campaign_ids = [c.id for c in campaigns]
+            followup_only_by_campaign = {}   # cid -> set(instance_id), status != completed, time filter
+            completed_count_by_campaign = {} # cid -> completed count, time filter
+            total_count_by_campaign = {}     # cid -> total follow-up count, time filter
+
+            CHUNK = 1000
+            for i in range(0, len(selected_campaign_ids), CHUNK):
+                chunk = selected_campaign_ids[i:i + CHUNK]
+
+                followup_only_query = db.query(
+                    FollowUp.campaign_id, FollowUp.customer_instance_id
+                ).filter(
+                    FollowUp.campaign_id.in_(chunk),
                     FollowUp.customer_instance_id.isnot(None),
                     FollowUp.status != 'completed'
                 ).distinct()
-                followup_only_customers_query = EmployeePerformanceController.apply_time_filter(
-                    followup_only_customers_query, FollowUp, time_period, start_date, end_date
+                followup_only_query = EmployeePerformanceController.apply_time_filter(
+                    followup_only_query, FollowUp, time_period, start_date, end_date
                 )
-                followup_only_customers = set([row[0] for row in followup_only_customers_query.all() if row[0]])
-                additional_customers = followup_only_customers - asset_numbers_set
-                
-                # completed_count with time filter
-                completed_count_query = db.query(FollowUp).filter(
-                    FollowUp.campaign_id == campaign.id,
+                for cid, iid in followup_only_query.all():
+                    if iid:
+                        followup_only_by_campaign.setdefault(cid, set()).add(iid)
+
+                completed_count_query = db.query(
+                    FollowUp.campaign_id, func.count(FollowUp.id)
+                ).filter(
+                    FollowUp.campaign_id.in_(chunk),
                     FollowUp.status == 'completed'
                 )
                 completed_count_query = EmployeePerformanceController.apply_time_filter(
                     completed_count_query, FollowUp, time_period, start_date, end_date
+                ).group_by(FollowUp.campaign_id)
+                for cid, cnt in completed_count_query.all():
+                    completed_count_by_campaign[cid] = int(cnt or 0)
+
+                total_count_query = db.query(
+                    FollowUp.campaign_id, func.count(FollowUp.id)
+                ).filter(
+                    FollowUp.campaign_id.in_(chunk)
                 )
-                completed_count = completed_count_query.count()
-                
-                campaign_totals['total_customers'] += asset_numbers_count + completed_count + len(additional_customers)     
-                
-                base_query = db.query(FollowUp).filter(FollowUp.campaign_id == campaign.id)
-                filtered_query = EmployeePerformanceController.apply_time_filter(base_query, FollowUp, time_period, start_date, end_date)
-                campaign_totals['total_followups'] += filtered_query.count()
-            
+                total_count_query = EmployeePerformanceController.apply_time_filter(
+                    total_count_query, FollowUp, time_period, start_date, end_date
+                ).group_by(FollowUp.campaign_id)
+                for cid, cnt in total_count_query.all():
+                    total_count_by_campaign[cid] = int(cnt or 0)
+            # ===== END BATCHED PREFETCH =====
+
+            for campaign in campaigns:
+                asset_numbers = campaign.asset_numbers or []
+                asset_numbers_set = set(asset_numbers)
+                asset_numbers_count = len(asset_numbers)
+
+                # Get additional customers from followups - WITH TIME FILTER (prefetched)
+                followup_only_customers = followup_only_by_campaign.get(campaign.id, set())
+                additional_customers = followup_only_customers - asset_numbers_set
+
+                # completed_count with time filter (prefetched)
+                completed_count = completed_count_by_campaign.get(campaign.id, 0)
+
+                campaign_totals['total_customers'] += asset_numbers_count + completed_count + len(additional_customers)
+
+                campaign_totals['total_followups'] += total_count_by_campaign.get(campaign.id, 0)
+
             # Start building the main query
             base_query = db.query(FollowUp).filter(FollowUp.activity_id.isnot(None))
-            
+
             if campaign_ids and len(campaign_ids) > 0:
                 base_query = base_query.filter(FollowUp.campaign_id.in_(campaign_ids))
             else:
-                active_campaign_ids = [c.id for c in db.query(Campaign).filter(Campaign.status == 'active').all()]
+                # `campaigns` already holds the active campaigns here (fetched above
+                # with the exact same filter) — no need to re-query.
+                active_campaign_ids = [c.id for c in campaigns]
                 if active_campaign_ids:
                     base_query = base_query.filter(FollowUp.campaign_id.in_(active_campaign_ids))
             
@@ -1321,9 +1387,15 @@ class EmployeePerformanceController:
                 user_branch_map = {u.user_id: u.branch for u in users_rows}
                 user_branch_name_map = {u.user_id: u.branch_name for u in users_rows}
             
+            # Pre-group once (was a full scan of activity_counts_raw per activity);
+            # per-activity entry order is unchanged (encounter order).
+            entries_by_activity = {}
+            for item in activity_counts_raw:
+                entries_by_activity.setdefault(item.activity_id, []).append(item)
+
             activity_stats = []
             for activity in all_activities:
-                activity_entries = [item for item in activity_counts_raw if item.activity_id == activity.id]
+                activity_entries = entries_by_activity.get(activity.id, [])
                 
                 user_breakdown = []
                 total_count = 0
@@ -1396,46 +1468,79 @@ class EmployeePerformanceController:
             else:
                 campaigns = db.query(Campaign).filter(Campaign.status == 'active').all()
             
-            for campaign in campaigns:
-                asset_numbers = campaign.asset_numbers or []
-                asset_numbers_set = set(asset_numbers)
-                asset_numbers_count = len(asset_numbers)
-                
-                # Get additional customers from followups - WITH TIME FILTER
-                followup_only_customers_query = db.query(FollowUp.customer_instance_id).filter(
-                    FollowUp.campaign_id == campaign.id,
+            # ===== BATCHED PREFETCH (fixes N+1: was 3 queries per campaign) =====
+            selected_campaign_ids = [c.id for c in campaigns]
+            followup_only_by_campaign = {}   # cid -> set(instance_id), status != completed, time filter
+            completed_count_by_campaign = {} # cid -> completed count, time filter
+            total_count_by_campaign = {}     # cid -> total follow-up count, time filter
+
+            CHUNK = 1000
+            for i in range(0, len(selected_campaign_ids), CHUNK):
+                chunk = selected_campaign_ids[i:i + CHUNK]
+
+                followup_only_query = db.query(
+                    FollowUp.campaign_id, FollowUp.customer_instance_id
+                ).filter(
+                    FollowUp.campaign_id.in_(chunk),
                     FollowUp.customer_instance_id.isnot(None),
                     FollowUp.status != 'completed'
                 ).distinct()
-                followup_only_customers_query = EmployeePerformanceController.apply_time_filter(
-                    followup_only_customers_query, FollowUp, time_period, start_date, end_date
+                followup_only_query = EmployeePerformanceController.apply_time_filter(
+                    followup_only_query, FollowUp, time_period, start_date, end_date
                 )
-                followup_only_customers = set([row[0] for row in followup_only_customers_query.all() if row[0]])
-                additional_customers = followup_only_customers - asset_numbers_set
-                
-                # completed_count with time filter
-                completed_count_query = db.query(FollowUp).filter(
-                    FollowUp.campaign_id == campaign.id,
+                for cid, iid in followup_only_query.all():
+                    if iid:
+                        followup_only_by_campaign.setdefault(cid, set()).add(iid)
+
+                completed_count_query = db.query(
+                    FollowUp.campaign_id, func.count(FollowUp.id)
+                ).filter(
+                    FollowUp.campaign_id.in_(chunk),
                     FollowUp.status == 'completed'
                 )
                 completed_count_query = EmployeePerformanceController.apply_time_filter(
                     completed_count_query, FollowUp, time_period, start_date, end_date
+                ).group_by(FollowUp.campaign_id)
+                for cid, cnt in completed_count_query.all():
+                    completed_count_by_campaign[cid] = int(cnt or 0)
+
+                total_count_query = db.query(
+                    FollowUp.campaign_id, func.count(FollowUp.id)
+                ).filter(
+                    FollowUp.campaign_id.in_(chunk)
                 )
-                completed_count = completed_count_query.count()
-                
+                total_count_query = EmployeePerformanceController.apply_time_filter(
+                    total_count_query, FollowUp, time_period, start_date, end_date
+                ).group_by(FollowUp.campaign_id)
+                for cid, cnt in total_count_query.all():
+                    total_count_by_campaign[cid] = int(cnt or 0)
+            # ===== END BATCHED PREFETCH =====
+
+            for campaign in campaigns:
+                asset_numbers = campaign.asset_numbers or []
+                asset_numbers_set = set(asset_numbers)
+                asset_numbers_count = len(asset_numbers)
+
+                # Get additional customers from followups - WITH TIME FILTER (prefetched)
+                followup_only_customers = followup_only_by_campaign.get(campaign.id, set())
+                additional_customers = followup_only_customers - asset_numbers_set
+
+                # completed_count with time filter (prefetched)
+                completed_count = completed_count_by_campaign.get(campaign.id, 0)
+
                 campaign_totals['total_customers'] += asset_numbers_count + completed_count + len(additional_customers)
-                
-                base_query = db.query(FollowUp).filter(FollowUp.campaign_id == campaign.id)
-                filtered_query = EmployeePerformanceController.apply_time_filter(base_query, FollowUp, time_period, start_date, end_date)
-                campaign_totals['total_followups'] += filtered_query.count()
-            
+
+                campaign_totals['total_followups'] += total_count_by_campaign.get(campaign.id, 0)
+
             # Start building the main query
             base_query = db.query(FollowUp).filter(FollowUp.rr_id.isnot(None))
-            
+
             if campaign_ids and len(campaign_ids) > 0:
                 base_query = base_query.filter(FollowUp.campaign_id.in_(campaign_ids))
             else:
-                active_campaign_ids = [c.id for c in db.query(Campaign).filter(Campaign.status == 'active').all()]
+                # `campaigns` already holds the active campaigns here (fetched above
+                # with the exact same filter) — no need to re-query.
+                active_campaign_ids = [c.id for c in campaigns]
                 if active_campaign_ids:
                     base_query = base_query.filter(FollowUp.campaign_id.in_(active_campaign_ids))
             
@@ -1471,9 +1576,15 @@ class EmployeePerformanceController:
                 user_branch_map = {u.user_id: u.branch for u in users_rows}
                 user_branch_name_map = {u.user_id: u.branch_name for u in users_rows}
             
+            # Pre-group once (was a full scan of rr_counts_raw per RR);
+            # per-RR entry order is unchanged (encounter order).
+            entries_by_rr = {}
+            for item in rr_counts_raw:
+                entries_by_rr.setdefault(item.rr_id, []).append(item)
+
             rr_stats = []
             for rr in all_rrs:
-                rr_entries = [item for item in rr_counts_raw if item.rr_id == rr.id]
+                rr_entries = entries_by_rr.get(rr.id, [])
                 
                 user_breakdown = []
                 total_count = 0
@@ -2433,10 +2544,22 @@ class EmployeePerformanceController:
                 Customer.instance_id.in_(instance_ids)
             ).all() if instance_ids else []
             customer_map = {c.instance_id: c for c in customers_db}
-    
+
+            # Bulk-fetch Activity content for the latest non-followups (same as
+            # get_my_non_campaign_customers). This was missing here — the loop
+            # below referenced an undefined `activity`, so the endpoint always
+            # errored into its except-handler and returned an empty list.
+            from app.models.engagement_model import Activity
+            activity_ids = list({nfu.activity_id for nfu in latest_map.values() if nfu.activity_id})
+            activity_map = {}
+            if activity_ids:
+                for a in db.query(Activity).filter(Activity.id.in_(activity_ids)).all():
+                    activity_map[a.id] = a
+
             customers_list = []
             for idx, (instance_id, nfu) in enumerate(latest_map.items(), 1):
                 customer = customer_map.get(instance_id)
+                activity = activity_map.get(nfu.activity_id) if nfu.activity_id else None
                 customers_list.append({
                     "s_no": idx,
                     "instance_id": instance_id,
@@ -2551,12 +2674,16 @@ class EmployeePerformanceController:
                     end_dt   = today_end
                 # any other unknown period → no filter (treat as 'all')
 
-            # ── Per-campaign query ────────────────────────────────────────────
-            result = []
-
-            for campaign in active_campaigns:
+            # ── Batched fetch (fixes N+1: was one query per active campaign) ──
+            # Same filters as before, but ONE query over all active campaign ids
+            # (chunked IN() for MSSQL's parameter cap), grouped per campaign.
+            followups_by_campaign: dict = {}
+            active_campaign_ids = [c.id for c in active_campaigns]
+            CHUNK = 1000
+            for i in range(0, len(active_campaign_ids), CHUNK):
+                chunk = active_campaign_ids[i:i + CHUNK]
                 base_q = db.query(FollowUp).filter(
-                    FollowUp.campaign_id == campaign.id,
+                    FollowUp.campaign_id.in_(chunk),
                     FollowUp.user_id == employee_id,
                     FollowUp.customer_instance_id.isnot(None),
                 )
@@ -2580,7 +2707,14 @@ class EmployeePerformanceController:
                         )
                     )
 
-                all_followups = base_q.all()
+                for fu in base_q.all():
+                    followups_by_campaign.setdefault(fu.campaign_id, []).append(fu)
+
+            # ── Per-campaign aggregation (unchanged logic) ────────────────────
+            result = []
+
+            for campaign in active_campaigns:
+                all_followups = followups_by_campaign.get(campaign.id, [])
 
                 if not all_followups:
                     continue

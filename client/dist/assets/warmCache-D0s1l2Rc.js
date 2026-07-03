@@ -1,0 +1,1 @@
+function e(t,r){try{return`warm:v1:${t}:${r?JSON.stringify(r):""}`}catch{return`warm:v1:${t}`}}function n(t){try{const r=sessionStorage.getItem(t);return r?JSON.parse(r):null}catch{return null}}function a(t,r){try{sessionStorage.setItem(t,JSON.stringify(r))}catch{}}export{a,n as r,e as w};

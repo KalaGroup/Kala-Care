@@ -4,12 +4,12 @@ import toast from 'react-hot-toast';
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
 
-const Spin = ({ color }) => (
+const Spin = React.memo(({ color }) => (
   <svg className="animate-spin h-4 w-4" style={color ? { color } : undefined} viewBox="0 0 24 24">
     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
   </svg>
-);
+));
 
 const inr = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -113,7 +113,8 @@ const OfficeExpenseHistoryModal = ({
     }
     return out;
   }, [groups, branchFilter, voucherSort]);
-  const recTotal = records.reduce((s, r) => s + parseFloat(r.amount || 0), 0);
+  const recTotal = useMemo(
+    () => records.reduce((s, r) => s + parseFloat(r.amount || 0), 0), [records]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 bg-black/50 backdrop-blur-sm">

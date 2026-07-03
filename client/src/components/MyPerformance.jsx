@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Bar, Pie, Line } from 'react-chartjs-2';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 
 const themeColor = '#2f3192';
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
@@ -206,8 +207,12 @@ const generateBandedLetterPdf = async (bodyHtml) => {
     if (!window.html2canvas) await loadLetterScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
     if (!window.jspdf) await loadLetterScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
 
-    const headerUrl = await loadLetterImageAsDataUrl(LETTER_HEADER_IMG);
-    const footerUrl = await loadLetterImageAsDataUrl(LETTER_FOOTER_IMG);
+    // Both loaders are self-contained (own try/catch, return '' on failure) and
+    // independent of each other, so fetch them in parallel.
+    const [headerUrl, footerUrl] = await Promise.all([
+        loadLetterImageAsDataUrl(LETTER_HEADER_IMG),
+        loadLetterImageAsDataUrl(LETTER_FOOTER_IMG)
+    ]);
 
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF('p', 'mm', 'a4');
@@ -392,6 +397,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const [error, setError] = useState(null);
     const [tableTimeFilter, setTableTimeFilter] = useState('all');
     const fetchingRef = useRef(false);
+    // True once a real fetch has populated `performance` — warm-cache paint is
+    // only allowed while the state is still empty/initial (first load).
+    const hasPerformanceDataRef = useRef(false);
     const topScrollRef = useRef(null);
     const bottomScrollRef = useRef(null);
     const tableRef = useRef(null);
@@ -616,7 +624,24 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
         try {
             fetchingRef.current = true;
-            setLoading(true);
+
+            // Warm-cache-first paint: on a repeat visit, instantly repaint with the
+            // last data shown for this EXACT user + period while the normal fetch
+            // below still runs unchanged and overwrites with fresh data.
+            const cacheKey = warmKey('my-performance-summary', {
+                uid: userData.user_id || userData.id,
+                timePeriod,
+                start: timePeriod === 'custom' ? formatDateForAPI(customStartDate) : null,
+                end: timePeriod === 'custom' ? formatDateForAPI(customEndDate) : null
+            });
+            const warm = readWarmCache(cacheKey);
+            if (warm && !hasPerformanceDataRef.current) {
+                setPerformance(warm);
+                setDailyPerformance(warm.daily_performance || []);
+                setLoading(false); // paint warm data instead of the skeleton; fetch continues
+            } else {
+                setLoading(true);
+            }
             setError(null);
 
             const payload = {
@@ -640,6 +665,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             const data = response.data || DEFAULT_PERFORMANCE;
             setPerformance(data);
             setDailyPerformance(data.daily_performance || []);
+            hasPerformanceDataRef.current = true;
+            writeWarmCache(cacheKey, data);
 
         } catch (error) {
             console.error('Error fetching performance:', error);
@@ -1910,6 +1937,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             'Email': c.email || '-',
             'Branch': c.branch_id || '-',
             'Service / Product': c.service || '-',
+            'Activity': c.activity_content || '-',
             'Remark Type': c.remark_type || '-',
             'Follow-up By': c.followup_by || '-',
             'Status': c.last_status || '-',
@@ -4368,6 +4396,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Email</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Branch</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Service / Product</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Activity</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Follow-up By</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Flag</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Status</th>
@@ -4389,6 +4418,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                         <td className="px-2 py-1 border border-gray-200 text-left">{c.email ? highlightMatch(c.email, nonCampaignSearchTerm) : '-'}</td>
                                                         <td className="px-2 py-1 border border-gray-200 text-center">{c.branch_id || '-'}</td>
                                                         <td className="px-2 py-1 border border-gray-200 text-left">{c.service ? highlightMatch(c.service, nonCampaignSearchTerm) : '-'}</td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-left max-w-[200px] truncate" title={c.activity_content || ''}>{c.activity_content ? highlightMatch(c.activity_content, nonCampaignSearchTerm) : '-'}</td>
                                                         <td className="px-2 py-1 border border-gray-200 text-center capitalize">{c.followup_by || '-'}</td>
                                                         <td className="px-2 py-1 border border-gray-200 text-center">
                                                             {c.latest_flag && c.latest_flag !== 'N/A' ? (

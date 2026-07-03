@@ -80,10 +80,29 @@ print("Creating/Updating database tables...")
 Base.metadata.create_all(bind=engine)
 print("Tables created/updated successfully!")
 
+# Ensure performance indexes for the hot list/dashboard queries. Idempotent
+# (IF NOT EXISTS) — after the first run this is a fast no-op on every startup.
+from app.performance_indexes import ensure_performance_indexes
+try:
+    ensure_performance_indexes(engine)
+except Exception as e:
+    print(f"[perf-indexes] skipped: {e}")
+
 # ---------------- FASTAPI APP ---------------- #
+
+# orjson serializes large JSON payloads several times faster than the standard
+# library, producing byte-identical data for clients. Guarded import so the
+# app (and the PyInstaller build) still runs fine without the package.
+try:
+    from fastapi.responses import ORJSONResponse as _DefaultResponse
+    import orjson  # noqa: F401 — verify it's actually importable
+    print("✅ orjson enabled for fast JSON responses")
+except ImportError:
+    _DefaultResponse = None
 
 app = FastAPI(
     title="KALA Care API",
+    **({"default_response_class": _DefaultResponse} if _DefaultResponse else {}),
 )
 
 # ---------------- STATIC FILES ---------------- #

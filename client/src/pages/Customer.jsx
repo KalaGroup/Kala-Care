@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import axios from 'axios';
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 import { DndContext, closestCenter } from '@dnd-kit/core';
@@ -784,6 +785,36 @@ const Customer = () => {
   const fetchData = async (pageNum = 1, searchValue = globalSearchTerm) => {
     setLoading(true);
 
+    // Warm-cache-first paint for the primary dataset (Customers, page 1, no search):
+    // instantly show the last-seen page while the normal fetch below runs unchanged.
+    const isPrimaryLoad = currentTable.id === 'customers' && pageNum === 1 && !(searchValue && searchValue.trim());
+    let warmCacheKey = null;
+    if (isPrimaryLoad) {
+      let warmUserId = null;
+      try {
+        warmUserId = JSON.parse(sessionStorage.getItem('user'))?.user_id ?? null;
+      } catch {
+        warmUserId = null;
+      }
+      warmCacheKey = warmKey('customerRawData', {
+        userId: warmUserId,
+        table: currentTable.id,
+        page: pageNum,
+        pageSize: pageSize,
+        search: ''
+      });
+      // Paint from cache only if nothing is on screen yet (initial/empty state).
+      if (tableData.length === 0) {
+        const warm = readWarmCache(warmCacheKey);
+        if (warm && Array.isArray(warm.data) && warm.data.length > 0) {
+          const hiddenFields = HIDDEN_FIELDS[currentTable.id] || ['id', 'created_at', 'updated_at'];
+          setTableData(warm.data);
+          setTotalCount(warm.totalRecords || warm.data.length);
+          setTableColumns(Object.keys(warm.data[0]).filter(key => !hiddenFields.includes(key)));
+        }
+      }
+    }
+
     try {
       const skip = (pageNum - 1) * pageSize;
       const params = {
@@ -839,6 +870,11 @@ const Customer = () => {
         ...prev,
         [currentTable.id]: totalRecords
       }));
+
+      // Persist the fresh primary-page result so the next visit paints instantly.
+      if (warmCacheKey && newData.length > 0) {
+        writeWarmCache(warmCacheKey, { data: newData, totalRecords: totalRecords });
+      }
 
       if (newData.length > 0) {
         const hiddenFields = HIDDEN_FIELDS[currentTable.id] || ['id', 'created_at', 'updated_at'];
@@ -1228,13 +1264,15 @@ const Customer = () => {
     );
   };
 
-  // Get ordered columns for display
-  const getOrderedColumns = () => {
+  // Get ordered columns for display (memoized: computed once per order/columns change
+  // instead of once per header/cell call during render)
+  const orderedColumns = useMemo(() => {
     if (columnOrder.length === tableColumns.length && columnOrder.every(col => tableColumns.includes(col))) {
       return columnOrder;
     }
     return tableColumns;
-  };
+  }, [columnOrder, tableColumns]);
+  const getOrderedColumns = () => orderedColumns;
 
   const FIXED_COLUMNS = ['select-col', 'sno-col'];
 

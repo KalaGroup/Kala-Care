@@ -56,12 +56,57 @@ def get_engineer_correct_branch(db: Session, engineer_uid: str) -> Optional[str]
     # No allowed branch found, default to HO
     return 'HO'
 
-def get_branches_with_engineers(db: Session) -> List[Dict[str, Any]]:
+def _batch_engineer_correct_branches(db: Session, engineer_uids) -> Dict[str, str]:
+    """
+    Batched equivalent of calling get_engineer_correct_branch once per engineer.
+
+    Runs ONE grouped query per 1000 uids (MSSQL 2100-parameter cap) instead of
+    one query per engineer, then picks each engineer's most-frequent allowed
+    branch (rows are ordered by count desc, so the first branch seen per uid
+    wins — same rule as the per-engineer query). Any uid that is not resolved
+    from the batched result falls back to the original per-engineer helper, so
+    the returned value is identical for every uid (including the 'HO' default).
+    """
+    uids = [u for u in dict.fromkeys(engineer_uids) if u is not None]
+    best: Dict[str, str] = {}
+    for i in range(0, len(uids), 1000):
+        chunk = uids[i:i + 1000]
+        rows = db.query(
+            TADAImport.service_engineer_uid,
+            TADAImport.branch_code,
+            func.count(TADAImport.id).label('record_count')
+        ).filter(
+            and_(
+                TADAImport.service_engineer_uid.in_(chunk),
+                TADAImport.branch_code.in_(ALLOWED_BRANCH_CODES)
+            )
+        ).group_by(
+            TADAImport.service_engineer_uid,
+            TADAImport.branch_code
+        ).order_by(
+            func.count(TADAImport.id).desc()
+        ).all()
+        for row in rows:
+            if row.service_engineer_uid not in best:
+                best[row.service_engineer_uid] = row.branch_code
+
+    resolved: Dict[str, str] = {}
+    for uid in uids:
+        if uid in best:
+            resolved[uid] = best[uid]
+        else:
+            # Not resolvable from the batch (no allowed-branch records, or the
+            # grouped representative differs from this exact string) — use the
+            # original per-engineer query so behaviour is identical.
+            resolved[uid] = get_engineer_correct_branch(db, uid)
+    return resolved
+
+def get_branches_with_engineers(db: Session, _uid_branch_map: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
     """Get ONLY the 15 allowed branches with their engineer counts"""
-    
+
     # First, build a mapping of engineer -> their correct branch
     engineer_branch_map = {}
-    
+
     # Get all unique engineers
     all_engineers = db.query(
         distinct(TADAImport.service_engineer_uid)
@@ -75,12 +120,17 @@ def get_branches_with_engineers(db: Session) -> List[Dict[str, Any]]:
             TADAImport.service_engineer_name != 'null'
         )
     ).all()
-    
-    for engineer in all_engineers:
-        engineer_uid = engineer[0]
-        correct_branch = get_engineer_correct_branch(db, engineer_uid)
-        engineer_branch_map[engineer_uid] = correct_branch
-    
+
+    engineer_uids = [engineer[0] for engineer in all_engineers]
+    if _uid_branch_map is not None:
+        engineer_branch_map = {
+            uid: (_uid_branch_map[uid] if uid in _uid_branch_map
+                  else get_engineer_correct_branch(db, uid))
+            for uid in engineer_uids
+        }
+    else:
+        engineer_branch_map = _batch_engineer_correct_branches(db, engineer_uids)
+
     # Count engineers per branch
     branch_engineer_counts = defaultdict(int)
     for engineer_uid, branch_code in engineer_branch_map.items():
@@ -100,30 +150,45 @@ def get_branches_with_engineers(db: Session) -> List[Dict[str, Any]]:
     
     return branch_list
 
-def get_engineers_by_branch(db: Session, branch_code: str) -> List[Dict[str, Any]]:
+def get_engineers_by_branch(db: Session, branch_code: str,
+                            _all_engineers_data: Optional[List[Any]] = None,
+                            _uid_branch_map: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
     """Get all engineers that belong to this branch (after mapping)"""
-    
+
     # First, get all engineers and map them to their correct branch
-    all_engineers_data = db.query(
-        TADAImport.service_engineer_name,
-        TADAImport.service_engineer_uid
-    ).filter(
-        and_(
-            TADAImport.service_engineer_uid.isnot(None),
-            TADAImport.service_engineer_uid != '',
-            TADAImport.service_engineer_uid != 'null',
-            TADAImport.service_engineer_name.isnot(None),
-            TADAImport.service_engineer_name != '',
-            TADAImport.service_engineer_name != 'null'
+    if _all_engineers_data is not None:
+        all_engineers_data = _all_engineers_data
+    else:
+        all_engineers_data = db.query(
+            TADAImport.service_engineer_name,
+            TADAImport.service_engineer_uid
+        ).filter(
+            and_(
+                TADAImport.service_engineer_uid.isnot(None),
+                TADAImport.service_engineer_uid != '',
+                TADAImport.service_engineer_uid != 'null',
+                TADAImport.service_engineer_name.isnot(None),
+                TADAImport.service_engineer_name != '',
+                TADAImport.service_engineer_name != 'null'
+            )
+        ).distinct().all()
+
+    # Resolve every engineer's correct branch in one batched pass
+    # (was one query per engineer row)
+    if _uid_branch_map is None:
+        _uid_branch_map = _batch_engineer_correct_branches(
+            db, [e.service_engineer_uid for e in all_engineers_data]
         )
-    ).distinct().all()
-    
+
     # Map each engineer to their correct branch
     engineer_branch_map = {}
     for engineer in all_engineers_data:
         engineer_uid = engineer.service_engineer_uid
         engineer_name = engineer.service_engineer_name
-        correct_branch = get_engineer_correct_branch(db, engineer_uid)
+        if engineer_uid in _uid_branch_map:
+            correct_branch = _uid_branch_map[engineer_uid]
+        else:
+            correct_branch = get_engineer_correct_branch(db, engineer_uid)
         engineer_branch_map[engineer_uid] = {
             'name': engineer_name,
             'branch': correct_branch
@@ -212,24 +277,71 @@ def get_engineer_records(db: Session, engineer_uid: str, requested_branch_code: 
 
 def get_branch_summary(db: Session) -> Dict[str, Any]:
     """Get complete summary of all branches with engineers and their records"""
-    
+
+    # Hoisted out of the per-branch loop: fetch the engineer list ONCE and
+    # resolve every engineer's correct branch ONCE (both were previously
+    # re-executed inside get_branches_with_engineers / get_engineers_by_branch
+    # for each of the 15 branches).
+    all_engineers_data = db.query(
+        TADAImport.service_engineer_name,
+        TADAImport.service_engineer_uid
+    ).filter(
+        and_(
+            TADAImport.service_engineer_uid.isnot(None),
+            TADAImport.service_engineer_uid != '',
+            TADAImport.service_engineer_uid != 'null',
+            TADAImport.service_engineer_name.isnot(None),
+            TADAImport.service_engineer_name != '',
+            TADAImport.service_engineer_name != 'null'
+        )
+    ).distinct().all()
+
+    uid_branch_map = _batch_engineer_correct_branches(
+        db, [e.service_engineer_uid for e in all_engineers_data]
+    )
+
+    # Batched record counts (was one COUNT query per engineer), chunked at
+    # 1000 uids per IN clause. Uids not found by exact key fall back to the
+    # original per-engineer COUNT query below.
+    record_counts: Dict[str, int] = {}
+    count_uids = list(uid_branch_map.keys())
+    for i in range(0, len(count_uids), 1000):
+        chunk = count_uids[i:i + 1000]
+        rows = db.query(
+            TADAImport.service_engineer_uid,
+            func.count(TADAImport.id)
+        ).filter(
+            TADAImport.service_engineer_uid.in_(chunk)
+        ).group_by(
+            TADAImport.service_engineer_uid
+        ).all()
+        for uid, cnt in rows:
+            record_counts[uid] = cnt
+
     # Get all branches with engineers
-    branches = get_branches_with_engineers(db)
-    
+    branches = get_branches_with_engineers(db, _uid_branch_map=uid_branch_map)
+
     # For each branch, get all engineers with their record counts
     for branch in branches:
         branch_code = branch['branch_code']
-        engineers_in_branch = get_engineers_by_branch(db, branch_code)
-        
+        engineers_in_branch = get_engineers_by_branch(
+            db, branch_code,
+            _all_engineers_data=all_engineers_data,
+            _uid_branch_map=uid_branch_map,
+        )
+
         # Add record counts for each engineer
         for engineer in engineers_in_branch:
             engineer_uid = engineer['service_engineer_uid']
             # Count all records for this engineer (from all branches)
-            record_count = db.query(func.count(TADAImport.id)).filter(
-                TADAImport.service_engineer_uid == engineer_uid
-            ).scalar() or 0
+            if engineer_uid in record_counts:
+                record_count = record_counts[engineer_uid] or 0
+            else:
+                record_count = db.query(func.count(TADAImport.id)).filter(
+                    TADAImport.service_engineer_uid == engineer_uid
+                ).scalar() or 0
             engineer['record_count'] = record_count
-        
+
         branch['engineers'] = engineers_in_branch
         branch['engineer_count'] = len(engineers_in_branch)
     
@@ -271,9 +383,17 @@ def get_unmapped_branches_data(db: Session) -> Dict[str, Any]:
             )
         ).distinct().all()
         
+        # Batched branch resolution (was one query per engineer)
+        uid_branch = _batch_engineer_correct_branches(
+            db, [eng.service_engineer_uid for eng in engineers]
+        )
+
         engineer_mappings = []
         for eng in engineers:
-            correct_branch = get_engineer_correct_branch(db, eng.service_engineer_uid)
+            if eng.service_engineer_uid in uid_branch:
+                correct_branch = uid_branch[eng.service_engineer_uid]
+            else:
+                correct_branch = get_engineer_correct_branch(db, eng.service_engineer_uid)
             engineer_mappings.append({
                 'engineer_uid': eng.service_engineer_uid,
                 'engineer_name': eng.service_engineer_name,

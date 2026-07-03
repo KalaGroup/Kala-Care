@@ -60,6 +60,7 @@ import {
 import { CiExport } from "react-icons/ci";
 import { FaCheck } from "react-icons/fa";
 import { useInView } from "react-intersection-observer";
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
 
@@ -79,7 +80,7 @@ const useDebounce = (value, delay) => {
 };
 
 // Sortable Table Header Component
-const SortableTableHeader = ({ id, children, onClick, sortIcon, className, style }) => {
+const SortableTableHeader = React.memo(({ id, children, onClick, sortIcon, className, style }) => {
   const {
     attributes,
     listeners,
@@ -137,11 +138,11 @@ const SortableTableHeader = ({ id, children, onClick, sortIcon, className, style
       </div>
     </th>
   );
-};
+});
 
 // Auto-growing textarea — height follows its content (no manual drag handle).
 // Grows when text wraps to more lines, shrinks back down when text is removed.
-const AutoGrowTextarea = ({ value, minRows = 1, className = '', style, ...props }) => {
+const AutoGrowTextarea = React.memo(({ value, minRows = 1, className = '', style, ...props }) => {
   const ref = useRef(null);
 
   const resize = () => {
@@ -164,7 +165,7 @@ const AutoGrowTextarea = ({ value, minRows = 1, className = '', style, ...props 
       {...props}
     />
   );
-};
+});
 
 const CustomerEng2 = () => {
   const navigate = useNavigate();
@@ -1011,6 +1012,96 @@ const CustomerEng2 = () => {
     return matches;
   }, [customerDetails, customers]);
 
+  // Unique branch ids for the Branch filter header dropdown — memoized because it
+  // scans the ENTIRE customers array and the table header re-renders on every
+  // windowed-scroll frame.
+  const uniqueBranchIds = useMemo(
+    () => [...new Set(customers.map(c => String(c.branch_id || '')))].sort(),
+    [customers]
+  );
+
+  // Active WIP quotations (excluding drives with a newer completed follow-up).
+  // Pure derivation of customerFollowups, memoized so the grouping/sorting/filter
+  // doesn't re-run on every keystroke while the details view is open.
+  const activeWipQuotations = useMemo(() => {
+    // First, identify which campaigns have a completed follow-up that is newer than the WIP follow-up
+    const allFollowups = customerFollowups || [];
+
+    // Group followups by campaign
+    const campaignFollowupsMap = new Map();
+    allFollowups.forEach(followup => {
+      if (!followup.campaign_id) return;
+      if (!campaignFollowupsMap.has(followup.campaign_id)) {
+        campaignFollowupsMap.set(followup.campaign_id, []);
+      }
+      campaignFollowupsMap.get(followup.campaign_id).push(followup);
+    });
+
+    // For each campaign, find the latest follow-up date and status
+    const campaignLatestStatus = new Map();
+    campaignFollowupsMap.forEach((followups, campaignId) => {
+      // Sort by followup date (latest first)
+      const sorted = [...followups].sort((a, b) =>
+        new Date(b.followup_date) - new Date(a.followup_date)
+      );
+      const latest = sorted[0];
+      campaignLatestStatus.set(campaignId, {
+        status: latest.status,
+        date: latest.followup_date,
+        campaign_name: latest.campaign_name,
+        campaign_service: latest.campaign_service
+      });
+    });
+
+    // Filter all followups with status 'wip' and quotation_sent = true
+    // But exclude if campaign has a newer completed follow-up
+    return allFollowups.filter(followup => {
+      // Must be WIP with quotation
+      if (followup.status !== 'wip') return false;
+      if (!followup.quotation_sent) return false;
+      if (!followup.quotation_no && !followup.quotation_value) return false;
+
+      // Check if this campaign has a completed follow-up that is newer
+      const latestCampaignStatus = campaignLatestStatus.get(followup.campaign_id);
+      if (latestCampaignStatus && latestCampaignStatus.status === 'completed') {
+        const latestCompletedDate = new Date(latestCampaignStatus.date);
+        const currentWipDate = new Date(followup.followup_date);
+
+        // If completed follow-up is newer than this WIP follow-up, hide this WIP
+        if (latestCompletedDate > currentWipDate) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [customerFollowups]);
+
+  // Follow-up history rows after applying the table filters. The exact same
+  // predicate was previously evaluated TWICE per render (rows + empty-state
+  // check); compute it once here instead.
+  const filteredFollowupRows = useMemo(() => {
+    return customerFollowups.filter(followup => {
+      if (followupFilters.date) {
+        const followupDate = new Date(followup.followup_date).toISOString().split('T')[0];
+        if (followupDate !== followupFilters.date) return false;
+      }
+      if (followupFilters.campaign && followup.campaign_name) {
+        if (!followup.campaign_name.toLowerCase().includes(followupFilters.campaign.toLowerCase())) return false;
+      }
+      if (followupFilters.service) {
+        const campaign = customerCampaigns.find(c => c.id === followup.campaign_id);
+        const service = campaign?.service || '';
+        if (!service.toLowerCase().includes(followupFilters.service.toLowerCase())) return false;
+      }
+      if (followupFilters.user && followup.user_name) {
+        if (!followup.user_name.toLowerCase().includes(followupFilters.user.toLowerCase())) return false;
+      }
+      if (followupFilters.followupBy && followup.followup_by !== followupFilters.followupBy) return false;
+      return true;
+    });
+  }, [customerFollowups, followupFilters, customerCampaigns]);
+
   // Server-side search — one indexed query instead of fetching page after page.
   useEffect(() => {
     const term = debouncedSearchTerm.trim();
@@ -1087,6 +1178,19 @@ const CustomerEng2 = () => {
 
   const fetchNonCampaignCustomers = async (pageNum = 1, reset = false, completedFirstOverride = null) => {
     const completedFirst = completedFirstOverride !== null ? completedFirstOverride : showCompletedFirst;
+
+    // Warm-cache key: includes everything that selects/filters/orders this dataset.
+    const warmCacheKey = warmKey('customerEng2:nonCampaignCustomers', {
+      userId: currentUser?.user_id || currentUser?.id || null,
+      branch: userBranch || null,
+      isAdmin,
+      completedFirst,
+      sortKey: sortConfig.key,
+      sortDir: sortConfig.direction,
+      page: pageNum,
+      limit: 2000,
+    });
+
     if (reset) {
       setLoading(true);
       setCustomers([]);
@@ -1094,6 +1198,18 @@ const CustomerEng2 = () => {
       setHasMore(true);
     } else {
       setLoadingMore(true);
+    }
+
+    // Warm-cache-first paint: only on the very first load (list still empty).
+    // The network fetch below ALWAYS runs and its fresh result overwrites this.
+    if (reset && pageNum === 1 && customers.length === 0) {
+      const warm = readWarmCache(warmCacheKey);
+      if (warm && Array.isArray(warm.customers) && warm.customers.length > 0) {
+        setCustomers(warm.customers);
+        setAllCampaigns(warm.allCampaigns || []);
+        setCampaignServices(warm.campaignServices || []);
+        if (warm.flagCounts) setFlagCounts(warm.flagCounts);
+      }
     }
 
     try {
@@ -1132,6 +1248,16 @@ const CustomerEng2 = () => {
           if (customer.followup_flags?.C7) counts.C7++;
         });
         setFlagCounts(counts);
+
+        // Refresh the warm cache with the fresh result (best-effort, page 1 only).
+        if (pageNum === 1) {
+          writeWarmCache(warmCacheKey, {
+            customers: sortedNewCustomers,
+            allCampaigns: data.all_campaigns || [],
+            campaignServices: data.campaign_services || [],
+            flagCounts: counts,
+          });
+        }
       } else {
         // Append new chunk to existing customers
         setCustomers(prev => {
@@ -3231,9 +3357,14 @@ const CustomerEng2 = () => {
     if (!window.jspdf) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
 
     // Make sure the bands are available (load locally if state hasn't filled yet)
+    // Header + footer are independent — load them in parallel.
     let headerUrl = headerImgDataUrl, footerUrl = footerImgDataUrl;
-    if (!headerUrl) { headerUrl = await loadImageAsDataUrl(LETTER_HEADER_IMG); if (headerUrl) setHeaderImgDataUrl(headerUrl); }
-    if (!footerUrl) { footerUrl = await loadImageAsDataUrl(LETTER_FOOTER_IMG); if (footerUrl) setFooterImgDataUrl(footerUrl); }
+    const [loadedHeaderUrl, loadedFooterUrl] = await Promise.all([
+      headerUrl ? Promise.resolve('') : loadImageAsDataUrl(LETTER_HEADER_IMG),
+      footerUrl ? Promise.resolve('') : loadImageAsDataUrl(LETTER_FOOTER_IMG),
+    ]);
+    if (!headerUrl) { headerUrl = loadedHeaderUrl; if (headerUrl) setHeaderImgDataUrl(headerUrl); }
+    if (!footerUrl) { footerUrl = loadedFooterUrl; if (footerUrl) setFooterImgDataUrl(footerUrl); }
 
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF('p', 'mm', 'a4');
@@ -3314,9 +3445,14 @@ const CustomerEng2 = () => {
     try {
       if (!window.html2canvas) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
 
+      // Header + footer are independent — load them in parallel.
       let headerUrl = headerImgDataUrl, footerUrl = footerImgDataUrl;
-      if (!headerUrl) { headerUrl = await loadImageAsDataUrl(LETTER_HEADER_IMG); if (headerUrl) setHeaderImgDataUrl(headerUrl); }
-      if (!footerUrl) { footerUrl = await loadImageAsDataUrl(LETTER_FOOTER_IMG); if (footerUrl) setFooterImgDataUrl(footerUrl); }
+      const [loadedHeaderUrl, loadedFooterUrl] = await Promise.all([
+        headerUrl ? Promise.resolve('') : loadImageAsDataUrl(LETTER_HEADER_IMG),
+        footerUrl ? Promise.resolve('') : loadImageAsDataUrl(LETTER_FOOTER_IMG),
+      ]);
+      if (!headerUrl) { headerUrl = loadedHeaderUrl; if (headerUrl) setHeaderImgDataUrl(headerUrl); }
+      if (!footerUrl) { footerUrl = loadedFooterUrl; if (footerUrl) setFooterImgDataUrl(footerUrl); }
 
       const LETTER_W = 780;
       const PAGE_W_MM = 210;
@@ -3552,8 +3688,13 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     setShowLetterWizard(true);
     fetchLetterFormatsForWizard();
 
-    if (!headerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_HEADER_IMG); if (d) setHeaderImgDataUrl(d); }
-    if (!footerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_FOOTER_IMG); if (d) setFooterImgDataUrl(d); }
+    // Header + footer band images are independent — load them in parallel.
+    const [wizardHeaderD, wizardFooterD] = await Promise.all([
+      headerImgDataUrl ? Promise.resolve('') : loadImageAsDataUrl(LETTER_HEADER_IMG),
+      footerImgDataUrl ? Promise.resolve('') : loadImageAsDataUrl(LETTER_FOOTER_IMG),
+    ]);
+    if (!headerImgDataUrl && wizardHeaderD) setHeaderImgDataUrl(wizardHeaderD);
+    if (!footerImgDataUrl && wizardFooterD) setFooterImgDataUrl(wizardFooterD);
 
     try {
       const res = await fetch(`${API_BASE_URL}/v1/engagement/letter/next-ref?instance_id=${encodeURIComponent(customerDetails.instance_id || '')}`);
@@ -4688,8 +4829,13 @@ ${f.start_para}`;
           service_cycle_intro: DEFAULT_SERVICE_CYCLE_INTRO
         });
 
-      if (!headerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_HEADER_IMG); if (d) setHeaderImgDataUrl(d); }
-      if (!footerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_FOOTER_IMG); if (d) setFooterImgDataUrl(d); }
+      // Header + footer band images are independent — load them in parallel.
+      const [draftHeaderD, draftFooterD] = await Promise.all([
+        headerImgDataUrl ? Promise.resolve('') : loadImageAsDataUrl(LETTER_HEADER_IMG),
+        footerImgDataUrl ? Promise.resolve('') : loadImageAsDataUrl(LETTER_FOOTER_IMG),
+      ]);
+      if (!headerImgDataUrl && draftHeaderD) setHeaderImgDataUrl(draftHeaderD);
+      if (!footerImgDataUrl && draftFooterD) setFooterImgDataUrl(draftFooterD);
 
       setLetterStep(2);
       setShowLetterWizard(true);
@@ -5448,57 +5594,9 @@ ${f.start_para}`;
 
           {/* New Section: All WIP Quotations with 90-day expiry */}
           {(() => {
-            // First, identify which campaigns have a completed follow-up that is newer than the WIP follow-up
-            const allFollowups = customerFollowups || [];
-
-            // Group followups by campaign
-            const campaignFollowupsMap = new Map();
-            allFollowups.forEach(followup => {
-              if (!followup.campaign_id) return;
-              if (!campaignFollowupsMap.has(followup.campaign_id)) {
-                campaignFollowupsMap.set(followup.campaign_id, []);
-              }
-              campaignFollowupsMap.get(followup.campaign_id).push(followup);
-            });
-
-            // For each campaign, find the latest follow-up date and status
-            const campaignLatestStatus = new Map();
-            campaignFollowupsMap.forEach((followups, campaignId) => {
-              // Sort by followup date (latest first)
-              const sorted = [...followups].sort((a, b) =>
-                new Date(b.followup_date) - new Date(a.followup_date)
-              );
-              const latest = sorted[0];
-              campaignLatestStatus.set(campaignId, {
-                status: latest.status,
-                date: latest.followup_date,
-                campaign_name: latest.campaign_name,
-                campaign_service: latest.campaign_service
-              });
-            });
-
-            // Filter all followups with status 'wip' and quotation_sent = true
-            // But exclude if campaign has a newer completed follow-up
-            const allWipQuotations = allFollowups.filter(followup => {
-              // Must be WIP with quotation
-              if (followup.status !== 'wip') return false;
-              if (!followup.quotation_sent) return false;
-              if (!followup.quotation_no && !followup.quotation_value) return false;
-
-              // Check if this campaign has a completed follow-up that is newer
-              const latestCampaignStatus = campaignLatestStatus.get(followup.campaign_id);
-              if (latestCampaignStatus && latestCampaignStatus.status === 'completed') {
-                const latestCompletedDate = new Date(latestCampaignStatus.date);
-                const currentWipDate = new Date(followup.followup_date);
-
-                // If completed follow-up is newer than this WIP follow-up, hide this WIP
-                if (latestCompletedDate > currentWipDate) {
-                  return false;
-                }
-              }
-
-              return true;
-            });
+            // Memoized above (activeWipQuotations): campaigns with a completed
+            // follow-up newer than the WIP follow-up are already excluded.
+            const allWipQuotations = activeWipQuotations;
 
             if (allWipQuotations.length === 0) return null;
 
@@ -6180,7 +6278,7 @@ ${f.start_para}`;
                               '420435_13': 'Gulbarga',
                               '420435_14': 'Bijapur'
                             };
-                            const uniqueBranches = [...new Set(customers.map(c => String(c.branch_id || '')))].sort();
+                            const uniqueBranches = uniqueBranchIds;
                             return (
                               <SortableTableHeader
                                 key={colId}
@@ -8859,26 +8957,7 @@ ${f.start_para}`;
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {customerFollowups
-                  .filter(followup => {
-                    if (followupFilters.date) {
-                      const followupDate = new Date(followup.followup_date).toISOString().split('T')[0];
-                      if (followupDate !== followupFilters.date) return false;
-                    }
-                    if (followupFilters.campaign && followup.campaign_name) {
-                      if (!followup.campaign_name.toLowerCase().includes(followupFilters.campaign.toLowerCase())) return false;
-                    }
-                    if (followupFilters.service) {
-                      const campaign = customerCampaigns.find(c => c.id === followup.campaign_id);
-                      const service = campaign?.service || '';
-                      if (!service.toLowerCase().includes(followupFilters.service.toLowerCase())) return false;
-                    }
-                    if (followupFilters.user && followup.user_name) {
-                      if (!followup.user_name.toLowerCase().includes(followupFilters.user.toLowerCase())) return false;
-                    }
-                    if (followupFilters.followupBy && followup.followup_by !== followupFilters.followupBy) return false;
-                    return true;
-                  })
+                {filteredFollowupRows
                   .map((followup) => {
                     const editable = canEditFollowup(followup);
                     const campaign = customerCampaigns.find(c => c.id === followup.campaign_id);
@@ -8977,25 +9056,7 @@ ${f.start_para}`;
                   })}
                 {followupFilters.date || followupFilters.campaign || followupFilters.service ||
                   followupFilters.user || followupFilters.followupBy ? (
-                  customerFollowups.filter(followup => {
-                    if (followupFilters.date) {
-                      const followupDate = new Date(followup.followup_date).toISOString().split('T')[0];
-                      if (followupDate !== followupFilters.date) return false;
-                    }
-                    if (followupFilters.campaign && followup.campaign_name) {
-                      if (!followup.campaign_name.toLowerCase().includes(followupFilters.campaign.toLowerCase())) return false;
-                    }
-                    if (followupFilters.service) {
-                      const campaign = customerCampaigns.find(c => c.id === followup.campaign_id);
-                      const service = campaign?.service || '';
-                      if (!service.toLowerCase().includes(followupFilters.service.toLowerCase())) return false;
-                    }
-                    if (followupFilters.user && followup.user_name) {
-                      if (!followup.user_name.toLowerCase().includes(followupFilters.user.toLowerCase())) return false;
-                    }
-                    if (followupFilters.followupBy && followup.followup_by !== followupFilters.followupBy) return false;
-                    return true;
-                  }).length === 0 && (
+                  filteredFollowupRows.length === 0 && (
                     <tr>
                       <td colSpan="15" className="px-2 py-3 text-center text-[11px] text-black">
                         No follow-ups match the selected filters

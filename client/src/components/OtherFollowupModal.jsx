@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 
 const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
@@ -55,7 +55,7 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
         wsData.push([]);
         wsData.push([
             'S.No', 'Instance ID', 'Customer Name', 'Phone Number', 'Email',
-            'Branch ID', 'Location', 'Service', 'Drive Type', 'Followup By',
+            'Branch ID', 'Location', 'Service', 'Drive Type', 'Activity', 'Followup By',
             'Last Status', 'Last Follow-up User', 'Last Follow-up User ID',
             'Last Follow-up Date', 'Next Follow-up Date',
             'Latest Flag', 'Latest Remark', 'Quotation Sent', 'Quotation Value'
@@ -72,6 +72,7 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                 customer.location,
                 customer.service,
                 customer.remark_type,
+                customer.activity_content || '',
                 customer.followup_by,
                 customer.last_status,
                 customer.last_followup_user_name,
@@ -101,13 +102,15 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
         setExportLoading(false);
     };
 
-    const filteredCustomers = customers.filter(customer =>
+    // Memoized: re-filter only when the data or the search term changes,
+    // not on every unrelated re-render.
+    const filteredCustomers = useMemo(() => customers.filter(customer =>
         customer.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         customer.instance_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         customer.phone_number?.includes(searchTerm) ||
         customer.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         customer.service?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    ), [customers, searchTerm]);
 
     // Scroll sync
     useEffect(() => {
@@ -295,6 +298,7 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Location</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Service</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Drive Type</th>
+                                            <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Activity</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Followup By</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Last Status</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Last User</th>
@@ -334,6 +338,9 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                                                     <span className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px]">
                                                         {customer.remark_type}
                                                     </span>
+                                                </td>
+                                                <td className="px-2 py-1 text-center text-[11px] text-black max-w-[180px] truncate border border-gray-200" title={customer.activity_content || ''}>
+                                                    {customer.activity_content ? highlightText(customer.activity_content, searchTerm) : '—'}
                                                 </td>
                                                 <td className="px-2 py-1 text-center text-[11px] text-black border border-gray-200">
                                                     {customer.followup_by}

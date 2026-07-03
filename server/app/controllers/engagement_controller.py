@@ -1145,14 +1145,26 @@ class EngagementController:
             .filter(FollowUp.customer_id == customer_id)\
             .order_by(desc(FollowUp.followup_date))\
             .all()
-        
+
+        # Batch-fetch all referenced campaigns in ONE query (kills the per-row N+1).
+        # Campaign.id is the primary key, so a dict lookup is identical to the old
+        # per-row .first() by id.
+        campaign_ids = list({f.campaign_id for f in followups if f.campaign_id})
+        campaign_lookup: Dict[int, Campaign] = {}
+        if campaign_ids:
+            CHUNK = 1000  # SQL Server 2100-param IN() limit
+            for i in range(0, len(campaign_ids), CHUNK):
+                chunk = campaign_ids[i:i + CHUNK]
+                for c in self.db.query(Campaign).filter(Campaign.id.in_(chunk)).all():
+                    campaign_lookup[c.id] = c
+
         result = []
         for f in followups:
             campaign_name = None
             campaign_color = None
             campaign_status = None
             if f.campaign_id:
-                campaign = self.db.query(Campaign).filter(Campaign.id == f.campaign_id).first()
+                campaign = campaign_lookup.get(f.campaign_id)
                 if campaign:
                     campaign_name = campaign.name
                     campaign_color = campaign.color
@@ -2022,26 +2034,49 @@ class EngagementController:
             .filter(NonFollowUp.customer_id == customer_id)\
             .order_by(desc(NonFollowUp.followup_date))\
             .all()
-        
+
+        # Batch-fetch all referenced campaigns/activities/RRs in ONE query each
+        # (kills the per-row N+1). All three are primary-key lookups, so a dict
+        # lookup returns exactly what the old per-row .first() by id returned.
+        campaign_ids = list({nf.campaign_id for nf in non_followups if nf.campaign_id})
+        activity_ids = list({nf.activity_id for nf in non_followups if nf.activity_id})
+        rr_ids = list({nf.rr_id for nf in non_followups if nf.rr_id})
+
+        CHUNK = 1000  # SQL Server 2100-param IN() limit
+        campaign_lookup: Dict[int, Campaign] = {}
+        for i in range(0, len(campaign_ids), CHUNK):
+            for c in self.db.query(Campaign).filter(Campaign.id.in_(campaign_ids[i:i + CHUNK])).all():
+                campaign_lookup[c.id] = c
+
+        activity_lookup: Dict[int, Activity] = {}
+        for i in range(0, len(activity_ids), CHUNK):
+            for a in self.db.query(Activity).filter(Activity.id.in_(activity_ids[i:i + CHUNK])).all():
+                activity_lookup[a.id] = a
+
+        rr_lookup: Dict[int, RR] = {}
+        for i in range(0, len(rr_ids), CHUNK):
+            for r in self.db.query(RR).filter(RR.id.in_(rr_ids[i:i + CHUNK])).all():
+                rr_lookup[r.id] = r
+
         result = []
         for nf in non_followups:
             campaign_name = None
             campaign_color = None
             if nf.campaign_id:
-                campaign = self.db.query(Campaign).filter(Campaign.id == nf.campaign_id).first()
+                campaign = campaign_lookup.get(nf.campaign_id)
                 if campaign:
                     campaign_name = campaign.name
                     campaign_color = campaign.color
-            
+
             activity_content = None
             if nf.activity_id:
-                activity = self.db.query(Activity).filter(Activity.id == nf.activity_id).first()
+                activity = activity_lookup.get(nf.activity_id)
                 if activity:
                     activity_content = activity.content
-            
+
             rr_content = None
             if nf.rr_id:
-                rr = self.db.query(RR).filter(RR.id == nf.rr_id).first()
+                rr = rr_lookup.get(nf.rr_id)
                 if rr:
                     rr_content = rr.content
             

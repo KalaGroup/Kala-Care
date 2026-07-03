@@ -434,8 +434,16 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
         };
     };
 
-    // Chart options for Campaign-wise Breakdown
-    const breakdownChartOptions = {
+    // Memoized breakdown chart data: previously rebuilt (twice) on every render.
+    // Depends only on the loaded data, the active filter and the NC counts.
+    const campaignBreakdownData = useMemo(
+        () => getCampaignBreakdownData(),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [branchData, totalCustomersData, activeCampaignFilter, ncCountByCampaign]
+    );
+
+    // Chart options for Campaign-wise Breakdown (memoized: suggestedMax scans all campaigns)
+    const breakdownChartOptions = useMemo(() => ({
         responsive: true,
         maintainAspectRatio: false,
         layout: {
@@ -515,7 +523,8 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                 }
             }
         }
-    };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }), [branchData, totalCustomersData, ncCountByCampaign]);
 
     // Asset Status Distribution Data
     const getAssetStatusData = () => {
@@ -551,16 +560,23 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
         };
     };
 
-    // Filter campaigns with allocate customers > 0
-    const campaignsWithAllocate = branchData?.campaigns?.filter(campaign => {
-        const totalAllocate = getCampaignTotalAllocate(campaign);
-        return totalAllocate > 0;
-    }) || [];
+    // Filter campaigns with allocate customers > 0 (memoized: getCampaignTotalAllocate
+    // does a find() per campaign, so avoid re-scanning on every render)
+    const campaignsWithAllocate = useMemo(() => (
+        branchData?.campaigns?.filter(campaign => {
+            const totalAllocate = getCampaignTotalAllocate(campaign);
+            return totalAllocate > 0;
+        }) || []
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    ), [branchData, totalCustomersData]);
 
-    // Calculate total branch assets
-    const totalBranchAssets = campaignsWithAllocate.reduce((sum, campaign) => {
-        return sum + getCampaignTotalAllocate(campaign);
-    }, 0);
+    // Calculate total branch assets (memoized for the same reason)
+    const totalBranchAssets = useMemo(() => (
+        campaignsWithAllocate.reduce((sum, campaign) => {
+            return sum + getCampaignTotalAllocate(campaign);
+        }, 0)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    ), [campaignsWithAllocate, totalCustomersData]);
 
     const totalEngagedCustomers = branchData?.total_customers || 0;
     const totalCompleted = branchData?.completed_followups || 0;
@@ -572,6 +588,60 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
     const totalFR = totalEngagedCustomers - (totalWip + totalCompleted + totalRejected + totalNotConnected);
 
     const totalRemaining = totalBranchAssets - totalEngagedCustomers;
+
+    // Details-modal rows: filter + sort once per data/filter/search change instead of on
+    // every keystroke-independent re-render. Logic is identical to the previous inline IIFE.
+    const detailSortedCustomers = useMemo(() => {
+        let filteredCustomers = selectedCampaign?.customers || [];
+
+        if (statusFilter !== 'all') {
+            if (statusFilter === 'pending') {
+                // Customers never touched (no last_status) or explicitly 'pending'
+                filteredCustomers = filteredCustomers.filter(customer =>
+                    !customer.last_status || customer.last_status?.toLowerCase() === 'pending'
+                );
+            } else if (statusFilter === 'nc') {
+                // "Not Connected" now keys off status (with a legacy remark/flag fallback)
+                filteredCustomers = filteredCustomers.filter(customer => isNotConnected(customer));
+            } else {
+                filteredCustomers = filteredCustomers.filter(customer =>
+                    customer.last_status?.toLowerCase() === statusFilter.toLowerCase()
+                );
+            }
+        }
+
+        if (searchTerm) {
+            const searchLower = searchTerm.toLowerCase();
+            filteredCustomers = filteredCustomers.filter(customer =>
+                customer.customer_name?.toLowerCase().includes(searchLower) ||
+                customer.instance_id?.toLowerCase().includes(searchLower) ||
+                customer.phone_number?.toLowerCase().includes(searchLower) ||
+                customer.branch_id?.toLowerCase().includes(searchLower) ||
+                customer.location?.toLowerCase().includes(searchLower)
+            );
+        }
+
+        return [...filteredCustomers].sort((a, b) => {
+            const statusOrder = {
+                'wip': 1,
+                'rescheduled': 2,
+                'rejected': 3,
+                'completed': 4
+            };
+
+            const statusA = a.last_status?.toLowerCase() || 'remaining';
+            const statusB = b.last_status?.toLowerCase() || 'remaining';
+
+            const orderA = statusOrder[statusA] || 5;
+            const orderB = statusOrder[statusB] || 5;
+
+            if (orderA !== orderB) {
+                return orderA - orderB;
+            }
+
+            return (a.customer_name || '').localeCompare(b.customer_name || '');
+        });
+    }, [selectedCampaign, statusFilter, searchTerm]);
 
     if (!isOpen) return null;
 
@@ -772,8 +842,8 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                             </div>
 
                             <div className="h-[420px] w-full overflow-x-auto">
-                                {getCampaignBreakdownData() ? (
-                                    <Bar data={getCampaignBreakdownData()} options={breakdownChartOptions} />
+                                {campaignBreakdownData ? (
+                                    <Bar data={campaignBreakdownData} options={breakdownChartOptions} />
                                 ) : (
                                     <div className="h-64 flex items-center justify-center text-gray-500">
                                         No Drive data available
@@ -1040,55 +1110,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                         </thead>
                                         <tbody className="bg-white">
                                             {(() => {
-                                                let filteredCustomers = selectedCampaign.customers || [];
-
-                                                if (statusFilter !== 'all') {
-                                                    if (statusFilter === 'pending') {
-                                                        // Customers never touched (no last_status) or explicitly 'pending'
-                                                        filteredCustomers = filteredCustomers.filter(customer =>
-                                                            !customer.last_status || customer.last_status?.toLowerCase() === 'pending'
-                                                        );
-                                                    } else if (statusFilter === 'nc') {
-                                                        // "Not Connected" now keys off status (with a legacy remark/flag fallback)
-                                                        filteredCustomers = filteredCustomers.filter(customer => isNotConnected(customer));
-                                                    } else {
-                                                        filteredCustomers = filteredCustomers.filter(customer =>
-                                                            customer.last_status?.toLowerCase() === statusFilter.toLowerCase()
-                                                        );
-                                                    }
-                                                }
-
-                                                if (searchTerm) {
-                                                    const searchLower = searchTerm.toLowerCase();
-                                                    filteredCustomers = filteredCustomers.filter(customer =>
-                                                        customer.customer_name?.toLowerCase().includes(searchLower) ||
-                                                        customer.instance_id?.toLowerCase().includes(searchLower) ||
-                                                        customer.phone_number?.toLowerCase().includes(searchLower) ||
-                                                        customer.branch_id?.toLowerCase().includes(searchLower) ||
-                                                        customer.location?.toLowerCase().includes(searchLower)
-                                                    );
-                                                }
-
-                                                const sortedCustomers = [...filteredCustomers].sort((a, b) => {
-                                                    const statusOrder = {
-                                                        'wip': 1,
-                                                        'rescheduled': 2,
-                                                        'rejected': 3,
-                                                        'completed': 4
-                                                    };
-
-                                                    const statusA = a.last_status?.toLowerCase() || 'remaining';
-                                                    const statusB = b.last_status?.toLowerCase() || 'remaining';
-
-                                                    const orderA = statusOrder[statusA] || 5;
-                                                    const orderB = statusOrder[statusB] || 5;
-
-                                                    if (orderA !== orderB) {
-                                                        return orderA - orderB;
-                                                    }
-
-                                                    return (a.customer_name || '').localeCompare(b.customer_name || '');
-                                                });
+                                                const sortedCustomers = detailSortedCustomers;
 
                                                 if (sortedCustomers.length === 0) {
                                                     return (

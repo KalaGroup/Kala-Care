@@ -1031,7 +1031,20 @@ class CustomerController:
         customer = self.get_customer_by_instance_id(instance_id)
         if not customer:
             return None
-        
+
+        # Run each count query ONCE and reuse for both the per-table count field
+        # and the total_records sum (was: every count executed twice).
+        amc_agreements_count = self.db.query(AMCAgreement).filter(AMCAgreement.instance_id == instance_id).count()
+        asset_detailed_count = self.db.query(AssetDetailed).filter(AssetDetailed.instance_id == instance_id).count()
+        asset_services_count = self.db.query(AssetService).filter(AssetService.instance_id == instance_id).count()
+        anubandhan_plus_quotes_count = self.db.query(AnubandhanPlusQuote).filter(AnubandhanPlusQuote.instance_id == instance_id).count()
+        anubandhan_quotes_count = self.db.query(AnubandhanQuote).filter(AnubandhanQuote.instance_id == instance_id).count()
+        bandhan_plus_quotes_count = self.db.query(BandhanPlusQuote).filter(BandhanPlusQuote.instance_id == instance_id).count()
+        pulse_quotations_count = self.db.query(PulseQuotation).filter(PulseQuotation.instance_id == instance_id).count()
+        regular_bandhan_count = self.db.query(RegularBandhan).filter(RegularBandhan.instance_id == instance_id).count()
+        lms_data_count = self.db.query(LMSData).filter(LMSData.instance_id == instance_id).count()
+        open_sr_load_reports_count = self.db.query(OpenSRLoadReport).filter(OpenSRLoadReport.instance_id == instance_id).count()
+
         complete_data = {
             "customer": self._customer_to_dict(customer),
             "amc_agreements": [self._amc_agreement_to_dict(a) for a in self.get_amc_agreements_by_instance(instance_id)],
@@ -1045,27 +1058,27 @@ class CustomerController:
             "lms_data": [self._lms_data_to_dict(a) for a in self.get_lms_data_by_instance(instance_id)],
             "open_sr_load_reports": [self._open_sr_load_report_to_dict(a) for a in self.get_open_sr_load_reports_by_instance(instance_id)],
             
-            "amc_agreements_count": self.db.query(AMCAgreement).filter(AMCAgreement.instance_id == instance_id).count(),
-            "asset_detailed_count": self.db.query(AssetDetailed).filter(AssetDetailed.instance_id == instance_id).count(),
-            "asset_services_count": self.db.query(AssetService).filter(AssetService.instance_id == instance_id).count(),
-            "anubandhan_plus_quotes_count": self.db.query(AnubandhanPlusQuote).filter(AnubandhanPlusQuote.instance_id == instance_id).count(),
-            "anubandhan_quotes_count": self.db.query(AnubandhanQuote).filter(AnubandhanQuote.instance_id == instance_id).count(),
-            "bandhan_plus_quotes_count": self.db.query(BandhanPlusQuote).filter(BandhanPlusQuote.instance_id == instance_id).count(),
-            "pulse_quotations_count": self.db.query(PulseQuotation).filter(PulseQuotation.instance_id == instance_id).count(),
-            "regular_bandhan_count": self.db.query(RegularBandhan).filter(RegularBandhan.instance_id == instance_id).count(),
-            "lms_data_count": self.db.query(LMSData).filter(LMSData.instance_id == instance_id).count(),
-            "open_sr_load_reports_count": self.db.query(OpenSRLoadReport).filter(OpenSRLoadReport.instance_id == instance_id).count(),
+            "amc_agreements_count": amc_agreements_count,
+            "asset_detailed_count": asset_detailed_count,
+            "asset_services_count": asset_services_count,
+            "anubandhan_plus_quotes_count": anubandhan_plus_quotes_count,
+            "anubandhan_quotes_count": anubandhan_quotes_count,
+            "bandhan_plus_quotes_count": bandhan_plus_quotes_count,
+            "pulse_quotations_count": pulse_quotations_count,
+            "regular_bandhan_count": regular_bandhan_count,
+            "lms_data_count": lms_data_count,
+            "open_sr_load_reports_count": open_sr_load_reports_count,
             "total_records": (
-                self.db.query(AMCAgreement).filter(AMCAgreement.instance_id == instance_id).count() +
-                self.db.query(AssetDetailed).filter(AssetDetailed.instance_id == instance_id).count() +
-                self.db.query(AssetService).filter(AssetService.instance_id == instance_id).count() +
-                self.db.query(AnubandhanPlusQuote).filter(AnubandhanPlusQuote.instance_id == instance_id).count() +
-                self.db.query(AnubandhanQuote).filter(AnubandhanQuote.instance_id == instance_id).count() +
-                self.db.query(BandhanPlusQuote).filter(BandhanPlusQuote.instance_id == instance_id).count() +
-                self.db.query(PulseQuotation).filter(PulseQuotation.instance_id == instance_id).count() +
-                self.db.query(RegularBandhan).filter(RegularBandhan.instance_id == instance_id).count() +
-                self.db.query(LMSData).filter(LMSData.instance_id == instance_id).count() +
-                self.db.query(OpenSRLoadReport).filter(OpenSRLoadReport.instance_id == instance_id).count()
+                amc_agreements_count +
+                asset_detailed_count +
+                asset_services_count +
+                anubandhan_plus_quotes_count +
+                anubandhan_quotes_count +
+                bandhan_plus_quotes_count +
+                pulse_quotations_count +
+                regular_bandhan_count +
+                lms_data_count +
+                open_sr_load_reports_count
             )
         }
         

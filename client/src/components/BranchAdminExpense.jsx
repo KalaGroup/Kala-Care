@@ -8,6 +8,7 @@ import BranchTADAHistory from './BranchTADAHistory';
 import BranchOEHistory from './BranchOEhistory';
 import BranchOE from './BranchOE';
 import BranchLVB from './BranchLVB';
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
 
@@ -22,7 +23,7 @@ const useDebounce = (value, delay) => {
 };
 
 /* ─── Blue-theme highlight for search matches ───────────────────────────────── */
-const Highlight = ({ text, query }) => {
+const Highlight = React.memo(({ text, query }) => {
   const str = text !== null && text !== undefined ? String(text) : '';
   if (!query || !str) return <>{str || '-'}</>;
   const q = query.trim();
@@ -38,7 +39,7 @@ const Highlight = ({ text, query }) => {
       {str.slice(idx + q.length)}
     </>
   );
-};
+});
 
 /* ─── Excel-style Column Filter Dropdown ────────────────────────────────────── */
 const ColumnFilterDropdown = ({ x, y, options, initialSelected, onApply, onClose, themeColor }) => {
@@ -1864,7 +1865,9 @@ const effKmOf = (r) => {
    Main Component
 ═══════════════════════════════════════════════════════════════════════════════ */
 const BranchAdminExpense = () => {
-  const user = JSON.parse(sessionStorage.getItem('user') || '{}');
+  // Parsed once per mount instead of on every render (same value — sessionStorage
+  // 'user' is set at login and this component remounts on any user change).
+  const user = useMemo(() => JSON.parse(sessionStorage.getItem('user') || '{}'), []);
   const themeColor = '#2f3192';
   const themeDark = '#335478';
   const themeLight = 'rgba(47,49,146,0.07)';
@@ -2441,17 +2444,37 @@ const BranchAdminExpense = () => {
   const fetchBatch = useCallback(async (skip) => {
     if (loadingRecords) return false;
     setLoadingRecords(true);
+    // Warm-cache key scoped to user + branch + this list (first page only).
+    const warmCacheKey = warmKey('branchTadaTempRecords', {
+      userId: user?.user_id || user?.id || '',
+      branch: userBranch,
+      limit: BATCH_SIZE,
+    });
     try {
+      if (skip === 0) {
+        // Instant paint of the last-seen first page while the normal fetch
+        // (below, unchanged) runs; its fresh result replaces this entirely.
+        const warm = readWarmCache(warmCacheKey);
+        if (Array.isArray(warm) && warm.length > 0) {
+          setAllRecords(prev => (prev.length === 0 ? warm : prev));
+        }
+      }
       const { data } = await axios.get(`${API_BASE_URL}/tada/temp/records`, {
         params: { skip, limit: BATCH_SIZE, branch_code: userBranch },
       });
       const batch = Array.isArray(data) ? data : [];
 
       setAllRecords(prev => {
+        // First page: replace outright. prev is always empty here without the
+        // warm cache (fetchBatch(0) only runs after the list is cleared), so
+        // this equals the old dedupe-append — and it guarantees a warm paint
+        // is fully overwritten by fresh server data, never merged with it.
+        if (skip === 0) return batch;
         const ids = new Set(prev.map(r => r.id));
         const fresh = batch.filter(r => !ids.has(r.id));
         return fresh.length ? [...prev, ...fresh] : prev;
       });
+      if (skip === 0) writeWarmCache(warmCacheKey, batch);
 
       const more = batch.length === BATCH_SIZE;
       setNextSkip(skip + batch.length);
@@ -5999,6 +6022,147 @@ const BranchAdminExpense = () => {
     setSubmittedTotalAmounts(newTotal);
   }, [submittedRecords, kmRates, getEffectiveKM, calculateDAmount, calculateTotalAmountDynamic]);
 
+  // Apply same filters (branch / engineer / search / drill-in) on submitted records too.
+  // Memoized (identical logic, hoisted out of the render body) so the full-array
+  // filter doesn't rerun on unrelated state changes such as un-debounced keystrokes.
+  const filteredSubmitted = useMemo(() => (submittedRecords || []).filter(r => {
+    if (!isAdmin && userBranch && String(r.branch_code || '').trim() !== userBranch) return false;
+    if (selectedEngineer && String(r.service_engineer_name || '').trim() !== selectedEngineer) return false;
+    if (drillInEngineer) {
+      if (String(r.service_engineer_name || '').trim() !== drillInEngineer.name) return false;
+      if (String(r.service_engineer_uid || '').trim() !== drillInEngineer.uid) return false;
+    }
+    // 3rd-level voucher scoping (Submitted → SE)
+    if (selectedVoucher && submittedInnerTab === 'se' && (r.voucher_no || 'No Voucher') !== selectedVoucher.voucher) return false;
+    // Verified-only filter (Submitted tab, drilled-in via Verify Data button)
+    if (verifyDataFilter && drillInEngineer) {
+      if (r.verification_status !== 'Verified') return false;
+    }
+    // Secondary filter: HO Corrected KM must be non-empty (only meaningful when Verified-only is on)
+    if (hoKmFilter && drillInEngineer && verifyDataFilter) {
+      if (r.ho_corrected_km === null || r.ho_corrected_km === undefined || String(r.ho_corrected_km).trim() === '') return false;
+    }
+    // Task Status filter (Excel-style)
+    if (mainTaskStatusFilter.size > 0 && !mainTaskStatusFilter.has(String(r.task_status || '').trim())) return false;
+    const q = debouncedSearch.trim().toLowerCase();
+    if (!q) return true;
+    return [
+      r.appointment_number, r.sd_branch_name, r.sd_branch_code, r.instance_id,
+      r.engine_serial_number, r.account, r.account_id, r.service_request_no,
+      r.service_engineer_name, r.service_engineer_uid, r.customer_name,
+      r.customer_contact_number, r.voc, r.uploaded_by,
+    ].some(v => String(v || '').toLowerCase().includes(q));
+  }), [submittedRecords, isAdmin, userBranch, selectedEngineer, drillInEngineer, selectedVoucher, submittedInnerTab, verifyDataFilter, hoKmFilter, mainTaskStatusFilter, debouncedSearch]);
+
+  // Header stats — identical logic, hoisted out of the render body and memoized so
+  // the O(n) reduces over the record arrays only rerun when their inputs change.
+  const activeStats = useMemo(() => {
+    const isSubmittedView = tadaSubTab === 'submitted';
+    const activeRecords = isSubmittedView ? filteredSubmitted : filteredRecords;
+
+    // ─── Verified → Sales & BM TADA inner tab ──────────────────────
+    if (tadaSubTab === 'verified' && verifiedInnerTab === 'sales_bm') {
+      const totalKm = salesBmDrafts.reduce((s, r) => s + (parseFloat(r.two_way_km) || 0), 0);
+      const dates = salesBmDrafts.map(r => r.date).filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
+      const startDate = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
+      const endDate = dates.length ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
+      const totalAmount = salesBmDrafts.reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0);
+      return { count: salesBmDrafts.length, totalTwoWayKm: totalKm, startDate, endDate, totalAmount, verifiedAmount: 0 };
+    }
+
+    // ─── Verified → Bill Wise inner tab (no KM) ────────────────────
+    if (tadaSubTab === 'verified' && verifiedInnerTab === 'bill_wise') {
+      const dates = billWiseDrafts.map(r => r.date).filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
+      const startDate = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
+      const endDate = dates.length ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
+      const totalAmount = billWiseDrafts.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+      return { count: billWiseDrafts.length, totalTwoWayKm: 0, startDate, endDate, totalAmount, verifiedAmount: 0 };
+    }
+
+    // ─── Submitted → Sales inner tab ───────────────────────────────
+    if (isSubmittedView && submittedInnerTab === 'sales') {
+      const totalKm = salesRecords.reduce((s, r) => s + (parseFloat(r.two_way_km) || 0), 0);
+      const dates = salesRecords.map(r => r.date).filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
+      const startDate = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
+      const endDate = dates.length ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
+      const totalAmount = salesRecords.reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0);
+      const verifiedAmount = salesRecords
+        .filter(r => r.verification_status === 'Verified')
+        .reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0);
+      return { count: salesRecords.length, totalTwoWayKm: totalKm, startDate, endDate, totalAmount, verifiedAmount };
+    }
+
+    // ─── Submitted → KM Wise inner tab ─────────────────────────────
+    if (isSubmittedView && submittedInnerTab === 'km_wise') {
+      const totalKm = kmWiseRecords.reduce((s, r) => s + (parseFloat(r.km) || 0), 0);
+      const dates = kmWiseRecords.map(r => r.date).filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
+      const startDate = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
+      const endDate = dates.length ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
+      const totalAmount = kmWiseRecords.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+      const verifiedAmount = kmWiseRecords
+        .filter(r => r.verification_status === 'Verified')
+        .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+      return { count: kmWiseRecords.length, totalTwoWayKm: totalKm, startDate, endDate, totalAmount, verifiedAmount };
+    }
+
+    // ─── Submitted → Bill Wise inner tab (no KM) ───────────────────
+    if (isSubmittedView && submittedInnerTab === 'bill_wise') {
+      const dates = billWiseRecords.map(r => r.date).filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
+      const startDate = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
+      const endDate = dates.length ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
+      const totalAmount = billWiseRecords.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+      const verifiedAmount = billWiseRecords
+        .filter(r => r.verification_status === 'Verified')
+        .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+      return { count: billWiseRecords.length, totalTwoWayKm: 0, startDate, endDate, totalAmount, verifiedAmount };
+    }
+
+    // ─── Default: Service Engineer (and Drafts/Verified views) ─────
+    const totalTwoWayKm = activeRecords.reduce((sum, r) => sum + (parseFloat(r.two_way_km) || 0), 0);
+    const reachDates = activeRecords
+      .map(r => r.sr_reach_at_site_datetime)
+      .filter(Boolean)
+      .map(d => new Date(d))
+      .filter(d => !isNaN(d.getTime()));
+    const startDate = reachDates.length ? new Date(Math.min(...reachDates.map(d => d.getTime()))) : null;
+    const endDate = reachDates.length ? new Date(Math.max(...reachDates.map(d => d.getTime()))) : null;
+
+    // ── Money totals ──
+    let totalAmount = 0;
+    let verifiedAmount = 0;
+    if (isSubmittedView) {
+      activeRecords.forEach(r => {
+        const calc = submittedTotalAmounts[r.id];
+        const amt = parseFloat(calc !== undefined ? calc : (r.total_amount || 0)) || 0;
+        totalAmount += amt;
+        if (r.verification_status === 'Verified') verifiedAmount += amt;
+      });
+    } else {
+      // ── Drafts: compute dynamically (frontend-only, same priority as cells) ──
+      activeRecords.forEach(r => {
+        let km = null;
+        const typed = localValues[`${r.id}_branch_verified_km`];
+        const pending = pendingKM[r.id];
+        if (typed !== undefined && String(typed).trim() !== '') {
+          km = parseFloat(typed);
+        } else if (pending !== undefined && String(pending).trim() !== '') {
+          km = parseFloat(pending);
+        } else if (r.branch_verified_km && String(r.branch_verified_km).trim() !== '') {
+          km = parseFloat(r.branch_verified_km);
+        } else if (r.two_way_km && String(r.two_way_km).trim() !== '') {
+          km = parseFloat(r.two_way_km);
+        }
+        if (km === null || isNaN(km)) return;
+        const da = calculateDAmount(r, km, allRecords) || 0;
+        const freight = parseFloat(r.freight_charges || 0) || 0;
+        const total = calculateTotalAmountDynamic(r, km, da, allRecords, freight);
+        if (total !== null && total !== undefined) totalAmount += total;
+      });
+    }
+
+    return { count: activeRecords.length, totalTwoWayKm, startDate, endDate, totalAmount, verifiedAmount };
+  }, [tadaSubTab, verifiedInnerTab, submittedInnerTab, filteredSubmitted, filteredRecords, salesBmDrafts, billWiseDrafts, salesRecords, kmWiseRecords, billWiseRecords, submittedTotalAmounts, localValues, pendingKM, allRecords, calculateDAmount, calculateTotalAmountDynamic]);
+
   /* ═══════════════════════════════════════════════════════════════════════════
      JSX RENDER
   ═══════════════════════════════════════════════════════════════════════════ */
@@ -6034,143 +6198,10 @@ const BranchAdminExpense = () => {
         {activeTab === 'tada' && (() => {
           const isSubmittedView = tadaSubTab === 'submitted';
 
-          // Apply same filters (branch / engineer / search / drill-in) on submitted records too
-          const filteredSubmitted = (submittedRecords || []).filter(r => {
-            if (!isAdmin && userBranch && String(r.branch_code || '').trim() !== userBranch) return false;
-            if (selectedEngineer && String(r.service_engineer_name || '').trim() !== selectedEngineer) return false;
-            if (drillInEngineer) {
-              if (String(r.service_engineer_name || '').trim() !== drillInEngineer.name) return false;
-              if (String(r.service_engineer_uid || '').trim() !== drillInEngineer.uid) return false;
-            }
-            // 3rd-level voucher scoping (Submitted → SE)
-            if (selectedVoucher && submittedInnerTab === 'se' && (r.voucher_no || 'No Voucher') !== selectedVoucher.voucher) return false;
-            // Verified-only filter (Submitted tab, drilled-in via Verify Data button)
-            if (verifyDataFilter && drillInEngineer) {
-              if (r.verification_status !== 'Verified') return false;
-            }
-            // Secondary filter: HO Corrected KM must be non-empty (only meaningful when Verified-only is on)
-            if (hoKmFilter && drillInEngineer && verifyDataFilter) {
-              if (r.ho_corrected_km === null || r.ho_corrected_km === undefined || String(r.ho_corrected_km).trim() === '') return false;
-            }
-            // Task Status filter (Excel-style)
-            if (mainTaskStatusFilter.size > 0 && !mainTaskStatusFilter.has(String(r.task_status || '').trim())) return false;
-            const q = debouncedSearch.trim().toLowerCase();
-            if (!q) return true;
-            return [
-              r.appointment_number, r.sd_branch_name, r.sd_branch_code, r.instance_id,
-              r.engine_serial_number, r.account, r.account_id, r.service_request_no,
-              r.service_engineer_name, r.service_engineer_uid, r.customer_name,
-              r.customer_contact_number, r.voc, r.uploaded_by,
-            ].some(v => String(v || '').toLowerCase().includes(q));
-          });
-
+          // filteredSubmitted + activeStats are memoized above (same logic, same values).
           const activeRecords = isSubmittedView ? filteredSubmitted : filteredRecords;
           const activeAllRecords = isSubmittedView ? (submittedRecords || []) : allRecords;
           const activeLoading = isSubmittedView ? loadingSubmitted : loadingRecords;
-
-          const activeStats = (() => {
-            // ─── Verified → Sales & BM TADA inner tab ──────────────────────
-            if (tadaSubTab === 'verified' && verifiedInnerTab === 'sales_bm') {
-              const totalKm = salesBmDrafts.reduce((s, r) => s + (parseFloat(r.two_way_km) || 0), 0);
-              const dates = salesBmDrafts.map(r => r.date).filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
-              const startDate = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
-              const endDate = dates.length ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
-              const totalAmount = salesBmDrafts.reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0);
-              return { count: salesBmDrafts.length, totalTwoWayKm: totalKm, startDate, endDate, totalAmount, verifiedAmount: 0 };
-            }
-
-            // ─── Verified → Bill Wise inner tab (no KM) ────────────────────
-            if (tadaSubTab === 'verified' && verifiedInnerTab === 'bill_wise') {
-              const dates = billWiseDrafts.map(r => r.date).filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
-              const startDate = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
-              const endDate = dates.length ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
-              const totalAmount = billWiseDrafts.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-              return { count: billWiseDrafts.length, totalTwoWayKm: 0, startDate, endDate, totalAmount, verifiedAmount: 0 };
-            }
-
-            // ─── Submitted → Sales inner tab ───────────────────────────────
-            if (isSubmittedView && submittedInnerTab === 'sales') {
-              const totalKm = salesRecords.reduce((s, r) => s + (parseFloat(r.two_way_km) || 0), 0);
-              const dates = salesRecords.map(r => r.date).filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
-              const startDate = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
-              const endDate = dates.length ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
-              const totalAmount = salesRecords.reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0);
-              const verifiedAmount = salesRecords
-                .filter(r => r.verification_status === 'Verified')
-                .reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0);
-              return { count: salesRecords.length, totalTwoWayKm: totalKm, startDate, endDate, totalAmount, verifiedAmount };
-            }
-
-            // ─── Submitted → KM Wise inner tab ─────────────────────────────
-            if (isSubmittedView && submittedInnerTab === 'km_wise') {
-              const totalKm = kmWiseRecords.reduce((s, r) => s + (parseFloat(r.km) || 0), 0);
-              const dates = kmWiseRecords.map(r => r.date).filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
-              const startDate = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
-              const endDate = dates.length ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
-              const totalAmount = kmWiseRecords.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-              const verifiedAmount = kmWiseRecords
-                .filter(r => r.verification_status === 'Verified')
-                .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-              return { count: kmWiseRecords.length, totalTwoWayKm: totalKm, startDate, endDate, totalAmount, verifiedAmount };
-            }
-
-            // ─── Submitted → Bill Wise inner tab (no KM) ───────────────────
-            if (isSubmittedView && submittedInnerTab === 'bill_wise') {
-              const dates = billWiseRecords.map(r => r.date).filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
-              const startDate = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
-              const endDate = dates.length ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
-              const totalAmount = billWiseRecords.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-              const verifiedAmount = billWiseRecords
-                .filter(r => r.verification_status === 'Verified')
-                .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-              return { count: billWiseRecords.length, totalTwoWayKm: 0, startDate, endDate, totalAmount, verifiedAmount };
-            }
-
-            // ─── Default: Service Engineer (and Drafts/Verified views) ─────
-            const totalTwoWayKm = activeRecords.reduce((sum, r) => sum + (parseFloat(r.two_way_km) || 0), 0);
-            const reachDates = activeRecords
-              .map(r => r.sr_reach_at_site_datetime)
-              .filter(Boolean)
-              .map(d => new Date(d))
-              .filter(d => !isNaN(d.getTime()));
-            const startDate = reachDates.length ? new Date(Math.min(...reachDates.map(d => d.getTime()))) : null;
-            const endDate = reachDates.length ? new Date(Math.max(...reachDates.map(d => d.getTime()))) : null;
-
-            // ── Money totals ──
-            let totalAmount = 0;
-            let verifiedAmount = 0;
-            if (isSubmittedView) {
-              activeRecords.forEach(r => {
-                const calc = submittedTotalAmounts[r.id];
-                const amt = parseFloat(calc !== undefined ? calc : (r.total_amount || 0)) || 0;
-                totalAmount += amt;
-                if (r.verification_status === 'Verified') verifiedAmount += amt;
-              });
-            } else {
-              // ── Drafts: compute dynamically (frontend-only, same priority as cells) ──
-              activeRecords.forEach(r => {
-                let km = null;
-                const typed = localValues[`${r.id}_branch_verified_km`];
-                const pending = pendingKM[r.id];
-                if (typed !== undefined && String(typed).trim() !== '') {
-                  km = parseFloat(typed);
-                } else if (pending !== undefined && String(pending).trim() !== '') {
-                  km = parseFloat(pending);
-                } else if (r.branch_verified_km && String(r.branch_verified_km).trim() !== '') {
-                  km = parseFloat(r.branch_verified_km);
-                } else if (r.two_way_km && String(r.two_way_km).trim() !== '') {
-                  km = parseFloat(r.two_way_km);
-                }
-                if (km === null || isNaN(km)) return;
-                const da = calculateDAmount(r, km, allRecords) || 0;
-                const freight = parseFloat(r.freight_charges || 0) || 0;
-                const total = calculateTotalAmountDynamic(r, km, da, allRecords, freight);
-                if (total !== null && total !== undefined) totalAmount += total;
-              });
-            }
-
-            return { count: activeRecords.length, totalTwoWayKm, startDate, endDate, totalAmount, verifiedAmount };
-          })();
 
           // ── Summary-view flag: Verified or Submitted tab, no drill-in yet ──
           const isSummaryView = (tadaSubTab === 'verified' || tadaSubTab === 'submitted') && !drillInEngineer;

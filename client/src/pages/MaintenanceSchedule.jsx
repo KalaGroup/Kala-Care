@@ -18,11 +18,11 @@ import {
 */
 
 const chipCls = { R: 'bg-blue-50 text-blue-700', C: 'bg-amber-50 text-amber-700', T: 'bg-emerald-50 text-emerald-700' };
-const Chip = ({ a }) => {
+const Chip = React.memo(({ a }) => {
     const k = (a || '').trim().toUpperCase();
     if (!ACTION[k]) return null;
     return <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold font-mono ${chipCls[k]}`}>{k}</span>;
-};
+});
 
 /* ----------------------------- Watermarked print sheet ----------------------------- */
 const PrintSheet = ({ app, services, parts, onClose }) => {

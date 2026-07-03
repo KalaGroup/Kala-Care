@@ -509,14 +509,27 @@ def submit_bill_wise_to_history(db: Session, record_ids: List[int],
         moved = 0
         skipped = 0
 
-        for rid in record_ids:
-            rec = db.query(TADABillWise).filter(
-                TADABillWise.id == rid,
+        # Batched lookup (was one query per id): fetch all matching Verified rows
+        # in chunks of 1000 ids (MSSQL parameter cap), keyed by primary key.
+        recs_by_id = {}
+        ids_list = list(record_ids)
+        for i in range(0, len(ids_list), 1000):
+            chunk = ids_list[i:i + 1000]
+            for rec in db.query(TADABillWise).filter(
+                TADABillWise.id.in_(chunk),
                 TADABillWise.verification_status == "Verified",
-            ).first()
-            if not rec:
+            ).all():
+                recs_by_id[rec.id] = rec
+
+        processed_ids = set()
+        for rid in record_ids:
+            rec = recs_by_id.get(rid)
+            # A duplicate id behaves like the original per-id query: the row was
+            # already deleted on the first pass, so the second pass skips it.
+            if rec is None or rid in processed_ids:
                 skipped += 1
                 continue
+            processed_ids.add(rid)
 
             hist = TADABillWiseHistory(
                 original_id=rec.id,

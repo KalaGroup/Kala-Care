@@ -464,6 +464,27 @@ const BranchOE = ({
         return { total, verified };
     }, [filteredDetailRecords]);
 
+    /* ─── Memoized period-table grand totals (same math as before) ───────────── */
+    const filteredPeriodTotals = useMemo(() => ({
+        records: filteredPeriodGroups.reduce((s, g) => s + g.records.length, 0),
+        total: filteredPeriodGroups.reduce((s, g) => s + g.totalAmount, 0),
+        verified: filteredPeriodGroups.reduce((s, g) => s + g.verifiedAmount, 0),
+    }), [filteredPeriodGroups]);
+
+    /* ─── Memoized drafts table sort + summary (same math as before) ─────────── */
+    const sortedOeTempDrafts = useMemo(
+        () => [...oeTempDrafts].sort((a, b) => new Date(a.paid_date || 0) - new Date(b.paid_date || 0)),
+        [oeTempDrafts]);
+    const oeTempSelectedCount = useMemo(
+        () => Object.values(oeTempSelected).filter(Boolean).length, [oeTempSelected]);
+
+    /* ─── Memoized detail head options (same math as before) ─────────────────── */
+    const oeDetailHeadOptions = useMemo(
+        () => selectedOEPeriod
+            ? Array.from(new Set(selectedOEPeriod.records.map(r => r.expenses_head).filter(Boolean))).sort()
+            : [],
+        [selectedOEPeriod]);
+
     /* ─── Reset inner filters whenever drill-in period changes ───────────────── */
     useEffect(() => {
         setOeDetailSearch('');
@@ -1121,14 +1142,14 @@ const BranchOE = ({
                             )}
                             <button
                                 onClick={handleSubmitOeTempToMain}
-                                disabled={submittingOeTemp || (!isAdmin && !isUploadAllowed()) || Object.values(oeTempSelected).filter(Boolean).length === 0}
+                                disabled={submittingOeTemp || (!isAdmin && !isUploadAllowed()) || oeTempSelectedCount === 0}
                                 className="px-3 py-1.5 text-white text-[10px] font-bold rounded-lg disabled:opacity-40 flex items-center gap-1"
                                 style={{ background: 'linear-gradient(135deg, #ea580c, #b91c1c)' }}
                                 title={!isAdmin && !isUploadAllowed() ? getUploadRestrictionMessage() : ''}
                             >
                                 {submittingOeTemp
                                     ? <><svg className="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Submitting...</>
-                                    : `Submit Selected (${Object.values(oeTempSelected).filter(Boolean).length})`}
+                                    : `Submit Selected (${oeTempSelectedCount})`}
                             </button>
                         </div>
                     </div>
@@ -1167,7 +1188,7 @@ const BranchOE = ({
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
-                                    {[...oeTempDrafts].sort((a, b) => new Date(a.paid_date || 0) - new Date(b.paid_date || 0)).map((d, idx) => {
+                                    {sortedOeTempDrafts.map((d, idx) => {
                                         const isEditing = oeTempEditingId === d.id;
                                         return (
                                             <tr key={d.id} className="hover:bg-blue-50/30" style={{ height: '34px' }}>
@@ -1300,10 +1321,10 @@ const BranchOE = ({
                                         {oePeriodGroups.length} period{oePeriodGroups.length === 1 ? '' : 's'}
                                     </span>
                                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-semibold whitespace-nowrap">
-                                        Grand Total: ₹{filteredPeriodGroups.reduce((s, g) => s + g.totalAmount, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        Grand Total: ₹{filteredPeriodTotals.total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
                                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold whitespace-nowrap">
-                                        Verified: ₹{filteredPeriodGroups.reduce((s, g) => s + g.verifiedAmount, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        Verified: ₹{filteredPeriodTotals.verified.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
                                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100 font-semibold whitespace-nowrap">
                                         Rule: {submitRule?.rule_type === 'weekdays' ? 'Weekly periods' : '15-day periods'}
@@ -1453,9 +1474,7 @@ const BranchOE = ({
                                     className="px-2 py-1 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
                                 >
                                     <option value="">All Expense Codes</option>
-                                    {Array.from(new Set(selectedOEPeriod.records.map(r => r.expenses_head).filter(Boolean)))
-                                        .sort()
-                                        .map(h => <option key={h} value={h}>{h}</option>)}
+                                    {oeDetailHeadOptions.map(h => <option key={h} value={h}>{h}</option>)}
                                 </select>
 
                                 <label
@@ -1668,13 +1687,13 @@ const BranchOE = ({
                                             Grand Total ({filteredPeriodGroups.length} period{filteredPeriodGroups.length === 1 ? '' : 's'})
                                         </td>
                                         <td className="px-3 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200">
-                                            {filteredPeriodGroups.reduce((s, g) => s + g.records.length, 0)}
+                                            {filteredPeriodTotals.records}
                                         </td>
                                         <td className="px-3 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200 text-blue-700 whitespace-nowrap">
-                                            ₹{filteredPeriodGroups.reduce((s, g) => s + g.totalAmount, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            ₹{filteredPeriodTotals.total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </td>
                                         <td className="px-3 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200 text-emerald-700 whitespace-nowrap">
-                                            ₹{filteredPeriodGroups.reduce((s, g) => s + g.verifiedAmount, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            ₹{filteredPeriodTotals.verified.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </td>
                                     </tr>
                                 </tfoot>

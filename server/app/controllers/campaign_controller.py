@@ -48,9 +48,42 @@ class CampaignController:
     
         valid_assets = [a for a in unique_assets if a in existing_ids]
         invalid_assets = [a for a in unique_assets if a not in existing_ids]
-    
+
         return {"valid": valid_assets, "invalid": invalid_assets}
-    
+
+    def _fetch_existing_instance_ids(self, normalized_assets) -> set:
+        """ONE chunked existence query for a set of already-normalized asset ids.
+        Same query/chunking as validate_asset_numbers — used to batch the
+        per-campaign revalidation loops into a single lookup."""
+        existing_ids = set()
+        assets = [a for a in normalized_assets if a]
+        CHUNK = 1000
+        for i in range(0, len(assets), CHUNK):
+            chunk = assets[i:i + CHUNK]
+            rows = (
+                self.db.query(Customer.instance_id)
+                .filter(Customer.instance_id.in_(chunk))
+                .all()
+            )
+            existing_ids.update(r[0] for r in rows)
+        return existing_ids
+
+    @staticmethod
+    def _split_valid_invalid(asset_numbers: List[str], existing_ids: set) -> Dict[str, List[str]]:
+        """EXACTLY the same normalization/dedupe/split as validate_asset_numbers,
+        but against a pre-fetched set of existing instance ids (no query)."""
+        if not asset_numbers:
+            return {"valid": [], "invalid": []}
+
+        unique_assets = list(set([str(num).strip() for num in asset_numbers if num and str(num).strip()]))
+        if not unique_assets:
+            return {"valid": [], "invalid": []}
+
+        valid_assets = [a for a in unique_assets if a in existing_ids]
+        invalid_assets = [a for a in unique_assets if a not in existing_ids]
+
+        return {"valid": valid_assets, "invalid": invalid_assets}
+
     # ==================== Service Management ====================
     
     def get_all_services(self) -> List[CampaignService]:
@@ -131,15 +164,26 @@ class CampaignController:
         
         # REVALIDATE ALL ASSET NUMBERS FOR EVERY CAMPAIGN ON EVERY FETCH
         # This ensures that if a customer was added to the database, it moves from invalid to valid
-        updated_campaigns = []
+        # BATCHED: one customers-existence lookup for the union of every campaign's
+        # assets (was one chunked query per campaign). Split logic is unchanged.
+        assets_by_campaign = {}
+        union_normalized = set()
         for campaign in campaigns:
             if campaign.asset_numbers or campaign.invalid_asset_numbers:
-                # Combine all asset numbers (valid + invalid) for revalidation
-                all_assets = list(set((campaign.asset_numbers or []) + (campaign.invalid_asset_numbers or [])))
-                
-                # Revalidate against current customer table
-                validation_result = self.validate_asset_numbers(all_assets)
-                
+                combined = list(set((campaign.asset_numbers or []) + (campaign.invalid_asset_numbers or [])))
+                assets_by_campaign[campaign.id] = combined
+                union_normalized.update(
+                    str(num).strip() for num in combined if num and str(num).strip()
+                )
+        existing_ids = self._fetch_existing_instance_ids(union_normalized) if union_normalized else set()
+
+        updated_campaigns = []
+        for campaign in campaigns:
+            all_assets = assets_by_campaign.get(campaign.id)
+            if all_assets is not None:
+                # Revalidate against current customer table (batched lookup above)
+                validation_result = self._split_valid_invalid(all_assets, existing_ids)
+
                 # Check if anything changed
                 old_valid = set(campaign.asset_numbers or [])
                 old_invalid = set(campaign.invalid_asset_numbers or [])
@@ -481,12 +525,25 @@ class CampaignController:
     def get_campaign_stats(self):
         # First, revalidate all campaigns to ensure stats are accurate
         campaigns = self.db.query(Campaign).all()
-        
+
+        # BATCHED: one customers-existence lookup for the union of every campaign's
+        # assets (was one chunked query per campaign). Split logic is unchanged.
+        assets_by_campaign = {}
+        union_normalized = set()
         for campaign in campaigns:
             if campaign.asset_numbers or campaign.invalid_asset_numbers:
-                all_assets = list(set((campaign.asset_numbers or []) + (campaign.invalid_asset_numbers or [])))
-                validation_result = self.validate_asset_numbers(all_assets)
-                
+                combined = list(set((campaign.asset_numbers or []) + (campaign.invalid_asset_numbers or [])))
+                assets_by_campaign[campaign.id] = combined
+                union_normalized.update(
+                    str(num).strip() for num in combined if num and str(num).strip()
+                )
+        existing_ids = self._fetch_existing_instance_ids(union_normalized) if union_normalized else set()
+
+        for campaign in campaigns:
+            all_assets = assets_by_campaign.get(campaign.id)
+            if all_assets is not None:
+                validation_result = self._split_valid_invalid(all_assets, existing_ids)
+
                 old_valid = set(campaign.asset_numbers or [])
                 old_invalid = set(campaign.invalid_asset_numbers or [])
                 new_valid = set(validation_result['valid'])

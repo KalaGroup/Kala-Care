@@ -241,6 +241,21 @@ const TADAHistoryModal = ({ branch, themeColor, onClose, canExport = false }) =>
     [detailSrc, selectedEngineer]
   );
 
+  const filteredTotals = useMemo(() => ({
+    records: filteredGroups.reduce((s, g) => s + (g.record_count || 0), 0),
+    amount: filteredGroups.reduce((s, g) => s + parseFloat(g.total_amount || 0), 0),
+  }), [filteredGroups]);
+  const voucherRecordsTotal = useMemo(
+    () => voucherRecords.reduce((s, r) => s + parseFloat(r[detailAmtKey] || 0), 0),
+    [voucherRecords, detailAmtKey]
+  );
+  const engineerRecordsTotal = useMemo(
+    () => selectedEngineer
+      ? selectedEngineer.records.reduce((s, r) => s + parseFloat(r[detailAmtKey] || 0), 0)
+      : 0,
+    [selectedEngineer, detailAmtKey]
+  );
+
   const applyPaid = async (group) => {
     const src = group._source;
     const bulkUrl = SOURCE_META[src].bulkUrl;
@@ -492,9 +507,9 @@ const TADAHistoryModal = ({ branch, themeColor, onClose, canExport = false }) =>
                 <tfoot className="sticky bottom-0">
                   <tr style={{ backgroundColor: '#f0f1ff' }}>
                     <td colSpan={isAll ? 7 : 6} className="px-3 py-1.5 text-[12px] font-bold text-gray-600 text-right border border-gray-200">Grand Total ({filteredGroups.length} vouchers)</td>
-                    <td className="px-3 py-1.5 text-[12px] font-bold text-center border border-gray-200">{filteredGroups.reduce((s, g) => s + (g.record_count || 0), 0)}</td>
+                    <td className="px-3 py-1.5 text-[12px] font-bold text-center border border-gray-200">{filteredTotals.records}</td>
                     <td className="px-3 py-1.5 text-[12px] font-bold text-center border border-gray-200" style={{ color: themeColor }}>
-                      {money(filteredGroups.reduce((s, g) => s + parseFloat(g.total_amount || 0), 0))}
+                      {money(filteredTotals.amount)}
                     </td>
                     <td className="border border-gray-200" />
                   </tr>
@@ -551,7 +566,7 @@ const TADAHistoryModal = ({ branch, themeColor, onClose, canExport = false }) =>
                     <td colSpan={2} className="px-3 py-1.5 text-[12px] font-bold text-right border border-gray-200" style={{ color: detailMeta.accent }}>Grand Total ({engineerGroups.length})</td>
                     <td className="px-3 py-1.5 text-[12px] font-bold text-center border border-gray-200">{voucherRecords.length}</td>
                     <td className="px-3 py-1.5 text-[12px] font-bold text-center border border-gray-200" style={{ color: detailMeta.accent }}>
-                      {money(voucherRecords.reduce((s, r) => s + parseFloat(r[detailAmtKey] || 0), 0))}
+                      {money(voucherRecordsTotal)}
                     </td>
                     <td className="border border-gray-200" />
                   </tr>
@@ -602,7 +617,7 @@ const TADAHistoryModal = ({ branch, themeColor, onClose, canExport = false }) =>
                   <tfoot className="sticky bottom-0">
                     <tr style={{ backgroundColor: detailMeta.bg }}>
                       <td colSpan={level3Cols.length + 2} className="px-3 py-1.5 text-[11px] font-bold text-right border border-gray-300" style={{ color: detailMeta.accent }}>
-                        Total: {money(selectedEngineer.records.reduce((s, r) => s + parseFloat(r[detailAmtKey] || 0), 0))}
+                        Total: {money(engineerRecordsTotal)}
                       </td>
                     </tr>
                   </tfoot>

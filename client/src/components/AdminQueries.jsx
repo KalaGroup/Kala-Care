@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import Swal from 'sweetalert2';
 import {
@@ -132,14 +132,16 @@ const AdminQueries = ({ user, onClose, showToast, onUnresolvedCount }) => {
         return date.toLocaleDateString(); // Changed to show only date
     };
 
-    const filteredQueries = queries.filter(q => {
+    // Memoized derived lists/counts — pure filters that previously re-ran on
+    // every re-render; now they only re-run when queries/filter change.
+    const filteredQueries = useMemo(() => queries.filter(q => {
         if (filter === 'resolved') return q.is_resolved;
         if (filter === 'unresolved') return !q.is_resolved;
         return true;
-    });
+    }), [queries, filter]);
 
-    const unresolvedCount = queries.filter(q => !q.is_resolved).length;
-    const resolvedCount = queries.filter(q => q.is_resolved).length;
+    const unresolvedCount = useMemo(() => queries.filter(q => !q.is_resolved).length, [queries]);
+    const resolvedCount = useMemo(() => queries.filter(q => q.is_resolved).length, [queries]);
 
     return (
         <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">

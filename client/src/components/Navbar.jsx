@@ -70,6 +70,110 @@ const formatDriveDate = (dateString) => {
   }
 };
 
+// ---- Static data hoisted to module scope so it isn't re-allocated on every
+// render of the Navbar (which wraps every page). Pure constants only. ----
+
+const themeColor = '#2f3192';
+const logoutColor = '#000000';
+
+// Generate shades of the theme color
+const themeShades = {
+  light: 'rgba(64, 96, 147, 0.1)',
+  medium: 'rgba(64, 96, 147, 0.5)',
+  dark: '#335478',
+};
+
+// Branch mapping
+const branchMap = {
+  'HO': 'Pune Office',
+  '420435_1': 'Ch.Sambhaji Nagar',
+  '420435_2': 'Ahilyanagar',
+  '420435_3': 'Beed',
+  '420435_4': 'Nanded',
+  '420435_5': 'Babhaleshwar',
+  '420435_6': 'Latur',
+  '420435_8': 'Hubli',
+  '420435_9': 'Belagavi',
+  '420435_10': 'Hospet',
+  '420435_11': 'Ballari',
+  '420435_12': 'Bagalkot',
+  '420435_13': 'Gulbarga',
+  '420435_14': 'Bijapur'
+};
+
+// Role display names
+const roleMap = {
+  'master_admin': 'Master Admin',
+  'it_admin': 'IT Admin',
+  'branch_admin': 'Branch Admin',
+  'employee': 'Employee'
+};
+
+// Terminology data
+const terminologyData = {
+  statusIndicators: {
+    title: "Status Indicators",
+    items: [
+      { symbol: "✓", meaning: "In Drive", description: "Customer is in drive" },
+      { symbol: "T", meaning: "Transferred", description: "Customer tranferred from old drive" },
+      { symbol: "W", meaning: "Work in Progress", description: "Ongoing" },
+      { symbol: "C", meaning: "Completed", description: "Business converted" },
+      { symbol: "R", meaning: "Rejected", description: "Rejected by customer" },
+      { symbol: "FR", meaning: "Rescheduled", description: "Follow-up rescheduled" },
+      { symbol: "NC", meaning: "Not Connected", description: "Call not connected during follow-up" }
+    ]
+  },
+  flagIndicators: {
+    title: "Follow-up Flags",
+    items: [
+      { symbol: "C1", meaning: "15 Days", description: "Follow-up within 15 days" },
+      { symbol: "C2", meaning: "30 Days", description: "Follow-up within 30 days" },
+      { symbol: "C3", meaning: "45 Days", description: "Follow-up within 45 days" },
+      { symbol: "C4", meaning: "60 Days", description: "Follow-up within 60 days" },
+      { symbol: "C5", meaning: "75 Days", description: "Follow-up within 75 days" },
+      { symbol: "C6", meaning: "90 Days", description: "Follow-up within 90 days" },
+      { symbol: "C7", meaning: "90+ Days", description: "Follow-up after 90 days" }
+    ]
+  }
+};
+
+// Customer Engagement dropdown items
+const engagementItems = [
+  {
+    path: '/customer-engagement',
+    name: 'Drive Data',
+    description: 'Drive-based customer interactions',
+    allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
+  },
+  {
+    path: '/customer-engagement-2',
+    name: 'Non-Drive Data',
+    description: 'Non-drive customer interactions',
+    allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
+  }
+];
+
+const expenseTrackingItems = [
+  {
+    path: '/expense-dashboard',
+    name: 'Dashboard',
+    description: 'Expense Dashboard View',
+    allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
+  },
+  {
+    path: '/expense',
+    name: 'Expense',
+    description: 'Expense Entry & Management',
+    allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
+  }
+];
+
+// ← added
+const partDetailItems = [
+  { path: '/maintenance-schedule', name: 'Quotation Template' },
+  { path: '/maintenance-reports', name: 'Activity Reports' },
+];
+
 function Navbar({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [logoError, setLogoError] = useState(false);
@@ -104,25 +208,12 @@ function Navbar({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const user = JSON.parse(sessionStorage.getItem('user'));
-
-  // Branch mapping
-  const branchMap = {
-    'HO': 'Pune Office',
-    '420435_1': 'Ch.Sambhaji Nagar',
-    '420435_2': 'Ahilyanagar',
-    '420435_3': 'Beed',
-    '420435_4': 'Nanded',
-    '420435_5': 'Babhaleshwar',
-    '420435_6': 'Latur',
-    '420435_8': 'Hubli',
-    '420435_9': 'Belagavi',
-    '420435_10': 'Hospet',
-    '420435_11': 'Ballari',
-    '420435_12': 'Bagalkot',
-    '420435_13': 'Gulbarga',
-    '420435_14': 'Bijapur'
-  };
+  // Read the raw string every render (cheap) but only JSON.parse when the
+  // stored value actually changes. This keeps freshness identical to the old
+  // per-render parse while giving `user` a stable identity, so the effects
+  // depending on [user] stop tearing down / re-subscribing on every render.
+  const userStr = sessionStorage.getItem('user');
+  const user = useMemo(() => (userStr ? JSON.parse(userStr) : null), [userStr]);
 
   // Function to get branch display name
   const getBranchDisplayName = (branchCode) => {
@@ -133,44 +224,6 @@ function Navbar({ children }) {
   const isAdmin = user?.role === 'master_admin' || user?.role === 'it_admin' || user?.role === 'branch_admin';
   const isMasterOrITAdmin = user?.role === 'master_admin' || user?.role === 'it_admin';
   const isEmployee = user?.role === 'employee';
-
-  const themeColor = '#2f3192';
-  const logoutColor = '#000000';
-
-  // Generate shades of the theme color
-  const themeShades = {
-    light: 'rgba(64, 96, 147, 0.1)',
-    medium: 'rgba(64, 96, 147, 0.5)',
-    dark: '#335478',
-  };
-
-  // Terminology data
-  const terminologyData = {
-    statusIndicators: {
-      title: "Status Indicators",
-      items: [
-        { symbol: "✓", meaning: "In Drive", description: "Customer is in drive" },
-        { symbol: "T", meaning: "Transferred", description: "Customer tranferred from old drive" },
-        { symbol: "W", meaning: "Work in Progress", description: "Ongoing" },
-        { symbol: "C", meaning: "Completed", description: "Business converted" },
-        { symbol: "R", meaning: "Rejected", description: "Rejected by customer" },
-        { symbol: "FR", meaning: "Rescheduled", description: "Follow-up rescheduled" },
-        { symbol: "NC", meaning: "Not Connected", description: "Call not connected during follow-up" }
-      ]
-    },
-    flagIndicators: {
-      title: "Follow-up Flags",
-      items: [
-        { symbol: "C1", meaning: "15 Days", description: "Follow-up within 15 days" },
-        { symbol: "C2", meaning: "30 Days", description: "Follow-up within 30 days" },
-        { symbol: "C3", meaning: "45 Days", description: "Follow-up within 45 days" },
-        { symbol: "C4", meaning: "60 Days", description: "Follow-up within 60 days" },
-        { symbol: "C5", meaning: "75 Days", description: "Follow-up within 75 days" },
-        { symbol: "C6", meaning: "90 Days", description: "Follow-up within 90 days" },
-        { symbol: "C7", meaning: "90+ Days", description: "Follow-up after 90 days" }
-      ]
-    }
-  };
 
   // Terminology Modal Component - Compact version
   const TerminologyModal = () => {
@@ -307,8 +360,10 @@ function Navbar({ children }) {
           fetch(`${base}/v1/campaigns/drive-meta/all`),
         ]);
 
-        const campData = campRes.ok ? await campRes.json() : [];
-        const metaData = metaRes.ok ? await metaRes.json() : [];
+        const [campData, metaData] = await Promise.all([
+          campRes.ok ? campRes.json() : [],
+          metaRes.ok ? metaRes.json() : [],
+        ]);
         const all = Array.isArray(campData) ? campData : [];
         const metaList = Array.isArray(metaData) ? metaData : [];
 
@@ -661,7 +716,8 @@ function Navbar({ children }) {
     });
   };
 
-  const mainNavItems = getMainNavItems();
+  // Only rebuilt when the user actually changes — not on every hover/route render.
+  const mainNavItems = useMemo(() => getMainNavItems(), [user]);
 
   // Engagement Masters dropdown items — master/IT admin only.
   // (Moved out of the flat main nav into one grouped dropdown.)
@@ -704,43 +760,12 @@ function Navbar({ children }) {
     });
   };
 
-  const engagementMastersItems = getEngagementMastersItems();
+  const engagementMastersItems = useMemo(() => getEngagementMastersItems(), [user]);
 
   const isEngagementMastersActive = () =>
     location.pathname === '/import' ||
     location.pathname === '/customers' ||
     location.pathname === '/campaigns';
-
-  // Customer Engagement dropdown items
-  const engagementItems = [
-    {
-      path: '/customer-engagement',
-      name: 'Drive Data',
-      description: 'Drive-based customer interactions',
-      allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
-    },
-    {
-      path: '/customer-engagement-2',
-      name: 'Non-Drive Data',
-      description: 'Non-drive customer interactions',
-      allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
-    }
-  ];
-
-  const expenseTrackingItems = [
-    {
-      path: '/expense-dashboard',
-      name: 'Dashboard',
-      description: 'Expense Dashboard View',
-      allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
-    },
-    {
-      path: '/expense',
-      name: 'Expense',
-      description: 'Expense Entry & Management',
-      allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
-    }
-  ];
 
   // Other standalone pages (not in dropdown) - Filtered by role
   const getOtherPagesItems = () => {
@@ -774,19 +799,13 @@ function Navbar({ children }) {
     );
   };
 
-  const otherPagesItems = getOtherPagesItems();
+  const otherPagesItems = useMemo(() => getOtherPagesItems(), [user]);
 
   // Check if any engagement route is active
   const isEngagementActive = () => {
     return location.pathname === '/customer-engagement' ||
       location.pathname === '/customer-engagement-2';
   };
-
-  // ← added
-  const partDetailItems = [
-    { path: '/maintenance-schedule', name: 'Quotation Template' },
-    { path: '/maintenance-reports', name: 'Activity Reports' },
-  ];
 
   const isPartInfoActive = () =>
     location.pathname === '/maintenance-schedule' ||
@@ -926,14 +945,8 @@ function Navbar({ children }) {
       .slice(0, 2);
   };
 
-  // Get role display name
+  // Get role display name (roleMap is a module-scope constant)
   const getRoleDisplayName = (role) => {
-    const roleMap = {
-      'master_admin': 'Master Admin',
-      'it_admin': 'IT Admin',
-      'branch_admin': 'Branch Admin',
-      'employee': 'Employee'
-    };
     return roleMap[role] || role;
   };
 

@@ -8,6 +8,7 @@ import {
     ArrowLeftIcon, Squares2X2Icon, ListBulletIcon, ArrowPathIcon, BookOpenIcon,
     TagIcon, PlusIcon, CubeIcon, RectangleStackIcon,
 } from '@heroicons/react/24/outline';
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 
 // -- Theme --------------------------------------------------------
 const themeColor = '#2f3192';
@@ -88,12 +89,12 @@ const folderSummaryText = (f) => {
     return parts.join(' \u00b7 ') || 'Empty';
 };
 
-const FolderYellow = ({ className, style }) => (
+const FolderYellow = React.memo(({ className, style }) => (
     <svg className={className} style={style} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M2.5 6.2c0-1 .8-1.7 1.7-1.7h4.8c.5 0 1 .2 1.3.6l1.1 1.3h8.4c1 0 1.7.8 1.7 1.7v9.4c0 1-.8 1.7-1.7 1.7H4.2c-1 0-1.7-.8-1.7-1.7V6.2Z" fill="#E0A50C" />
         <path d="M2.5 9.3h19v8.3c0 1-.8 1.7-1.7 1.7H4.2c-1 0-1.7-.8-1.7-1.7V9.3Z" fill="#F6C23E" />
     </svg>
-);
+));
 
 const KnowledgeBook = () => {
     const currentUser = useMemo(() => {
@@ -128,6 +129,9 @@ const KnowledgeBook = () => {
     const [products, setProducts] = useState([]);
 
     const fileInputRef = useRef(null);
+    // Warm-cache guard: only the very first folder load (initial mount, state
+    // still empty) may paint from the warm cache; navigation never does.
+    const warmedRef = useRef(false);
 
     const [hidingKeys, setHidingKeys] = useState(() => new Set());
     const setHiding = (key, on) => setHidingKeys((prev) => {
@@ -165,6 +169,20 @@ const KnowledgeBook = () => {
 
     const loadFolder = useCallback(async (parentId) => {
         setLoading(true);
+        const cacheKey = warmKey('kb-folder', {
+            userId: authHeaders['user-id'], role: authHeaders['user-role'],
+            parentId: parentId ?? null,
+        });
+        // Warm-cache-first paint (initial load only, while state is still empty);
+        // the fetch below always runs and overwrites it with fresh data.
+        if (!warmedRef.current) {
+            warmedRef.current = true;
+            const warm = readWarmCache(cacheKey);
+            if (warm) {
+                setFolders(warm.folders || []);
+                setFiles(warm.files || []);
+            }
+        }
         try {
             const qs = parentId != null ? `?parent_id=${parentId}` : '';
             const res = await fetch(`${API_BASE_URL}/knowledge-book/folders${qs}`, { headers: authHeaders });
@@ -172,6 +190,7 @@ const KnowledgeBook = () => {
             const data = await res.json();
             setFolders(data.folders || []);
             setFiles(data.files || []);
+            writeWarmCache(cacheKey, { folders: data.folders || [], files: data.files || [] });
         } catch (e) {
             toast.error(e.message || 'Could not load this folder');
             setFolders([]); setFiles([]);
@@ -222,13 +241,19 @@ const KnowledgeBook = () => {
     }, [topFolders]);
 
     // ---- Search + category filter (filter only active in All Files) ----
-    const q = query.toLowerCase();
     const effCat = mode === 'all' ? catFilter : '';
-    const baseFiles = mode === 'all' ? allFilesData : files;
-    const shownFiles = baseFiles
-        .filter((f) => f.name.toLowerCase().includes(q))
-        .filter((f) => !effCat || String(f.category_id) === String(effCat));
-    const shownFolders = mode === 'all' ? [] : folders.filter((f) => f.name.toLowerCase().includes(q));
+    const shownFiles = useMemo(() => {
+        const base = mode === 'all' ? allFilesData : files;
+        const lc = query.toLowerCase();
+        const cat = mode === 'all' ? catFilter : '';
+        return base
+            .filter((f) => f.name.toLowerCase().includes(lc))
+            .filter((f) => !cat || String(f.category_id) === String(cat));
+    }, [mode, allFilesData, files, query, catFilter]);
+    const shownFolders = useMemo(
+        () => (mode === 'all' ? [] : folders.filter((f) => f.name.toLowerCase().includes(query.toLowerCase()))),
+        [mode, folders, query],
+    );
 
     const fileTitle = (file) => [
         file.name,

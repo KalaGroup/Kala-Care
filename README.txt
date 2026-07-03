@@ -25,14 +25,15 @@ cd server
 
 
 
+Added indexes: 
+
+
 CREATE INDEX idx_fu_user_created ON followups(user_id, created_at);
 CREATE INDEX idx_fu_campaign_status ON followups(campaign_id, status);
 CREATE INDEX idx_fu_customer_instance ON followups(customer_instance_id);
 CREATE INDEX idx_fu_status ON followups(status);
 CREATE INDEX idx_fu_user_campaign ON followups(user_id, campaign_id);
 CREATE INDEX idx_users_branch ON users(branch);
-
-
 
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_customers_branch_instance')
@@ -42,10 +43,7 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_fu_campaign_customer'
     CREATE INDEX idx_fu_campaign_customer ON followups(campaign_id, customer_instance_id);
 
 
-
 CREATE INDEX idx_followups_customer_date ON followups(customer_id, followup_date DESC);
-
-
 
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_asset_detailed_instance')
@@ -61,20 +59,14 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_non_followups_status'
     CREATE INDEX idx_non_followups_status ON non_followups(status);
 
 
-
 CREATE NONCLUSTERED INDEX idx_customers_customer_name
 ON customers (customer_name);
-
 
 
 CREATE INDEX ix_customers_branch_id ON customers (branch_id);
 CREATE INDEX ix_followups_user_id ON followups (user_id);
 CREATE INDEX ix_followups_campaign_status ON followups (campaign_id, status);
 CREATE INDEX ix_users_branch_blocked ON users (branch, is_blocked);
-
-
-
-
 
 
 CREATE INDEX ix_non_followups_customer_date
@@ -104,8 +96,6 @@ CREATE NONCLUSTERED INDEX IX_letter_send_records_sent_by_id ON letter_send_recor
 
 
 
-
-
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_kb_files_folder' AND object_id=OBJECT_ID('dbo.kb_files'))
     CREATE NONCLUSTERED INDEX IX_kb_files_folder
         ON dbo.kb_files (folder_id, original_name)
@@ -123,8 +113,6 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_kb_folders_parent' AND o
 GO
 
 
-
-
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_maintenance_parts_app_cover' AND object_id=OBJECT_ID('dbo.maintenance_parts'))
     CREATE NONCLUSTERED INDEX IX_maintenance_parts_app_cover
         ON dbo.maintenance_parts (app_code_id, sort_order)
@@ -137,7 +125,6 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_maintenance_activity_cre
         ON dbo.maintenance_activity (created_at DESC, id DESC)
         INCLUDE (app_code, employee, engine_model, segment);
 GO
-
 
 
 -- TADA (Critical)
@@ -175,13 +162,9 @@ CREATE INDEX idx_sales_bm_engineer_uid ON sales_bm(engineer_uid);
 CREATE INDEX idx_sales_bm_date ON sales_bm(date);
 
 
-
-
 CREATE NONCLUSTERED INDEX IX_cust_edit_hist_deleted_customer ON dbo.customer_edit_history (is_deleted, customer_id);      -- distinct edited customers
 CREATE NONCLUSTERED INDEX IX_cust_edit_hist_customer_edited  ON dbo.customer_edit_history (customer_id, last_edited_at DESC); -- per-customer history, newest first
 CREATE NONCLUSTERED INDEX IX_cust_edit_hist_created          ON dbo.customer_edit_history (created_at);                    -- 10-day report
-
-
 
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes

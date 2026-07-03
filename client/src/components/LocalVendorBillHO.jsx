@@ -7,12 +7,12 @@ import LocalVendorBillHistoryModal from './LocalVendorBillHistoryModal';
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
 const inr = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const Spin = ({ color }) => (
+const Spin = React.memo(({ color }) => (
   <svg className="animate-spin h-6 w-6 mx-auto" style={color ? { color } : undefined} viewBox="0 0 24 24">
     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
   </svg>
-);
+));
 
 const LocalVendorBillHO = ({
   themeColor, themeShades, branchMap, branchOrder, user, canExport, exportToExcel, onOpenVendorList,
@@ -162,11 +162,23 @@ const LocalVendorBillHO = ({
     }),
     [records, tab]
   );
-  const pendingCount = records.filter(r => r.verification_status !== 'Verified' && r.verification_status !== 'Unverified').length;
-  const verifiedCount = records.filter(r => r.verification_status === 'Verified').length;
-  const unverifiedCount = records.filter(r => r.verification_status === 'Unverified').length;
-  const tabTotal = tabRecords.reduce((s, r) => s + parseFloat(r.payment_amount || 0), 0);
-  const verifiedTotal = records.filter(r => r.verification_status === 'Verified').reduce((s, r) => s + parseFloat(r.payment_amount || 0), 0);
+  const pendingCount = useMemo(
+    () => records.filter(r => r.verification_status !== 'Verified' && r.verification_status !== 'Unverified').length,
+    [records]);
+  const verifiedCount = useMemo(
+    () => records.filter(r => r.verification_status === 'Verified').length, [records]);
+  const unverifiedCount = useMemo(
+    () => records.filter(r => r.verification_status === 'Unverified').length, [records]);
+  const tabTotal = useMemo(
+    () => tabRecords.reduce((s, r) => s + parseFloat(r.payment_amount || 0), 0), [tabRecords]);
+  const verifiedTotal = useMemo(
+    () => records.filter(r => r.verification_status === 'Verified').reduce((s, r) => s + parseFloat(r.payment_amount || 0), 0),
+    [records]);
+  const groupTotals = useMemo(() => ({
+    records: visibleGroups.reduce((s, g) => s + (g.record_count || 0), 0),
+    total: visibleGroups.reduce((s, g) => s + g.total_amount, 0),
+    verified: visibleGroups.reduce((s, g) => s + g.verified_amount, 0),
+  }), [visibleGroups]);
 
   return (
     <div className="bg-white rounded-xl shadow-lg overflow-hidden">
@@ -349,9 +361,9 @@ const LocalVendorBillHO = ({
               </tbody>
               <tfoot className="sticky bottom-0"><tr style={{ backgroundColor: '#f0f1ff' }}>
                 <td colSpan={4} className="px-3 py-1.5 text-[12px] font-bold text-gray-600 text-right border-t-2 border-gray-200">Grand Total</td>
-                <td className="px-3 py-1.5 text-[12px] font-bold text-center border-t-2 border-gray-200">{visibleGroups.reduce((s, g) => s + (g.record_count || 0), 0)}</td>
-                <td className="px-3 py-1.5 text-[12px] font-bold text-center border-t-2 border-gray-200 text-blue-700">{inr(visibleGroups.reduce((s, g) => s + g.total_amount, 0))}</td>
-                <td className="px-3 py-1.5 text-[12px] font-bold text-center border-t-2 border-gray-200 text-emerald-700">{inr(visibleGroups.reduce((s, g) => s + g.verified_amount, 0))}</td>
+                <td className="px-3 py-1.5 text-[12px] font-bold text-center border-t-2 border-gray-200">{groupTotals.records}</td>
+                <td className="px-3 py-1.5 text-[12px] font-bold text-center border-t-2 border-gray-200 text-blue-700">{inr(groupTotals.total)}</td>
+                <td className="px-3 py-1.5 text-[12px] font-bold text-center border-t-2 border-gray-200 text-emerald-700">{inr(groupTotals.verified)}</td>
                 <td className="border-t-2 border-gray-200" />
               </tr></tfoot>
             </table>

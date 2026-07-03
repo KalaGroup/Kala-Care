@@ -325,6 +325,27 @@ const BranchLVB = ({
     return { total, verified };
   }, [filteredLvbDetailRecords]);
 
+  /* ─── Memoized period-table grand totals (same math as before) ─── */
+  const filteredLvbPeriodTotals = useMemo(() => ({
+    records: filteredLvbPeriodGroups.reduce((s, g) => s + g.records.length, 0),
+    total: filteredLvbPeriodGroups.reduce((s, g) => s + g.totalAmount, 0),
+    verified: filteredLvbPeriodGroups.reduce((s, g) => s + g.verifiedAmount, 0),
+  }), [filteredLvbPeriodGroups]);
+
+  /* ─── Memoized drafts table sort + selection count (same math as before) ─── */
+  const sortedLvbTempDrafts = useMemo(
+    () => [...lvbTempDrafts].sort((a, b) => new Date(a.invoice_date || 0) - new Date(b.invoice_date || 0)),
+    [lvbTempDrafts]);
+  const lvbTempSelectedCount = useMemo(
+    () => Object.values(lvbTempSelected).filter(Boolean).length, [lvbTempSelected]);
+
+  /* ─── Memoized detail vendor options (same math as before) ─── */
+  const lvbDetailVendorOptions = useMemo(
+    () => selectedLvbPeriod
+      ? Array.from(new Set(selectedLvbPeriod.records.map(r => r.vendor_name).filter(Boolean))).sort()
+      : [],
+    [selectedLvbPeriod]);
+
   useEffect(() => {
     setLvbDetailSearch('');
     setLvbDetailVendor('');
@@ -1115,14 +1136,14 @@ const BranchLVB = ({
               )}
               <button
                 onClick={handleSubmitLvbTempToMain}
-                disabled={submittingLvbTemp || (!isAdmin && !isUploadAllowed()) || Object.values(lvbTempSelected).filter(Boolean).length === 0}
+                disabled={submittingLvbTemp || (!isAdmin && !isUploadAllowed()) || lvbTempSelectedCount === 0}
                 className="px-3 py-1.5 text-white text-[10px] font-bold rounded-lg disabled:opacity-40 flex items-center gap-1"
                 style={{ background: 'linear-gradient(135deg, #ea580c, #b91c1c)' }}
                 title={!isAdmin && !isUploadAllowed() ? getUploadRestrictionMessage() : ''}
               >
                 {submittingLvbTemp
                   ? <><svg className="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Submitting...</>
-                  : `Submit Selected (${Object.values(lvbTempSelected).filter(Boolean).length})`}
+                  : `Submit Selected (${lvbTempSelectedCount})`}
               </button>
             </div>
           </div>
@@ -1161,7 +1182,7 @@ const BranchLVB = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {[...lvbTempDrafts].sort((a, b) => new Date(a.invoice_date || 0) - new Date(b.invoice_date || 0)).map((d, idx) => {
+                  {sortedLvbTempDrafts.map((d, idx) => {
                     const isEditing = lvbTempEditingId === d.id;
                     return (
                       <tr key={d.id} className="hover:bg-blue-50/30" style={{ height: '34px' }}>
@@ -1303,10 +1324,10 @@ const BranchLVB = ({
                     );
                   })()}
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-semibold whitespace-nowrap">
-                    Grand Total: ₹{filteredLvbPeriodGroups.reduce((s, g) => s + g.totalAmount, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    Grand Total: ₹{filteredLvbPeriodTotals.total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold whitespace-nowrap">
-                    Verified: ₹{filteredLvbPeriodGroups.reduce((s, g) => s + g.verifiedAmount, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    Verified: ₹{filteredLvbPeriodTotals.verified.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100 font-semibold whitespace-nowrap">
                     Rule: {submitRule?.rule_type === 'weekdays' ? 'Weekly periods' : '15-day periods'}
@@ -1459,9 +1480,7 @@ const BranchLVB = ({
                   className="px-2 py-1 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
                 >
                   <option value="">All Vendors</option>
-                  {Array.from(new Set(selectedLvbPeriod.records.map(r => r.vendor_name).filter(Boolean)))
-                    .sort()
-                    .map(v => <option key={v} value={v}>{v}</option>)}
+                  {lvbDetailVendorOptions.map(v => <option key={v} value={v}>{v}</option>)}
                 </select>
 
                 <label
@@ -1675,13 +1694,13 @@ const BranchLVB = ({
                       Grand Total ({filteredLvbPeriodGroups.length} period{filteredLvbPeriodGroups.length === 1 ? '' : 's'})
                     </td>
                     <td className="px-3 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200">
-                      {filteredLvbPeriodGroups.reduce((s, g) => s + g.records.length, 0)}
+                      {filteredLvbPeriodTotals.records}
                     </td>
                     <td className="px-3 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200 text-blue-700 whitespace-nowrap">
-                      ₹{filteredLvbPeriodGroups.reduce((s, g) => s + g.totalAmount, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ₹{filteredLvbPeriodTotals.total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td className="px-3 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200 text-emerald-700 whitespace-nowrap">
-                      ₹{filteredLvbPeriodGroups.reduce((s, g) => s + g.verifiedAmount, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ₹{filteredLvbPeriodTotals.verified.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                   </tr>
                 </tfoot>

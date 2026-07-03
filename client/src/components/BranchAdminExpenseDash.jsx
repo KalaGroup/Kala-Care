@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 import { Bar, Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -87,8 +88,14 @@ const VENDOR_CONFIG = {
   groupedXLabel: 'Vendor',
 };
 
+// Best-effort user id for warm-cache keys only (never throws).
+const getWarmUserId = () => {
+  try { return JSON.parse(sessionStorage.getItem('user') || '{}')?.user_id || ''; }
+  catch { return ''; }
+};
+
 const BranchAdminExpenseDash = ({ branchCode: propBranchCode }) => {
-  const user = JSON.parse(sessionStorage.getItem('user') || '{}');
+  const user = useMemo(() => JSON.parse(sessionStorage.getItem('user') || '{}'), []);
   const branchCode = propBranchCode || user?.branch || '';
   const branchName = BRANCH_MAP[branchCode] || branchCode || 'No Branch';
 
@@ -201,6 +208,11 @@ const BranchTadaSection = ({ branchCode, branchName }) => {
   };
 
   const loadEngVerified = async (df = dateFrom, dt = dateTo) => {
+    const cacheKey = warmKey('branch-dash:tada:eng-verified', {
+      userId: getWarmUserId(), branch: branchCode, df: df || '', dt: dt || '',
+    });
+    const warm = readWarmCache(cacheKey);
+    if (warm) setEngVerified(prev => (prev && prev.length ? prev : warm));
     setLoadingEngVerified(true);
     try {
       const params = { branch_code: branchCode };
@@ -210,6 +222,7 @@ const BranchTadaSection = ({ branchCode, branchName }) => {
         `${API_BASE_URL}/branch-expense-dash/engineers-verified`, { params }
       );
       setEngVerified(data || []);
+      writeWarmCache(cacheKey, data || []);
     } catch (e) {
       console.error(e); toast.error('Failed to load engineer-wise verified data');
     } finally { setLoadingEngVerified(false); }
@@ -229,6 +242,11 @@ const BranchTadaSection = ({ branchCode, branchName }) => {
   };
 
   const loadMonthly = async (year) => {
+    const cacheKey = warmKey('branch-dash:tada:monthly', {
+      userId: getWarmUserId(), branch: branchCode, year,
+    });
+    const warm = readWarmCache(cacheKey);
+    if (warm) setMonthlyData(prev => (prev && prev.length ? prev : warm));
     setLoadingMonthly(true);
     try {
       const { data } = await axios.get(
@@ -236,6 +254,7 @@ const BranchTadaSection = ({ branchCode, branchName }) => {
         { params: { branch_code: branchCode, year } }
       );
       setMonthlyData(data || []);
+      writeWarmCache(cacheKey, data || []);
     } catch (e) {
       console.error(e); toast.error('Failed to load monthly trend');
     } finally { setLoadingMonthly(false); }
@@ -275,10 +294,11 @@ const BranchTadaSection = ({ branchCode, branchName }) => {
   const monthlyTotal = useMemo(
     () => monthlyData.reduce((s, x) => s + Number(x.total_amount || 0), 0), [monthlyData]);
 
-  const monthlyChart = buildMonthlyChart(monthlyData);
-  const monthlyOptions = buildMonthlyOptions(monthlyData, selectedYear);
+  const monthlyChart = useMemo(() => buildMonthlyChart(monthlyData), [monthlyData]);
+  const monthlyOptions = useMemo(
+    () => buildMonthlyOptions(monthlyData, selectedYear), [monthlyData, selectedYear]);
 
-  const engVerifiedChart = {
+  const engVerifiedChart = useMemo(() => ({
     labels: engVerified.map(d => d.engineer_name),
     datasets: [{
       label: 'Verified Amount',
@@ -287,10 +307,11 @@ const BranchTadaSection = ({ branchCode, branchName }) => {
       backgroundColor: 'rgba(47, 49, 146, 0.85)', borderColor: themeColor,
       borderWidth: 2, borderRadius: 6, barPercentage: 0.7, categoryPercentage: 0.8,
     }],
-  };
-  const engVerifiedOptions = buildBarOptionsWithCount(engVerified, 'engineer_uid');
+  }), [engVerified]);
+  const engVerifiedOptions = useMemo(
+    () => buildBarOptionsWithCount(engVerified, 'engineer_uid'), [engVerified]);
 
-  const engUnverifiedChart = {
+  const engUnverifiedChart = useMemo(() => ({
     labels: engUnverified.map(d => d.engineer_name),
     datasets: [
       {
@@ -309,8 +330,9 @@ const BranchTadaSection = ({ branchCode, branchName }) => {
         tension: 0.35, fill: false, yAxisID: 'y1', order: 1,
       },
     ],
-  };
-  const engUnverifiedOptions = buildUnverifiedOptions(engUnverified, 'engineer_uid');
+  }), [engUnverified]);
+  const engUnverifiedOptions = useMemo(
+    () => buildUnverifiedOptions(engUnverified, 'engineer_uid'), [engUnverified]);
 
   return (
     <div className="space-y-5">
@@ -412,6 +434,11 @@ const BranchSimpleSection = ({ branchCode, branchName, config }) => {
   };
 
   const loadGrouped = async (df = dateFrom, dt = dateTo) => {
+    const cacheKey = warmKey(`branch-dash:grouped:${config.endpoints.grouped}`, {
+      userId: getWarmUserId(), branch: branchCode, df: df || '', dt: dt || '',
+    });
+    const warm = readWarmCache(cacheKey);
+    if (warm) setGroupedData(prev => (prev && prev.length ? prev : warm));
     setLoadingGrouped(true);
     try {
       const params = { branch_code: branchCode };
@@ -419,18 +446,25 @@ const BranchSimpleSection = ({ branchCode, branchName, config }) => {
       if (dt) params.date_to   = dt;
       const { data } = await axios.get(`${API_BASE_URL}${config.endpoints.grouped}`, { params });
       setGroupedData(data || []);
+      writeWarmCache(cacheKey, data || []);
     } catch (e) {
       console.error(e); toast.error('Failed to load verified data');
     } finally { setLoadingGrouped(false); }
   };
 
   const loadMonthly = async (year) => {
+    const cacheKey = warmKey(`branch-dash:monthly:${config.endpoints.monthly}`, {
+      userId: getWarmUserId(), branch: branchCode, year,
+    });
+    const warm = readWarmCache(cacheKey);
+    if (warm) setMonthlyData(prev => (prev && prev.length ? prev : warm));
     setLoadingMonthly(true);
     try {
       const { data } = await axios.get(`${API_BASE_URL}${config.endpoints.monthly}`, {
         params: { branch_code: branchCode, year },
       });
       setMonthlyData(data || []);
+      writeWarmCache(cacheKey, data || []);
     } catch (e) {
       console.error(e); toast.error('Failed to load monthly trend');
     } finally { setLoadingMonthly(false); }
@@ -465,7 +499,7 @@ const BranchSimpleSection = ({ branchCode, branchName, config }) => {
   const monthlyTotal = useMemo(
     () => monthlyData.reduce((s, x) => s + Number(x.total_amount || 0), 0), [monthlyData]);
 
-  const groupedChart = {
+  const groupedChart = useMemo(() => ({
     labels: groupedData.map(d => d[config.groupKey]),
     datasets: [{
       label: 'Verified Amount',
@@ -474,11 +508,13 @@ const BranchSimpleSection = ({ branchCode, branchName, config }) => {
       backgroundColor: 'rgba(47, 49, 146, 0.85)', borderColor: themeColor,
       borderWidth: 2, borderRadius: 6, barPercentage: 0.7, categoryPercentage: 0.8,
     }],
-  };
-  const groupedOptions = buildBarOptionsWithCount(groupedData, null, config.groupKey);
+  }), [groupedData, config]);
+  const groupedOptions = useMemo(
+    () => buildBarOptionsWithCount(groupedData, null, config.groupKey), [groupedData, config]);
 
-  const monthlyChart = buildMonthlyChart(monthlyData);
-  const monthlyOptions = buildMonthlyOptions(monthlyData, selectedYear);
+  const monthlyChart = useMemo(() => buildMonthlyChart(monthlyData), [monthlyData]);
+  const monthlyOptions = useMemo(
+    () => buildMonthlyOptions(monthlyData, selectedYear), [monthlyData, selectedYear]);
 
   return (
     <div className="space-y-5">
@@ -676,7 +712,7 @@ function buildUnverifiedOptions(rows, uidKey) {
 /* ════════════════════════════════════════════════════════════════
    Reusable bits
    ════════════════════════════════════════════════════════════════ */
-const KpiStrip = ({ kpis }) => (
+const KpiStrip = React.memo(({ kpis }) => (
   <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
     <KpiCard label="Verified Records"
       value={(kpis.total_verified_count || 0).toLocaleString('en-IN')} tone="theme" />
@@ -687,9 +723,9 @@ const KpiStrip = ({ kpis }) => (
     <KpiCard label="Pending Amount"
       value={formatINRCompact(kpis.total_unverified_amount)} tone="pending" />
   </div>
-);
+));
 
-const KpiCard = ({ label, value, tone = 'theme' }) => {
+const KpiCard = React.memo(({ label, value, tone = 'theme' }) => {
   const colors = tone === 'pending'
     ? { bg: 'rgba(245, 158, 11, 0.08)', border: 'rgba(245, 158, 11, 0.3)', text: pendingDark }
     : { bg: 'rgba(47, 49, 146, 0.05)', border: 'rgba(47, 49, 146, 0.2)', text: themeColor };
@@ -700,7 +736,7 @@ const KpiCard = ({ label, value, tone = 'theme' }) => {
       <p className="text-base sm:text-lg font-bold" style={{ color: colors.text }}>{value}</p>
     </div>
   );
-};
+});
 
 const ChartCard = ({ title, subtitle, rightSlot, children }) => (
   <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg p-5 border border-gray-100 max-md:p-3">
@@ -774,16 +810,16 @@ const RefreshSlot = ({ onRefresh, chips }) => (
   </>
 );
 
-const ChartLoader = () => (
+const ChartLoader = React.memo(() => (
   <div className="h-full flex flex-col items-center justify-center">
     <div className="w-10 h-10 border-3 border-t-3 rounded-full animate-spin"
       style={{ borderColor: '#e5e7eb', borderTopColor: themeColor, borderWidth: '3px' }}></div>
     <p className="mt-3 text-sm text-gray-500">Loading chart…</p>
   </div>
-);
+));
 
-const ChartEmpty = ({ msg }) => (
+const ChartEmpty = React.memo(({ msg }) => (
   <div className="h-full flex items-center justify-center text-xs text-gray-500">{msg}</div>
-);
+));
 
 export default BranchAdminExpenseDash;

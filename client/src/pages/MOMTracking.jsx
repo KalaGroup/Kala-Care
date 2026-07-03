@@ -317,33 +317,33 @@ function exportMeetingExcel(m) {
 /* ============================================================
    SMALL UI PIECES
    ============================================================ */
-const StatusBadge = ({ r }) => {
+const StatusBadge = React.memo(({ r }) => {
   if (r.flag !== 'T') return <span className="fs-10 text-gray-300">—</span>;
   const s = STATUS[effStatus(r)];
   return <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 fs-10 font-semibold" style={{ background: s.soft, color: s.color }}>
     <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.color }} />{s.label}</span>;
-};
-const FlagChip = ({ f, small }) => (
+});
+const FlagChip = React.memo(({ f, small }) => (
   <span className={`inline-flex items-center gap-1 rounded font-bold ${small ? 'px-1.5 py-0.5 fs-9' : 'px-2 py-0.5 fs-10'}`} style={{ background: FLAG[f].bg, color: FLAG[f].color }}>
     <span className="font-black">{f}</span>{!small && FLAG[f].label}
   </span>
-);
-const SourceBadge = ({ source }) => source === 'manual'
+));
+const SourceBadge = React.memo(({ source }) => source === 'manual'
   ? <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }}><UserPlus size={9} /> Manually added</span>
-  : <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: BRAND }}><User size={9} /> Employee</span>;
-const CatDot = ({ color, title }) => <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ background: color || '#94a3b8' }} title={title} />;
+  : <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: BRAND }}><User size={9} /> Employee</span>);
+const CatDot = React.memo(({ color, title }) => <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ background: color || '#94a3b8' }} title={title} />);
 /* initials avatar — deterministic colour per name */
 const AVATAR_HUES = ['#2f3192', '#0d9488', '#d97706', '#7c3aed', '#0ea5e9', '#e11d48', '#059669', '#b45309'];
-const Avatar = ({ name, size = 22 }) => {
+const Avatar = React.memo(({ name, size = 22 }) => {
   const c = AVATAR_HUES[(name || '?').split('').reduce((a, ch) => a + ch.charCodeAt(0), 0) % AVATAR_HUES.length];
   const init = (name || '?').trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
   return <span className="rounded-full flex items-center justify-center font-bold text-white flex-shrink-0" style={{ width: size, height: size, fontSize: Math.max(8, size * 0.42), background: c }}>{init}</span>;
-};
-const Bar2 = ({ v }) => (
+});
+const Bar2 = React.memo(({ v }) => (
   <div className="h-1.5 w-full rounded-full overflow-hidden" style={{ background: '#eef0f3' }}>
     <div className="h-full rounded-full" style={{ width: `${v}%`, background: v >= 80 ? '#059669' : v >= 40 ? '#d97706' : '#dc2626', transition: 'width .3s' }} />
   </div>
-);
+));
 /* T / I toggle used inside the sheet */
 const FlagToggle = ({ value, onChange }) => (
   <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden">
@@ -365,7 +365,7 @@ const SegStatus = ({ value, onChange }) => (
   </div>
 );
 /* legend card — mirrors the "Action Flag" box on the sheet */
-const FlagLegend = () => (
+const FlagLegend = React.memo(() => (
   <div className="rounded-xl border border-gray-200 bg-white p-3">
     <div className="fs-10 font-bold text-gray-500 uppercase tracking-wide mb-1.5 flex items-center gap-1"><Flag size={11} /> Action Flag</div>
     <div className="space-y-1">
@@ -373,9 +373,9 @@ const FlagLegend = () => (
       <div className="flex items-center gap-2 fs-11"><FlagChip f="I" small /><span className="text-gray-600">Information — shared for awareness only</span></div>
     </div>
   </div>
-);
+));
 /* previous remarks chips (the accumulating "Remarks - date" columns) */
-const RemarkHistory = ({ list }) => !list?.length ? <span className="fs-10 text-gray-300">—</span> : (
+const RemarkHistory = React.memo(({ list }) => !list?.length ? <span className="fs-10 text-gray-300">—</span> : (
   <div className="space-y-1">
     {list.map((p, i) => (
       <div key={i} className="fs-10 leading-snug">
@@ -384,9 +384,9 @@ const RemarkHistory = ({ list }) => !list?.length ? <span className="fs-10 text-
       </div>
     ))}
   </div>
-);
+));
 
-const FontScale = () => <style>{`@keyframes livedot{0%,100%{opacity:1}50%{opacity:.35}} @keyframes pop{0%{transform:scale(.4)}70%{transform:scale(1.2)}100%{transform:scale(1)}} .kc-pop{animation:pop .18s ease-out} .kc-lift{transition:transform .15s ease,box-shadow .15s ease} .kc-lift:hover{transform:translateY(-1px);box-shadow:0 10px 22px -10px rgba(35,37,95,.35)} .kc-input{background:#f7f8fc;border:1.5px solid #e6e9f0;border-radius:10px;transition:border-color .15s,box-shadow .15s,background .15s} .kc-input:focus,.kc-input:focus-within{background:#fff;border-color:#2f3192;box-shadow:0 0 0 3px rgba(47,49,146,.10);outline:none} .kc-grid{background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px),repeating-linear-gradient(90deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px)} .kc-scroll::-webkit-scrollbar{height:6px;width:6px} .kc-scroll::-webkit-scrollbar-thumb{background:#d5d9e6;border-radius:8px} .kc-scroll::-webkit-scrollbar-thumb:hover{background:#bfc5d8} .kc-scroll::-webkit-scrollbar-track{background:transparent} .fs-9{font-size:9px;line-height:1.3} .fs-10{font-size:10px;line-height:1.35} .fs-11{font-size:11px;line-height:1.4} .fs-12{font-size:12px;line-height:1.45} .fs-13{font-size:13px;line-height:1.45} .mom-sheet td,.mom-sheet th{border:1px solid #e2e8f0} .mom-sheet input,.mom-sheet select,.mom-sheet textarea{background:transparent;border-radius:6px;transition:box-shadow .12s,background .12s} .mom-sheet input:hover,.mom-sheet select:hover,.mom-sheet textarea:hover{background:#f6f8fc} .mom-sheet input:focus,.mom-sheet select:focus,.mom-sheet textarea:focus{background:#fff;box-shadow:inset 0 0 0 1.5px ${BRAND}55} .mom-sheet tbody tr:nth-child(even){background:#fbfcfe} .mom-sheet tbody tr:hover{background:#f2f6ff} .mom-sheet .no-ring:focus{box-shadow:none;background:#fff}`}</style>;
+const FontScale = React.memo(() => <style>{`@keyframes livedot{0%,100%{opacity:1}50%{opacity:.35}} @keyframes pop{0%{transform:scale(.4)}70%{transform:scale(1.2)}100%{transform:scale(1)}} .kc-pop{animation:pop .18s ease-out} .kc-lift{transition:transform .15s ease,box-shadow .15s ease} .kc-lift:hover{transform:translateY(-1px);box-shadow:0 10px 22px -10px rgba(35,37,95,.35)} .kc-input{background:#f7f8fc;border:1.5px solid #e6e9f0;border-radius:10px;transition:border-color .15s,box-shadow .15s,background .15s} .kc-input:focus,.kc-input:focus-within{background:#fff;border-color:#2f3192;box-shadow:0 0 0 3px rgba(47,49,146,.10);outline:none} .kc-grid{background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px),repeating-linear-gradient(90deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px)} .kc-scroll::-webkit-scrollbar{height:6px;width:6px} .kc-scroll::-webkit-scrollbar-thumb{background:#d5d9e6;border-radius:8px} .kc-scroll::-webkit-scrollbar-thumb:hover{background:#bfc5d8} .kc-scroll::-webkit-scrollbar-track{background:transparent} .fs-9{font-size:9px;line-height:1.3} .fs-10{font-size:10px;line-height:1.35} .fs-11{font-size:11px;line-height:1.4} .fs-12{font-size:12px;line-height:1.45} .fs-13{font-size:13px;line-height:1.45} .mom-sheet td,.mom-sheet th{border:1px solid #e2e8f0} .mom-sheet input,.mom-sheet select,.mom-sheet textarea{background:transparent;border-radius:6px;transition:box-shadow .12s,background .12s} .mom-sheet input:hover,.mom-sheet select:hover,.mom-sheet textarea:hover{background:#f6f8fc} .mom-sheet input:focus,.mom-sheet select:focus,.mom-sheet textarea:focus{background:#fff;box-shadow:inset 0 0 0 1.5px ${BRAND}55} .mom-sheet tbody tr:nth-child(even){background:#fbfcfe} .mom-sheet tbody tr:hover{background:#f2f6ff} .mom-sheet .no-ring:focus{box-shadow:none;background:#fff}`}</style>);
 
 /* ============================================================
    MAIN COMPONENT
@@ -565,7 +565,7 @@ export default function MOMTracking() {
   };
 
   /* ---------- Step-2 (sheet) actions ---------- */
-  const presentNames = attendees.filter((a) => a.present).map((a) => a.name);
+  const presentNames = useMemo(() => attendees.filter((a) => a.present).map((a) => a.name), [attendees]);
   const ATT_PREVIEW = 6;                                   // chips shown before "+N more"
   const attPreview = showAllAtt ? attendees : attendees.slice(0, ATT_PREVIEW);
   const attHidden = Math.max(0, attendees.length - ATT_PREVIEW);
@@ -594,10 +594,12 @@ export default function MOMTracking() {
   };
   const updCarry = (id, patch) => setCarry((p) => p.map((c) => c.id === id ? { ...c, ...patch } : c));
 
-  const taskCount = rows.filter((r) => r.flag === 'T').length + carry.filter((c) => c.status !== 'completed').length;
-  const infoCount = rows.filter((r) => r.flag === 'I' && (r.point.trim() || r.remark.trim())).length;
-  const blankCount = rows.filter((r) => r.flag === 'I' && !r.point.trim() && !r.remark.trim() && !r.resp).length;
-  const unassigned = rows.filter((r) => r.flag === 'T' && !r.resp).length;
+  const { taskCount, infoCount, blankCount, unassigned } = useMemo(() => ({
+    taskCount: rows.filter((r) => r.flag === 'T').length + carry.filter((c) => c.status !== 'completed').length,
+    infoCount: rows.filter((r) => r.flag === 'I' && (r.point.trim() || r.remark.trim())).length,
+    blankCount: rows.filter((r) => r.flag === 'I' && !r.point.trim() && !r.remark.trim() && !r.resp).length,
+    unassigned: rows.filter((r) => r.flag === 'T' && !r.resp).length,
+  }), [rows, carry]);
 
   const finalize = () => {
     if (unassigned) return ping(`${unassigned} Task row(s) have no Responsibility — assign or switch them to "I"`, 'err');
@@ -1212,8 +1214,11 @@ export default function MOMTracking() {
 function MeetingSheetModal({ data, categories, canExport, onClose }) {
   const [showAll, setShowAll] = useState(false);
   const catColor = (n) => (categories && categories[n]) || '#94a3b8';
-  const present = data.attendees.filter((a) => a.present);
-  const ordered = [...data.rows.filter((r) => r.carried), ...data.rows.filter((r) => !r.carried)];
+  const present = useMemo(() => data.attendees.filter((a) => a.present), [data]);
+  const ordered = useMemo(
+    () => [...data.rows.filter((r) => r.carried), ...data.rows.filter((r) => !r.carried)],
+    [data],
+  );
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col" style={{ maxHeight: '92vh' }} onClick={(e) => e.stopPropagation()}>

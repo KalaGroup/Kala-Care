@@ -59,7 +59,9 @@ const getLatestFollowupsPerInstanceCampaign = (followups) => {
 
 /* ─── sub-components ──────────────────────────────────────── */
 
-const StatBadge = ({ status, count }) => {
+// React.memo: props are primitives (status, count), so rows whose badge values
+// haven't changed skip re-rendering this subtree on every parent re-render.
+const StatBadge = React.memo(({ status, count }) => {
     const cfg = STATUS_CONFIG[status] || { label: status, color: '#374151', bg: '#f3f4f6', short: status };
     return (
         <span
@@ -69,7 +71,7 @@ const StatBadge = ({ status, count }) => {
             <span className="font-bold">{cfg.short}:</span> {count}
         </span>
     );
-};
+});
 
 /* ─── main component ──────────────────────────────────────── */
 
@@ -252,6 +254,30 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
         });
     }, [latestAssets, assetsCampaignFilter, assetsStatusFilter, debouncedAssetsSearch, uniqueCampaignsInAssets]);
 
+    /* ── sorting (memoized — recompute only when data / search / sort change) ── */
+    const sorted = useMemo(() => [...campaigns]
+        .filter(c =>
+            c.campaign_name.toLowerCase().includes(search.toLowerCase()) ||
+            c.service.toLowerCase().includes(search.toLowerCase())
+        )
+        .sort((a, b) => {
+            const av = a[sortKey] ?? 0;
+            const bv = b[sortKey] ?? 0;
+            if (typeof av === 'string') return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+            return sortDir === 'asc' ? av - bv : bv - av;
+        }), [campaigns, search, sortKey, sortDir]);
+
+    /* ── summary totals (memoized — recompute only when data changes) ── */
+    const totals = useMemo(() => campaigns.reduce((acc, c) => ({
+        unique: acc.unique + c.total_unique_customers,
+        followups: acc.followups + c.total_followups,
+        completed: acc.completed + c.completed,
+        wip: acc.wip + c.wip,
+        rescheduled: acc.rescheduled + c.rescheduled,
+        rejected: acc.rejected + c.rejected,
+        not_connected: acc.not_connected + (c.not_connected || 0),
+    }), { unique: 0, followups: 0, completed: 0, wip: 0, rescheduled: 0, rejected: 0, not_connected: 0 }), [campaigns]);
+
     if (!isOpen) return null;
 
     /* ── quick-mode helpers ── */
@@ -333,29 +359,6 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
             {sortKey === col ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
         </span>
     );
-
-    const sorted = [...campaigns]
-        .filter(c =>
-            c.campaign_name.toLowerCase().includes(search.toLowerCase()) ||
-            c.service.toLowerCase().includes(search.toLowerCase())
-        )
-        .sort((a, b) => {
-            const av = a[sortKey] ?? 0;
-            const bv = b[sortKey] ?? 0;
-            if (typeof av === 'string') return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-            return sortDir === 'asc' ? av - bv : bv - av;
-        });
-
-    /* ── summary totals ── */
-    const totals = campaigns.reduce((acc, c) => ({
-        unique: acc.unique + c.total_unique_customers,
-        followups: acc.followups + c.total_followups,
-        completed: acc.completed + c.completed,
-        wip: acc.wip + c.wip,
-        rescheduled: acc.rescheduled + c.rescheduled,
-        rejected: acc.rejected + c.rejected,
-        not_connected: acc.not_connected + (c.not_connected || 0),
-    }), { unique: 0, followups: 0, completed: 0, wip: 0, rescheduled: 0, rejected: 0, not_connected: 0 });
 
     /* ── period label ── */
     const periodLabel = () => {

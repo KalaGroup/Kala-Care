@@ -7,6 +7,44 @@ import { FaEye, FaEyeSlash } from "react-icons/fa";
 const themeColor = '#2f3192';
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
 
+// Static CSS hoisted to module scope so the big template string isn't rebuilt
+// on every keystroke re-render of the form.
+const LOGIN_STYLES = `
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+    .animate-fadeIn { animation: fadeIn 0.8s ease-out; }
+
+    @keyframes slideUp {
+        from { opacity: 0; transform: translateY(30px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-slideUp { animation: slideUp 0.6s ease-out; }
+
+    @keyframes ripple {
+        0% { transform: scale(0); opacity: 0.5; }
+        100% { transform: scale(4); opacity: 0; }
+    }
+    .animate-ripple { animation: ripple 0.6s ease-out; }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f1f1; }
+    ::-webkit-scrollbar-thumb { background: ${themeColor}; border-radius: 10px; }
+
+    @media (max-width: 480px) {
+        .break-words { word-break: break-word; }
+    }
+
+    /* Stop animations during screen share / when user prefers reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            transition-duration: 0.01ms !important;
+        }
+    }
+`;
+
 const Login = () => {
     const [currentSlide, setCurrentSlide] = useState(0);
     const [rippleEffect, setRippleEffect] = useState(false);
@@ -299,7 +337,8 @@ const Login = () => {
                                             src={img}
                                             alt={`Slide ${index + 1}`}
                                             className="relative w-full h-full object-contain transition-transform duration-700"
-                                            loading="eager"
+                                            loading={index === 0 ? 'eager' : 'lazy'}
+                                            decoding="async"
                                         />
                                     </div>
                                 </div>
@@ -462,41 +501,7 @@ const Login = () => {
                 </div>
             </div>
 
-            <style jsx>{`
-    @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
-    }
-    .animate-fadeIn { animation: fadeIn 0.8s ease-out; }
-
-    @keyframes slideUp {
-        from { opacity: 0; transform: translateY(30px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-    .animate-slideUp { animation: slideUp 0.6s ease-out; }
-
-    @keyframes ripple {
-        0% { transform: scale(0); opacity: 0.5; }
-        100% { transform: scale(4); opacity: 0; }
-    }
-    .animate-ripple { animation: ripple 0.6s ease-out; }
-
-    ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-track { background: #f1f1f1; }
-    ::-webkit-scrollbar-thumb { background: ${themeColor}; border-radius: 10px; }
-
-    @media (max-width: 480px) {
-        .break-words { word-break: break-word; }
-    }
-
-    /* Stop animations during screen share / when user prefers reduced motion */
-    @media (prefers-reduced-motion: reduce) {
-        *, *::before, *::after {
-            animation-duration: 0.01ms !important;
-            transition-duration: 0.01ms !important;
-        }
-    }
-`}</style>
+            <style jsx>{LOGIN_STYLES}</style>
         </div>
     );
 };

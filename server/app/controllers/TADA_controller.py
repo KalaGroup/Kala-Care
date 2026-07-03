@@ -183,11 +183,23 @@ def get_branch_km_rate(db: Session, branch_code: str) -> Optional[BranchKMRate]:
     return db.query(BranchKMRate).filter(BranchKMRate.branch_code == branch_code).first()
 
 
+def _get_branch_km_rate_cached(db: Session, branch_code, cache: Optional[Dict] = None):
+    """get_branch_km_rate with an optional per-call memo.
+    BranchKMRate is a static config table that is not modified while a file is
+    being processed, so repeated lookups for the same branch are identical."""
+    if cache is None:
+        return get_branch_km_rate(db, branch_code)
+    if branch_code not in cache:
+        cache[branch_code] = get_branch_km_rate(db, branch_code)
+    return cache[branch_code]
+
+
 def find_branch_for_engineer(
     db: Session,
     engineer_uid: str,
     current_branch_code: str,
     file_branch_hints: Optional[List[str]] = None,
+    _rate_cache: Optional[Dict] = None,
 ) -> str:
     """
     Resolve the correct branch for an engineer when the row's branch
@@ -216,7 +228,7 @@ def find_branch_for_engineer(
         branch_votes.extend([r.sd_branch_code for r in engineer_records if r.sd_branch_code])
 
     # Keep only branches that actually exist in BranchKMRate
-    valid_votes = [b for b in branch_votes if get_branch_km_rate(db, b)]
+    valid_votes = [b for b in branch_votes if _get_branch_km_rate_cached(db, b, _rate_cache)]
 
     if valid_votes:
         # Majority wins (Counter.most_common returns highest count first)
@@ -267,6 +279,8 @@ def update_record_calculations(
     record,
     file_branch_hints: Optional[List[str]] = None,
     sr_count: int = 1,
+    _rate_cache: Optional[Dict] = None,
+    _engineer_branch_cache: Optional[Dict] = None,
 ) -> bool:
     """
     Update calculated fields for a single record:
@@ -291,15 +305,24 @@ def update_record_calculations(
 
     # 2. Resolve branch (fall back to engineer's majority branch / HO if unconfigured)
     branch_code_to_use = record.sd_branch_code
-    branch_rate = get_branch_km_rate(db, branch_code_to_use)
+    branch_rate = _get_branch_km_rate_cached(db, branch_code_to_use, _rate_cache)
     if not branch_has_rates(branch_rate) and record.service_engineer_uid:
-        corrected = find_branch_for_engineer(
-            db, record.service_engineer_uid, branch_code_to_use,
-            file_branch_hints=file_branch_hints,
-        )
+        # _engineer_branch_cache is only valid when the caller guarantees that
+        # file_branch_hints is constant per engineer uid (process_tada_file does).
+        uid = record.service_engineer_uid
+        if _engineer_branch_cache is not None and uid in _engineer_branch_cache:
+            corrected = _engineer_branch_cache[uid]
+        else:
+            corrected = find_branch_for_engineer(
+                db, uid, branch_code_to_use,
+                file_branch_hints=file_branch_hints,
+                _rate_cache=_rate_cache,
+            )
+            if _engineer_branch_cache is not None:
+                _engineer_branch_cache[uid] = corrected
         if corrected != branch_code_to_use:
             branch_code_to_use = corrected
-            branch_rate = get_branch_km_rate(db, branch_code_to_use)
+            branch_rate = _get_branch_km_rate_cached(db, branch_code_to_use, _rate_cache)
 
     # 3. Effective KM = two_way_km at branch stage
     eff_km = None
@@ -358,6 +381,7 @@ def process_tada_file(db: Session, file_path: str, branch_code: str, uploaded_by
 
     engineer_file_branches: Dict[str, List[str]] = defaultdict(list)
     engineer_day_sr_count: Dict[Tuple[str, str], int] = defaultdict(int)
+    file_appointment_numbers = set()
     for _, r in df.iterrows():
         eng_uid = parse_as_string(r.get("Service Engineer UID"))
         br_code = parse_as_string(r.get("SD Branch Code"))
@@ -366,6 +390,48 @@ def process_tada_file(db: Session, file_path: str, branch_code: str, uploaded_by
         dkey = reach_date_key(r.get("SR Reach at Site Date & Time"))
         if eng_uid and dkey:
             engineer_day_sr_count[(eng_uid, dkey)] += 1
+        appt = parse_as_string(r.get("Appointment Number"))
+        if appt:
+            file_appointment_numbers.add(appt)
+
+    # ── Batched duplicate-check fast path ────────────────────────────────
+    # Previously each row ran up to 3 existence queries (main / history / temp).
+    # Prefetch the (appointment_number, task_start_date, service_engineer_name)
+    # triples already stored for this file's appointment numbers, chunked at
+    # 1000 IN-parameters (MSSQL caps at 2100). An exact in-memory match means
+    # the per-row query would certainly find a row, so it can be skipped; on a
+    # miss the original per-row query still runs, so behaviour is identical in
+    # every case (collation, NULLs, trailing spaces, concurrent edits).
+    def _prefetch_existing_triples(model, extra_criterion=None):
+        triples = set()
+        appts = list(file_appointment_numbers)
+        for i in range(0, len(appts), 1000):
+            chunk = appts[i:i + 1000]
+            q = db.query(
+                model.appointment_number,
+                model.task_start_date,
+                model.service_engineer_name,
+            ).filter(model.appointment_number.in_(chunk))
+            if extra_criterion is not None:
+                q = q.filter(extra_criterion)
+            for appt_no, tsd, eng_name in q.all():
+                triples.add((appt_no, tsd, eng_name))
+        return triples
+
+    main_triples = _prefetch_existing_triples(models.TADAImport)
+    history_triples = _prefetch_existing_triples(TADAHistory)
+    temp_triples = _prefetch_existing_triples(
+        TADAImportTemp, TADAImportTemp.branch_code == branch_code
+    )
+
+    # Per-file memo caches: BranchKMRate / BranchEmployee / TADAImport (main)
+    # are not modified by this loop, so repeated lookups with the same key
+    # always return the same result.
+    km_rate_cache: Dict = {}
+    engineer_branch_cache: Dict = {}
+    _EMP_MISS = object()
+    emp_by_uid_cache: Dict = {}
+    emp_by_name_cache: Dict = {}
 
     new_count = 0
     updated_count = 0
@@ -406,33 +472,44 @@ def process_tada_file(db: Session, file_path: str, branch_code: str, uploaded_by
             is_manual_no_appt = appointment_number.startswith('MANUAL_')
 
             if not is_manual_no_appt:
+                row_triple = (appointment_number, task_start_date, service_engineer_name)
+
                 # Skip if already submitted to MAIN (match on appointment + task_start + engineer)
-                already_in_main = db.query(models.TADAImport).filter(
-                    models.TADAImport.appointment_number == appointment_number,
-                    models.TADAImport.task_start_date == task_start_date,
-                    models.TADAImport.service_engineer_name == service_engineer_name,
-                ).first()
+                already_in_main = (
+                    True if row_triple in main_triples
+                    else db.query(models.TADAImport).filter(
+                        models.TADAImport.appointment_number == appointment_number,
+                        models.TADAImport.task_start_date == task_start_date,
+                        models.TADAImport.service_engineer_name == service_engineer_name,
+                    ).first()
+                )
                 if already_in_main:
                     already_submitted_skipped += 1
                     continue
 
                 # Skip if already moved to HISTORY (archived/paid)
-                already_in_history = db.query(TADAHistory).filter(
-                    TADAHistory.appointment_number == appointment_number,
-                    TADAHistory.task_start_date == task_start_date,
-                    TADAHistory.service_engineer_name == service_engineer_name,
-                ).first()
+                already_in_history = (
+                    True if row_triple in history_triples
+                    else db.query(TADAHistory).filter(
+                        TADAHistory.appointment_number == appointment_number,
+                        TADAHistory.task_start_date == task_start_date,
+                        TADAHistory.service_engineer_name == service_engineer_name,
+                    ).first()
+                )
                 if already_in_history:
                     history_skipped += 1
                     continue
 
                 # Existing in TEMP? Skip as duplicate; otherwise create
-                existing_temp = db.query(TADAImportTemp).filter(
-                    TADAImportTemp.appointment_number == appointment_number,
-                    TADAImportTemp.task_start_date == task_start_date,
-                    TADAImportTemp.service_engineer_name == service_engineer_name,
-                    TADAImportTemp.branch_code == branch_code,
-                ).first()
+                existing_temp = (
+                    True if row_triple in temp_triples
+                    else db.query(TADAImportTemp).filter(
+                        TADAImportTemp.appointment_number == appointment_number,
+                        TADAImportTemp.task_start_date == task_start_date,
+                        TADAImportTemp.service_engineer_name == service_engineer_name,
+                        TADAImportTemp.branch_code == branch_code,
+                    ).first()
+                )
                 if existing_temp:
                     duplicate_skipped += 1
                     continue
@@ -493,24 +570,34 @@ def process_tada_file(db: Session, file_path: str, branch_code: str, uploaded_by
             employee_id_value = None
             
             if engineer_uid_for_lookup:
-                # Primary: match by UID
-                branch_emp = db.query(BranchEmployee).filter(
-                    BranchEmployee.employee_uid == engineer_uid_for_lookup,
-                    BranchEmployee.is_active == True
-                ).first()
-                if branch_emp:
-                    employee_id_value = branch_emp.employee_id
-            
+                # Primary: match by UID (memoized — same uid repeats per file)
+                if engineer_uid_for_lookup in emp_by_uid_cache:
+                    emp_lookup = emp_by_uid_cache[engineer_uid_for_lookup]
+                else:
+                    branch_emp = db.query(BranchEmployee).filter(
+                        BranchEmployee.employee_uid == engineer_uid_for_lookup,
+                        BranchEmployee.is_active == True
+                    ).first()
+                    emp_lookup = branch_emp.employee_id if branch_emp else _EMP_MISS
+                    emp_by_uid_cache[engineer_uid_for_lookup] = emp_lookup
+                if emp_lookup is not _EMP_MISS:
+                    employee_id_value = emp_lookup
+
             # Fallback: if UID didn't find a match, try by engineer name
             if not employee_id_value and engineer_name_for_lookup:
-                branch_emp = db.query(BranchEmployee).filter(
-                    BranchEmployee.employee_name == engineer_name_for_lookup,
-                    BranchEmployee.branch_code == branch_code,
-                    BranchEmployee.is_active == True
-                ).first()
-                if branch_emp:
-                    employee_id_value = branch_emp.employee_id
-            
+                if engineer_name_for_lookup in emp_by_name_cache:
+                    emp_lookup = emp_by_name_cache[engineer_name_for_lookup]
+                else:
+                    branch_emp = db.query(BranchEmployee).filter(
+                        BranchEmployee.employee_name == engineer_name_for_lookup,
+                        BranchEmployee.branch_code == branch_code,
+                        BranchEmployee.is_active == True
+                    ).first()
+                    emp_lookup = branch_emp.employee_id if branch_emp else _EMP_MISS
+                    emp_by_name_cache[engineer_name_for_lookup] = emp_lookup
+                if emp_lookup is not _EMP_MISS:
+                    employee_id_value = emp_lookup
+
             data["employee_id"] = employee_id_value
 
             new_record = TADAImportTemp(**data)
@@ -522,7 +609,11 @@ def process_tada_file(db: Session, file_path: str, branch_code: str, uploaded_by
                 engineer_day_sr_count.get((new_record.service_engineer_uid, dkey), 1)
                 if dkey else 1
             )
-            update_record_calculations(db, new_record, file_branch_hints=hints, sr_count=sr_count)
+            update_record_calculations(
+                db, new_record, file_branch_hints=hints, sr_count=sr_count,
+                _rate_cache=km_rate_cache,
+                _engineer_branch_cache=engineer_branch_cache,
+            )
             new_count += 1
 
             if new_count % 100 == 0:

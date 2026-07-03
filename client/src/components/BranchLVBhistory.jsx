@@ -4,12 +4,12 @@ import toast from 'react-hot-toast';
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
 
-const Spin = ({ color }) => (
+const Spin = React.memo(({ color }) => (
   <svg className="animate-spin h-4 w-4" style={color ? { color } : undefined} viewBox="0 0 24 24">
     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
   </svg>
-);
+));
 
 const inr = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (d) =>
@@ -87,7 +87,13 @@ const BranchLVBHistory = ({ branchCode, branchName, themeColor = '#2f3192', canE
     }
   };
 
-  const recTotal = records.reduce((s, r) => s + parseFloat(r.payment_amount || 0), 0);
+  const recTotal = React.useMemo(
+    () => records.reduce((s, r) => s + parseFloat(r.payment_amount || 0), 0), [records]);
+
+  const groupsTotalRecords = React.useMemo(
+    () => groups.reduce((s, g) => s + (g.record_count || 0), 0), [groups]);
+  const groupsTotalAmount = React.useMemo(
+    () => groups.reduce((s, g) => s + parseFloat(g.total_amount || 0), 0), [groups]);
 
   const sortedGroups = React.useMemo(() => {
     if (!voucherSort) return groups;
@@ -304,8 +310,8 @@ const BranchLVBHistory = ({ branchCode, branchName, themeColor = '#2f3192', canE
                 </tbody>
                 <tfoot className="sticky bottom-0"><tr style={{ backgroundColor: '#f0f1ff' }}>
                   <td colSpan={5} className="px-3 py-1.5 text-[11px] font-bold text-gray-600 text-right border-t-2 border-gray-200">Grand Total ({groups.length} voucher{groups.length === 1 ? '' : 's'})</td>
-                  <td className="px-3 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200">{groups.reduce((s, g) => s + (g.record_count || 0), 0)}</td>
-                  <td className="px-3 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200 text-blue-700 whitespace-nowrap">{inr(groups.reduce((s, g) => s + parseFloat(g.total_amount || 0), 0))}</td>
+                  <td className="px-3 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200">{groupsTotalRecords}</td>
+                  <td className="px-3 py-1.5 text-[11px] font-bold text-center border-t-2 border-gray-200 text-blue-700 whitespace-nowrap">{inr(groupsTotalAmount)}</td>
                   <td className="border-t-2 border-gray-200" />
                 </tr></tfoot>
               </table>

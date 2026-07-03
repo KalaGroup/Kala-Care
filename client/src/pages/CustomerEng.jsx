@@ -11,6 +11,7 @@ import { CSS } from '@dnd-kit/utilities';
 import * as XLSX from 'xlsx';
 import { verticalListSortingStrategy } from '@dnd-kit/sortable';
 import DraggableScrollButtons from '../components/DraggableScrollButtons';
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 import {
     CalendarIcon,
     FunnelIcon,
@@ -1555,9 +1556,83 @@ const CustomerEng = () => {
         [activeCampaigns, campaignShortNameMap]
     );
 
+    // "Customers - N" header count — the branch-visible customer count. Memoized
+    // so the full-list filter doesn't rerun on every render (e.g. each keystroke).
+    const visibleCustomerCount = useMemo(() => customers.filter(c => {
+        if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
+            return String(c.branch_id) === String(userBranch);
+        }
+        return true;
+    }).length, [customers, isAdmin, userBranch]);
+
+    // Per-drive chip counts (same branch rule as above) — one memoized pass
+    // instead of filtering the whole customer list once per chip per render.
+    const campaignCustomerCounts = useMemo(() => {
+        const counts = {};
+        const visible = customers.filter(c => {
+            if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
+                return String(c.branch_id) === String(userBranch);
+            }
+            return true;
+        });
+        activeCampaigns.forEach(campaign => {
+            counts[campaign] = visible.filter(c => c.campaigns?.includes(campaign)).length;
+        });
+        return counts;
+    }, [customers, activeCampaigns, isAdmin, userBranch]);
+
+    // "Assets - N" header count — sum of the per-drive counts (identical to the
+    // previous inline reduce, just not recomputed on every render).
+    const totalAssetsCount = useMemo(
+        () => activeCampaigns.reduce((sum, campaign) => sum + (campaignCustomerCounts[campaign] || 0), 0),
+        [activeCampaigns, campaignCustomerCounts]
+    );
+
+    // Branch filter dropdown options — recomputed only when the list changes.
+    const uniqueBranches = useMemo(
+        () => [...new Set(customers.map(c => String(c.branch_id || '')))].sort(),
+        [customers]
+    );
+
     const fetchEngagementData = async () => {
         setLoading(true);
         const loadingToast = toast.loading('Loading engagement data...');
+
+        // Warm-cache-first paint: instantly show the last-seen list while the
+        // normal fetch below runs unchanged. Keyed by the logged-in user's
+        // identity (straight from sessionStorage, so it's correct even on the
+        // very first call before the user state has committed) PLUS the closure
+        // values that shape the stored dataset (the in-function branch filter)
+        // and the date filters that trigger this fetch.
+        let warmCacheKey = null;
+        try {
+            const sessUser = JSON.parse(sessionStorage.getItem('user') || 'null');
+            warmCacheKey = warmKey('customerEngEngagement', {
+                userId: sessUser?.user_id ?? sessUser?.id ?? null,
+                branch: sessUser?.branch ?? null,
+                filterAdmin: !!isAdmin,
+                filterBranch: userBranch || null,
+                fromDate,
+                toDate
+            });
+        } catch (e) {
+            warmCacheKey = null;
+        }
+        // Don't warm-paint when navigation state is waiting to auto-open a
+        // customer — that flow must key off the FRESH list exactly as before.
+        const pendingAutoOpen = !autoOpenHandledRef.current &&
+            !!(location.state && (location.state.openCustomerId || location.state.openCustomerInstanceId));
+        if (warmCacheKey && !pendingAutoOpen && customers.length === 0) {
+            const warm = readWarmCache(warmCacheKey);
+            if (warm && Array.isArray(warm.customers) && warm.customers.length > 0) {
+                setActiveCampaigns(warm.activeCampaigns || []);
+                setCustomers(warm.customers);
+                setDisplayedCustomers(warm.customers.slice(0, ITEMS_PER_PAGE));
+                setHasMore(warm.customers.length > ITEMS_PER_PAGE);
+                setPage(1);
+            }
+        }
+
         try {
             let url = `${API_BASE_URL}/v1/engagement/customers`;
             const params = [];
@@ -1588,6 +1663,14 @@ const CustomerEng = () => {
             setDisplayedCustomers(customersWithCampaigns.slice(0, ITEMS_PER_PAGE));
             setHasMore(customersWithCampaigns.length > ITEMS_PER_PAGE);
             setPage(1);
+
+            // Persist the fresh result so the next visit paints instantly.
+            if (warmCacheKey && customersWithCampaigns.length > 0) {
+                writeWarmCache(warmCacheKey, {
+                    activeCampaigns: data.active_campaigns || [],
+                    customers: customersWithCampaigns
+                });
+            }
 
             toast.dismiss(loadingToast);
             // Drive catalog (colors + ids for ordering) is loaded once on mount in
@@ -3835,13 +3918,14 @@ const CustomerEng = () => {
         const pageH = pdf.internal.pageSize.getHeight();  // 297
 
         // Band heights in mm (each image is placed at full page width).
+        // Both bands load in parallel; a failed load leaves its height at 0 (as before).
         let headerH = 0, footerH = 0;
-        if (headerImgDataUrl) {
-            try { const h = await loadHtmlImage(headerImgDataUrl); if (h.width) headerH = pageW * (h.height / h.width); } catch (e) { headerH = 0; }
-        }
-        if (footerImgDataUrl) {
-            try { const f = await loadHtmlImage(footerImgDataUrl); if (f.width) footerH = pageW * (f.height / f.width); } catch (e) { footerH = 0; }
-        }
+        const [hBand, fBand] = await Promise.all([
+            headerImgDataUrl ? loadHtmlImage(headerImgDataUrl).catch(() => null) : Promise.resolve(null),
+            footerImgDataUrl ? loadHtmlImage(footerImgDataUrl).catch(() => null) : Promise.resolve(null)
+        ]);
+        if (hBand && hBand.width) headerH = pageW * (hBand.height / hBand.width);
+        if (fBand && fBand.width) footerH = pageW * (fBand.height / fBand.width);
         const SAFE_MM = 4;                                  // small safety gap so edges never clip
         const contentTop = headerH;
         const contentH = Math.max(20, pageH - headerH - footerH - SAFE_MM); // body height available per page (mm)
@@ -3908,19 +3992,29 @@ const CustomerEng = () => {
         if (!window.html2canvas) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
         if (!window.jspdf) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
 
-        // Make sure the bands are available (load locally if state hasn't filled yet)
+        // Make sure the bands are available (load locally if state hasn't filled yet).
+        // Missing bands load in parallel; loadImageAsDataUrl never throws (returns '' on failure).
         let headerUrl = headerImgDataUrl, footerUrl = footerImgDataUrl;
-        if (!headerUrl) { headerUrl = await loadImageAsDataUrl(LETTER_HEADER_IMG); if (headerUrl) setHeaderImgDataUrl(headerUrl); }
-        if (!footerUrl) { footerUrl = await loadImageAsDataUrl(LETTER_FOOTER_IMG); if (footerUrl) setFooterImgDataUrl(footerUrl); }
+        const [hLoaded, fLoaded] = await Promise.all([
+            headerUrl ? Promise.resolve(null) : loadImageAsDataUrl(LETTER_HEADER_IMG),
+            footerUrl ? Promise.resolve(null) : loadImageAsDataUrl(LETTER_FOOTER_IMG)
+        ]);
+        if (!headerUrl) { headerUrl = hLoaded; if (headerUrl) setHeaderImgDataUrl(headerUrl); }
+        if (!footerUrl) { footerUrl = fLoaded; if (footerUrl) setFooterImgDataUrl(footerUrl); }
 
         const { jsPDF } = window.jspdf;
         const pdf = new jsPDF('p', 'mm', 'a4');
         const pageW = pdf.internal.pageSize.getWidth();
         const pageH = pdf.internal.pageSize.getHeight();
 
+        // Both bands measure in parallel; a failed load leaves its height at 0 (as before).
         let headerH = 0, footerH = 0;
-        if (headerUrl) { try { const h = await loadHtmlImage(headerUrl); if (h.width) headerH = pageW * (h.height / h.width); } catch (e) { headerH = 0; } }
-        if (footerUrl) { try { const f = await loadHtmlImage(footerUrl); if (f.width) footerH = pageW * (f.height / f.width); } catch (e) { footerH = 0; } }
+        const [hBand, fBand] = await Promise.all([
+            headerUrl ? loadHtmlImage(headerUrl).catch(() => null) : Promise.resolve(null),
+            footerUrl ? loadHtmlImage(footerUrl).catch(() => null) : Promise.resolve(null)
+        ]);
+        if (hBand && hBand.width) headerH = pageW * (hBand.height / hBand.width);
+        if (fBand && fBand.width) footerH = pageW * (fBand.height / fBand.width);
         const SAFE_MM = 4;
         const contentTop = headerH;
         const contentH = Math.max(20, pageH - headerH - footerH - SAFE_MM);
@@ -3992,18 +4086,28 @@ const CustomerEng = () => {
         try {
             if (!window.html2canvas) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
 
+            // Missing bands load in parallel; loadImageAsDataUrl never throws (returns '' on failure).
             let headerUrl = headerImgDataUrl, footerUrl = footerImgDataUrl;
-            if (!headerUrl) { headerUrl = await loadImageAsDataUrl(LETTER_HEADER_IMG); if (headerUrl) setHeaderImgDataUrl(headerUrl); }
-            if (!footerUrl) { footerUrl = await loadImageAsDataUrl(LETTER_FOOTER_IMG); if (footerUrl) setFooterImgDataUrl(footerUrl); }
+            const [hLoaded, fLoaded] = await Promise.all([
+                headerUrl ? Promise.resolve(null) : loadImageAsDataUrl(LETTER_HEADER_IMG),
+                footerUrl ? Promise.resolve(null) : loadImageAsDataUrl(LETTER_FOOTER_IMG)
+            ]);
+            if (!headerUrl) { headerUrl = hLoaded; if (headerUrl) setHeaderImgDataUrl(headerUrl); }
+            if (!footerUrl) { footerUrl = fLoaded; if (footerUrl) setFooterImgDataUrl(footerUrl); }
 
             const LETTER_W = 780;
             const PAGE_W_MM = 210;
             const PAGE_H_MM = 297;
             const SAFE_MM = 4;
 
+            // Both bands measure in parallel; a failed load leaves its height at 0 (as before).
             let headerMm = 0, footerMm = 0;
-            if (headerUrl) { try { const h = await loadHtmlImage(headerUrl); if (h.width) headerMm = PAGE_W_MM * (h.height / h.width); } catch (e) { headerMm = 0; } }
-            if (footerUrl) { try { const f = await loadHtmlImage(footerUrl); if (f.width) footerMm = PAGE_W_MM * (f.height / f.width); } catch (e) { footerMm = 0; } }
+            const [hBand, fBand] = await Promise.all([
+                headerUrl ? loadHtmlImage(headerUrl).catch(() => null) : Promise.resolve(null),
+                footerUrl ? loadHtmlImage(footerUrl).catch(() => null) : Promise.resolve(null)
+            ]);
+            if (hBand && hBand.width) headerMm = PAGE_W_MM * (hBand.height / hBand.width);
+            if (fBand && fBand.width) footerMm = PAGE_W_MM * (fBand.height / fBand.width);
             const bodyRegionMm = Math.max(40, PAGE_H_MM - headerMm - footerMm - SAFE_MM);
 
             holder = document.createElement('div');
@@ -4234,8 +4338,15 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         setShowLetterWizard(true);
         fetchLetterFormatsForWizard();
 
-        if (!headerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_HEADER_IMG); if (d) setHeaderImgDataUrl(d); }
-        if (!footerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_FOOTER_IMG); if (d) setFooterImgDataUrl(d); }
+        // Missing bands load in parallel; loadImageAsDataUrl never throws (returns '' on failure).
+        {
+            const [hD, fD] = await Promise.all([
+                headerImgDataUrl ? Promise.resolve(null) : loadImageAsDataUrl(LETTER_HEADER_IMG),
+                footerImgDataUrl ? Promise.resolve(null) : loadImageAsDataUrl(LETTER_FOOTER_IMG)
+            ]);
+            if (!headerImgDataUrl && hD) setHeaderImgDataUrl(hD);
+            if (!footerImgDataUrl && fD) setFooterImgDataUrl(fD);
+        }
 
         try {
             const res = await fetch(`${API_BASE_URL}/v1/engagement/letter/next-ref?instance_id=${encodeURIComponent(customerDetails.instance_id || '')}`);
@@ -5031,13 +5142,14 @@ ${f.start_para}`;
             const SAFE_MM = 4;               // tiny safety margin so edges never clip
 
             // Band heights in mm (each image spans the full page width).
+            // Both bands measure in parallel; a failed load leaves its height at 0 (as before).
             let headerMm = 0, footerMm = 0;
-            if (headerImgDataUrl) {
-                try { const h = await loadHtmlImage(headerImgDataUrl); if (h.width) headerMm = PAGE_W_MM * (h.height / h.width); } catch (e) { headerMm = 0; }
-            }
-            if (footerImgDataUrl) {
-                try { const f = await loadHtmlImage(footerImgDataUrl); if (f.width) footerMm = PAGE_W_MM * (f.height / f.width); } catch (e) { footerMm = 0; }
-            }
+            const [hBand, fBand] = await Promise.all([
+                headerImgDataUrl ? loadHtmlImage(headerImgDataUrl).catch(() => null) : Promise.resolve(null),
+                footerImgDataUrl ? loadHtmlImage(footerImgDataUrl).catch(() => null) : Promise.resolve(null)
+            ]);
+            if (hBand && hBand.width) headerMm = PAGE_W_MM * (hBand.height / hBand.width);
+            if (fBand && fBand.width) footerMm = PAGE_W_MM * (fBand.height / fBand.width);
             // Usable body height per page (mm), leaving the bands + a small safe gap.
             const bodyRegionMm = Math.max(40, PAGE_H_MM - headerMm - footerMm - SAFE_MM);
 
@@ -5441,8 +5553,13 @@ ${f.start_para}`;
                     service_cycle_intro: DEFAULT_SERVICE_CYCLE_INTRO
                 });
 
-            if (!headerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_HEADER_IMG); if (d) setHeaderImgDataUrl(d); }
-            if (!footerImgDataUrl) { const d = await loadImageAsDataUrl(LETTER_FOOTER_IMG); if (d) setFooterImgDataUrl(d); }
+            // Missing bands load in parallel; loadImageAsDataUrl never throws (returns '' on failure).
+            const [hD, fD] = await Promise.all([
+                headerImgDataUrl ? Promise.resolve(null) : loadImageAsDataUrl(LETTER_HEADER_IMG),
+                footerImgDataUrl ? Promise.resolve(null) : loadImageAsDataUrl(LETTER_FOOTER_IMG)
+            ]);
+            if (!headerImgDataUrl && hD) setHeaderImgDataUrl(hD);
+            if (!footerImgDataUrl && fD) setFooterImgDataUrl(fD);
 
             setLetterStep(2);
             setShowLetterWizard(true);
@@ -6712,12 +6829,7 @@ ${f.start_para}`;
                                             : 'bg-transparent text-black hover:bg-gray-50'
                                             }`}
                                     >
-                                        Customers - {customers.filter(c => {
-                                            if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
-                                                return String(c.branch_id) === String(userBranch);
-                                            }
-                                            return true;
-                                        }).length}
+                                        Customers - {visibleCustomerCount}
                                     </button>
                                     <button
                                         onClick={handleAllCampaigns}
@@ -6726,16 +6838,7 @@ ${f.start_para}`;
                                             : 'bg-transparent text-black hover:bg-gray-50'
                                             }`}
                                     >
-                                        Assets - {
-                                            activeCampaigns.reduce((sum, campaign) => {
-                                                return sum + customers.filter(c => {
-                                                    if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
-                                                        if (String(c.branch_id) !== String(userBranch)) return false;
-                                                    }
-                                                    return c.campaigns?.includes(campaign);
-                                                }).length;
-                                            }, 0)
-                                        }
+                                        Assets - {totalAssetsCount}
                                     </button>
                                 </div>
 
@@ -6761,12 +6864,7 @@ ${f.start_para}`;
                                             for (let i = 0; i < ordered.length; i += 2) pairs.push(ordered.slice(i, i + 2));
 
                                             const renderChip = (campaign) => {
-                                                const campaignCount = customers.filter(c => {
-                                                    if (!isAdmin && userBranch && c.branch_id && userBranch !== 'HO') {
-                                                        if (String(c.branch_id) !== String(userBranch)) return false;
-                                                    }
-                                                    return c.campaigns?.includes(campaign);
-                                                }).length;
+                                                const campaignCount = campaignCustomerCounts[campaign] || 0;
                                                 const color = campaignColors[campaign] || '#406093';
                                                 return (
                                                     <button
@@ -7373,7 +7471,6 @@ ${f.start_para}`;
                                                             '420435_13': 'Gulbarga',
                                                             '420435_14': 'Bijapur'
                                                         };
-                                                        const uniqueBranches = [...new Set(customers.map(c => String(c.branch_id || '')))].sort();
                                                         return (
                                                             <SortableTableHeader
                                                                 key={colId}

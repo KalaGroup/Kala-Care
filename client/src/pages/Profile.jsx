@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 import DeleteDataModal from '../components/DeleteDataModal';
 import DraggableScrollButtons from '../components/DraggableScrollButtons';
 import Swal from 'sweetalert2';
@@ -90,7 +91,11 @@ const CDBUpdateTable = ({ user, showToast }) => {
     const canExport = user && (user.role === 'master_admin' || user.can_export);
 
     // Count of pending (not done) records in the current filtered view
-    const pendingCount = filteredHistories.filter(h => !h.is_done).length;
+    // (memoized: the list can be large and this ran on every keystroke)
+    const pendingCount = useMemo(
+        () => filteredHistories.filter(h => !h.is_done).length,
+        [filteredHistories]
+    );
 
     // Helper to highlight search term in text
     const highlightText = (text, search) => {
@@ -1150,6 +1155,20 @@ const Profile = () => {
 
     const fetchEmployees = async () => {
         setLoading(true);
+        // Warm-cache-first paint: instantly show the last employees list this
+        // user/branch/role saw while the normal fetch below runs unchanged and
+        // overwrites it with fresh data. Only applied while state is still empty.
+        const employeesWarmKey = warmKey('profileEmployees', {
+            userId: user.user_id,
+            branch: user.branch || '',
+            role: user.role || ''
+        });
+        const warmEmployees = readWarmCache(employeesWarmKey);
+        if (warmEmployees && Array.isArray(warmEmployees) && employees.length === 0) {
+            setEmployees(warmEmployees);
+            setFilteredEmployees(warmEmployees);
+            setEmployeeCount(warmEmployees.filter(e => e.user_id !== MASTER_ADMIN_ID).length);
+        }
         try {
             const response = await axios.get(`${API_BASE_URL}/users/employees`, {
                 headers: { 'user-id': user.user_id }
@@ -1163,6 +1182,7 @@ const Profile = () => {
                 setEmployees(employeesData);
                 setFilteredEmployees(employeesData);
                 setEmployeeCount(visibleEmployees.length);
+                writeWarmCache(employeesWarmKey, employeesData);
             } else {
                 setEmployees([]);
                 setFilteredEmployees([]);
@@ -2050,6 +2070,17 @@ const Profile = () => {
         if (dot) dot.remove();
     };
 
+    // Memoized visible slice of the employees table. The copy + filter + sort
+    // + slice are pure and were re-run on every re-render (toasts, dropdowns,
+    // modals); now they only re-run when the inputs actually change.
+    const visibleSortedEmployees = useMemo(() =>
+        [...filteredEmployees]
+            .filter(emp => emp.user_id !== MASTER_ADMIN_ID)
+            .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+            .slice(0, visibleEmployeeCount),
+        [filteredEmployees, visibleEmployeeCount]
+    );
+
     const getAvailableRoles = () => {
         if (isMasterAdmin) {
             return [
@@ -2590,10 +2621,7 @@ const Profile = () => {
                                                             </td>
                                                         </tr>
                                                     ) : filteredEmployees && filteredEmployees.length > 0 ? (
-                                                        [...filteredEmployees]
-                                                            .filter(emp => emp.user_id !== MASTER_ADMIN_ID)
-                                                            .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-                                                            .slice(0, visibleEmployeeCount)
+                                                        visibleSortedEmployees
                                                             .map((emp, index) => (
                                                                 <tr key={emp.id || emp.user_id} className="hover:bg-gray-50 transition-colors">
                                                                     <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200">
@@ -3495,6 +3523,8 @@ const Profile = () => {
                                                     <img
                                                         src={bannerPreviews[bannerKey]}
                                                         alt={`Banner ${position}`}
+                                                        loading="lazy"
+                                                        decoding="async"
                                                         className="w-full h-32 object-cover rounded-lg border-2 border-gray-200"
                                                         onError={(e) => {
                                                             e.target.src = 'https://via.placeholder.com/300x150?text=No+Image';

@@ -28,7 +28,14 @@ engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
     pool_recycle=300,
-    echo=False
+    echo=False,
+    # Keep more warm connections available so concurrent page loads don't
+    # queue waiting for a connection (defaults are 5/10).
+    pool_size=10,
+    max_overflow=20,
+    # pyodbc batches multi-row INSERTs into a single round-trip — makes the
+    # Excel import endpoints dramatically faster with identical results.
+    fast_executemany=True,
 )
 
 Base = declarative_base()

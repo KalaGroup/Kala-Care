@@ -3,6 +3,7 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import { Bar, Line } from 'react-chartjs-2';
 import BranchAdminExpenseDash from './BranchAdminExpenseDash';
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 import {
   Chart as ChartJS,
   CategoryScale, LinearScale,
@@ -109,8 +110,14 @@ const VENDOR_CONFIG = {
   },
 };
 
+// Best-effort user id for warm-cache keys only (never throws).
+const getWarmUserId = () => {
+  try { return JSON.parse(sessionStorage.getItem('user') || '{}')?.user_id || ''; }
+  catch { return ''; }
+};
+
 const HOExpenseDash = () => {
-  const user = JSON.parse(sessionStorage.getItem('user') || '{}');
+  const user = useMemo(() => JSON.parse(sessionStorage.getItem('user') || '{}'), []);
   const [activeTab, setActiveTab] = useState('tada');
   const [showBranchPicker, setShowBranchPicker] = useState(false);
   const [viewingBranch, setViewingBranch] = useState(null);
@@ -253,6 +260,11 @@ const ExpenseSection = ({ config }) => {
 
   // ───── Loaders ─────
   const loadVerified = async (df = dateFrom, dt = dateTo) => {
+    const cacheKey = warmKey(`ho-dash:verified:${config.verified}`, {
+      userId: getWarmUserId(), branch: 'ALL', df: df || '', dt: dt || '',
+    });
+    const warm = readWarmCache(cacheKey);
+    if (warm) setVerifiedData(prev => (prev && prev.length ? prev : warm));
     setLoadingVerified(true);
     try {
       const params = {};
@@ -260,6 +272,7 @@ const ExpenseSection = ({ config }) => {
       if (dt) params.date_to = dt;
       const { data } = await axios.get(`${API_BASE_URL}${config.verified}`, { params });
       setVerifiedData(data || []);
+      writeWarmCache(cacheKey, data || []);
     } catch (e) {
       console.error(e);
       toast.error('Failed to load verified expense');
@@ -269,12 +282,18 @@ const ExpenseSection = ({ config }) => {
   };
 
   const loadMonthly = async (branch, year) => {
+    const cacheKey = warmKey(`ho-dash:monthly:${config.monthly}`, {
+      userId: getWarmUserId(), branch, year,
+    });
+    const warm = readWarmCache(cacheKey);
+    if (warm) setMonthlyData(prev => (prev && prev.length ? prev : warm));
     setLoadingMonthly(true);
     try {
       const { data } = await axios.get(`${API_BASE_URL}${config.monthly}`, {
         params: { branch_code: branch, year },
       });
       setMonthlyData(data || []);
+      writeWarmCache(cacheKey, data || []);
     } catch (e) {
       console.error(e);
       toast.error('Failed to load monthly trend');
@@ -345,7 +364,7 @@ const ExpenseSection = ({ config }) => {
   );
 
   // ───── Chart data + options ─────
-  const monthlyChart = {
+  const monthlyChart = useMemo(() => ({
     labels: monthlyData.map(d => d.month),
     datasets: [{
       label: 'Verified Amount',
@@ -359,8 +378,8 @@ const ExpenseSection = ({ config }) => {
       pointRadius: 5, pointHoverRadius: 7,
       tension: 0.35, fill: true,
     }],
-  };
-  const monthlyOptions = {
+  }), [monthlyData]);
+  const monthlyOptions = useMemo(() => ({
     responsive: true, maintainAspectRatio: false,
     plugins: {
       legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 10, boxHeight: 10, font: { size: 11, weight: '500' }, padding: 12 } },
@@ -385,9 +404,9 @@ const ExpenseSection = ({ config }) => {
         ticks: { font: { size: 10 }, callback: (v) => formatINRCompact(v) }
       },
     },
-  };
+  }), [monthlyData, selectedYear]);
 
-  const verifiedChart = {
+  const verifiedChart = useMemo(() => ({
     labels: verifiedData.map(d => d.branch_name),
     datasets: [{
       label: 'Verified Amount',
@@ -398,8 +417,8 @@ const ExpenseSection = ({ config }) => {
       borderWidth: 2, borderRadius: 6,
       barPercentage: 0.7, categoryPercentage: 0.8,
     }],
-  };
-  const verifiedOptions = {
+  }), [verifiedData]);
+  const verifiedOptions = useMemo(() => ({
     responsive: true, maintainAspectRatio: false,
     layout: { padding: { top: 24 } },
     animation: {
@@ -445,9 +464,9 @@ const ExpenseSection = ({ config }) => {
         ticks: { font: { size: 10 }, callback: (v) => formatINRCompact(v) }
       },
     },
-  };
+  }), [verifiedData]);
 
-  const unverifiedChart = {
+  const unverifiedChart = useMemo(() => ({
     labels: unverifiedData.map(d => d.branch_name),
     datasets: [
       {
@@ -468,8 +487,8 @@ const ExpenseSection = ({ config }) => {
         tension: 0.35, fill: false, yAxisID: 'y1', order: 1,
       },
     ],
-  };
-  const unverifiedOptions = {
+  }), [unverifiedData]);
+  const unverifiedOptions = useMemo(() => ({
     responsive: true, maintainAspectRatio: false,
     layout: { padding: { top: 24 } },
     animation: {
@@ -522,7 +541,7 @@ const ExpenseSection = ({ config }) => {
         ticks: { font: { size: 10 }, color: pendingDark, callback: (v) => formatINRCompact(v) }
       },
     },
-  };
+  }), [unverifiedData]);
 
   // ───── Render ─────
   return (
@@ -752,23 +771,23 @@ const BranchPickerModal = ({ onClose, onSelect }) => {
 };
 
 // ───── Reusable bits ─────
-const KpiCard = ({ label, value }) => (
+const KpiCard = React.memo(({ label, value }) => (
   <div className="bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md transition-shadow text-center">
     <h3 className="text-[11px] sm:text-xs font-semibold text-black mb-1">{label}</h3>
     <p className="text-base sm:text-lg font-bold text-black">{value}</p>
   </div>
-);
+));
 
-const ChartLoader = () => (
+const ChartLoader = React.memo(() => (
   <div className="h-full flex flex-col items-center justify-center">
     <div className="w-10 h-10 border-3 border-t-3 rounded-full animate-spin"
       style={{ borderColor: '#e5e7eb', borderTopColor: themeColor, borderWidth: '3px' }}></div>
     <p className="mt-3 text-sm text-gray-500">Loading chart…</p>
   </div>
-);
+));
 
-const ChartEmpty = ({ msg }) => (
+const ChartEmpty = React.memo(({ msg }) => (
   <div className="h-full flex items-center justify-center text-xs text-gray-500">{msg}</div>
-);
+));
 
 export default HOExpenseDash;

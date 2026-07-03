@@ -6,6 +6,7 @@ import {
     PencilSquareIcon, EyeIcon, MagnifyingGlassIcon, ArrowPathIcon,
     DocumentPlusIcon, ArrowLeftIcon,
 } from '@heroicons/react/24/outline';
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 
 // -- Theme (matches Knowledge Bank) -------------------------------
 const themeColor = '#2f3192';
@@ -53,10 +54,21 @@ const QuotationInfoSheetMaster = () => {
 
     const load = useCallback(async () => {
         setLoading(true);
+        // Warm-cache-first paint: show the last list instantly (only if nothing
+        // is on screen yet); the fetch below always runs and overwrites it.
+        const cacheKey = warmKey('quotation-info', {
+            userId: authHeaders['user-id'], role: authHeaders['user-role'],
+        });
+        const warm = readWarmCache(cacheKey);
+        if (warm && Array.isArray(warm)) {
+            setItems((prev) => (prev.length ? prev : warm));
+        }
         try {
             const res = await fetch(`${API_BASE_URL}/quotation-info/`, { headers: authHeaders });
             const data = await res.json().catch(() => ({}));
-            setItems(Array.isArray(data) ? data : (data.items || []));
+            const list = Array.isArray(data) ? data : (data.items || []);
+            setItems(list);
+            writeWarmCache(cacheKey, list);
         } catch {
             setItems([]);
         } finally { setLoading(false); }

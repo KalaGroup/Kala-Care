@@ -1,5 +1,19 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 
+// Static grip icon hoisted to module scope — the component re-renders on every
+// pointermove while dragging, so this avoids rebuilding the SVG element tree
+// each frame. (Pure static JSX, no props/state.)
+const GRIP_ICON = (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+    <circle cx="9" cy="6" r="1.6" />
+    <circle cx="15" cy="6" r="1.6" />
+    <circle cx="9" cy="12" r="1.6" />
+    <circle cx="15" cy="12" r="1.6" />
+    <circle cx="9" cy="18" r="1.6" />
+    <circle cx="15" cy="18" r="1.6" />
+  </svg>
+);
+
 /**
  * Floating "scroll to top / bottom" button group that lives at the bottom of the
  * screen and can be dragged horizontally (left ↔ right only). The vertical
@@ -80,14 +94,7 @@ export default function DraggableScrollButtons({
         title="Drag left / right"
         className="cursor-ew-resize flex items-center justify-center w-4 h-8 max-md:w-6 max-md:h-10 rounded text-gray-400 hover:text-gray-600 touch-none select-none"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-          <circle cx="9" cy="6" r="1.6" />
-          <circle cx="15" cy="6" r="1.6" />
-          <circle cx="9" cy="12" r="1.6" />
-          <circle cx="15" cy="12" r="1.6" />
-          <circle cx="9" cy="18" r="1.6" />
-          <circle cx="15" cy="18" r="1.6" />
-        </svg>
+        {GRIP_ICON}
       </div>
 
       {/* The scroll buttons (kept stacked vertically) */}

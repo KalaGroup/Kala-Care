@@ -12,20 +12,21 @@ import {
     getServices, renameService, partService, ACTION, ORIG_HEADERS,
     themeColor, themeDark, themeSoft,
 } from './maintenanceApi';
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 
 const chipCls = { R: 'bg-blue-50 text-blue-700', C: 'bg-amber-50 text-amber-700', T: 'bg-emerald-50 text-emerald-700' };
-const Chip = ({ a }) => {
+const Chip = React.memo(({ a }) => {
     const k = (a || '').trim().toUpperCase();
     if (!ACTION[k]) return null;
     return <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold font-mono ${chipCls[k]}`}>{k}</span>;
-};
+});
 const numSort = (arr) => arr.slice().sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0));
 
-const Loading = () => (
+const Loading = React.memo(() => (
     <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm animate-pulse space-y-3">
         {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-10 rounded bg-gray-50" />)}
     </div>
-);
+));
 const ErrorBox = ({ msg, onRetry }) => (
     <div className="rounded-2xl border border-red-200 bg-red-50 py-10 text-center">
         <p className="text-sm font-semibold text-red-700">{msg}</p>
@@ -102,11 +103,27 @@ const MasterData = () => {
     const [refreshing, setRefreshing] = useState(false);
 
     const load = useCallback(async (initial = false) => {
-        if (initial) setLoading(true);
+        // Warm-cache-first paint (initial load only): instantly repaint the last
+        // master-data list this user saw while the normal fetch below runs
+        // unchanged and overwrites it. Key is scoped per user + branch + tab.
+        const u = (() => { try { return JSON.parse(sessionStorage.getItem('user')) || {}; } catch { return {}; } })();
+        const cacheKey = warmKey('maintenance-master-data', { userId: u.user_id || '', branch: u.branch || '', tab: 'master' });
+        let painted = false;
+        if (initial) {
+            const warm = readWarmCache(cacheKey);
+            if (warm && Array.isArray(warm.rows) && Array.isArray(warm.services)) {
+                setRows((prev) => (prev.length ? prev : warm.rows));
+                setServices((prev) => (prev.length ? prev : warm.services));
+                setLoading(false);
+                painted = true;
+            }
+        }
+        if (initial && !painted) setLoading(true);
         setErr('');
         try {
             const [r, s] = await Promise.all([getAppCodes(), getServices()]);
             setRows(r); setServices(s);
+            writeWarmCache(cacheKey, { rows: r, services: s });
         } catch (e) { if (initial) setErr(e.message || 'Could not load'); else toast.error(e.message); }
         finally { if (initial) setLoading(false); }
     }, []);
@@ -646,6 +663,14 @@ const MasterOfService = () => {
     }, []);
     useEffect(() => { load(true); }, [load]);
 
+    // Usage stats per service are O(services × rows × parts) — memoize so they
+    // are not recomputed on unrelated re-renders. Pure derivation of state.
+    const svcStats = useMemo(() => services.map((s) => ({
+        s,
+        used: rows.reduce((n, a) => n + a.parts.filter((p) => partService(services, p).id === s.id).length, 0),
+        codes: rows.filter((a) => a.parts.some((p) => partService(services, p).id === s.id)).length,
+    })), [services, rows]);
+
     const rename = async (s) => {
         const { value } = await Swal.fire({
             title: 'Rename service type', input: 'text', inputValue: s.name,
@@ -671,9 +696,7 @@ const MasterOfService = () => {
                 These names are the catalogue; renaming one updates every screen. Only the name is editable.
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {services.map((s) => {
-                    const used = rows.reduce((n, a) => n + a.parts.filter((p) => partService(services, p).id === s.id).length, 0);
-                    const codes = rows.filter((a) => a.parts.some((p) => partService(services, p).id === s.id)).length;
+                {svcStats.map(({ s, used, codes }) => {
                     return (
                         <div key={s.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm flex flex-col gap-2">
                             <div className="flex items-start justify-between gap-2">

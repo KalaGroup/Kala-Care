@@ -17,3 +17,4 @@ pytz
 xhtml2pdf
 
 pyinstaller
+orjson

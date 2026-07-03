@@ -9,11 +9,12 @@ import Swal from 'sweetalert2';
 import TADAHistoryModal from './TADAHistoryModal';
 import OfficeExpenseHO from './OfficeExpenseHO';
 import LocalVendorBillHO from './LocalVendorBillHO';
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
 
 /* ─── Draggable column header ───────────────────────────────────────────────── */
-const SortableTableHeader = ({ id, children, className, style }) => {
+const SortableTableHeader = React.memo(({ id, children, className, style }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   return (
     <th
@@ -54,10 +55,10 @@ const SortableTableHeader = ({ id, children, className, style }) => {
       </div>
     </th>
   );
-};
+});
 
 /* ─── Excel-style Column Filter Dropdown ────────────────────────────────────── */
-const ColumnFilterDropdown = ({ x, y, options, initialSelected, onApply, onClose, themeColor, label = 'Task Status' }) => {
+const ColumnFilterDropdown = React.memo(({ x, y, options, initialSelected, onApply, onClose, themeColor, label = 'Task Status' }) => {
   const [selected, setSelected] = React.useState(new Set(initialSelected));
   const [search, setSearch] = React.useState('');
 
@@ -148,7 +149,7 @@ const ColumnFilterDropdown = ({ x, y, options, initialSelected, onApply, onClose
       </div>
     </div>
   );
-};
+});
 
 const ALL_COLUMNS = [
   { key: 'sr_no', label: 'Sr. No.', width: 50 },
@@ -271,7 +272,7 @@ const BRANCH_ORDER = [
 ];
 
 /* ─── Imprest Amount Modal ───────────────────────────────────────── */
-const ImprestModal = ({
+const ImprestModal = React.memo(({
   branches,
   loading,
   saving,
@@ -470,10 +471,10 @@ const ImprestModal = ({
       </div>
     </div>
   );
-};
+});
 
 const HOExpense = () => {
-  const user = JSON.parse(sessionStorage.getItem('user') || '{}');
+  const user = useMemo(() => JSON.parse(sessionStorage.getItem('user') || '{}'), []);
   const [canExport, setCanExport] = useState(false);
   const [vendorBranchFilter, setVendorBranchFilter] = useState('');
   const [historyReachDateFrom, setHistoryReachDateFrom] = useState('');
@@ -1294,6 +1295,16 @@ const HOExpense = () => {
 
   const loadBranches = async () => {
     setLoadingBranches(true);
+    // Warm-cache-first paint: show the last branch list instantly while the
+    // normal fetch (unchanged, always runs) refreshes it in the background.
+    const branchesCacheKey = warmKey('ho-expense-branches', {
+      user_id: user?.user_id || user?.id || null,
+      tab: 'tada',
+    });
+    const warmBranches = readWarmCache(branchesCacheKey);
+    if (Array.isArray(warmBranches) && warmBranches.length > 0) {
+      setBranches(prev => (prev.length === 0 ? warmBranches : prev));
+    }
     try {
       const response = await axios.get(`${API_BASE_URL}/tada-ho/branches-with-managers`);
       const branchDataMap = {};
@@ -1363,6 +1374,7 @@ const HOExpense = () => {
       }));
 
       setBranches(enrichedBranches);
+      writeWarmCache(branchesCacheKey, enrichedBranches);
     } catch (error) {
       console.error('Error loading branches:', error);
       toast.error('Failed to load branches');
@@ -2436,10 +2448,22 @@ const HOExpense = () => {
     return status !== 'Verified' && status !== 'Unverified'; // pending
   }), [filteredSalesBMRecords, salesBMTab]);
 
-  const salesBMPendingCount = filteredSalesBMRecords.filter(r => r.verification_status !== 'Verified' && r.verification_status !== 'Unverified').length;
-  const salesBMVerifiedCount = filteredSalesBMRecords.filter(r => r.verification_status === 'Verified').length;
-  const salesBMUnverifiedCount = filteredSalesBMRecords.filter(r => r.verification_status === 'Unverified').length;
-  const salesBMTabTotal = tabSalesBMRecords.reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0);
+  const salesBMPendingCount = useMemo(
+    () => filteredSalesBMRecords.filter(r => r.verification_status !== 'Verified' && r.verification_status !== 'Unverified').length,
+    [filteredSalesBMRecords]
+  );
+  const salesBMVerifiedCount = useMemo(
+    () => filteredSalesBMRecords.filter(r => r.verification_status === 'Verified').length,
+    [filteredSalesBMRecords]
+  );
+  const salesBMUnverifiedCount = useMemo(
+    () => filteredSalesBMRecords.filter(r => r.verification_status === 'Unverified').length,
+    [filteredSalesBMRecords]
+  );
+  const salesBMTabTotal = useMemo(
+    () => tabSalesBMRecords.reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0),
+    [tabSalesBMRecords]
+  );
 
   const loadEngineerDetails = async (engineerUid, engineerName, branchCode) => {
     setLoadingRecords(true);

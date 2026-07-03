@@ -29,6 +29,7 @@ const EmployeeActivityModal = lazy(() => import('../components/EmployeeActivityM
 const EmployeeRRModal = lazy(() => import('../components/EmployeeRRModal'));
 import axios from 'axios';
 import * as XLSX from 'xlsx';
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 const EmployeePerformanceModal = lazy(() => import('../components/EmployeePerformanceModal'));
@@ -764,6 +765,34 @@ const Dashboard = () => {
         return Array.from(branches).sort();
     }, [rrStats]);
 
+    // Totals for the Drive Success stat cards — computed in ONE pass instead of
+    // ~10 separate filter/reduce scans over campaignPerformance on every render.
+    // Values are byte-for-byte identical to the previous inline computations.
+    const campaignSuccessTotals = useMemo(() => {
+        let activeCount = 0;
+        let attendedTotal = 0, attendedActive = 0, attendedInactive = 0;
+        let completedTotal = 0, completedActive = 0, completedInactive = 0;
+        for (const c of campaignPerformance) {
+            const attended = c.attended_customers || 0;
+            const completed = c.completed_count || c.total_completed_followups || c.completed || 0;
+            attendedTotal += attended;
+            completedTotal += completed;
+            if (c.status === 'active') {
+                activeCount += 1;
+                attendedActive += attended;
+                completedActive += completed;
+            } else if (c.status === 'inactive') {
+                attendedInactive += attended;
+                completedInactive += completed;
+            }
+        }
+        // Matches original: length > 0 ? rate.toFixed(1) : 0 (renders "0%" when empty)
+        const avgSuccessRateDisplay = campaignPerformance.length > 0
+            ? (attendedTotal > 0 ? ((completedTotal / attendedTotal) * 100) : 0).toFixed(1)
+            : 0;
+        return { activeCount, attendedTotal, attendedActive, attendedInactive, completedTotal, completedActive, completedInactive, avgSuccessRateDisplay };
+    }, [campaignPerformance]);
+
     const sortedCampaignPerformance = useMemo(() => {
         if (!campaignPerformance || campaignPerformance.length === 0) return [];
 
@@ -1266,6 +1295,20 @@ const Dashboard = () => {
 
     const fetchSummaryStats = useCallback(async () => {
         const signal = abortControllerRef.current?.signal;
+        // Warm-cache-first paint: show last known data instantly (only if state is
+        // still empty); the fetch below always runs and overwrites it with fresh data.
+        const summaryWarmKey = warmKey('dash-summary', {
+            userId: userData.user_id || userData.id,
+            role: userData.role || '',
+            branch: userData.branch || '',
+            timePeriod,
+            start: timePeriod === 'custom' && customStartDate ? formatDateForAPI(customStartDate) : null,
+            end: timePeriod === 'custom' && customEndDate ? formatDateForAPI(customEndDate) : null
+        });
+        const warmSummary = readWarmCache(summaryWarmKey);
+        if (warmSummary && isMounted.current) {
+            setSummaryStats(prev => (prev == null ? warmSummary : prev));
+        }
         try {
             let url = `${API_BASE_URL}/performance/summary?time_period=${timePeriod}`;
             if (timePeriod === 'custom' && customStartDate && customEndDate) {
@@ -1279,6 +1322,7 @@ const Dashboard = () => {
             });
             const response = await axios.get(`${url}&${params.toString()}`, { signal });
             if (isMounted.current) setSummaryStats(response.data);
+            writeWarmCache(summaryWarmKey, response.data);
         } catch (error) {
             if (axios.isCancel(error) || error.name === 'CanceledError') return; // Ignore aborts
             if (isMounted.current) {
@@ -2369,6 +2413,20 @@ const Dashboard = () => {
     const fetchCampaignPerformance = useCallback(async () => {
 
         const signal = abortControllerRef.current?.signal;
+        // Warm-cache-first paint: show last known campaigns instantly (only if state
+        // is still empty); the fetch below always runs and overwrites with fresh data.
+        const campaignWarmKey = warmKey('dash-campaign-performance', {
+            userId: userData.user_id || userData.id,
+            role: userData.role || '',
+            branch: userData.branch || '',
+            timePeriod,
+            start: timePeriod === 'custom' && customStartDate ? formatDateForAPI(customStartDate) : null,
+            end: timePeriod === 'custom' && customEndDate ? formatDateForAPI(customEndDate) : null
+        });
+        const warmCampaigns = readWarmCache(campaignWarmKey);
+        if (warmCampaigns && isMounted.current) {
+            setCampaignPerformance(prev => (prev && prev.length > 0 ? prev : warmCampaigns));
+        }
         try {
             if (isMounted.current) setCampaignLoading(true);
             const payload = { user_info: { user_id: userData.user_id || userData.id, name: userData.name, role: userData.role, branch: userData.branch } };
@@ -2378,6 +2436,7 @@ const Dashboard = () => {
             }
             const response = await axios.post(url, payload, { signal });
             if (isMounted.current) setCampaignPerformance(response.data.campaigns || []);
+            writeWarmCache(campaignWarmKey, response.data.campaigns || []);
         } catch (error) {
             if (axios.isCancel(error) || error.name === 'CanceledError') return;
             if (isMounted.current) console.error('Error fetching drive performance:', error);
@@ -2526,14 +2585,15 @@ const Dashboard = () => {
 
         try {
             if (isMasterAdmin || isITAdmin) {
-                // Load summary stats FIRST (shows cards quickly)
-                await fetchSummaryStats();
-
-                // Load campaign performance SECOND (shows graphs)
-                await fetchCampaignPerformance();
-
-                // Load branch performance LAST (heaviest query)
-                await fetchBranchPerformance();
+                // Fire summary stats, campaign performance and branch performance in
+                // PARALLEL — each loader is self-contained (own try/catch, own setState),
+                // so cards/graphs still paint independently as each response lands,
+                // just without waiting for the previous request to finish first.
+                await Promise.all([
+                    fetchSummaryStats(),
+                    fetchCampaignPerformance(),
+                    fetchBranchPerformance()
+                ]);
 
                 // Load remaining data in background (don't block UI)
                 Promise.all([
@@ -4563,13 +4623,13 @@ const Dashboard = () => {
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Active:</span>
                                             <span className="font-bold text-lg whitespace-nowrap">
-                                                {campaignPerformance.filter(c => c.status === 'active').length}
+                                                {campaignSuccessTotals.activeCount}
                                             </span>
                                         </div>
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Inactive:</span>
                                             <span className="font-bold text-lg whitespace-nowrap">
-                                                {campaignPerformance.length - campaignPerformance.filter(c => c.status === 'active').length}
+                                                {campaignPerformance.length - campaignSuccessTotals.activeCount}
                                             </span>
                                         </div>
                                     </div>
@@ -4588,7 +4648,7 @@ const Dashboard = () => {
                                     {/* LEFT */}
                                     <div className="w-[30%] flex justify-center">
                                         <p className="text-lg font-bold text-gray-900">
-                                            <TimeValue>{campaignPerformance.reduce((sum, c) => sum + (c.attended_customers || 0), 0)}</TimeValue>
+                                            <TimeValue>{campaignSuccessTotals.attendedTotal}</TimeValue>
                                         </p>
                                     </div>
 
@@ -4599,17 +4659,13 @@ const Dashboard = () => {
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Active Drive:</span>
                                             <span className="font-bold text-lg whitespace-nowrap">
-                                                <TimeValue>{campaignPerformance
-                                                    .filter(c => c.status === 'active')
-                                                    .reduce((sum, c) => sum + (c.attended_customers || 0), 0)}</TimeValue>
+                                                <TimeValue>{campaignSuccessTotals.attendedActive}</TimeValue>
                                             </span>
                                         </div>
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Inactive Drive:</span>
                                             <span className="font-bold text-lg whitespace-nowrap">
-                                                <TimeValue>{campaignPerformance
-                                                    .filter(c => c.status === 'inactive')
-                                                    .reduce((sum, c) => sum + (c.attended_customers || 0), 0)}</TimeValue>
+                                                <TimeValue>{campaignSuccessTotals.attendedInactive}</TimeValue>
                                             </span>
                                         </div>
                                     </div>
@@ -4627,10 +4683,7 @@ const Dashboard = () => {
                                     {/* LEFT */}
                                     <div className="w-[30%] flex justify-center">
                                         <p className="text-lg font-bold text-gray-900">
-                                            <TimeValue>{campaignPerformance.reduce((sum, c) => {
-                                                const completed = c.completed_count || c.total_completed_followups || c.completed || 0;
-                                                return sum + completed;
-                                            }, 0)}</TimeValue>
+                                            <TimeValue>{campaignSuccessTotals.completedTotal}</TimeValue>
                                         </p>
                                     </div>
 
@@ -4641,23 +4694,13 @@ const Dashboard = () => {
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Active Drive:</span>
                                             <span className="font-bold text-lg whitespace-nowrap">
-                                                <TimeValue>{campaignPerformance
-                                                    .filter(c => c.status === 'active')
-                                                    .reduce((sum, c) => {
-                                                        const completed = c.completed_count || c.total_completed_followups || c.completed || 0;
-                                                        return sum + completed;
-                                                    }, 0)}</TimeValue>
+                                                <TimeValue>{campaignSuccessTotals.completedActive}</TimeValue>
                                             </span>
                                         </div>
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Inactive Drive:</span>
                                             <span className="font-bold text-lg whitespace-nowrap">
-                                                <TimeValue>{campaignPerformance
-                                                    .filter(c => c.status === 'inactive')
-                                                    .reduce((sum, c) => {
-                                                        const completed = c.completed_count || c.total_completed_followups || c.completed || 0;
-                                                        return sum + completed;
-                                                    }, 0)}</TimeValue>
+                                                <TimeValue>{campaignSuccessTotals.completedInactive}</TimeValue>
                                             </span>
                                         </div>
                                     </div>
@@ -4676,17 +4719,7 @@ const Dashboard = () => {
                                     {/* LEFT */}
                                     <div className="w-[30%] flex justify-center">
                                         <p className="text-lg font-bold text-gray-900">
-                                            <TimeValue>{campaignPerformance.length > 0
-                                                ? (() => {
-                                                    const totalAttended = campaignPerformance.reduce((sum, c) => sum + (c.attended_customers || 0), 0);
-                                                    const totalCompleted = campaignPerformance.reduce((sum, c) => {
-                                                        const completed = c.completed_count || c.total_completed_followups || c.completed || 0;
-                                                        return sum + completed;
-                                                    }, 0);
-                                                    const avgSuccessRate = totalAttended > 0 ? (totalCompleted / totalAttended) * 100 : 0;
-                                                    return avgSuccessRate.toFixed(1);
-                                                })()
-                                                : 0}%</TimeValue>
+                                            <TimeValue>{campaignSuccessTotals.avgSuccessRateDisplay}%</TimeValue>
                                         </p>
                                     </div>
 

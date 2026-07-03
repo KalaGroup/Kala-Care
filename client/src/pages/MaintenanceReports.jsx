@@ -1,5 +1,6 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 import {
     DocumentChartBarIcon, ChartBarIcon, ClockIcon, UsersIcon,
     ArrowDownTrayIcon, ArrowPathIcon, Squares2X2Icon, ExclamationTriangleIcon,
@@ -27,11 +28,34 @@ const MaintenanceReports = () => {
     const [loading, setLoading] = useState(true);
     const [err, setErr] = useState('');
 
+    // Warm-cache-first paint: on the very first load only, instantly repaint the
+    // last dataset this user saw while the normal fetch below runs unchanged and
+    // overwrites it. Manual "Refresh" (and any later load) behaves exactly as before.
+    const firstLoadRef = useRef(true);
+
     const load = useCallback(async () => {
-        setLoading(true); setErr('');
+        // Key scoped per user + branch. The fetch itself takes no tab/filter
+        // params (tabs only change what is displayed), so none belong in the key.
+        const u = (() => { try { return JSON.parse(sessionStorage.getItem('user')) || {}; } catch { return {}; } })();
+        const cacheKey = warmKey('maintenance-reports', { userId: u.user_id || '', branch: u.branch || '' });
+        let painted = false;
+        if (firstLoadRef.current) {
+            firstLoadRef.current = false;
+            const warm = readWarmCache(cacheKey);
+            if (warm && Array.isArray(warm.master) && Array.isArray(warm.services) && Array.isArray(warm.activity)) {
+                setMaster((prev) => (prev.length ? prev : warm.master));
+                setServices((prev) => (prev.length ? prev : warm.services));
+                setActivity((prev) => (prev.length ? prev : warm.activity));
+                setLoading(false);
+                painted = true;
+            }
+        }
+        if (!painted) setLoading(true);
+        setErr('');
         try {
             const [m, s, a] = await Promise.all([getAppCodes(), getServices(), getActivity()]);
             setMaster(m); setServices(s); setActivity(a);
+            writeWarmCache(cacheKey, { master: m, services: s, activity: a });
         } catch (e) {
             setErr(e.message || 'Could not load reports');
         } finally { setLoading(false); }
@@ -114,6 +138,13 @@ const MaintenanceReports = () => {
 const CoverageReport = ({ master, services }) => {
     const cols = useMemo(() => sortByHours(services), [services]);
 
+    // Coverage matrix (one Set of service ids per app code) is O(codes × parts);
+    // memoize it so re-renders don't rebuild it. Pure derivation of master + services.
+    const coverage = useMemo(
+        () => master.map((a) => ({ a, ids: new Set(a.parts.map((p) => partService(services, p).id)) })),
+        [master, services]
+    );
+
     const exportXlsx = () => {
         const aoa = [['Model', 'App Code', 'Segment', ...cols.map((c) => c.short)]];
         master.forEach((a) => {
@@ -152,8 +183,7 @@ const CoverageReport = ({ master, services }) => {
                         </tr>
                     </thead>
                     <tbody>
-                        {master.map((a) => {
-                            const ids = new Set(a.parts.map((p) => partService(services, p).id));
+                        {coverage.map(({ a, ids }) => {
                             return (
                                 <tr key={a.appCode} className="hover:bg-indigo-50/40 transition">
                                     <td className="px-3 py-2 border border-gray-200 font-mono text-gray-700">{a.engineModel || '—'}</td>
@@ -346,8 +376,8 @@ const ActivityReport = ({ master, activity }) => {
     );
 };
 
-const Empty = ({ label }) => (
+const Empty = React.memo(({ label }) => (
     <div className="rounded-2xl border border-dashed border-gray-300 bg-white py-16 text-center text-gray-400 text-[13px]">{label}</div>
-);
+));
 
 export default MaintenanceReports;

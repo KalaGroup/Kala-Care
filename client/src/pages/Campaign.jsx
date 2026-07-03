@@ -150,7 +150,8 @@ const blankServiceCycleRow = () => ({ service_type: '', schedule: '', remarks: '
 
 // Auto-growing textarea — height follows its content (no manual drag handle).
 // Grows when text wraps to more lines, shrinks back down when text is removed.
-const AutoGrowTextarea = ({ value, minRows = 1, className = '', style, ...props }) => {
+// React.memo: pure w.r.t. props, so unrelated parent re-renders are skipped.
+const AutoGrowTextarea = React.memo(({ value, minRows = 1, className = '', style, ...props }) => {
   const ref = useRef(null);
 
   const resize = () => {
@@ -173,7 +174,7 @@ const AutoGrowTextarea = ({ value, minRows = 1, className = '', style, ...props 
       {...props}
     />
   );
-};
+});
 const Campaign = () => {
   const [showCampaignForm, setShowCampaignForm] = useState(false);
   const [showServiceForm, setShowServiceForm] = useState(false);
