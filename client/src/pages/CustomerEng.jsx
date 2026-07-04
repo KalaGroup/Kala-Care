@@ -10438,7 +10438,7 @@ ${f.start_para}`;
                                 </div>
                             </div>
                             <div className="flex-1 overflow-y-auto p-3 bg-gray-50 custom-scrollbar">
-                                <div dangerouslySetInnerHTML={{ __html: viewLetterHtml }} />
+                                <div className="keep-light" dangerouslySetInnerHTML={{ __html: viewLetterHtml }} />
                             </div>
                         </div>
                     </div>
@@ -10598,7 +10598,8 @@ ${f.start_para}`;
                                 {/* STEP 2 — Generated, editable letter */}
                                 {letterStep === 2 && (
                                     <div className="space-y-3 max-w-3xl mx-auto">
-                                        <div className="border border-gray-300 rounded-lg overflow-hidden bg-white">
+                                        {/* keep-light: the letter is printable paper — stays white in dark mode */}
+                                        <div className="keep-light border border-gray-300 rounded-lg overflow-hidden bg-white">
                                             {/* Header band: single full-width letterhead image */}
                                             {headerImgDataUrl ? (
                                                 <img src={headerImgDataUrl} alt={COMPANY_FULL} className="block w-full h-auto" style={{ maxWidth: '780px', margin: '0 auto' }} />
@@ -11001,7 +11002,7 @@ ${f.start_para}`;
                                                 </div>
                                             </div>
                                             <div className="p-2 max-h-[65vh] overflow-y-auto bg-gray-50">
-                                                <div dangerouslySetInnerHTML={{ __html: buildLetterHtml() }} />
+                                                <div className="keep-light" dangerouslySetInnerHTML={{ __html: buildLetterHtml() }} />
                                             </div>
                                         </div>
 
