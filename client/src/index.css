@@ -944,3 +944,103 @@ html.dark .keep-light [style*="linear-gradient"][style*="rgb(47, 49, 146)"] { ba
 /* brand-blue inline backgrounds keep original blue + white text (last so it wins) */
 html.dark .keep-light [style*="background-color: rgb(47, 49, 146)"],
 html.dark .keep-light [style*="background: rgb(47, 49, 146)"] { background-color: #2f3192 !important; color: #ffffff !important; }
+
+/* ============================================================
+   UI POLISH — modern "AI app" finish for BOTH themes.
+   Pure visual layer: no logic, layout, shapes, sizes or fonts
+   are changed — only shadows, glows, focus rings, scrollbars,
+   ambience and micro-interactions.
+   ============================================================ */
+
+/* ----- Tokens ----- */
+:root {
+  --erp-glow: rgba(47, 49, 146, 0.35);
+  --erp-focus-ring: rgba(47, 49, 146, 0.16);
+  --erp-selection: rgba(47, 49, 146, 0.22);
+  scrollbar-color: #c9cfda transparent; /* inherited by every scroll area */
+}
+html.dark {
+  --erp-glow: rgba(2, 132, 199, 0.45);
+  --erp-focus-ring: rgba(56, 189, 248, 0.22);
+  --erp-selection: rgba(56, 189, 248, 0.3);
+}
+
+/* ----- Text selection ----- */
+::selection { background: var(--erp-selection); }
+
+/* ----- Slim modern scrollbars everywhere ----- */
+* { scrollbar-width: thin; }
+
+/* ----- Ambient page background (subtle color glows, like modern
+   AI dashboards). Light mode gets a whisper of brand tint; dark
+   mode gets a deep blue-black with sky/indigo aurora. ----- */
+.bg-\[\#EEEEEE\] {
+  background-image:
+    radial-gradient(1100px 520px at 88% -12%, rgba(47, 49, 146, 0.05), transparent 60%),
+    radial-gradient(900px 480px at -8% 112%, rgba(47, 49, 146, 0.04), transparent 60%);
+  background-attachment: fixed;
+}
+html.dark .bg-\[\#EEEEEE\] {
+  background-color: #0b0e14 !important;
+  background-image:
+    radial-gradient(1100px 520px at 88% -12%, rgba(56, 189, 248, 0.08), transparent 60%),
+    radial-gradient(900px 480px at -8% 112%, rgba(99, 102, 241, 0.07), transparent 60%);
+  background-attachment: fixed;
+}
+
+/* ----- Softer, layered elevation (replaces harsh default shadows).
+   Same footprint, no layout impact. ----- */
+.shadow-sm { box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05) !important; }
+.shadow,
+.shadow-md { box-shadow: 0 2px 4px -1px rgba(16, 24, 40, 0.05), 0 4px 10px -2px rgba(16, 24, 40, 0.08) !important; }
+.shadow-lg { box-shadow: 0 4px 6px -2px rgba(16, 24, 40, 0.04), 0 12px 20px -4px rgba(16, 24, 40, 0.1) !important; }
+.shadow-xl,
+.shadow-2xl { box-shadow: 0 8px 10px -4px rgba(16, 24, 40, 0.04), 0 22px 34px -6px rgba(16, 24, 40, 0.14) !important; }
+html.dark .shadow-sm { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.02) !important; }
+html.dark .shadow,
+html.dark .shadow-md { box-shadow: 0 3px 8px -2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.03) !important; }
+html.dark .shadow-lg { box-shadow: 0 8px 18px -4px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04) !important; }
+html.dark .shadow-xl,
+html.dark .shadow-2xl { box-shadow: 0 18px 36px -8px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05) !important; }
+
+/* ----- Card sheen (dark): a faint top light on panels gives the
+   glassy, dimensional look from modern AI UIs. Cells excluded. ----- */
+html.dark div.bg-white,
+html.dark section.bg-white,
+html.dark aside.bg-white {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0) 36%);
+}
+
+/* ----- Primary action glow — brand/CTA buttons get a soft colored
+   halo that intensifies on hover ----- */
+button.bg-\[\#2f3192\],
+a.bg-\[\#2f3192\],
+button[style*="linear-gradient"] {
+  box-shadow: 0 3px 12px -3px var(--erp-glow);
+  transition: box-shadow 0.18s ease, opacity 0.18s ease, background-color 0.18s ease;
+}
+button.bg-\[\#2f3192\]:hover,
+a.bg-\[\#2f3192\]:hover,
+button[style*="linear-gradient"]:hover {
+  box-shadow: 0 6px 20px -4px var(--erp-glow);
+}
+button.bg-green-600,
+button.bg-emerald-600,
+button.bg-blue-600 {
+  box-shadow: 0 3px 10px -3px rgba(16, 24, 40, 0.35);
+  transition: box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+/* ----- Modern focus ring — inputs glow with the accent instead of
+   a hard outline (works in light, dark, and letter paper) ----- */
+input:not([type="checkbox"]):not([type="radio"]):focus,
+select:focus,
+textarea:focus {
+  border-color: var(--erp-accent) !important;
+  box-shadow: 0 0 0 3px var(--erp-focus-ring) !important;
+}
+
+/* ----- Active sidebar item — slim accent bar (inset, no layout shift) ----- */
+aside a[aria-current="page"] {
+  box-shadow: inset 2.5px 0 0 var(--erp-accent);
+}

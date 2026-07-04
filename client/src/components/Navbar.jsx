@@ -856,7 +856,7 @@ function Navbar({ children }) {
   };
 
   const NavLinks = ({ items, collapsed = false, onClick = () => { } }) => (
-    <nav className="space-y-0.5">
+    <nav className="space-y-1">
       {items.map((item) => (
         <NavLink
           key={item.path}
@@ -865,7 +865,7 @@ function Navbar({ children }) {
           onMouseEnter={() => setHoveredItem(item.path)}
           onMouseLeave={() => setHoveredItem(null)}
           className={({ isActive }) =>
-            `group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200 min-w-full w-max ${isActive
+            `group relative flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200 min-w-full w-max ${isActive
               ? 'text-gray-900 font-medium'
               : 'text-black hover:text-gray-900'
             } ${collapsed ? 'justify-center' : ''}`
@@ -1528,13 +1528,13 @@ function Navbar({ children }) {
                   Customers Data Bouquet and Drive Creation under one dropdown. */}
               {isMasterOrITAdmin && engagementMastersItems.length > 0 && (
                 sidebarOpen ? (
-                  <div className="mt-0">
+                  <div className="mt-1">
                     <button
                       onClick={() => setEngagementMastersDropdownOpen(!engagementMastersDropdownOpen)}
                       onMouseEnter={() => setHoveredItem('engagement-masters')}
                       onMouseLeave={() => setHoveredItem(null)}
                       className={`
-                        min-w-full w-max group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200
+                        min-w-full w-max group relative flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200
                         ${isEngagementMastersActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
                       `}
                       style={{
@@ -1559,14 +1559,14 @@ function Navbar({ children }) {
                     </button>
 
                     {(engagementMastersDropdownOpen || isEngagementMastersActive()) && (
-                      <div className="ml-5 mt-1 space-y-0.5 border-l border-gray-200 pl-1.5">
+                      <div className="ml-5 mt-1 space-y-1 border-l border-gray-200 pl-1.5">
                         {engagementMastersItems.map((item) => (
                           <NavLink
                             key={item.path}
                             to={item.path}
                             onClick={() => { if (isMobile) setSidebarOpen(false); }}
                             className={({ isActive }) =>
-                              `group relative flex items-center gap-1.5 px-1 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
+                              `group relative flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
                                 ? 'text-gray-900 font-medium'
                                 : 'text-black hover:text-gray-900'
                               }`
@@ -1647,13 +1647,13 @@ function Navbar({ children }) {
                   Branch admin and employee do not see this section at all. */}
               {isMasterOrITAdmin && (
                 sidebarOpen ? (
-                  <div className="mt-0">
+                  <div className="mt-1">
                     <button
                       onClick={() => setPartInfoDropdownOpen(!partInfoDropdownOpen)}
                       onMouseEnter={() => setHoveredItem('part-detail-info')}
                       onMouseLeave={() => setHoveredItem(null)}
                       className={`
-          min-w-full w-max group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200
+          min-w-full w-max group relative flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200
           ${isPartInfoActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
         `}
                       style={{
@@ -1678,7 +1678,7 @@ function Navbar({ children }) {
                     </button>
 
                     {(partInfoDropdownOpen || isPartInfoActive()) && (
-                      <div className="ml-5 mt-1 space-y-0.5 border-l border-gray-200 pl-1.5">
+                      <div className="ml-5 mt-1 space-y-1 border-l border-gray-200 pl-1.5">
                         {partDetailItems.map((item) => (
                           <NavLink
                             key={item.path}
@@ -1687,7 +1687,7 @@ function Navbar({ children }) {
                               if (isMobile) setSidebarOpen(false);
                             }}
                             className={({ isActive }) =>
-                              `group relative flex items-center gap-1 px-1 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
+                              `group relative flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
                                 ? 'text-black font-medium'
                                 : 'text-black hover:text-black'
                               }`
@@ -1761,13 +1761,13 @@ function Navbar({ children }) {
 
               {/* Customer Engagement Dropdown */}
               {sidebarOpen ? (
-                <div className="mt-0">
+                <div className="mt-1">
                   <button
                     onClick={() => setEngagementDropdownOpen(!engagementDropdownOpen)}
                     onMouseEnter={() => setHoveredItem('customer-engagement')}
                     onMouseLeave={() => setHoveredItem(null)}
                     className={`
-        min-w-full w-max group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200
+        min-w-full w-max group relative flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200
         ${isEngagementActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
       `}
                     style={{
@@ -1793,14 +1793,14 @@ function Navbar({ children }) {
 
                   {/* Dropdown Items */}
                   {(engagementDropdownOpen || isEngagementActive()) && (
-                    <div className="ml-5 mt-1 space-y-0.5 border-l border-gray-200 pl-1.5">
+                    <div className="ml-5 mt-1 space-y-1 border-l border-gray-200 pl-1.5">
                       {/* Drive List Info — opens the modal (not a route); shown first.
                           Master Admin / IT Admin only. */}
                       {isMasterOrITAdmin && (
                         <button
                           type="button"
                           onClick={() => { setShowDriveNamesModal(true); if (isMobile) setSidebarOpen(false); }}
-                          className="min-w-full w-max group relative flex items-center gap-1 px-1 py-1 rounded-md transition-all duration-200 text-sm text-black hover:text-black hover:bg-gray-50"
+                          className="min-w-full w-max group relative flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-200 text-sm text-black hover:text-black hover:bg-gray-50"
                         >
                           <div className="w-1 h-1 rounded-full" style={{ backgroundColor: '#D1D5DB' }} />
                           <span className="flex-1 whitespace-nowrap text-left">Drive List Info</span>
@@ -1815,7 +1815,7 @@ function Navbar({ children }) {
                             if (isMobile) setSidebarOpen(false);
                           }}
                           className={({ isActive }) =>
-                            `group relative flex items-center gap-1 px-1 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
+                            `group relative flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
                               ? 'text-black font-medium'
                               : 'text-black hover:text-black'
                             }`
@@ -1904,15 +1904,15 @@ function Navbar({ children }) {
 
               {/* Expense Tracking Dropdown Section */}
               {canAccessExpensePages() && (
-                <div className="mt-0 pt-0">
+                <div className="mt-1 pt-0">
                   {sidebarOpen ? (
-                    <div className="mt-0">
+                    <div className="mt-1">
                       <button
                         onClick={() => setExpenseDropdownOpen(!expenseDropdownOpen)}
                         onMouseEnter={() => setHoveredItem('expense-tracking')}
                         onMouseLeave={() => setHoveredItem(null)}
                         className={`
-            min-w-full w-max group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200
+            min-w-full w-max group relative flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200
             ${isExpenseActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
           `}
                         style={{
@@ -1938,7 +1938,7 @@ function Navbar({ children }) {
 
                       {/* Dropdown Items */}
                       {(expenseDropdownOpen || isExpenseActive()) && (
-                        <div className="ml-5 mt-1 space-y-0.5 border-l border-gray-200 pl-1.5">
+                        <div className="ml-5 mt-1 space-y-1 border-l border-gray-200 pl-1.5">
                           {expenseTrackingItems.map((item) => (
                             <NavLink
                               key={item.path}
@@ -1947,7 +1947,7 @@ function Navbar({ children }) {
                                 if (isMobile) setSidebarOpen(false);
                               }}
                               className={({ isActive }) =>
-                                `group relative flex items-center gap-1 px-1 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
+                                `group relative flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
                                   ? 'text-black font-medium'
                                   : 'text-black hover:text-black'
                                 }`
@@ -2022,9 +2022,9 @@ function Navbar({ children }) {
 
               {/* Other Pages (MOM Tracking, Sales) - Only show if user has access */}
               {otherPagesItems.length > 0 && (
-                <div className="mt-0 pt-0">
+                <div className="mt-1 pt-0">
                   {sidebarOpen ? (
-                    <div className="space-y-0.5">
+                    <div className="space-y-1">
                       {otherPagesItems.map((item) => (
                         <NavLink
                           key={item.path}
@@ -2033,7 +2033,7 @@ function Navbar({ children }) {
                           onMouseEnter={() => setHoveredItem(item.path)}
                           onMouseLeave={() => setHoveredItem(null)}
                           className={({ isActive }) =>
-                            `group relative flex items-center gap-1 px-1 py-1 rounded-lg transition-all duration-200 min-w-full w-max ${isActive
+                            `group relative flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200 min-w-full w-max ${isActive
                               ? 'text-gray-900 font-medium'
                               : 'text-black hover:text-gray-900'
                             }`
@@ -2062,7 +2062,7 @@ function Navbar({ children }) {
                     </div>
                   ) : (
                     /* Collapsed mode */
-                    <div className="space-y-0.5">
+                    <div className="space-y-1">
                       {otherPagesItems.map((item) => (
                         <NavLink
                           key={item.path}
@@ -2218,7 +2218,7 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
                       <span className="text-sm font-semibold text-[#2f3192] underline hover:font-bold truncate">
                         {user?.name || 'User'}
                       </span>
-                      <div className="flex flex-col space-y-0.5">
+                      <div className="flex flex-col space-y-1">
                         <span className="text-[10px] truncate">
                           <span className="font-semibold text black">Branch: </span>
                           {user?.branch || 'N/A'} - {getBranchDisplayName(user?.branch)}

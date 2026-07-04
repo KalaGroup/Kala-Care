@@ -26,7 +26,9 @@ import {
   ChatBubbleLeftRightIcon,
   PaperClipIcon,
   EyeIcon,
-  TrashIcon
+  TrashIcon,
+  ChevronDownIcon,
+  ChevronUpIcon
 } from '@heroicons/react/24/outline';
 // Code-split the heavy customer-followups modal into its own chunk (loads in the
 // background; it's mounted-but-closed so there is no visual change).
@@ -60,21 +62,80 @@ const campaignCache = {
 };
 const cacheKey = (service, status) => `${service}|${status}`;
 
-// Color options for campaigns
-const colorOptions = [
-  { value: '#000000', label: 'Cyan', class: 'bg-[#000000]' },
-  { value: '#ffaa00', label: 'Orange', class: 'bg-[#ffaa00]' },
-  { value: '#02b343', label: 'Green', class: 'bg-[#02b343]' },
-  { value: '#3B82F6', label: 'Blue', class: 'bg-blue-500' },
-  { value: '#8B5CF6', label: 'Purple', class: 'bg-purple-500' },
-  { value: '#EC4899', label: 'Pink', class: 'bg-pink-500' },
-  { value: '#fdf500', label: 'Yellow', class: 'bg-[#fdf500]' },
-  { value: '#ff0000', label: 'Gray', class: 'bg-[#ff0000]' },
-  { value: '#14B8A6', label: 'Teal', class: 'bg-teal-500' },
-  { value: '#fd5d00', label: 'Red', class: 'bg-[#fd5d00]' },
-  { value: '#3bfd00', label: 'Red', class: 'bg-[#3bfd00]' },
-  { value: '#660185', label: 'Red', class: 'bg-[#660185]' },
+// Drive color palette — full grid: 12 hues × 6 shades (light → dark),
+// then a neutrals + brand row. A free "custom" picker below the grid
+// lets the user choose ANY color beyond these.
+const COLOR_GRID_ROWS = [
+  ['#fca5a5', '#fdba74', '#fcd34d', '#fde047', '#86efac', '#5eead4', '#67e8f9', '#7dd3fc', '#93c5fd', '#a5b4fc', '#d8b4fe', '#f9a8d4'],
+  ['#f87171', '#fb923c', '#fbbf24', '#facc15', '#4ade80', '#2dd4bf', '#22d3ee', '#38bdf8', '#60a5fa', '#818cf8', '#c084fc', '#f472b6'],
+  ['#ef4444', '#f97316', '#f59e0b', '#eab308', '#22c55e', '#14b8a6', '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1', '#a855f7', '#ec4899'],
+  ['#dc2626', '#ea580c', '#d97706', '#ca8a04', '#16a34a', '#0d9488', '#0891b2', '#0284c7', '#2563eb', '#4f46e5', '#9333ea', '#db2777'],
+  ['#b91c1c', '#c2410c', '#b45309', '#a16207', '#15803d', '#0f766e', '#0e7490', '#0369a1', '#1d4ed8', '#4338ca', '#7e22ce', '#be185d'],
+  ['#991b1b', '#9a3412', '#92400e', '#854d0e', '#166534', '#115e59', '#155e75', '#075985', '#1e40af', '#3730a3', '#6b21a8', '#9d174d'],
+  ['#000000', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f5f5f5', '#ffffff', '#2f3192', '#ffdb62'],
 ];
+const colorGridColors = COLOR_GRID_ROWS.flat();
+
+// Full-grid color picker used by both the Create and Edit drive modals.
+// Collapsed by default (compact trigger showing the current color); click
+// to expand the grid. Picking a swatch closes it again. Stores the same
+// hex string as before — only the picking UI is richer.
+const DriveColorPicker = ({ value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between gap-2 px-2 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+        title={open ? 'Hide colors' : 'Choose color'}
+      >
+        <span className="flex items-center gap-2 min-w-0">
+          <span
+            className="w-5 h-5 rounded-md border border-black/10 flex-shrink-0"
+            style={{ backgroundColor: value || '#2f3192' }}
+          />
+          <span className="text-xs font-mono text-gray-600 uppercase truncate">
+            {value || 'Select color'}
+          </span>
+        </span>
+        {open ? (
+          <ChevronUpIcon className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
+        ) : (
+          <ChevronDownIcon className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
+        )}
+      </button>
+
+      {open && (
+        <div className="mt-2 p-2 border border-gray-200 rounded-lg bg-white shadow-sm w-fit max-w-full">
+          <div className="grid grid-cols-12 gap-1.5">
+            {colorGridColors.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => { onChange(c); setOpen(false); }}
+                className={`w-5 h-5 rounded-md border border-black/10 transition-transform hover:scale-110 ${value === c ? 'ring-2 ring-offset-1 ring-gray-500 scale-110' : ''}`}
+                style={{ backgroundColor: c }}
+                title={c}
+              />
+            ))}
+          </div>
+          <div className="flex items-center gap-2 mt-2">
+            <span className="text-[11px] text-gray-500">Custom:</span>
+            <input
+              type="color"
+              value={value || '#2f3192'}
+              onChange={(e) => onChange(e.target.value)}
+              className="w-8 h-6 p-0 border border-gray-300 rounded cursor-pointer"
+              title="Pick any custom color"
+            />
+            <span className="text-[11px] font-mono text-gray-500 uppercase">{value || '—'}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // Transfer status options — mapped to FollowUp.status values.
 // 'completed' is intentionally NOT transferable.
@@ -3016,18 +3077,10 @@ const Campaign = () => {
 
                   <div className="border border-gray-300 rounded-lg p-4">
                     <label className="block text-xs font-semibold text-black mb-1.5">Drive Color</label>
-                    <div className="flex flex-wrap gap-2">
-                      {colorOptions.map((color) => (
-                        <button
-                          key={color.value}
-                          type="button"
-                          onClick={() => setNewCampaign({ ...newCampaign, color: color.value })}
-                          className={`w-8 h-8 rounded-full ${color.class} ${newCampaign.color === color.value ? 'ring-2 ring-offset-1 ring-gray-400' : ''
-                            }`}
-                          title={color.label}
-                        />
-                      ))}
-                    </div>
+                    <DriveColorPicker
+                      value={newCampaign.color}
+                      onChange={(c) => setNewCampaign({ ...newCampaign, color: c })}
+                    />
                   </div>
                 </div>
 
@@ -3598,18 +3651,10 @@ const Campaign = () => {
 
                   <div className="border border-gray-300 rounded-lg p-4">
                     <label className="block text-xs font-semibold text-black mb-1.5">Drive Color</label>
-                    <div className="flex flex-wrap gap-2">
-                      {colorOptions.map((color) => (
-                        <button
-                          key={color.value}
-                          type="button"
-                          onClick={() => setEditCampaignData({ ...editCampaignData, color: color.value })}
-                          className={`w-8 h-8 rounded-full ${color.class} ${editCampaignData.color === color.value ? 'ring-2 ring-offset-1 ring-gray-400' : ''
-                            }`}
-                          title={color.label}
-                        />
-                      ))}
-                    </div>
+                    <DriveColorPicker
+                      value={editCampaignData.color}
+                      onChange={(c) => setEditCampaignData({ ...editCampaignData, color: c })}
+                    />
                   </div>
                 </div>
 
