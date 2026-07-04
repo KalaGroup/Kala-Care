@@ -5,6 +5,7 @@ import Swal from 'sweetalert2';
 import axios from 'axios';
 import SitemapModal from './SitemapModal';
 import { prefetchRoute } from '../routePrefetch';
+import { applyTheme } from '../theme';
 
 import {
   Bars3Icon,
@@ -15,6 +16,8 @@ import {
   TableCellsIcon,
   ChevronDoubleLeftIcon,
   ChevronDoubleRightIcon,
+  SunIcon,
+  MoonIcon,
   UserCircleIcon,
   ArrowLeftOnRectangleIcon,
   HomeIcon,
@@ -75,14 +78,16 @@ const formatDriveDate = (dateString) => {
 // ---- Static data hoisted to module scope so it isn't re-allocated on every
 // render of the Navbar (which wraps every page). Pure constants only. ----
 
-const themeColor = '#2f3192';
-const logoutColor = '#000000';
+// Accent colors as CSS variables so DARK MODE can swap them (see index.css).
+// Light-mode values are identical to the old hardcoded colors.
+const themeColor = 'var(--erp-accent)';
+const logoutColor = 'var(--erp-ink)';
 
 // Generate shades of the theme color
 const themeShades = {
-  light: 'rgba(64, 96, 147, 0.1)',
-  medium: 'rgba(64, 96, 147, 0.5)',
-  dark: '#335478',
+  light: 'var(--erp-accent-light)',
+  medium: 'var(--erp-accent-medium)',
+  dark: 'var(--erp-accent-dark)',
 };
 
 // Branch mapping
@@ -210,6 +215,20 @@ function Navbar({ children }) {
   const [editSaving, setEditSaving] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Dark mode — a `dark` class on <html> drives all colors (see index.css).
+  // index.html applies the saved theme before the app loads, so reading the
+  // class here is always in sync with what the user last chose.
+  const [darkMode, setDarkMode] = useState(() =>
+    document.documentElement.classList.contains('dark')
+  );
+  const toggleTheme = () => {
+    setDarkMode((prev) => {
+      const next = !prev;
+      applyTheme(next ? 'dark' : 'light');
+      return next;
+    });
+  };
 
   // Read the raw string every render (cheap) but only JSON.parse when the
   // stored value actually changes. This keeps freshness identical to the old
@@ -1675,7 +1694,7 @@ function Navbar({ children }) {
                             }
                             style={({ isActive }) => ({
                               backgroundColor: isActive ? themeShades.light : 'transparent',
-                              color: isActive ? 'black' : undefined
+                              color: isActive ? 'var(--erp-ink)' : undefined
                             })}
                           >
                             {({ isActive }) => (
@@ -1683,7 +1702,7 @@ function Navbar({ children }) {
                                 <div
                                   className="w-1 h-1 rounded-full"
                                   style={{
-                                    backgroundColor: isActive ? 'black' : '#D1D5DB'
+                                    backgroundColor: isActive ? 'var(--erp-ink)' : '#D1D5DB'
                                   }}
                                 />
                                 <span className="flex-1 whitespace-nowrap">{item.name}</span>
@@ -1726,7 +1745,7 @@ function Navbar({ children }) {
                               }`
                             }
                             style={({ isActive }) => ({
-                              color: isActive ? 'black' : undefined,
+                              color: isActive ? 'var(--erp-ink)' : undefined,
                               backgroundColor: isActive ? themeShades.light : 'transparent'
                             })}
                           >
@@ -1758,8 +1777,8 @@ function Navbar({ children }) {
                     <PiHandshakeDuotone
                       className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
                       style={{
-                        color: isEngagementActive() ? 'black' :
-                          hoveredItem === 'customer-engagement' ? 'black' : 'black'
+                        color: isEngagementActive() ? 'var(--erp-ink)' :
+                          hoveredItem === 'customer-engagement' ? 'var(--erp-ink)' : 'var(--erp-ink)'
                       }}
                     />
                     <span className="flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
@@ -1803,7 +1822,7 @@ function Navbar({ children }) {
                           }
                           style={({ isActive }) => ({
                             backgroundColor: isActive ? themeShades.light : 'transparent',
-                            color: isActive ? 'black' : undefined
+                            color: isActive ? 'var(--erp-ink)' : undefined
                           })}
                         >
                           {({ isActive }) => (
@@ -1811,7 +1830,7 @@ function Navbar({ children }) {
                               <div
                                 className="w-1 h-1 rounded-full"
                                 style={{
-                                  backgroundColor: isActive ? 'black' : '#D1D5DB'
+                                  backgroundColor: isActive ? 'var(--erp-ink)' : '#D1D5DB'
                                 }}
                               />
                               <span className="flex-1 whitespace-nowrap">{item.name}</span>
@@ -1833,7 +1852,7 @@ function Navbar({ children }) {
                     <PiHandshakeDuotone
                       className="h-3.5 w-3.5 transition-all duration-200"
                       style={{
-                        color: 'black'
+                        color: 'var(--erp-ink)'
                       }}
                     />
                     {/* Tooltip removed — the hover flyout already shows the submenu. */}
@@ -1872,7 +1891,7 @@ function Navbar({ children }) {
                             }`
                           }
                           style={({ isActive }) => ({
-                            color: isActive ? 'black' : undefined,
+                            color: isActive ? 'var(--erp-ink)' : undefined,
                             backgroundColor: isActive ? themeShades.light : 'transparent'
                           })}
                         >
@@ -1903,8 +1922,8 @@ function Navbar({ children }) {
                         <BanknotesIcon
                           className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
                           style={{
-                            color: isExpenseActive() ? 'black' :
-                              hoveredItem === 'expense-tracking' ? 'black' : 'black'
+                            color: isExpenseActive() ? 'var(--erp-ink)' :
+                              hoveredItem === 'expense-tracking' ? 'var(--erp-ink)' : 'var(--erp-ink)'
                           }}
                         />
                         <span className="flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
@@ -1935,7 +1954,7 @@ function Navbar({ children }) {
                               }
                               style={({ isActive }) => ({
                                 backgroundColor: isActive ? themeShades.light : 'transparent',
-                                color: isActive ? 'black' : undefined
+                                color: isActive ? 'var(--erp-ink)' : undefined
                               })}
                             >
                               {({ isActive }) => (
@@ -1943,7 +1962,7 @@ function Navbar({ children }) {
                                   <div
                                     className="w-1 h-1 rounded-full"
                                     style={{
-                                      backgroundColor: isActive ? 'black' : '#D1D5DB'
+                                      backgroundColor: isActive ? 'var(--erp-ink)' : '#D1D5DB'
                                     }}
                                   />
                                   <span className="flex-1 whitespace-nowrap">{item.name}</span>
@@ -1965,7 +1984,7 @@ function Navbar({ children }) {
                         <BanknotesIcon
                           className="h-3.5 w-3.5 transition-all duration-200"
                           style={{
-                            color: 'black'
+                            color: 'var(--erp-ink)'
                           }}
                         />
                         {/* Tooltip removed — the hover flyout already shows the submenu. */}
@@ -1988,7 +2007,7 @@ function Navbar({ children }) {
                                 }`
                               }
                               style={({ isActive }) => ({
-                                color: isActive ? 'black' : undefined,
+                                color: isActive ? 'var(--erp-ink)' : undefined,
                                 backgroundColor: isActive ? themeShades.light : 'transparent'
                               })}
                             >
@@ -2136,6 +2155,52 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
 
           {/* Profile and Logout Section at BOTTOM with margin bottom - UPDATED with NavLink */}
           <div className="flex-shrink-0 px-3 pb-3 pt-2 space-y-1.5 bg-[#ffdb62]">
+            {/* Dark / Light mode toggle */}
+            {sidebarOpen ? (
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="w-full flex items-center justify-between px-2 py-1 bg-white hover:bg-gray-50 rounded-md border border-gray-200 transition-colors"
+                title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+              >
+                <span className="flex items-center gap-1 min-w-0">
+                  {darkMode ? (
+                    <MoonIcon className="h-3 w-3 flex-shrink-0 text-sky-400" />
+                  ) : (
+                    <SunIcon className="h-3 w-3 flex-shrink-0 text-amber-500" />
+                  )}
+                  <span className="text-[10px] font-medium text-gray-700 truncate">
+                    {darkMode ? 'Dark Mode' : 'Light Mode'}
+                  </span>
+                </span>
+                {/* Small switch track + knob */}
+                <span
+                  className={`relative inline-flex h-3.5 w-7 flex-shrink-0 items-center rounded-full transition-colors duration-200 ${darkMode ? 'bg-sky-500' : 'bg-gray-300'}`}
+                >
+                  <span
+                    className={`inline-block h-2.5 w-2.5 rounded-full bg-white shadow transform transition-transform duration-200 ${darkMode ? 'translate-x-[15px]' : 'translate-x-[3px]'}`}
+                  />
+                </span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="w-full group relative flex items-center justify-center py-0.5 rounded-lg transition-all duration-200"
+                title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+              >
+                {darkMode ? (
+                  <MoonIcon className="h-4 w-4 text-sky-400" />
+                ) : (
+                  <SunIcon className="h-4 w-4 text-amber-500" />
+                )}
+                <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
+                  {darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                  <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
+                </div>
+              </button>
+            )}
+
             {/* User Info Section - Changed from div to NavLink */}
             {sidebarOpen ? (
               <div className="space-y-1.5">
@@ -2264,7 +2329,7 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
               >
                 <ArrowLeftOnRectangleIcon
                   className="h-4 w-4 transition-all duration-200"
-                  style={{ color: hoveredItem === 'logout' ? logoutColor : '#000000' }}
+                  style={{ color: logoutColor }}
                   onMouseEnter={() => setHoveredItem('logout')}
                   onMouseLeave={() => setHoveredItem(null)}
                 />

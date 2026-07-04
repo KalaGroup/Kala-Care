@@ -308,3 +308,520 @@
 .swal2-icon .swal2-icon-content {
   font-size: 2rem !important;
 }
+
+/* ============================================================
+   DARK THEME — activated by the `dark` class on <html>
+   (toggled from the sidebar bottom button, saved in localStorage).
+
+   The LIGHT theme is completely untouched: every rule below is
+   scoped to `html.dark`, so removing the class restores the
+   original design exactly.
+
+   Palette: black (#0f1115), greys (#171a20 → #4b5563),
+   sky blue accent (#38bdf8 / #0369a1).
+   ============================================================ */
+
+/* Accent color as CSS variables so components that use inline styles
+   (Navbar active highlights, gradients, focus rings) switch automatically.
+   Light values are IDENTICAL to the old hardcoded colors. */
+:root {
+  --erp-accent: #2f3192;
+  --erp-accent-dark: #335478;
+  --erp-accent-light: rgba(64, 96, 147, 0.1);
+  --erp-accent-medium: rgba(64, 96, 147, 0.5);
+  --erp-ink: #000000;
+}
+
+html.dark {
+  color-scheme: dark; /* native date pickers, selects, scrollbars go dark */
+  scrollbar-color: #3a4150 #12151b;
+  --erp-accent: #38bdf8;
+  --erp-accent-dark: #0284c7;
+  --erp-accent-light: rgba(56, 189, 248, 0.14);
+  --erp-accent-medium: rgba(56, 189, 248, 0.45);
+  --erp-ink: #e6e9ef;
+}
+
+html.dark body {
+  background-color: #0f1115;
+  color: #e6e9ef;
+}
+
+/* ---------- Surfaces ---------- */
+html.dark .bg-white { background-color: #171a20 !important; }
+html.dark .bg-gray-50,
+html.dark .bg-gray-50\/50 { background-color: #1d222b !important; }
+html.dark .bg-gray-100 { background-color: #232936 !important; }
+html.dark .bg-gray-200 { background-color: #2b313d !important; }
+html.dark .bg-gray-300 { background-color: #39404e !important; }
+html.dark .bg-\[\#EEEEEE\] { background-color: #0f1115 !important; }
+html.dark .bg-\[\#f7f9ff\],
+html.dark .bg-\[\#f6f8fc\] { background-color: #171a20 !important; }
+
+/* Sidebar yellow header/footer → near-black panel */
+html.dark .bg-\[\#ffdb62\] { background-color: #12151b !important; }
+
+/* Brand blue buttons / headers → sky blue */
+html.dark .bg-\[\#2f3192\],
+html.dark .bg-\[\#252780\] { background-color: #0369a1 !important; }
+html.dark .bg-\[\#335478\],
+html.dark .bg-\[\#3a5885\] { background-color: #075985 !important; }
+html.dark .hover\:bg-\[\#252780\]:hover,
+html.dark .hover\:bg-\[\#335478\]:hover,
+html.dark .hover\:bg-\[\#3a5885\]:hover { background-color: #0c4a6e !important; }
+
+/* Light blue / indigo tint panels → sky tint */
+html.dark .bg-blue-50,
+html.dark .bg-blue-50\/40,
+html.dark .bg-blue-50\/30,
+html.dark .bg-indigo-50,
+html.dark .bg-indigo-50\/40,
+html.dark .bg-sky-50 { background-color: rgba(56, 189, 248, 0.08) !important; }
+html.dark .bg-blue-100,
+html.dark .bg-indigo-100,
+html.dark .bg-sky-100 { background-color: rgba(56, 189, 248, 0.16) !important; }
+
+/* Status tints (badges, alerts) — same hue, dark-friendly */
+html.dark .bg-green-50 { background-color: rgba(34, 197, 94, 0.1) !important; }
+html.dark .bg-green-100 { background-color: rgba(34, 197, 94, 0.17) !important; }
+html.dark .bg-red-50 { background-color: rgba(239, 68, 68, 0.1) !important; }
+html.dark .bg-red-100 { background-color: rgba(239, 68, 68, 0.17) !important; }
+html.dark .bg-yellow-50,
+html.dark .bg-amber-50 { background-color: rgba(234, 179, 8, 0.1) !important; }
+html.dark .bg-yellow-100,
+html.dark .bg-amber-100 { background-color: rgba(234, 179, 8, 0.17) !important; }
+html.dark .bg-orange-50 { background-color: rgba(249, 115, 22, 0.1) !important; }
+html.dark .bg-orange-100 { background-color: rgba(249, 115, 22, 0.17) !important; }
+html.dark .bg-purple-50 { background-color: rgba(168, 85, 247, 0.1) !important; }
+html.dark .bg-purple-100 { background-color: rgba(168, 85, 247, 0.17) !important; }
+
+/* ---------- Hover surfaces ---------- */
+html.dark .hover\:bg-gray-50:hover,
+html.dark .hover\:bg-white:hover { background-color: #1f242e !important; }
+html.dark .hover\:bg-gray-100:hover,
+html.dark .hover\:bg-gray-100\/80:hover { background-color: #262c38 !important; }
+html.dark .hover\:bg-gray-200:hover { background-color: #2e3542 !important; }
+html.dark .hover\:bg-blue-50:hover,
+html.dark .hover\:bg-indigo-50:hover { background-color: rgba(56, 189, 248, 0.12) !important; }
+html.dark .hover\:bg-red-50:hover { background-color: rgba(239, 68, 68, 0.15) !important; }
+html.dark .hover\:bg-green-50:hover { background-color: rgba(34, 197, 94, 0.15) !important; }
+
+/* ---------- Text ---------- */
+html.dark .text-black,
+html.dark .text-gray-900 { color: #e6e9ef !important; }
+html.dark .text-gray-800 { color: #d7dbe2 !important; }
+html.dark .text-gray-700 { color: #c3c9d4 !important; }
+html.dark .text-gray-600 { color: #a9b1be !important; }
+html.dark .text-gray-500 { color: #8d95a3 !important; }
+html.dark .text-gray-400 { color: #6f7683 !important; }
+html.dark .text-gray-300 { color: #596070 !important; }
+html.dark .hover\:text-gray-900:hover,
+html.dark .hover\:text-black:hover { color: #ffffff !important; }
+
+/* Brand / blue text → sky blue */
+html.dark .text-\[\#2f3192\],
+html.dark .text-blue-500,
+html.dark .text-blue-600,
+html.dark .text-blue-700,
+html.dark .text-indigo-600,
+html.dark .text-indigo-700 { color: #38bdf8 !important; }
+html.dark .text-blue-800,
+html.dark .text-indigo-800 { color: #7dd3fc !important; }
+
+/* Status text — brighter shades that read on dark */
+html.dark .text-green-600,
+html.dark .text-green-700,
+html.dark .text-green-800 { color: #4ade80 !important; }
+html.dark .text-red-500,
+html.dark .text-red-600,
+html.dark .text-red-700 { color: #f87171 !important; }
+html.dark .text-yellow-600,
+html.dark .text-yellow-700,
+html.dark .text-yellow-800,
+html.dark .text-amber-600,
+html.dark .text-amber-700 { color: #facc15 !important; }
+html.dark .text-orange-600,
+html.dark .text-orange-700 { color: #fb923c !important; }
+html.dark .text-purple-600,
+html.dark .text-purple-700 { color: #c084fc !important; }
+
+/* ---------- Borders ---------- */
+html.dark .border-gray-50,
+html.dark .border-gray-100 { border-color: #232833 !important; }
+html.dark .border-gray-200,
+html.dark .border-gray-200\/50 { border-color: #2e3440 !important; }
+html.dark .border-gray-300 { border-color: #3a4150 !important; }
+html.dark .border-gray-400 { border-color: #4b5563 !important; }
+html.dark .border-blue-100,
+html.dark .border-blue-200,
+html.dark .border-indigo-200 { border-color: rgba(56, 189, 248, 0.35) !important; }
+html.dark .border-\[\#2f3192\] { border-color: #38bdf8 !important; }
+/* Row/column divider lines (divide-y / divide-x).
+   Tailwind v4 emits `> :not(:last-child)`; the `~` form is kept as a
+   fallback for any v3-style output. Without this, dividers stay light
+   gray and show as white lines between dark table rows. */
+html.dark .divide-gray-100 > :not(:last-child),
+html.dark .divide-gray-200 > :not(:last-child),
+html.dark .divide-gray-300 > :not(:last-child),
+html.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-gray-300 > :not([hidden]) ~ :not([hidden]) { border-color: #2e3440 !important; }
+
+/* ---------- Form controls ---------- */
+html.dark input,
+html.dark select,
+html.dark textarea {
+  background-color: #1a1f27;
+  color: #e6e9ef;
+  border-color: #3a4150;
+}
+html.dark input::placeholder,
+html.dark textarea::placeholder { color: #6f7683; }
+html.dark select option { background-color: #1a1f27; color: #e6e9ef; }
+
+/* ---------- Sidebar details ---------- */
+html.dark .nav-scroll::-webkit-scrollbar-thumb { background: #3a4150; }
+html.dark .nav-scroll::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+
+/* ---------- Loading shimmer ---------- */
+html.dark .dash-shimmer { background-color: #232936; }
+html.dark .dash-shimmer::after {
+  background: linear-gradient(90deg,
+      transparent,
+      rgba(255, 255, 255, 0.08),
+      transparent);
+}
+
+/* ---------- SweetAlert dialogs ---------- */
+html.dark .swal2-popup {
+  background: #171a20 !important;
+  color: #e6e9ef !important;
+}
+html.dark .swal2-title { color: #e6e9ef !important; }
+html.dark .swal2-html-container { color: #c3c9d4 !important; }
+
+/* ---------- Toasts (react-hot-toast) ---------- */
+html.dark .react-hot-toast {
+  background: #171a20 !important;
+  color: #e6e9ef !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+}
+/* keep the colored success / error toasts as they are */
+html.dark .react-hot-toast[data-type="success"] {
+  background: #71C9CE !important;
+  color: #1a1a1a !important;
+}
+html.dark .react-hot-toast[data-type="error"] {
+  background: #F97316 !important;
+  color: #ffffff !important;
+}
+
+/* ---------- react-datepicker ---------- */
+html.dark .react-datepicker {
+  background-color: #171a20 !important;
+  border-color: #2e3440 !important;
+  color: #e6e9ef !important;
+}
+html.dark .react-datepicker__header {
+  background-color: #1d222b !important;
+  border-color: #2e3440 !important;
+}
+html.dark .react-datepicker__current-month,
+html.dark .react-datepicker__day-name,
+html.dark .react-datepicker__day,
+html.dark .react-datepicker-time__header { color: #e6e9ef !important; }
+html.dark .react-datepicker__day:hover { background-color: #232936 !important; }
+html.dark .react-datepicker__day--selected { background-color: #0369a1 !important; }
+
+/* ---------- Charts ----------
+   ECharts / Chart.js / Plotly draw on their own canvas/svg with light
+   backgrounds and dark labels, which CSS can't recolor directly.
+   Inverting brightness while rotating hue 180° keeps every series color
+   recognizable but flips white→dark and dark-text→light. */
+html.dark .echarts-for-react,
+html.dark .js-plotly-plot,
+html.dark canvas:not(.echarts-for-react canvas):not(.js-plotly-plot canvas) {
+  filter: invert(0.9) hue-rotate(180deg);
+}
+/* Recharts is plain SVG — recolor its text/grid instead of filtering,
+   so brand series colors stay exact. */
+html.dark .recharts-text { fill: #a9b1be !important; }
+html.dark .recharts-cartesian-grid line { stroke: #2e3440 !important; }
+html.dark .recharts-default-tooltip {
+  background-color: #171a20 !important;
+  border-color: #2e3440 !important;
+}
+html.dark .recharts-tooltip-item,
+html.dark .recharts-tooltip-label { color: #e6e9ef !important; }
+
+/* ============================================================
+   DARK THEME — extended coverage (pass 2).
+   Fills the gaps found by scanning every page/component:
+   brand arbitrary-value classes, gradient stops, extra color
+   families, and hover/focus/ring variants.
+   ============================================================ */
+
+/* ----- Brand color arbitrary classes → sky blue ----- */
+html.dark .hover\:bg-\[\#2f3192\]:hover { background-color: #0369a1 !important; }
+html.dark .bg-\[\#2f3192\]\/90,
+html.dark .hover\:bg-\[\#2f3192\]\/90:hover { background-color: rgba(3, 105, 161, 0.9) !important; }
+html.dark .bg-\[\#2f3192\]\/15 { background-color: rgba(56, 189, 248, 0.16) !important; }
+html.dark .bg-\[\#2f3192\]\/10,
+html.dark .hover\:bg-\[\#2f3192\]\/10:hover { background-color: rgba(56, 189, 248, 0.12) !important; }
+html.dark .bg-\[\#2f3192\]\/5,
+html.dark .hover\:bg-\[\#2f3192\]\/5:hover { background-color: rgba(56, 189, 248, 0.07) !important; }
+html.dark .text-\[\#1f2061\],
+html.dark .hover\:text-\[\#1f2061\]:hover { color: #7dd3fc !important; }
+html.dark .text-\[\#3a5885\],
+html.dark .text-\[\#335478\],
+html.dark .hover\:text-\[\#3a5885\]:hover,
+html.dark .hover\:text-\[\#335478\]:hover,
+html.dark .hover\:text-\[\#2f3192\]:hover { color: #38bdf8 !important; }
+html.dark .group:hover .group-hover\:text-\[\#2f3192\] { color: #38bdf8 !important; }
+html.dark .border-\[\#406093\],
+html.dark .hover\:border-\[\#406093\]:hover { border-color: rgba(56, 189, 248, 0.45) !important; }
+html.dark .hover\:border-\[\#2f3192\]:hover,
+html.dark .focus\:border-\[\#2f3192\]:focus { border-color: #38bdf8 !important; }
+html.dark .ring-\[\#2f3192\],
+html.dark .focus\:ring-\[\#2f3192\]:focus { --tw-ring-color: #38bdf8 !important; }
+html.dark .ring-\[\#2f3192\]\/20,
+html.dark .focus\:ring-\[\#2f3192\]\/20:focus { --tw-ring-color: rgba(56, 189, 248, 0.2) !important; }
+html.dark .ring-\[\#2f3192\]\/30,
+html.dark .focus\:ring-\[\#2f3192\]\/30:focus { --tw-ring-color: rgba(56, 189, 248, 0.3) !important; }
+html.dark .ring-\[\#2f3192\]\/40,
+html.dark .focus\:ring-\[\#2f3192\]\/40:focus { --tw-ring-color: rgba(56, 189, 248, 0.4) !important; }
+html.dark .hover\:bg-\[\#f7f9ff\]:hover,
+html.dark .hover\:bg-\[\#f6f8fc\]:hover { background-color: #1f242e !important; }
+html.dark .bg-\[\#ffdb62\]\/80,
+html.dark .bg-\[\#ffdb62\]\/70 { background-color: rgba(234, 179, 8, 0.18) !important; }
+
+/* ----- Gradient stops ----- */
+html.dark .from-\[\#2f3192\] { --tw-gradient-from: #0369a1 !important; }
+html.dark .to-\[\#335478\] { --tw-gradient-to: #075985 !important; }
+html.dark .from-\[\#2f3192\]\/8,
+html.dark .from-\[\#2f3192\]\/5 { --tw-gradient-from: rgba(56, 189, 248, 0.08) !important; }
+html.dark .to-\[\#2f3192\]\/5,
+html.dark .to-\[\#2f3192\]\/10 { --tw-gradient-to: rgba(56, 189, 248, 0.09) !important; }
+html.dark .from-white,
+html.dark .from-gray-50,
+html.dark .from-gray-100 { --tw-gradient-from: #171a20 !important; }
+html.dark .to-white,
+html.dark .to-gray-50,
+html.dark .to-gray-50\/60,
+html.dark .to-gray-100 { --tw-gradient-to: #171a20 !important; }
+html.dark .via-white { --tw-gradient-via: #171a20 !important; }
+html.dark .via-gray-300 { --tw-gradient-via: #39404e !important; }
+html.dark .via-gray-400 { --tw-gradient-via: #4b5563 !important; }
+html.dark .from-blue-50 { --tw-gradient-from: rgba(56, 189, 248, 0.1) !important; }
+
+/* ----- Emerald / teal / cyan / rose / sky families ----- */
+html.dark .text-emerald-500,
+html.dark .text-emerald-600,
+html.dark .text-emerald-700 { color: #34d399 !important; }
+html.dark .text-emerald-800 { color: #6ee7b7 !important; }
+html.dark .bg-emerald-50,
+html.dark .bg-emerald-50\/60 { background-color: rgba(16, 185, 129, 0.1) !important; }
+html.dark .bg-emerald-100 { background-color: rgba(16, 185, 129, 0.17) !important; }
+html.dark .border-emerald-100,
+html.dark .border-emerald-200,
+html.dark .border-emerald-300 { border-color: rgba(16, 185, 129, 0.35) !important; }
+html.dark .hover\:bg-emerald-50:hover { background-color: rgba(16, 185, 129, 0.15) !important; }
+html.dark .hover\:bg-emerald-200:hover { background-color: rgba(16, 185, 129, 0.25) !important; }
+html.dark .text-teal-700 { color: #2dd4bf !important; }
+html.dark .bg-teal-50 { background-color: rgba(20, 184, 166, 0.12) !important; }
+html.dark .hover\:bg-teal-100:hover { background-color: rgba(20, 184, 166, 0.2) !important; }
+html.dark .text-cyan-700 { color: #22d3ee !important; }
+html.dark .bg-cyan-100 { background-color: rgba(34, 211, 238, 0.17) !important; }
+html.dark .text-rose-800 { color: #fda4af !important; }
+html.dark .bg-rose-50 { background-color: rgba(244, 63, 94, 0.1) !important; }
+html.dark .bg-rose-100 { background-color: rgba(244, 63, 94, 0.17) !important; }
+html.dark .hover\:bg-rose-100:hover { background-color: rgba(244, 63, 94, 0.22) !important; }
+html.dark .text-sky-700 { color: #7dd3fc !important; }
+
+/* ----- Remaining status shades / hovers ----- */
+html.dark .text-red-800,
+html.dark .hover\:text-red-500:hover,
+html.dark .hover\:text-red-600:hover,
+html.dark .hover\:text-red-700:hover,
+html.dark .hover\:text-red-800:hover { color: #f87171 !important; }
+html.dark .border-red-200 { border-color: rgba(239, 68, 68, 0.35) !important; }
+html.dark .border-red-300 { border-color: rgba(239, 68, 68, 0.45) !important; }
+html.dark .bg-green-200 { background-color: rgba(34, 197, 94, 0.25) !important; }
+html.dark .border-green-200 { border-color: rgba(34, 197, 94, 0.35) !important; }
+html.dark .hover\:bg-green-100:hover { background-color: rgba(34, 197, 94, 0.22) !important; }
+html.dark .border-yellow-200 { border-color: rgba(234, 179, 8, 0.35) !important; }
+html.dark .border-yellow-400 { border-color: rgba(234, 179, 8, 0.5) !important; }
+html.dark .bg-orange-200 { background-color: rgba(249, 115, 22, 0.25) !important; }
+html.dark .text-orange-800 { color: #fb923c !important; }
+html.dark .text-amber-800 { color: #fcd34d !important; }
+html.dark .text-purple-800,
+html.dark .hover\:text-purple-800:hover { color: #c084fc !important; }
+html.dark .hover\:text-blue-600:hover,
+html.dark .hover\:text-blue-800:hover { color: #7dd3fc !important; }
+html.dark .hover\:bg-blue-100:hover { background-color: rgba(56, 189, 248, 0.2) !important; }
+html.dark .hover\:bg-blue-50\/30:hover,
+html.dark .hover\:bg-blue-50\/40:hover,
+html.dark .hover\:bg-indigo-50\/40:hover { background-color: rgba(56, 189, 248, 0.1) !important; }
+html.dark .hover\:text-gray-600:hover,
+html.dark .hover\:text-gray-700:hover,
+html.dark .hover\:text-gray-800:hover { color: #d7dbe2 !important; }
+
+/* ============================================================
+   DARK THEME — inline-style override net.
+   Many components set colors via style={{ ... }} (e.g. striped
+   table rows with backgroundColor '#f0f1ff'). Inline styles beat
+   normal CSS, but author `!important` rules beat inline styles —
+   and React serializes hex colors into the style ATTRIBUTE as
+   rgb(...), so attribute selectors can target them precisely.
+   Light theme untouched: everything is scoped to html.dark.
+   ============================================================ */
+
+/* White / near-white inline backgrounds → dark surfaces */
+html.dark [style*="background-color: rgb(255, 255, 255)"],
+html.dark [style*="background: rgb(255, 255, 255)"],
+html.dark [style*="background-color: white"],
+html.dark [style*="background: white"] { background-color: #171a20 !important; }
+html.dark [style*="background-color: rgb(249, 250, 251)"],
+html.dark [style*="background: rgb(247, 248, 252)"],
+html.dark [style*="background: rgb(250, 250, 252)"],
+html.dark [style*="background: rgb(250, 251, 253)"] { background-color: #1d222b !important; }
+
+/* Striped / highlighted rows */
+html.dark [style*="background-color: rgb(240, 241, 255)"] { background-color: rgba(56, 189, 248, 0.08) !important; }
+html.dark [style*="background-color: rgb(255, 219, 98)"] { background-color: rgba(234, 179, 8, 0.2) !important; }
+html.dark [style*="background-color: rgb(253, 224, 71)"] { background-color: rgba(234, 179, 8, 0.35) !important; }
+html.dark [style*="background-color: rgb(255, 247, 237)"] { background-color: rgba(249, 115, 22, 0.12) !important; }
+
+/* Tinted inline chips / panels */
+html.dark [style*="background: rgb(219, 234, 254)"] { background: rgba(56, 189, 248, 0.15) !important; }
+html.dark [style*="background: rgb(209, 250, 229)"] { background: rgba(16, 185, 129, 0.15) !important; }
+html.dark [style*="background: rgb(243, 232, 255)"] { background: rgba(168, 85, 247, 0.15) !important; }
+html.dark [style*="background: rgb(254, 243, 199)"] { background: rgba(234, 179, 8, 0.15) !important; }
+
+/* Inline brand blue → sky blue */
+html.dark [style*="background-color: rgb(47, 49, 146)"],
+html.dark [style*="background: rgb(47, 49, 146)"] { background-color: #0369a1 !important; }
+html.dark [style*="background-color: rgba(47, 49, 146, 0.85)"] { background-color: rgba(2, 132, 199, 0.9) !important; }
+html.dark [style*="linear-gradient"][style*="rgb(47, 49, 146)"] { background: linear-gradient(135deg, #0369a1, #075985) !important; }
+
+/* Inline text colors → readable on dark */
+html.dark [style*="color: rgb(47, 49, 146)"] { color: #38bdf8 !important; }
+html.dark [style*="color: rgb(55, 65, 81)"] { color: #c3c9d4 !important; }
+html.dark [style*="color: rgb(0, 0, 0)"],
+html.dark [style*="color: black"] { color: #e6e9ef !important; }
+html.dark [style*="color: rgb(68, 68, 68)"],
+html.dark [style*="color: rgb(85, 85, 85)"],
+html.dark [style*="color: rgb(91, 97, 112)"],
+html.dark [style*="color: rgb(102, 102, 102)"],
+html.dark [style*="color: rgb(107, 114, 128)"],
+html.dark [style*="color: rgb(136, 136, 136)"] { color: #9aa2b1 !important; }
+html.dark [style*="color: rgb(180, 83, 9)"],
+html.dark [style*="color: rgb(217, 119, 6)"] { color: #fbbf24 !important; }
+html.dark [style*="color: rgb(146, 64, 14)"] { color: #fcd34d !important; }
+html.dark [style*="color: rgb(30, 64, 175)"] { color: #93c5fd !important; }
+html.dark [style*="color: rgb(5, 150, 105)"],
+html.dark [style*="color: rgb(6, 95, 70)"] { color: #34d399 !important; }
+
+/* Inline borders */
+html.dark [style*="border-color: rgb(229, 231, 235)"],
+html.dark [style*="border-color: rgb(223, 227, 242)"],
+html.dark [style*="border-color: rgb(207, 207, 224)"] { border-color: #2e3440 !important; }
+html.dark [style*="border-color: rgb(209, 213, 219)"] { border-color: #3a4150 !important; }
+
+/* ============================================================
+   DARK THEME — pass 3: fixes from page-by-page screenshot review
+   (MOM Tracking, Part Detail Master, Profile, History).
+   ============================================================ */
+
+/* ----- MOM Tracking: the page ships its own <style> block with hardcoded
+   light colors (.kc-input frames, .mom-sheet grid lines & zebra rows).
+   These rules out-specific it in dark mode. ----- */
+html.dark .kc-input {
+  background: #1a1f27 !important;
+  border-color: #3a4150 !important;
+}
+html.dark .kc-input:focus,
+html.dark .kc-input:focus-within {
+  background: #171a20 !important;
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15) !important;
+}
+html.dark .mom-sheet td,
+html.dark .mom-sheet th { border-color: #2e3440 !important; }
+html.dark .mom-sheet tbody tr:nth-child(even) { background: #161b23 !important; }
+html.dark .mom-sheet tbody tr:hover { background: #1c2330 !important; }
+html.dark .mom-sheet input:hover,
+html.dark .mom-sheet select:hover,
+html.dark .mom-sheet textarea:hover { background: #1f242e !important; }
+html.dark .mom-sheet input:focus,
+html.dark .mom-sheet select:focus,
+html.dark .mom-sheet textarea:focus,
+html.dark .mom-sheet .no-ring:focus { background: #171a20 !important; }
+
+/* Custom scrollbar classes defined inside page <style> blocks */
+html.dark .kc-scroll::-webkit-scrollbar-thumb,
+html.dark .q-scroll::-webkit-scrollbar-thumb,
+html.dark .qm-scroll::-webkit-scrollbar-thumb { background: #3a4150 !important; }
+html.dark .kc-scroll::-webkit-scrollbar-thumb:hover,
+html.dark .q-scroll::-webkit-scrollbar-thumb:hover,
+html.dark .qm-scroll::-webkit-scrollbar-thumb:hover { background: #4b5563 !important; }
+
+/* ----- Profile: banner uses a light photo (bg-[url('/2.jpg')]) that made
+   the light-colored name unreadable — swap it for a dark surface. ----- */
+html.dark [class*="2.jpg"] {
+  background-image: none !important;
+  background-color: #171a20 !important;
+}
+
+/* ----- Variant-prefixed & opacity-suffixed surface classes (compiled as
+   separate classes, so the plain overrides above don't match them) ----- */
+html.dark .even\:bg-gray-50:nth-child(even) { background-color: #1d222b !important; }
+html.dark .bg-gray-50\/40,
+html.dark .bg-gray-50\/50,
+html.dark .bg-gray-50\/60 { background-color: rgba(29, 34, 43, 0.6) !important; }
+html.dark .bg-gray-100\/70,
+html.dark .bg-gray-100\/80 { background-color: rgba(35, 41, 54, 0.8) !important; }
+html.dark .bg-white\/95 { background-color: rgba(23, 26, 32, 0.95) !important; }
+html.dark .bg-white\/90,
+html.dark .hover\:bg-white\/90:hover { background-color: rgba(23, 26, 32, 0.9) !important; }
+html.dark .bg-white\/80,
+html.dark .hover\:bg-white\/80:hover { background-color: rgba(23, 26, 32, 0.85) !important; }
+html.dark .bg-white\/70,
+html.dark .hover\:bg-white\/70:hover { background-color: rgba(23, 26, 32, 0.8) !important; }
+html.dark .bg-white\/60 { background-color: rgba(23, 26, 32, 0.7) !important; }
+html.dark .bg-white\/50 { background-color: rgba(23, 26, 32, 0.6) !important; }
+/* bg-white/5 … /30 are glass accents on colored headers — left as-is */
+html.dark .bg-blue-200 { background-color: rgba(56, 189, 248, 0.25) !important; }
+
+/* ----- Inline-style net: remaining literals found in the full sweep ----- */
+/* Light surfaces */
+html.dark [style*="background: rgb(250, 250, 250)"],
+html.dark [style*="background: rgb(241, 243, 251)"],
+html.dark [style*="background: rgb(241, 243, 249)"],
+html.dark [style*="background: rgb(241, 245, 249)"],
+html.dark [style*="background: rgb(238, 240, 243)"],
+html.dark [style*="background: rgb(238, 240, 250)"],
+html.dark [style*="background-color: rgb(243, 244, 246)"] { background-color: #1d222b !important; }
+/* Row-highlight / tint shorthands */
+html.dark [style*="background: rgb(240, 241, 255)"] { background: rgba(56, 189, 248, 0.08) !important; }
+html.dark [style*="background: rgb(253, 246, 236)"] { background: rgba(234, 179, 8, 0.12) !important; }
+html.dark [style*="background-color: rgb(219, 234, 254)"] { background-color: rgba(56, 189, 248, 0.15) !important; }
+html.dark [style*="background-color: rgb(209, 250, 229)"] { background-color: rgba(16, 185, 129, 0.15) !important; }
+/* Grey chips */
+html.dark [style*="background-color: rgb(209, 213, 219)"] { background-color: #39404e !important; }
+html.dark [style*="background-color: rgb(156, 163, 175)"] { background-color: #4b5563 !important; }
+/* Text */
+html.dark [style*="color: rgb(146, 96, 10)"],
+html.dark [style*="color: rgb(196, 106, 18)"] { color: #fbbf24 !important; }
+html.dark [style*="color: rgb(31, 41, 55)"] { color: #d7dbe2 !important; }
+html.dark [style*="color: rgb(100, 116, 139)"] { color: #9aa2b1 !important; }
+html.dark [style*="color: rgb(29, 78, 216)"] { color: #93c5fd !important; }
+html.dark [style*="color: rgb(64, 96, 147)"] { color: #38bdf8 !important; }
+/* Borders */
+html.dark [style*="border-color: rgb(226, 232, 240)"] { border-color: #2e3440 !important; }
+
+/* Correction — elements with a brand-blue inline BACKGROUND also match the
+   inline text-color rule above (the attribute string contains "color:").
+   Re-assert white text on them; this rule is last so it wins. */
+html.dark [style*="background-color: rgb(47, 49, 146)"],
+html.dark [style*="background: rgb(47, 49, 146)"] { color: #ffffff !important; }

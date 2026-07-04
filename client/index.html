@@ -9,6 +9,11 @@
 </head>
 
 <body>
+  <!-- Apply the saved dark theme BEFORE the app loads so there is no white
+       flash on refresh. Keep the key in sync with src/theme.js. -->
+  <script>
+    try { if (localStorage.getItem('erp-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) { }
+  </script>
   <div id="root"></div>
   <script type="module" src="/src/main.jsx"></script>
 </body>

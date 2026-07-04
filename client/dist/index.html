@@ -6,13 +6,18 @@
   <link rel="icon" type="image/png" sizes="32x32" href="./logo.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>KALA Care</title>
-  <script type="module" crossorigin src="./assets/index-IJGC8bd2.js"></script>
+  <script type="module" crossorigin src="./assets/index-J3Uus-PF.js"></script>
   <link rel="modulepreload" crossorigin href="./assets/vendor-react-Chjj6F22.js">
   <link rel="modulepreload" crossorigin href="./assets/vendor-chartjs-DaFCGlIH.js">
-  <link rel="stylesheet" crossorigin href="./assets/index-CtcBJOIH.css">
+  <link rel="stylesheet" crossorigin href="./assets/index-DZPD9urB.css">
 </head>
 
 <body>
+  <!-- Apply the saved dark theme BEFORE the app loads so there is no white
+       flash on refresh. Keep the key in sync with src/theme.js. -->
+  <script>
+    try { if (localStorage.getItem('erp-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) { }
+  </script>
   <div id="root"></div>
 </body>
 
