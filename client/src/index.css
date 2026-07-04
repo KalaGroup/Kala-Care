@@ -217,6 +217,63 @@
   }
 }
 
+/* ============================================================
+   Dashboard loading UX — shimmer skeletons + content reveal
+   ============================================================ */
+@keyframes dashShimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.dash-shimmer {
+  position: relative;
+  overflow: hidden;
+  background-color: #e5e7eb;
+}
+
+.dash-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg,
+      transparent,
+      rgba(255, 255, 255, 0.7),
+      transparent);
+  animation: dashShimmer 1.5s ease-in-out infinite;
+  animation-delay: var(--shimmer-delay, 0s);
+}
+
+@keyframes dashFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dash-fade-in {
+  animation: dashFadeUp 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .dash-shimmer::after,
+  .dash-fade-in {
+    animation: none;
+  }
+
+  .dash-fade-in {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* Reduce SweetAlert font size and padding */
 .swal2-popup {
   font-size: 0.8rem !important;

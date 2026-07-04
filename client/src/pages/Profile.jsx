@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 import DeleteDataModal from '../components/DeleteDataModal';
@@ -72,6 +72,7 @@ const CDBUpdateTable = ({ user, showToast }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [dateFilter, setDateFilter] = useState('all');
     const [showDateDropdown, setShowDateDropdown] = useState(false);
+    const [editedByFilter, setEditedByFilter] = useState('all');
 
     // Debounced search term: the input stays instant, but the (potentially large)
     // filter pass below only re-runs once the user pauses typing.
@@ -96,6 +97,15 @@ const CDBUpdateTable = ({ user, showToast }) => {
         () => filteredHistories.filter(h => !h.is_done).length,
         [filteredHistories]
     );
+
+    // Unique editor names for the "Edited By" filter dropdown
+    const editedByOptions = useMemo(() => {
+        const names = new Set();
+        editHistories.forEach(h => {
+            if (h.user_name && h.user_name !== '-') names.add(h.user_name);
+        });
+        return [...names].sort((a, b) => a.localeCompare(b));
+    }, [editHistories]);
 
     // Helper to highlight search term in text
     const highlightText = (text, search) => {
@@ -473,12 +483,16 @@ const CDBUpdateTable = ({ user, showToast }) => {
                 );
             }
 
+            if (editedByFilter !== 'all') {
+                filtered = filtered.filter(history => history.user_name === editedByFilter);
+            }
+
             // Keep the natural (latest-first) date order — marking a row "done"
             // no longer moves it to the bottom; it stays in place.
 
             setFilteredHistories(filtered);
         }
-    }, [debouncedSearchTerm, dateFilter, editHistories]);
+    }, [debouncedSearchTerm, dateFilter, editedByFilter, editHistories]);
 
     // Reset the progressive-render window whenever the filtered list changes.
     useEffect(() => {
@@ -635,7 +649,7 @@ const CDBUpdateTable = ({ user, showToast }) => {
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-3">
                 <div>
                     <h3 className="text-sm sm:text-base font-semibold text-black flex items-center space-x-2">
-                        <span>CDB Update History</span>
+                        <span>CDB Update</span>
                         <span className="text-xs bg-gray-100 text-black px-2 py-0.5 rounded-full">
                             {filteredHistories.length} records ({getDateFilterLabel()})
                         </span>
@@ -643,6 +657,19 @@ const CDBUpdateTable = ({ user, showToast }) => {
                 </div>
 
                 <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+                    {/* Edited By filter */}
+                    <select
+                        value={editedByFilter}
+                        onChange={(e) => setEditedByFilter(e.target.value)}
+                        title="Filter by who edited the record"
+                        className={`bg-white border border-gray-300 hover:bg-gray-50 px-2.5 py-1.5 rounded-lg text-xs cursor-pointer max-w-[180px] focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent transition-all ${editedByFilter !== 'all' ? 'text-[#2f3192] border-[#2f3192] font-semibold' : 'text-black'}`}
+                    >
+                        <option value="all">Edited By: All</option>
+                        {editedByOptions.map(name => (
+                            <option key={name} value={name}>{name}</option>
+                        ))}
+                    </select>
+
                     <div className="relative">
                         <button
                             onClick={() => setShowDateDropdown(!showDateDropdown)}
@@ -925,6 +952,27 @@ const Profile = () => {
     const [unresolvedQueryCount, setUnresolvedQueryCount] = useState(0);
     const [hasShownUnresolvedToast, setHasShownUnresolvedToast] = useState(false);
     const [showQueryCount, setShowQueryCount] = useState(false);
+
+    // Deep-link support: the ERP Sitemap opens a specific admin tab or box via
+    // router state — navigate('/profile', { state: { openTab: 'queries' } }) or
+    // { state: { openModal: 'banner' } }. The state is consumed immediately so
+    // a refresh doesn't re-apply it.
+    const routerLocation = useLocation();
+    const routerNavigate = useNavigate();
+    useEffect(() => {
+        const s = routerLocation.state;
+        if (!s) return;
+        const { openTab: tab, openModal: modal } = s;
+        if (tab) {
+            setActiveAdminTab(tab);
+            if (tab === 'queries') setShowQueryCount(true);
+        }
+        if (modal === 'banner') setShowBannerModal(true);
+        if (tab || modal) {
+            routerNavigate(routerLocation.pathname, { replace: true, state: null });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [routerLocation.state]);
     const [employeeCount, setEmployeeCount] = useState(0);
     const [visibleEmployeeCount, setVisibleEmployeeCount] = useState(50);
     const employeeLoadMoreRef = React.useRef(null); const [previewData, setPreviewData] = useState([]);

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
     ClipboardDocumentCheckIcon, Cog6ToothIcon, PrinterIcon,
     ArrowDownTrayIcon, CheckIcon, XMarkIcon, ArrowPathIcon,
@@ -346,10 +347,35 @@ const MaintenanceSchedule = () => {
     const role = getRole();
     const isManager = role === 'master_admin' || role === 'it_admin';
     const [showMaster, setShowMaster] = useState(false);
+    // { tab, n } — n bumps on every deep-link so the panel re-applies the tab
+    // even when the same one is requested twice.
+    const [masterReq, setMasterReq] = useState({ tab: 'master', n: 0 });
+
+    // Deep-link support: the ERP Sitemap opens the Master panel on a specific
+    // tab via router state — navigate('/maintenance-schedule', { state:
+    // { openMaster: 'service' } }) with 'master' | 'service' | 'import' — or
+    // returns to the schedule view via { openSchedule: true }. The state is
+    // consumed immediately so a refresh doesn't re-apply it.
+    const routerLocation = useLocation();
+    const routerNavigate = useNavigate();
+    useEffect(() => {
+        const s = routerLocation.state;
+        if (!s) return;
+        const m = s.openMaster;
+        if (m && isManager) {
+            setMasterReq((r) => ({ tab: typeof m === 'string' ? m : 'master', n: r.n + 1 }));
+            setShowMaster(true);
+        }
+        if (s.openSchedule) setShowMaster(false);
+        if (m || s.openSchedule) {
+            routerNavigate(routerLocation.pathname, { replace: true, state: null });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [routerLocation.state]);
 
     // Master / IT admin can flip into the Master panel in the SAME tab.
     if (showMaster && isManager) {
-        return <MaintenanceScheduleMaster onBack={() => setShowMaster(false)} />;
+        return <MaintenanceScheduleMaster onBack={() => setShowMaster(false)} initialTab={masterReq.tab} initialTabNonce={masterReq.n} />;
     }
     return <MaintenanceScheduleView isMaster={isManager} onManage={() => setShowMaster(true)} />;
 };

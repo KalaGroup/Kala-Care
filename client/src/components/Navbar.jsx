@@ -3,6 +3,8 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { PiHandshakeDuotone } from "react-icons/pi";
 import Swal from 'sweetalert2';
 import axios from 'axios';
+import SitemapModal from './SitemapModal';
+import { prefetchRoute } from '../routePrefetch';
 
 import {
   Bars3Icon,
@@ -181,6 +183,7 @@ function Navbar({ children }) {
   const [hoveredItem, setHoveredItem] = useState(null);
   const [engagementDropdownOpen, setEngagementDropdownOpen] = useState(false);
   const [showTerminologyModal, setShowTerminologyModal] = useState(false);
+  const [showSitemapModal, setShowSitemapModal] = useState(false);
   const [expenseDropdownOpen, setExpenseDropdownOpen] = useState(false);
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
   const [partInfoDropdownOpen, setPartInfoDropdownOpen] = useState(false);   // ← added
@@ -223,6 +226,7 @@ function Navbar({ children }) {
   // Role checks
   const isAdmin = user?.role === 'master_admin' || user?.role === 'it_admin' || user?.role === 'branch_admin';
   const isMasterOrITAdmin = user?.role === 'master_admin' || user?.role === 'it_admin';
+  const isMasterAdmin = user?.role === 'master_admin';
   const isEmployee = user?.role === 'employee';
 
   // Terminology Modal Component - Compact version
@@ -576,12 +580,14 @@ function Navbar({ children }) {
     recordLogoutAndClear('manual');
   };
 
-  // On the customer info page (taking follow-ups) → open Knowledge Bank in a small
-  // CHROME POPUP WINDOW (not a new tab). The fixed window name "knowledgeBankPopup"
-  // means a second click reuses the same popup instead of opening another one.
-  // Everywhere else it navigates normally in the same tab.
+  // Anywhere on the Drive (/customer-engagement) or Non-Drive (/customer-engagement-2)
+  // data pages → open Knowledge Bank in a small CHROME POPUP WINDOW (not a new tab),
+  // so the user never loses their working page. The fixed window name
+  // "knowledgeBankPopup" means a second click reuses the same popup instead of
+  // opening another one. Everywhere else it navigates normally in the same tab.
+  const ENGAGEMENT_DATA_PATHS = ['/customer-engagement', '/customer-engagement-2'];
   const handleOtherPageClick = (e, path) => {
-    if (path === '/knowledge-book' && sessionStorage.getItem('onCustomerInfoPage') === 'true') {
+    if (path === '/knowledge-book' && ENGAGEMENT_DATA_PATHS.includes(location.pathname)) {
       e.preventDefault();
       const w = 1000, h = 700;
       const left = window.screenX + Math.max(0, (window.outerWidth - w) / 2);
@@ -950,10 +956,25 @@ function Navbar({ children }) {
     return roleMap[role] || role;
   };
 
+  // Delegated prefetch for every link in the sidebar: on hover/touch, find the
+  // nearest anchor and warm its route chunk so the click renders instantly.
+  const handleNavLinkPrefetch = (e) => {
+    const link = e.target.closest && e.target.closest('a[href]');
+    if (!link) return;
+    try {
+      prefetchRoute(new URL(link.href, window.location.origin).pathname);
+    } catch { /* malformed href — nothing to prefetch */ }
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-[#EEEEEE]">
       {/* Terminology Modal */}
       <TerminologyModal />
+
+      {/* ERP Sitemap — helicopter view (Master Admin only) */}
+      {showSitemapModal && isMasterAdmin && (
+        <SitemapModal onClose={() => setShowSitemapModal(false)} />
+      )}
 
       {/* Drive List Modal — ALL drives (active + inactive). Duration / Remark /
           display name are editable via the Actions column (View / Edit) and
@@ -1389,8 +1410,14 @@ function Navbar({ children }) {
         </div>
       )}
 
-      {/* Sidebar */}
-      <aside className={`
+      {/* Sidebar. One delegated handler warms the target page's JS chunk the
+          moment the user hovers (desktop) or touches (mobile) ANY link inside
+          the sidebar — by the time they finish the click, the chunk is usually
+          already cached and the page opens instantly. */}
+      <aside
+        onMouseOver={handleNavLinkPrefetch}
+        onTouchStart={handleNavLinkPrefetch}
+        className={`
         fixed md:relative md:translate-x-0
         h-full bg-white backdrop-blur-xl
         border-r border-gray-200/50
@@ -2046,8 +2073,31 @@ function Navbar({ children }) {
               </div>
             </div>
 
-            {/* Fixed Info Button at Bottom of White Section - Non-scrollable */}
-            <div className="flex-shrink-0 px-2 pb-2 pt-1 mt-auto">
+            {/* Fixed Info Buttons at Bottom of White Section - Non-scrollable */}
+            <div className={`flex-shrink-0 px-2 pb-2 pt-1 mt-auto flex items-center gap-1 ${sidebarOpen ? 'flex-row' : 'flex-col'}`}>
+              {/* Sitemap — helicopter view of the whole ERP (Master Admin only) */}
+              {isMasterAdmin && (
+                <button
+                  onClick={() => setShowSitemapModal(true)}
+                  onMouseEnter={() => setHoveredItem('sitemap')}
+                  onMouseLeave={() => setHoveredItem(null)}
+                  className="group relative flex items-center justify-center px-2 py-1 rounded-md transition-all duration-200 hover:bg-gray-100 active:scale-[0.98] flex-shrink-0"
+                >
+                  <div className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center border border-gray-200">
+                    <svg className="w-3 h-3" style={{ color: themeColor }} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <rect x="9" y="3" width="6" height="4.5" rx="1" />
+                      <rect x="3" y="16.5" width="6" height="4.5" rx="1" />
+                      <rect x="15" y="16.5" width="6" height="4.5" rx="1" />
+                      <path strokeLinecap="round" d="M12 7.5v3.5M12 11H6v5.5M12 11h6v5.5" />
+                    </svg>
+                  </div>
+                  <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
+                    ERP Sitemap
+                    <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
+                  </div>
+                </button>
+              )}
+
               <button
                 onClick={() => setShowTerminologyModal(true)}
                 onMouseEnter={() => setHoveredItem('terminology')}

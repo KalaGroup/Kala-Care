@@ -37,8 +37,16 @@ const ErrorBox = ({ msg, onRetry }) => (
 );
 
 /* ===================================================================== */
-const MaintenanceScheduleMaster = ({ onBack }) => {
-    const [tab, setTab] = useState('master');
+const MaintenanceScheduleMaster = ({ onBack, initialTab, initialTabNonce }) => {
+    const [tab, setTab] = useState(initialTab || 'master');
+
+    // Keep following the requested tab when the panel is already mounted and a
+    // sitemap deep-link asks for one (the nonce bumps per request, so even a
+    // repeat of the same tab re-applies after manual tab switches).
+    useEffect(() => {
+        if (initialTab) setTab(initialTab);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialTab, initialTabNonce]);
     const tabs = [
         { id: 'master', label: 'Master Data', Icon: CircleStackIcon },
         { id: 'service', label: 'Master of Service', Icon: WrenchScrewdriverIcon },

@@ -66,27 +66,64 @@ def _safe_float(val) -> float:
 # Used for unverified records where total_amount is NULL in DB.
 # ──────────────────────────────────────────────────────────────────
 def _get_branch_km_rates(db: Session) -> Dict[str, Dict[str, Any]]:
-    """Fetch all branch KM/DA rates from branch_km_rates table."""
+    """Fetch all branch KM/DA slab rates from branch_km_rates.
+
+    Uses the 2×2 slab schema (BranchKMRate model): rate + DA for each
+    (SR-count per day × distance vs km_threshold) combination.
+    """
     try:
         rows = db.execute(text("""
-            SELECT branch_code, km_rate, range_start_km, range_end_km,
-                   range_amount, above_km, above_amount
+            SELECT branch_code, km_threshold,
+                   single_low_rate,  single_low_da,
+                   multi_low_rate,   multi_low_da,
+                   single_high_rate, single_high_da,
+                   multi_high_rate,  multi_high_da
             FROM branch_km_rates
         """)).fetchall()
         rates = {}
         for r in rows:
             rates[r.branch_code] = {
-                'km_rate':        _safe_float(r.km_rate),
-                'range_start_km': float(r.range_start_km) if r.range_start_km is not None else None,
-                'range_end_km':   float(r.range_end_km)   if r.range_end_km   is not None else None,
-                'range_amount':   _safe_float(r.range_amount),
-                'above_km':       float(r.above_km)       if r.above_km       is not None else None,
-                'above_amount':   _safe_float(r.above_amount),
+                # falsy/NULL threshold falls back to 100 — same as the frontend
+                'km_threshold':     _safe_float(r.km_threshold) or 100.0,
+                'single_low_rate':  _safe_float(r.single_low_rate),
+                'single_low_da':    _safe_float(r.single_low_da),
+                'multi_low_rate':   _safe_float(r.multi_low_rate),
+                'multi_low_da':     _safe_float(r.multi_low_da),
+                'single_high_rate': _safe_float(r.single_high_rate),
+                'single_high_da':   _safe_float(r.single_high_da),
+                'multi_high_rate':  _safe_float(r.multi_high_rate),
+                'multi_high_da':    _safe_float(r.multi_high_da),
             }
         return rates
     except Exception as e:
         print(f"[KM rates] Could not load: {e}")
         return {}
+
+
+def _sr_day_key(uid, dt_str) -> Optional[str]:
+    """engineer-uid + calendar-day key used to count SRs per day."""
+    d = _parse_date_safe(dt_str)
+    if not d:
+        return None
+    return f"{(uid or '').strip()}__{d.date().isoformat()}"
+
+
+def _build_sr_per_day_map(rows) -> Dict[str, int]:
+    """Count records per (engineer, day) — mirrors frontend buildSrPerDayMap."""
+    day_map: Dict[str, int] = defaultdict(int)
+    for r in rows:
+        key = _sr_day_key(getattr(r, 'service_engineer_uid', None),
+                          getattr(r, 'sr_reach_at_site_datetime', None))
+        if key:
+            day_map[key] += 1
+    return day_map
+
+
+def _sr_count_for(record, day_map: Dict[str, int]) -> int:
+    """SR count for this record's engineer+day (defaults to 1)."""
+    key = _sr_day_key(getattr(record, 'service_engineer_uid', None),
+                      getattr(record, 'sr_reach_at_site_datetime', None))
+    return day_map.get(key, 1) if key else 1
 
 
 def _effective_km(record) -> Optional[float]:
@@ -105,21 +142,30 @@ def _effective_km(record) -> Optional[float]:
     return None
 
 
-def _calc_da(km: float, rate: Dict[str, Any]) -> float:
-    """Range-based DA, falls back to above-range DA."""
-    rs, re_, ak = rate['range_start_km'], rate['range_end_km'], rate['above_km']
-    if rs is not None and re_ is not None and rs <= km <= re_:
-        return rate['range_amount']
-    if ak is not None and km > ak:
-        return rate['above_amount']
-    return 0.0
+def _pick_rate_da(km: float, sr_count: int, rate: Dict[str, Any]):
+    """Pick (rate, da) from the 2×2 slab master — mirrors the frontend:
+    high = km > threshold (km exactly == threshold counts as LOW),
+    multi = more than 1 SR that day."""
+    high = km > rate['km_threshold']
+    multi = (sr_count or 1) > 1
+    if multi and high:
+        return rate['multi_high_rate'], rate['multi_high_da']
+    if multi:
+        return rate['multi_low_rate'], rate['multi_low_da']
+    if high:
+        return rate['single_high_rate'], rate['single_high_da']
+    return rate['single_low_rate'], rate['single_low_da']
 
 
-def _calc_total(km: Optional[float], rate: Optional[Dict[str, Any]]) -> float:
-    """Total = (km × km_rate) + DA."""
-    if km is None or not rate or rate['km_rate'] <= 0:
+def _calc_total(km: Optional[float], rate: Optional[Dict[str, Any]],
+                sr_count: int = 1, freight=0.0) -> float:
+    """Total = (km × slab rate) + slab DA + freight — mirrors the frontend."""
+    if km is None or not rate:
         return 0.0
-    return (km * rate['km_rate']) + _calc_da(km, rate)
+    r, da = _pick_rate_da(km, sr_count, rate)
+    if r <= 0:
+        return 0.0
+    return (km * r) + da + _safe_float(freight)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -266,11 +312,17 @@ def get_all_branches_unverified_count(db: Session) -> List[Dict[str, Any]]:
         TADAImport.ho_corrected_km,
         TADAImport.branch_verified_km,
         TADAImport.two_way_km,
+        TADAImport.service_engineer_uid,
+        TADAImport.sr_reach_at_site_datetime,
+        TADAImport.freight_charges,
     ).filter(
         (TADAImport.verification_status != 'Verified') |
         (TADAImport.verification_status.is_(None)),
         TADAImport.sd_branch_code.in_(BRANCH_ORDER),
     ).all()
+
+    # SRs per engineer per day — decides single vs multi slab rates
+    sr_day_map = _build_sr_per_day_map(rows)
 
     for r in rows:
         branch = r.sd_branch_code
@@ -286,7 +338,7 @@ def get_all_branches_unverified_count(db: Session) -> List[Dict[str, Any]]:
         if amt <= 0:
             km = _effective_km(r)
             rate = km_rates.get(branch) or ho_rate
-            amt = _calc_total(km, rate)
+            amt = _calc_total(km, rate, _sr_count_for(r, sr_day_map), r.freight_charges)
 
         branch_data[branch]['total_amount'] += amt
 

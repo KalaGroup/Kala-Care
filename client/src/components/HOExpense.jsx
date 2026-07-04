@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
@@ -566,6 +567,35 @@ const HOExpense = () => {
   const [historyRecords, setHistoryRecords] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyBranch, setHistoryBranch] = useState(null);
+
+  // Deep-link support: the ERP Sitemap opens a specific HO tab (and optionally
+  // the TA-DA History box) via router state — navigate('/expense', { state:
+  // { openTab: 'office' } }) or { openTab: 'tada', openModal: 'history' }.
+  // The state is consumed immediately so a refresh doesn't re-apply it.
+  const routerLocation = useLocation();
+  const routerNavigate = useNavigate();
+  const historyDeepLinkRef = useRef(false);
+  useEffect(() => {
+    const s = routerLocation.state;
+    if (!s) return;
+    if (s.openTab) setActiveTab(s.openTab);
+    if (s.openModal === 'history') historyDeepLinkRef.current = true;
+    if (s.openTab || s.openModal) {
+      routerNavigate(routerLocation.pathname, { replace: true, state: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routerLocation.state]);
+
+  // Honor a pending History deep-link as soon as a branch is available (the
+  // selected summary branch, else the first loaded branch).
+  useEffect(() => {
+    if (!historyDeepLinkRef.current) return;
+    const target = selectedBranchForSummary || branches[0];
+    if (!target) return;
+    historyDeepLinkRef.current = false;
+    loadBranchHistory(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branches, selectedBranchForSummary]);
 
   // New: History tab state
   const [historyTab, setHistoryTab] = useState('all'); // 'all' | 'periods'

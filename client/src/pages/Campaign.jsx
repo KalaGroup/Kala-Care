@@ -4,7 +4,7 @@ import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   MegaphoneIcon,
   PlusIcon,
@@ -247,6 +247,23 @@ const Campaign = () => {
   // Serial No lock: true once a letter has already been sent with the format being edited
   const [serialLocked, setSerialLocked] = useState(false);
   const [serialLockLoading, setSerialLockLoading] = useState(false);
+
+  // Deep-link support: the ERP Sitemap opens a specific box via router state —
+  // navigate('/campaigns', { state: { openModal: 'letter-master' } }). The
+  // state is consumed immediately so a refresh doesn't re-apply it.
+  const routerLocation = useLocation();
+  const routerNavigate = useNavigate();
+  useEffect(() => {
+    const modal = routerLocation.state?.openModal;
+    if (modal) {
+      if (modal === 'create-drive') setShowCampaignForm(true);
+      if (modal === 'add-service') setShowServiceForm(true);
+      if (modal === 'letter-master') setShowLetterMaster(true);
+      if (modal === 'branch-email') setShowBranchEmailMaster(true);
+      routerNavigate(routerLocation.pathname, { replace: true, state: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routerLocation.state]);
 
   // Branch Email Master
   const [showBranchEmailMaster, setShowBranchEmailMaster] = useState(false);

@@ -12,66 +12,55 @@ import Login from './pages/Login';
 // This keeps the initial bundle small so the app paints fast instead of
 // waiting for every page's code to download up front.
 //
-// The importer functions are named (not inlined) so the same reference can be
-// reused both by React.lazy AND by the idle prefetcher below. import() dedupes,
-// so prefetching just warms the module cache — the real navigation then resolves
-// instantly instead of waiting on a fresh chunk download.
-const importCustomer = () => import('./pages/Customer');
-const importImport = () => import('./pages/Import');
-const importCampaign = () => import('./pages/Campaign');
-const importCustomerEng = () => import('./pages/CustomerEng');
-const importProfile = () => import('./pages/Profile');
-const importDashboard = () => import('./pages/Dashboard');
-const importCustomerEng2 = () => import('./pages/CustomerEng2');
-const importExpense = () => import('./pages/Expense');
-const importExDashboard = () => import('./pages/ExDashboard');
-const importMOMTracking = () => import('./pages/MOMTracking');
-const importSalseANDFinance = () => import('./pages/SalseANDFinance');
-const importKnowledgeBook = () => import('./pages/KnowledgeBook');
-const importMaintenanceSchedule = () => import('./pages/MaintenanceSchedule');
-const importMaintenanceReports = () => import('./pages/MaintenanceReports');
+// The importer functions live in routePrefetch.js so the same references are
+// shared by React.lazy, the idle prefetcher below AND the navbar's hover
+// prefetch. import() dedupes, so prefetching just warms the module cache — the
+// real navigation then resolves instantly instead of waiting on a chunk download.
+import { routeImporters } from './routePrefetch';
 
-const Customer = lazy(importCustomer);
-const Import = lazy(importImport);
-const Campaign = lazy(importCampaign);
-const CustomerEng = lazy(importCustomerEng);
-const Profile = lazy(importProfile);
-const Dashboard = lazy(importDashboard);
-const CustomerEng2 = lazy(importCustomerEng2);
-const Expense = lazy(importExpense);
-const ExDashboard = lazy(importExDashboard);
-const MOMTracking = lazy(importMOMTracking);
-const SalseANDFinance = lazy(importSalseANDFinance);
-const KnowledgeBook = lazy(importKnowledgeBook);
+const Customer = lazy(routeImporters['/customers']);
+const Import = lazy(routeImporters['/import']);
+const Campaign = lazy(routeImporters['/campaigns']);
+const CustomerEng = lazy(routeImporters['/customer-engagement']);
+const Profile = lazy(routeImporters['/profile']);
+const Dashboard = lazy(routeImporters['/dashboard']);
+const CustomerEng2 = lazy(routeImporters['/customer-engagement-2']);
+const Expense = lazy(routeImporters['/expense']);
+const ExDashboard = lazy(routeImporters['/expense-dashboard']);
+const MOMTracking = lazy(routeImporters['/mom-tracking']);
+const SalseANDFinance = lazy(routeImporters['/sales-finance']);
+const KnowledgeBook = lazy(routeImporters['/knowledge-book']);
 //added by nik
-const MaintenanceSchedule = lazy(importMaintenanceSchedule);
-const MaintenanceReports = lazy(importMaintenanceReports);
+const MaintenanceSchedule = lazy(routeImporters['/maintenance-schedule']);
+const MaintenanceReports = lazy(routeImporters['/maintenance-reports']);
 
 // Route chunks to warm during idle time, most-visited first, so a later navbar
 // click finds the chunk already cached. Order roughly by how often pages are hit.
 const ROUTE_PREFETCHERS = [
-  importDashboard,
-  importCustomerEng,
-  importCustomerEng2,
-  importProfile,
-  importCustomer,
-  importCampaign,
-  importKnowledgeBook,
-  importExpense,
-  importExDashboard,
-  importMaintenanceSchedule,
-  importMaintenanceReports,
-  importMOMTracking,
-  importSalseANDFinance,
-  importImport,
+  routeImporters['/dashboard'],
+  routeImporters['/customer-engagement'],
+  routeImporters['/customer-engagement-2'],
+  routeImporters['/profile'],
+  routeImporters['/customers'],
+  routeImporters['/campaigns'],
+  routeImporters['/knowledge-book'],
+  routeImporters['/expense'],
+  routeImporters['/expense-dashboard'],
+  routeImporters['/maintenance-schedule'],
+  routeImporters['/maintenance-reports'],
+  routeImporters['/mom-tracking'],
+  routeImporters['/sales-finance'],
+  routeImporters['/import'],
 ];
 
-// Prefetch route chunks one at a time during browser idle periods. Runs after
-// the current page has settled, and yields between each chunk so it never
-// competes with the active page's own rendering / data fetches.
+// Prefetch route chunks one at a time during browser idle periods, yielding
+// between chunks. The timeout matters: on first load the dashboard keeps the
+// main thread busy (fetches + chart renders), and without it requestIdleCallback
+// can be postponed for seconds — exactly when the user clicks another page.
 function prefetchRouteChunks() {
-  const idle =
-    window.requestIdleCallback || ((cb) => window.setTimeout(() => cb({ timeRemaining: () => 0 }), 200));
+  const idle = window.requestIdleCallback
+    ? (cb) => window.requestIdleCallback(cb, { timeout: 700 })
+    : (cb) => window.setTimeout(cb, 200);
   let i = 0;
   const step = () => {
     if (i >= ROUTE_PREFETCHERS.length) return;
@@ -218,8 +207,13 @@ function Layout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // key={location.pathname}: React Router runs navigations inside
+  // startTransition, so when the target page's chunk isn't loaded yet React
+  // would keep showing the OLD page (URL changes, screen doesn't) until the
+  // download finishes. Remounting the boundary per path makes the fallback
+  // spinner appear immediately on click instead.
   const routes = (
-    <Suspense fallback={<RouteFallback />}>
+    <Suspense key={location.pathname} fallback={<RouteFallback />}>
     <Routes>
       {/* Public Routes */}
       <Route path="/login" element={

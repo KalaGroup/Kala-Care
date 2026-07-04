@@ -28,6 +28,7 @@ const EmployeeCampaignProgress = lazy(() => import('../components/EmployeeCampai
 const EmployeeActivityModal = lazy(() => import('../components/EmployeeActivityModal'));
 const EmployeeRRModal = lazy(() => import('../components/EmployeeRRModal'));
 import axios from 'axios';
+import { useLocation, useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 import DatePicker from 'react-datepicker';
@@ -96,6 +97,10 @@ const Dashboard = () => {
     const [userData, setUserData] = useState(null);
     const [allEmployeesPerformance, setAllEmployeesPerformance] = useState([]);
     const [branchPerformance, setBranchPerformance] = useState([]);
+    // True once a branch-performance fetch has completed (with data or not) —
+    // lets the Branch Overview tab show a loader instead of "No Branch Data"
+    // while the request is still in flight.
+    const [branchPerfFetched, setBranchPerfFetched] = useState(false);
     const [branchEmployees, setBranchEmployees] = useState([]);
     const [branches, setBranches] = useState([]);
     const [selectedBranch, setSelectedBranch] = useState('');
@@ -579,6 +584,23 @@ const Dashboard = () => {
         }
     }, [userData]);
 
+    // Deep-link support: the Navbar's ERP Sitemap opens a specific dashboard tab
+    // via router state — navigate('/dashboard', { state: { openTab: 'branches' } }).
+    // Defined AFTER the mount effect above so on a fresh mount this setActiveTab
+    // wins over the role-based default. The state is consumed immediately so a
+    // refresh or back-navigation doesn't re-apply it.
+    const routerLocation = useLocation();
+    const routerNavigate = useNavigate();
+    useEffect(() => {
+        const tab = routerLocation.state?.openTab;
+        if (tab) {
+            setActiveTab(tab);
+            markTabAsLoaded(tab);
+            routerNavigate(routerLocation.pathname, { replace: true, state: null });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [routerLocation.state]);
+
     // Load data when time period changes - PREVENT INFINITE LOOP
     // NOTE: fetch functions are intentionally NOT in the dependency array — they are
     // defined later in this component, so referencing them here would throw
@@ -588,6 +610,7 @@ const Dashboard = () => {
         if (userData && loadedTabs.overall && !isInitialMount.current && activeTab === 'overall') {
             isDataLoaded.current = false;
             hasFetchedBranchPerformance.current = false;
+            setBranchPerfFetched(false); // refetching — Branch Overview shows its loader again if empty
 
             // Give the filter-change fetches a FRESH AbortController, exactly like the
             // tab-switch path does. Without this, the request fired on filter change can
@@ -2301,6 +2324,7 @@ const Dashboard = () => {
             const response = await axios.post(url, payload, { signal });
             if (isMounted.current) {
                 setBranchPerformance(response.data);
+                setBranchPerfFetched(true);
                 hasFetchedBranchPerformance.current = true; // ← MARK AS FETCHED
                 if (response.data?.length > 0) {
                     response.data.forEach(branch => {
@@ -2312,7 +2336,10 @@ const Dashboard = () => {
             return response.data;
         } catch (error) {
             if (axios.isCancel(error) || error.name === 'CanceledError') return [];
-            if (isMounted.current) console.error('Error fetching branch performance:', error);
+            if (isMounted.current) {
+                console.error('Error fetching branch performance:', error);
+                setBranchPerfFetched(true); // fetch finished (failed) — stop showing the loader
+            }
             return [];
         }
     }, [userData, timePeriod, customStartDate, customEndDate, branchEngagedData, branchRemainingData]);
@@ -2334,11 +2361,13 @@ const Dashboard = () => {
             const filteredData = response.data.filter(branch => branch.branch === userData.branch);
             if (isMounted.current) {
                 setBranchPerformance(filteredData);
+                setBranchPerfFetched(true);
             }
         } catch (error) {
             if (axios.isCancel(error) || error.name === 'CanceledError') return; // ADD THIS
             if (isMounted.current) {
                 console.error('Error fetching branch performance:', error);
+                setBranchPerfFetched(true); // fetch finished (failed) — stop showing the loader
             }
         }
     }, [userData, timePeriod, customStartDate, customEndDate]);
@@ -3044,7 +3073,10 @@ const Dashboard = () => {
         }
     };
 
-    if (loading && !allEmployeesPerformance.length) {
+    // Only gate the very first frame (userData is read synchronously from
+    // sessionStorage). Once it's set, the dashboard shell renders immediately
+    // and each section shows its own skeleton until its data lands.
+    if (!userData && !error) {
         return (
             <div className="flex items-center justify-center min-h-screen">
                 <div className="flex flex-col items-center">
@@ -3109,27 +3141,29 @@ const Dashboard = () => {
         return 'My Performance';
     };
 
-    // Add these skeleton components before your Dashboard component
+    // Skeleton components — each mirrors the real layout of the box it stands in
+    // for, using a shimmer sweep (.dash-shimmer) instead of spinners so the page
+    // structure is visible immediately and content fades in box-by-box.
 
     // Skeleton for the 3 summary cards
     const SummaryCardsSkeleton = () => (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
-            {[1, 2, 3].map((i) => (
-                <div key={i} className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3 animate-pulse">
-                    <div className="h-3 bg-gray-300 rounded w-24 mb-2"></div>
+            {[0, 1, 2].map((i) => (
+                <div key={i} className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3 dash-fade-in" style={{ animationDelay: `${i * 80}ms` }}>
+                    <div className="h-3 w-36 rounded dash-shimmer mb-3" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
                     <div className="flex items-center justify-between">
                         <div className="w-[30%] flex justify-center">
-                            <div className="h-7 bg-gray-300 rounded w-12"></div>
+                            <div className="h-7 w-14 rounded-lg dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
                         </div>
-                        <div className="w-px h-12 bg-gray-300"></div>
+                        <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-300 to-transparent"></div>
                         <div className="w-[60%] space-y-2">
-                            <div className="flex justify-between">
-                                <div className="h-3 bg-gray-300 rounded w-16"></div>
-                                <div className="h-4 bg-gray-300 rounded w-12"></div>
+                            <div className="flex justify-between items-center">
+                                <div className="h-3 w-16 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
+                                <div className="h-4 w-10 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
                             </div>
-                            <div className="flex justify-between">
-                                <div className="h-3 bg-gray-300 rounded w-16"></div>
-                                <div className="h-4 bg-gray-300 rounded w-12"></div>
+                            <div className="flex justify-between items-center">
+                                <div className="h-3 w-16 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
+                                <div className="h-4 w-10 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
                             </div>
                         </div>
                     </div>
@@ -3138,49 +3172,122 @@ const Dashboard = () => {
         </div>
     );
 
-    // Skeleton for the two graphs (campaign breakdown + pie chart)
+    // Skeleton for the two graphs (drive breakdown bar chart + status pie chart)
     const GraphsSkeleton = () => (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 mb-3">
-            {/* Campaign-wise Customer Breakdown Skeleton */}
-            <div className="lg:col-span-8 bg-white rounded-xl shadow-sm p-3 border border-gray-100 max-lg:w-full max-lg:min-w-0">
-                <div className="h-5 bg-gray-300 rounded w-64 mb-4 animate-pulse"></div>
-                <div className="h-[420px] bg-gray-100 rounded-lg animate-pulse flex items-center justify-center">
-                    <div className="text-center">
-                        <div className="w-12 h-12 border-4 border-t-4 border-t-[#2f3192] border-gray-200 rounded-full animate-spin mx-auto mb-3"></div>
-                        <p className="text-gray-500 text-sm">Loading drive data...</p>
-                    </div>
+            {/* Drive-wise Customer Breakdown skeleton — fake vertical bars */}
+            <div className="lg:col-span-8 bg-white rounded-xl shadow-sm p-3 border border-gray-100 max-lg:w-full max-lg:min-w-0 dash-fade-in">
+                <div className="h-5 w-64 rounded dash-shimmer mb-3"></div>
+                <div className="flex justify-center gap-4 mb-3">
+                    {[0, 1, 2].map((i) => (
+                        <div key={i} className="h-3 w-20 rounded-full dash-shimmer" style={{ '--shimmer-delay': `${i * 0.1}s` }}></div>
+                    ))}
+                </div>
+                <div className="h-[370px] flex items-end justify-around gap-2 px-4 pb-1 border-b border-gray-200">
+                    {[55, 82, 40, 95, 65, 30, 74, 50, 88, 45].map((h, i) => (
+                        <div
+                            key={i}
+                            className="flex-1 max-w-[48px] rounded-t-md dash-shimmer"
+                            style={{ height: `${h}%`, '--shimmer-delay': `${(i % 5) * 0.12}s` }}
+                        ></div>
+                    ))}
                 </div>
             </div>
 
-            {/* Asset Status Distribution Skeleton */}
-            <div className="lg:col-span-4 bg-white rounded-xl shadow-sm p-3 border border-gray-100 max-lg:w-full max-lg:min-w-0">
-                <div className="h-5 bg-gray-300 rounded w-48 mb-4 animate-pulse"></div>
-                <div className="h-[350px] bg-gray-100 rounded-lg animate-pulse flex items-center justify-center">
-                    <div className="text-center">
-                        <div className="w-12 h-12 border-4 border-t-4 border-t-[#2f3192] border-gray-200 rounded-full animate-spin mx-auto mb-3"></div>
-                        <p className="text-gray-500 text-sm">Loading chart data...</p>
+            {/* Asset Status Distribution skeleton — fake donut + legend */}
+            <div className="lg:col-span-4 bg-white rounded-xl shadow-sm p-3 border border-gray-100 flex flex-col max-lg:w-full max-lg:min-w-0 dash-fade-in" style={{ animationDelay: '80ms' }}>
+                <div className="h-5 w-48 rounded dash-shimmer mb-3"></div>
+                <div className="flex-1 flex flex-col items-center justify-center gap-5 min-h-[350px]">
+                    <div className="relative w-44 h-44 rounded-full dash-shimmer">
+                        <div className="absolute inset-[32%] bg-white rounded-full"></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                        {[0, 1, 2, 3].map((i) => (
+                            <div key={i} className="flex items-center gap-2">
+                                <div className="w-3 h-3 rounded-sm dash-shimmer" style={{ '--shimmer-delay': `${i * 0.1}s` }}></div>
+                                <div className="h-3 w-14 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.1}s` }}></div>
+                            </div>
+                        ))}
                     </div>
                 </div>
             </div>
         </div>
     );
 
-    // Skeleton for Branch-wise Asset Progress
+    // Skeleton for Branch-wise Asset Progress — fake horizontal bar rows
     const BranchProgressSkeleton = () => (
-        <div className="w-full mb-2">
+        <div className="w-full mb-2 dash-fade-in" style={{ animationDelay: '160ms' }}>
             <div className="bg-white rounded-xl shadow-sm p-3 border border-gray-100">
-                <div className="mb-2">
-                    <div className="h-5 bg-gray-300 rounded w-48 mb-2 animate-pulse"></div>
-                    <div className="h-3 bg-gray-300 rounded w-32 animate-pulse"></div>
+                <div className="mb-3 flex items-center justify-between">
+                    <div className="h-5 w-56 rounded dash-shimmer"></div>
+                    <div className="h-4 w-32 rounded dash-shimmer"></div>
                 </div>
-                <div className="h-[600px] bg-gray-100 rounded-lg animate-pulse flex items-center justify-center">
-                    <div className="text-center">
-                        <div className="w-12 h-12 border-4 border-t-4 border-t-[#2f3192] border-gray-200 rounded-full animate-spin mx-auto mb-3"></div>
-                        <p className="text-black text-sm">Loading branch data...</p>
-                    </div>
+                <div className="h-3 w-44 rounded dash-shimmer mb-4"></div>
+                <div className="space-y-4 py-2">
+                    {[92, 78, 85, 62, 71, 52, 66, 44, 57, 38, 48, 30].map((w, i) => (
+                        <div key={i} className="flex items-center gap-3">
+                            <div className="h-3 w-24 rounded dash-shimmer shrink-0" style={{ '--shimmer-delay': `${(i % 6) * 0.1}s` }}></div>
+                            <div className="h-4 rounded-r-md dash-shimmer" style={{ width: `${w}%`, '--shimmer-delay': `${(i % 6) * 0.1}s` }}></div>
+                        </div>
+                    ))}
                 </div>
             </div>
         </div>
+    );
+
+    // Skeleton for one branch's combined 4-section stats box (Branch tab)
+    const BranchStatsSkeleton = () => (
+        <div className="px-3 py-2 bg-gradient-to-r from-gray-50 to-white">
+            <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-gray-300">
+                {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className={`${i === 2 ? 'flex-[1.4]' : 'flex-1'} p-3`}>
+                        <div className="h-3 w-32 rounded dash-shimmer mb-3" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
+                        <div className="flex items-center justify-between">
+                            <div className="w-[30%] flex justify-center">
+                                <div className="h-8 w-12 rounded-lg dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
+                            </div>
+                            <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-300 to-transparent"></div>
+                            <div className="w-[60%] space-y-2">
+                                <div className="flex justify-between items-center">
+                                    <div className="h-3 w-14 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
+                                    <div className="h-4 w-10 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <div className="h-3 w-14 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
+                                    <div className="h-4 w-10 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+
+    // Skeleton for the whole Branch Overview list (before the branch list arrives)
+    const BranchOverviewSkeleton = () => (
+        <>
+            {[0, 1, 2].map((i) => (
+                <div key={i} className="dash-fade-in" style={{ animationDelay: `${i * 90}ms` }}>
+                    <div className="px-3 py-2 border-b border-gray-100">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <div className="h-4 w-44 rounded dash-shimmer mb-2" style={{ '--shimmer-delay': `${i * 0.1}s` }}></div>
+                                <div className="h-3 w-24 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.1}s` }}></div>
+                            </div>
+                            <div className="flex items-center gap-4">
+                                <div className="h-7 w-44 rounded-lg dash-shimmer max-sm:hidden" style={{ '--shimmer-delay': `${i * 0.1}s` }}></div>
+                                <div className="flex flex-col items-center gap-1">
+                                    <div className="h-3 w-16 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.1}s` }}></div>
+                                    <div className="h-6 w-8 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.1}s` }}></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <BranchStatsSkeleton />
+                </div>
+            ))}
+        </>
     );
 
     return (
@@ -3624,18 +3731,13 @@ const Dashboard = () => {
                 {/* Overall Performance Tab (for Master Admin and IT Admin) */}
                 {activeTab === 'overall' && (isMasterAdmin || isITAdmin) && shouldLoadTab('overall') && (
                     <div>
-                        {/* Show SKELETON while loading initial data */}
-                        {(!summaryStats || !campaignPerformance?.length || !branchPerformance?.length) && loading ? (
-                            <>
-                                <SummaryCardsSkeleton />
-                                <GraphsSkeleton />
-                                <BranchProgressSkeleton />
-                            </>
-                        ) : (
-                            <>
-                                {/* 3 Summary Cards - Only show when data is loaded */}
-                                {summaryStats && (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
+                        {/* Each section paints independently: it shows its own
+                            skeleton until its own data lands, then fades in —
+                            no box waits for another box's request. */}
+
+                                {/* 3 Summary Cards */}
+                                {!summaryStats ? (loading && <SummaryCardsSkeleton />) : (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-3 dash-fade-in">
                                         {/* 1st Card */}
                                         <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3">
                                             <h3 className="text-[11px] font-semibold text-black uppercase mb-2">
@@ -3725,8 +3827,11 @@ const Dashboard = () => {
                                     </div>
                                 )}
 
-                                {/* Two Graphs Row - Show when campaign data is ready */}
-                                <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 mb-3">
+                                {/* Two Graphs Row — skeleton until drive data is ready */}
+                                {!campaignPerformance?.length && (loading || campaignLoading) ? (
+                                    <GraphsSkeleton />
+                                ) : (
+                                <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 mb-3 dash-fade-in">
                                     {/* Campaign-wise Customer Breakdown - 65% width */}
                                     <div className="lg:col-span-8 bg-white rounded-xl shadow-sm p-3 border border-gray-100 max-lg:w-full max-lg:min-w-0">
                                         <h3 className="text-base font-semibold text-gray-800 mb-4">
@@ -3755,11 +3860,12 @@ const Dashboard = () => {
                                         </div>
                                     </div>
                                 </div>
+                                )}
 
                                 {branchPerformance && branchPerformance.length > 0 ? (() => {
                                     const sortedBranchPerformance = sortedBranchPerformanceMemo;
                                     return (
-                                        <div className="w-full mb-2">
+                                        <div className="w-full mb-2 dash-fade-in">
                                             <div className="bg-white rounded-xl shadow-sm p-3 border border-gray-100">
                                                 <div className="mb-2">
                                                     <h3 className="text-base font-semibold text-black flex justify-between items-center">
@@ -4024,11 +4130,13 @@ const Dashboard = () => {
                                                             }}
                                                         />
                                                     ) : (
-                                                        <div className="h-64 flex items-center justify-center text-gray-500">
-                                                            <div className="text-center">
-                                                                <div className="w-10 h-10 border-4 border-t-4 border-t-[#2f3192] border-gray-200 rounded-full animate-spin mx-auto mb-3"></div>
-                                                                <p>Loading branch data...</p>
-                                                            </div>
+                                                        <div className="space-y-4 py-2">
+                                                            {[90, 72, 80, 58, 66, 45, 52, 34].map((w, i) => (
+                                                                <div key={i} className="flex items-center gap-3">
+                                                                    <div className="h-3 w-24 rounded dash-shimmer shrink-0" style={{ '--shimmer-delay': `${(i % 5) * 0.1}s` }}></div>
+                                                                    <div className="h-4 rounded-r-md dash-shimmer" style={{ width: `${w}%`, '--shimmer-delay': `${(i % 5) * 0.1}s` }}></div>
+                                                                </div>
+                                                            ))}
                                                         </div>
                                                     )}
                                                 </div>
@@ -4038,8 +4146,6 @@ const Dashboard = () => {
                                 })() : (
                                     <BranchProgressSkeleton />
                                 )}
-                            </>
-                        )}
                     </div>
                 )}
 
@@ -4090,29 +4196,28 @@ const Dashboard = () => {
 
                                     if (isLoading || !engagedData || !remainingData) {
                                         return (
-                                            <div key={branch.branch}>
-                                                <div className="px-5 py-3 border-b border-gray-100">
+                                            <div key={branch.branch} className="dash-fade-in">
+                                                <div className="px-3 py-2 border-b border-gray-100">
                                                     <div className="flex items-center justify-between">
-                                                        <h3 className="text-base font-semibold text-black">
-                                                            {getBranchDisplayName(branch.branch)}
-                                                        </h3>
+                                                        <div>
+                                                            <h3 className="text-base font-semibold text-black">
+                                                                {getBranchDisplayName(branch.branch)}
+                                                            </h3>
+                                                            <div className="h-3 w-24 rounded dash-shimmer mt-1"></div>
+                                                        </div>
                                                         <div className="text-center">
                                                             <p className="text-xs text-gray-500">Employees</p>
                                                             <p className="text-xl font-bold text-gray-900">{branch.total_employees}</p>
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <div className="px-5 py-4">
-                                                    <div className="flex justify-center py-6">
-                                                        <div className="w-6 h-6 border-2 border-[#2f3192] border-t-transparent rounded-full animate-spin"></div>
-                                                    </div>
-                                                </div>
+                                                <BranchStatsSkeleton />
                                             </div>
                                         );
                                     }
 
                                     return (
-                                        <div key={branch.branch} className="hover:bg-gray-50/40 transition-colors">
+                                        <div key={branch.branch} className="hover:bg-gray-50/40 transition-colors dash-fade-in">
                                             {/* Branch Header - Clickable */}
                                             <div
                                                 className="px-3 py-2 cursor-pointer hover:bg-gray-50 transition-colors border-b border-gray-100"
@@ -4163,8 +4268,21 @@ const Dashboard = () => {
                                                             Customers Allocated to Branch
                                                         </h3>
                                                         {!allocationData ? (
-                                                            <div className="flex justify-center items-center h-[72px]">
-                                                                <div className="w-5 h-5 border-2 border-t-2 border-t-[#2f3192] border-gray-300 rounded-full animate-spin"></div>
+                                                            <div className="flex items-center justify-between h-[72px]">
+                                                                <div className="w-[30%] flex justify-center">
+                                                                    <div className="h-8 w-12 rounded-lg dash-shimmer"></div>
+                                                                </div>
+                                                                <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-300 to-transparent"></div>
+                                                                <div className="w-[60%] space-y-2">
+                                                                    <div className="flex justify-between items-center">
+                                                                        <div className="h-3 w-14 rounded dash-shimmer"></div>
+                                                                        <div className="h-4 w-10 rounded dash-shimmer"></div>
+                                                                    </div>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <div className="h-3 w-14 rounded dash-shimmer"></div>
+                                                                        <div className="h-4 w-10 rounded dash-shimmer"></div>
+                                                                    </div>
+                                                                </div>
                                                             </div>
                                                         ) : (
                                                             <div className="flex items-center justify-between">
@@ -4235,26 +4353,26 @@ const Dashboard = () => {
                                                                 </p>
                                                             </div>
                                                             <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
-                                                            <div className="w-[65%] grid grid-cols-3 gap-x-4 gap-y-1 text-xs font-semibold justify-items-start max-sm:grid-cols-2">
-                                                                <div className="flex items-baseline gap-1">
+                                                            <div className="w-[65%] min-w-0 grid grid-cols-3 gap-x-2 gap-y-1 pl-2 pr-3 text-xs font-semibold justify-items-start max-sm:grid-cols-2">
+                                                                <div className="flex items-baseline gap-1 min-w-0">
                                                                     <span className="w-8 shrink-0">WIP:</span>
-                                                                    <span className="font-bold text-base text-black">{totalWip.toLocaleString()}</span>
+                                                                    <span className="font-bold text-base text-black whitespace-nowrap">{totalWip.toLocaleString()}</span>
                                                                 </div>
-                                                                <div className="flex items-baseline gap-1">
+                                                                <div className="flex items-baseline gap-1 min-w-0">
                                                                     <span className="w-8 shrink-0">FR:</span>
-                                                                    <span className="font-bold text-base text-black">{totalFR.toLocaleString()}</span>
+                                                                    <span className="font-bold text-base text-black whitespace-nowrap">{totalFR.toLocaleString()}</span>
                                                                 </div>
-                                                                <div className="flex items-baseline gap-1">
+                                                                <div className="flex items-baseline gap-1 min-w-0">
                                                                     <span className="w-8 shrink-0">R:</span>
-                                                                    <span className="font-bold text-base text-black">{totalRejected.toLocaleString()}</span>
+                                                                    <span className="font-bold text-base text-black whitespace-nowrap">{totalRejected.toLocaleString()}</span>
                                                                 </div>
-                                                                <div className="flex items-baseline gap-1">
+                                                                <div className="flex items-baseline gap-1 min-w-0">
                                                                     <span className="w-8 shrink-0">NC:</span>
-                                                                    <span className="font-bold text-base text-black">{totalNotConnected.toLocaleString()}</span>
+                                                                    <span className="font-bold text-base text-black whitespace-nowrap">{totalNotConnected.toLocaleString()}</span>
                                                                 </div>
-                                                                <div className="flex items-baseline gap-1">
+                                                                <div className="flex items-baseline gap-1 min-w-0">
                                                                     <span className="w-8 shrink-0">C:</span>
-                                                                    <span className="font-bold text-base text-black">{totalCompleted.toLocaleString()}</span>
+                                                                    <span className="font-bold text-base text-black whitespace-nowrap">{totalCompleted.toLocaleString()}</span>
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -4292,6 +4410,8 @@ const Dashboard = () => {
                                         </div>
                                     );
                                 })
+                            ) : !branchPerfFetched ? (
+                                <BranchOverviewSkeleton />
                             ) : (
                                 <div className="p-12 text-center">
                                     <svg className="w-20 h-20 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

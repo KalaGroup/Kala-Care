@@ -2583,11 +2583,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 </span>
                             </div>
 
-                            {/* Status Breakdown Pills (Completed removed) */}
-                            <div className="flex flex-wrap items-center gap-1.5">
+                            {/* Status Breakdown Pills (Completed removed) — tidy 2×2 grid */}
+                            <div className="grid grid-cols-2 gap-1.5 shrink-0">
 
                                 {/* WIP */}
-                                <div className="flex items-center gap-1 bg-yellow-50 border border-yellow-200 rounded-full px-2 py-0.5">
+                                <div className="flex items-center justify-center gap-1 bg-yellow-50 border border-yellow-200 rounded-full px-2.5 py-0.5">
                                     <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 inline-block"></span>
                                     <span className="text-[10px] sm:text-[11px] font-medium text-yellow-700">W</span>
                                     <span className="text-[10px] sm:text-[11px] font-bold text-yellow-800">
@@ -2601,7 +2601,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 </div>
 
                                 {/* Rejected */}
-                                <div className="flex items-center gap-1 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
+                                <div className="flex items-center justify-center gap-1 bg-red-50 border border-red-200 rounded-full px-2.5 py-0.5">
                                     <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block"></span>
                                     <span className="text-[10px] sm:text-[11px] font-medium text-red-700">R</span>
                                     <span className="text-[10px] sm:text-[11px] font-bold text-red-800">
@@ -2615,7 +2615,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 </div>
 
                                 {/* Rescheduled / FR */}
-                                <div className="flex items-center gap-1 bg-purple-50 border border-purple-200 rounded-full px-2 py-0.5">
+                                <div className="flex items-center justify-center gap-1 bg-purple-50 border border-purple-200 rounded-full px-2.5 py-0.5">
                                     <span className="w-1.5 h-1.5 rounded-full bg-purple-500 inline-block"></span>
                                     <span className="text-[10px] sm:text-[11px] font-medium text-purple-700">FR</span>
                                     <span className="text-[10px] sm:text-[11px] font-bold text-purple-800">
@@ -2629,7 +2629,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 </div>
 
                                 {/* NC (Not Connected) */}
-                                <div className="flex items-center gap-1 bg-gray-50 border border-gray-300 rounded-full px-2 py-0.5">
+                                <div className="flex items-center justify-center gap-1 bg-gray-50 border border-gray-300 rounded-full px-2.5 py-0.5">
                                     <span className="w-1.5 h-1.5 rounded-full bg-gray-500 inline-block"></span>
                                     <span className="text-[10px] sm:text-[11px] font-medium text-gray-700">NC</span>
                                     <span className="text-[10px] sm:text-[11px] font-bold text-gray-800">
@@ -2644,7 +2644,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
                                 {/* Pending - only show if > 0 */}
                                 {nonFollowupCustomerStats.pending > 0 && (
-                                    <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-full px-2 py-0.5">
+                                    <div className="col-span-2 flex items-center justify-center gap-1 bg-gray-50 border border-gray-200 rounded-full px-2.5 py-0.5">
                                         <span className="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block"></span>
                                         <span className="text-[10px] sm:text-[11px] font-medium text-gray-600">P</span>
                                         <span className="text-[10px] sm:text-[11px] font-bold text-gray-700">
@@ -2678,14 +2678,14 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 <p className="text-[10px] text-gray-500">Letters sent by you — click to view details</p>
                             </div>
                         </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
+                        <div className="grid grid-rows-2 gap-1.5 shrink-0">
                             {/* Sent */}
-                            <div className="flex items-center gap-1 bg-green-50 border border-green-200 rounded-full px-2.5 py-0.5">
+                            <div className="flex items-center justify-center gap-1 bg-green-50 border border-green-200 rounded-full px-2.5 py-0.5">
                                 <span className="text-[10px] sm:text-[11px] font-medium text-green-700">Sent</span>
                                 <span className="text-[11px] sm:text-sm font-bold text-green-800">{letterSentCount}</span>
                             </div>
                             {/* Draft */}
-                            <div className="flex items-center gap-1 bg-yellow-50 border border-yellow-200 rounded-full px-2.5 py-0.5">
+                            <div className="flex items-center justify-center gap-1 bg-yellow-50 border border-yellow-200 rounded-full px-2.5 py-0.5">
                                 <span className="text-[10px] sm:text-[11px] font-medium text-yellow-700">Draft</span>
                                 <span className="text-[11px] sm:text-sm font-bold text-yellow-800">{letterDraftCount}</span>
                             </div>

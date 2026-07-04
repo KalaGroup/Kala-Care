@@ -6,7 +6,7 @@ import React, {
   useRef,
   useMemo,
 } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { MdEmojiPeople } from "react-icons/md";
 import { BsGraphUpArrow } from "react-icons/bs";
 import { MdOutlineFollowTheSigns } from "react-icons/md";
@@ -365,6 +365,26 @@ const CustomerEng2 = () => {
   // Data states with pagination
   const [customers, setCustomers] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
+
+  // Deep-link support: the ERP Sitemap opens this page with Completed-on-top
+  // enabled via router state — navigate('/customer-engagement-2', { state:
+  // { completedFirst: true } }). Applied once the initial list has loaded so
+  // it isn't raced by the mount fetch; the state is consumed immediately so a
+  // refresh doesn't re-apply it.
+  const routerLocation = useLocation();
+  const routerNavigate = useNavigate();
+  const completedFirstHandledRef = useRef(false);
+  useEffect(() => {
+    if (completedFirstHandledRef.current) return;
+    if (!routerLocation.state?.completedFirst) return;
+    if (!customers || customers.length === 0) return;
+    completedFirstHandledRef.current = true;
+    setShowCompletedFirst(true);
+    if (tableContainerRef.current) tableContainerRef.current.scrollTop = 0;
+    fetchNonCampaignCustomers(1, true, true);
+    routerNavigate(routerLocation.pathname, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customers, routerLocation.state]);
   // Server-side search results
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);

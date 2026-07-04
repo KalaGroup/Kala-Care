@@ -1,14 +1,26 @@
-from pydantic import BaseModel
+# app/schemas/mom_schema.py
+"""Pydantic request bodies for the MOM module."""
+
 from typing import Optional, List, Union, Any
+from pydantic import BaseModel
 
 
 class AttendeeIn(BaseModel):
     name: str
-    source: Optional[str] = "employee"      # 'employee' | 'manual'
+    source: Optional[str] = "employee"       # employee | manual
     present: Optional[bool] = True
     user_id: Optional[str] = None
+    branch: Optional[str] = None             # branch label shown next to the name
 
-    model_config = {"extra": "ignore"}      # frontend objects carry extra keys (id, ...)
+    model_config = {"extra": "ignore"}
+
+
+class BranchIn(BaseModel):
+    """One branch a meeting covers (manual branches use an 'MB-…' code)."""
+    code: str
+    name: Optional[str] = ""
+
+    model_config = {"extra": "ignore"}
 
 
 class RowIn(BaseModel):
@@ -17,24 +29,27 @@ class RowIn(BaseModel):
     area: str
     category: Optional[str] = "Other"
     point: Optional[str] = ""
-    resp: Optional[str] = ""
-    due: Optional[str] = ""                 # 'YYYY-MM-DD' or ''
-    flag: Optional[str] = "I"               # 'T' | 'I'
-    status: Optional[str] = "pending"       # pending | in_progress | completed
+    # multi-person responsibility — a list of names; a plain string is still
+    # accepted for backward compatibility and treated as a one-person list
+    resp: Optional[Union[List[str], str]] = []
+    due: Optional[str] = ""                  # 'YYYY-MM-DD' (Tasks only)
+    flag: Optional[str] = "I"                # T | I  (I may have resp, never a due date)
+    status: Optional[str] = "pending"
     remark: Optional[str] = ""
-    originDate: Optional[str] = ""          # 'YYYY-MM-DD' or ''
+    originDate: Optional[str] = ""
     carried: Optional[bool] = False
-    prevRemarks: Optional[List[Any]] = []   # [{date, text, status, by}, ...]
+    prevRemarks: Optional[List[Any]] = []
 
     model_config = {"extra": "ignore"}
 
 
 class MeetingIn(BaseModel):
-    branchCode: str
-    branchName: Optional[str] = ""
-    date: str                               # 'YYYY-MM-DD'
+    branchCode: str                          # primary branch (first selected)
+    branchName: Optional[str] = ""           # display label — "A + B" for joint reviews
+    branches: Optional[List[BranchIn]] = []  # every branch this meeting covers
+    date: str                                # 'YYYY-MM-DD' — mandatory
     location: Optional[str] = ""
-    type: Optional[str] = ""
+    type: Optional[str] = ""                 # preset OR custom typed text
     attendees: List[AttendeeIn] = []
     rows: List[RowIn] = []
 

@@ -1,0 +1,94 @@
+1. AMC Population Report (26 columns in file)
+
+INSTANCE ID
+AGREEMENT STATUS
+AGREEMENT NUMBER
+BRANCH ID
+AGREEMENT START DATE
+AGREEMENT END DATE
+KVA RATING
+2. Asset Detailed Report
+
+ASSET NUMBER
+ENGINE SERIAL NO
+BRANCH ID
+WARRANTY EXPIRY DATE
+GOEM OEM
+SEGMENT
+ENGINE MODEL
+KVA RATING
+ACCOUNT NAME
+CONTACT PHONE NUMBER
+CONTACT EMAIL ID
+INSTALLATION SITE ADDRESS
+COMMISSIONING DATE
+PRODUCT SEGMENT
+3. Asset Details with Last Oil Service
+
+ASSET NUMBER
+ENGINE SERIAL NO
+BRANCH ID
+LAST OIL CHANGE DATE
+LAST OIL CHANGE SR TYPE
+LAST SR CLOSE DATE
+LAST CLOSED SR NUMBER
+ACCOUNT NAME
+CONTACT PHONE NUMBER
+4. Anubandhan Plus Quotes Report / 5. Anubandhan Quotes Report / 6. BandhanPlus Quotes Report (identical)
+
+Pulse Instance ID
+EngineNo
+QuotationRefNo
+CompanyName
+MobileNo
+EmailId
+City
+CreatedDateTime
+7. Pulse Quotation - Service Only
+
+Instance Id
+Quote ID
+Account
+Account/Contact Phone Number
+Account/Contact Primary Email
+Installation Site Address
+Creation Date
+Total Amount
+8. Regular Bandhan Customers Report
+
+Genset Number
+Quotation Ref No.
+Name
+Mobile
+Email
+PAN Card No.
+Billing Location / DG Location (location source; Billing City / DG City are the fallback)
+9. LMS Data for ERP
+
+Instance ID
+Lead Number
+SD Branch Code
+Account Name
+Account Contact Number
+Account Contact Email ID
+Installation Site Address
+Lead Created Date
+Lead Status
+Lead Raised By
+10. Open SR Load Report
+
+Service Request #
+Instance Id [Asset #]
+Engine Serial#
+SR Due Date
+SR Type
+SR Sub-Type
+Status
+Account
+Customer Name
+Customer Mobile #
+Primary Phone#
+Installation Site Address
+Oil Change Flg
+Segment
+Engine Model

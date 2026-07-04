@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 import {
@@ -22,6 +23,20 @@ const sortByHours = (svcs) => svcs.slice().sort((a, b) => (parseFloat(a.hours) |
 
 const MaintenanceReports = () => {
     const [tab, setTab] = useState('coverage');
+
+    // Deep-link support: the ERP Sitemap opens a specific report tab via router
+    // state — navigate('/maintenance-reports', { state: { openTab: 'activity' } }).
+    // The state is consumed immediately so a refresh doesn't re-apply it.
+    const routerLocation = useLocation();
+    const routerNavigate = useNavigate();
+    useEffect(() => {
+        const t = routerLocation.state?.openTab;
+        if (t) {
+            setTab(t);
+            routerNavigate(routerLocation.pathname, { replace: true, state: null });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [routerLocation.state]);
     const [master, setMaster] = useState([]);
     const [services, setServices] = useState([]);
     const [activity, setActivity] = useState([]);

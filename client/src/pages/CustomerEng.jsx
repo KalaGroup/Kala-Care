@@ -3480,6 +3480,17 @@ const CustomerEng = () => {
         fetchDieryEntries();
     };
 
+    // Deep-link support: the ERP Sitemap opens the diary Notes box via router
+    // state — navigate('/customer-engagement', { state: { openModal: 'diary' } }).
+    // The state is consumed immediately so a refresh doesn't re-apply it.
+    useEffect(() => {
+        if (location.state?.openModal === 'diary') {
+            handleOpenDiery();
+            navigate(location.pathname, { replace: true, state: null });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [location.state]);
+
     const handleDeleteDieryEntry = async (id) => {
         const result = await Swal.fire({
             title: 'Remove from diary?',
@@ -6922,10 +6933,14 @@ ${f.start_para}`;
                                 {/* ---- Top section: All (spans 2 rows) + C1–C7 ---- */}
                                 <div className="grid gap-x-0.5 gap-y-0" style={{ gridTemplateColumns: 'repeat(5, auto)' }}>
                                     {/* All button — spans & centers across the first two rows only (left side) */}
+                                    {/* min-w + tabular-nums keep every count button the same width
+                                        when the numbers change after a drive/flag click — otherwise
+                                        the whole right block resizes and the drive chips re-wrap,
+                                        making the bar visibly jump. */}
                                     <button
                                         onClick={() => setSelectedFlag("all")}
                                         title="Show all customers regardless of follow-up flag"
-                                        className={`mr-1 self-center flex items-center justify-center px-2.5 py-0.5 text-sm rounded-md whitespace-nowrap font-bold transition-colors ${selectedFlag === "all"
+                                        className={`mr-1 self-center flex items-center justify-center min-w-[86px] tabular-nums px-1.5 py-0.5 text-sm rounded-md whitespace-nowrap font-bold transition-colors ${selectedFlag === "all"
                                             ? "bg-[#2f3192] text-white shadow-sm"
                                             : "text-black"
                                             }`}
@@ -6951,7 +6966,7 @@ ${f.start_para}`;
                                                 onClick={() => setSelectedFlag(key)}
                                                 title={titles[key]}
                                                 style={{ gridColumn: i + 2, gridRow: 1 }}
-                                                className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === key
+                                                className={`min-w-[58px] tabular-nums px-1 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === key
                                                     ? "bg-[#2f3192] text-white shadow-sm"
                                                     : "text-black hover:bg-gray-50"
                                                     }`}
@@ -6974,7 +6989,7 @@ ${f.start_para}`;
                                                 onClick={() => setSelectedFlag(key)}
                                                 title={titles[key]}
                                                 style={{ gridColumn: i + 2, gridRow: 2 }}
-                                                className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === key
+                                                className={`min-w-[58px] tabular-nums px-1 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedFlag === key
                                                     ? "bg-[#2f3192] text-white shadow-sm"
                                                     : "text-black hover:bg-gray-50"
                                                     }`}
@@ -6991,7 +7006,7 @@ ${f.start_para}`;
                                     <button
                                         onClick={() => setSelectedStatus("all")}
                                         title="Show all records regardless of status"
-                                        className={`mr-1 flex items-center justify-center px-2.5 py-0.5 text-sm rounded-md whitespace-nowrap font-bold transition-colors ${selectedStatus === "all"
+                                        className={`mr-1 flex items-center justify-center min-w-[86px] tabular-nums px-1.5 py-0.5 text-sm rounded-md whitespace-nowrap font-bold transition-colors ${selectedStatus === "all"
                                             ? "bg-[#2f3192] text-white shadow-sm"
                                             : "text-black"
                                             }`}
@@ -7004,7 +7019,7 @@ ${f.start_para}`;
                                         <button
                                             onClick={() => setSelectedStatus('WIP')}
                                             title="Work in Progress — drives with 'WIP' status (respects drive & branch filters)"
-                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'WIP'
+                                            className={`min-w-[66px] tabular-nums px-1 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'WIP'
                                                 ? "bg-[#2f3192] text-white shadow-sm"
                                                 : "text-black hover:bg-gray-50"
                                                 }`}
@@ -7015,7 +7030,7 @@ ${f.start_para}`;
                                         <button
                                             onClick={() => setSelectedStatus('FR')}
                                             title="Follow-up Reschedule — drives with 'Rescheduled' status (respects drive & branch filters)"
-                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'FR'
+                                            className={`min-w-[58px] tabular-nums px-1 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'FR'
                                                 ? "bg-[#2f3192] text-white shadow-sm"
                                                 : "text-black hover:bg-gray-50"
                                                 }`}
@@ -7026,7 +7041,7 @@ ${f.start_para}`;
                                         <button
                                             onClick={() => setSelectedStatus('NC')}
                                             title="Not connected — drives with 'Not Connected' status (respects drive & branch filters)"
-                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'NC'
+                                            className={`min-w-[58px] tabular-nums px-1 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'NC'
                                                 ? "bg-[#2f3192] text-white shadow-sm"
                                                 : "text-black hover:bg-gray-50"
                                                 }`}
@@ -7040,7 +7055,7 @@ ${f.start_para}`;
                                             style={selectedStatus === 'R'
                                                 ? { backgroundColor: '#e34019' }
                                                 : { color: '#e34019' }}
-                                            className={`px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'R'
+                                            className={`min-w-[52px] tabular-nums px-1 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'R'
                                                 ? "text-white shadow-sm"
                                                 : "hover:bg-orange-50"
                                                 }`}
@@ -7049,7 +7064,7 @@ ${f.start_para}`;
                                         </button>
 
                                         <span
-                                            className="px-2 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md text-center text-green-600 cursor-default flex items-center justify-center"
+                                            className="min-w-[52px] tabular-nums px-1 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md text-center text-green-600 cursor-default flex items-center justify-center"
                                             title={
                                                 (currentUser?.role === 'master_admin' || currentUser?.role === 'it_admin')
                                                     ? 'Overall company completed (from Dashboard)'

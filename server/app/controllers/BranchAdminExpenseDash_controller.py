@@ -14,6 +14,7 @@ from app.models.LVB_model import LocalVendorBill, LocalVendorBillHistory
 from app.controllers.HOExpenseDash_controller import (
     _parse_date_safe, _safe_float,
     _get_branch_km_rates, _effective_km, _calc_total,
+    _build_sr_per_day_map, _sr_count_for,
     BRANCH_MAP,
 )
 
@@ -59,11 +60,16 @@ def get_branch_kpis(db: Session, branch_code: str) -> Dict[str, Any]:
         TADAImport.ho_corrected_km,
         TADAImport.branch_verified_km,
         TADAImport.two_way_km,
+        TADAImport.service_engineer_uid,
+        TADAImport.sr_reach_at_site_datetime,
+        TADAImport.freight_charges,
     ).filter(
         (TADAImport.verification_status != 'Verified') |
         (TADAImport.verification_status.is_(None)),
         TADAImport.sd_branch_code == branch_code,
     ).all()
+
+    sr_day_map = _build_sr_per_day_map(unverified_rows)
 
     unverified_count = len(unverified_rows)
     unverified_total = 0.0
@@ -71,7 +77,7 @@ def get_branch_kpis(db: Session, branch_code: str) -> Dict[str, Any]:
         amt = _safe_float(r.total_amount)
         if amt <= 0:
             km = _effective_km(r)
-            amt = _calc_total(km, rate)
+            amt = _calc_total(km, rate, _sr_count_for(r, sr_day_map), r.freight_charges)
         unverified_total += amt
 
     base.update({
@@ -220,11 +226,15 @@ def get_engineers_unverified(db: Session, branch_code: str) -> List[Dict[str, An
         TADAImport.ho_corrected_km,
         TADAImport.branch_verified_km,
         TADAImport.two_way_km,
+        TADAImport.sr_reach_at_site_datetime,
+        TADAImport.freight_charges,
     ).filter(
         (TADAImport.verification_status != 'Verified') |
         (TADAImport.verification_status.is_(None)),
         TADAImport.sd_branch_code == branch_code,
     ).all()
+
+    sr_day_map = _build_sr_per_day_map(rows)
 
     eng_data = defaultdict(lambda: {
         'engineer_name': '',
@@ -245,7 +255,7 @@ def get_engineers_unverified(db: Session, branch_code: str) -> List[Dict[str, An
         amt = _safe_float(r.total_amount)
         if amt <= 0:
             km = _effective_km(r)
-            amt = _calc_total(km, rate)
+            amt = _calc_total(km, rate, _sr_count_for(r, sr_day_map), r.freight_charges)
         eng_data[key]['total_amount'] += amt
 
     result = [

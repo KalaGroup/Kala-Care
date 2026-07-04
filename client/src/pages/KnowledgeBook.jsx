@@ -1,4 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import Swal from 'sweetalert2';
 import {
@@ -125,6 +126,19 @@ const KnowledgeBook = () => {
     const [categories, setCategories] = useState([]);
     const [catFilter, setCatFilter] = useState('');
     const [showCatModal, setShowCatModal] = useState(false);
+
+    // Deep-link support: the ERP Sitemap opens the Categories box via router
+    // state — navigate('/knowledge-book', { state: { openModal: 'categories' } }).
+    // The state is consumed immediately so a refresh doesn't re-apply it.
+    const routerLocation = useLocation();
+    const routerNavigate = useNavigate();
+    useEffect(() => {
+        if (routerLocation.state?.openModal === 'categories') {
+            setShowCatModal(true);
+            routerNavigate(routerLocation.pathname, { replace: true, state: null });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [routerLocation.state]);
     const [newCat, setNewCat] = useState('');
     const [products, setProducts] = useState([]);
 

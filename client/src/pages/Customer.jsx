@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 import * as XLSX from 'xlsx';
@@ -493,6 +494,21 @@ const Customer = () => {
 
   // State for current table
   const [currentTable, setCurrentTable] = useState(TABLES[0]);
+
+  // Deep-link support: the ERP Sitemap opens a specific master table via
+  // router state — navigate('/customers', { state: { openTable: 'lms_data' } }).
+  // The state is consumed immediately so a refresh doesn't re-apply it.
+  const routerLocation = useLocation();
+  const routerNavigate = useNavigate();
+  useEffect(() => {
+    const tableId = routerLocation.state?.openTable;
+    if (tableId) {
+      const table = TABLES.find((t) => t.id === tableId);
+      if (table) setCurrentTable(table);
+      routerNavigate(routerLocation.pathname, { replace: true, state: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routerLocation.state]);
   const [tableData, setTableData] = useState([]);
   const [tableColumns, setTableColumns] = useState([]);
   const [columnTypes, setColumnTypes] = useState({});
