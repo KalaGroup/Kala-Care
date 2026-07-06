@@ -80,6 +80,21 @@ print("Creating/Updating database tables...")
 Base.metadata.create_all(bind=engine)
 print("Tables created/updated successfully!")
 
+# create_all only creates missing TABLES — it never adds new columns to an
+# existing table. Idempotent per-column ALTERs live here instead.
+def ensure_user_columns(engine):
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text(
+            "IF COL_LENGTH('users', 'theme') IS NULL "
+            "ALTER TABLE users ADD theme VARCHAR(10) NULL"
+        ))
+
+try:
+    ensure_user_columns(engine)
+except Exception as e:
+    print(f"[user-columns] skipped: {e}")
+
 # Ensure performance indexes for the hot list/dashboard queries. Idempotent
 # (IF NOT EXISTS) — after the first run this is a fast no-op on every startup.
 from app.performance_indexes import ensure_performance_indexes

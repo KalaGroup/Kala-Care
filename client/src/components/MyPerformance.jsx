@@ -172,14 +172,27 @@ const letterComputeSafeCuts = (canvas, sliceHpx) => {
     };
     const cuts = [0];
     let top = 0;
+    // STRICTLY blank row = nothing on it at all (couple of anti-alias px allowed).
+    // Rows inside a table always contain its vertical border pixels, so pass 1 can
+    // never split a table: when a boundary lands mid-table the search walks up past
+    // the whole table and cuts in the gap above it — the ENTIRE table moves to the
+    // next page. Pass 2 (old near-blank behavior) only runs when no blank gap exists
+    // at all, e.g. a table taller than one page that must be cut somewhere.
+    const STRICT_BLANK = 2;
     while (top + sliceHpx < H) {
         const proposed = top + sliceHpx;
-        const minY = top + Math.floor(sliceHpx * 0.65);
-        let cut = proposed;
-        for (let y = proposed; y >= minY; y--) {
-            if (darkInRow(y) <= BLANK_LIMIT) { cut = y; break; }
+        let cut = -1;
+        const deepMin = top + Math.floor(sliceHpx * 0.25);
+        for (let y = proposed; y >= deepMin; y--) {
+            if (darkInRow(y) <= STRICT_BLANK) { cut = y; break; }
         }
-        if (cut <= top) cut = proposed;
+        if (cut === -1) {
+            const minY = top + Math.floor(sliceHpx * 0.65);
+            for (let y = proposed; y >= minY; y--) {
+                if (darkInRow(y) <= BLANK_LIMIT) { cut = y; break; }
+            }
+        }
+        if (cut === -1 || cut <= top) cut = proposed;
         cuts.push(cut);
         top = cut;
     }
@@ -232,6 +245,7 @@ const generateBandedLetterPdf = async (bodyHtml) => {
     holder.style.top = '0';
     holder.style.width = '780px';
     holder.style.background = '#ffffff';
+    holder.className = 'keep-light'; // letter = paper — stays white in dark mode
     // Center table cell content in the PDF. html2canvas (which rasterizes this letter)
     // does NOT reliably honor `vertical-align: middle`, so cells with a fixed HEIGHT from
     // the letter template render with their text stuck to the top. Fix: drop the fixed
@@ -251,9 +265,10 @@ const generateBandedLetterPdf = async (bodyHtml) => {
         '  vertical-align: middle !important;' +
         '  height: auto !important;' +
         '  min-height: 0 !important;' +
-        '  padding-top: 6px !important;' +
-        '  padding-bottom: 8px !important;' +
+        '  padding-top: 3px !important;' +
+        '  padding-bottom: 10px !important;' +
         '  line-height: 1.15 !important;' +
+        '  border-color: #9ca3af !important;' +
         '  box-sizing: border-box !important;' +
         '}' +
         'td > *, th > * { margin-top: 0 !important; margin-bottom: 0 !important; }' +
@@ -284,8 +299,8 @@ const generateBandedLetterPdf = async (bodyHtml) => {
         // 2) center the cells (real <td>/<th> OR div cells using display:table-cell)
         if (tag === 'TD' || tag === 'TH' || disp === 'table-cell') {
             el.style.setProperty('vertical-align', 'middle', 'important');
-            el.style.setProperty('padding-top', '6px', 'important');
-            el.style.setProperty('padding-bottom', '8px', 'important');
+            el.style.setProperty('padding-top', '3px', 'important');
+            el.style.setProperty('padding-bottom', '10px', 'important');
             el.style.setProperty('line-height', '1.15', 'important');
         }
     });

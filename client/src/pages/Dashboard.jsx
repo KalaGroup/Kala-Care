@@ -1241,23 +1241,63 @@ const Dashboard = () => {
         }
     }, [userData]);
 
+    // ONE request for every branch's engaged/remaining/allocation aggregates —
+    // replaces the old 3-requests-per-branch fan-out (each of which loaded the
+    // full customer + follow-up detail server-side) that made the Branch-wise
+    // Asset Progress chart and Branch Overview tab crawl.
+    const branchSummariesRequestedRef = useRef(false);
+    const fetchAllBranchSummaries = useCallback(async () => {
+        const signal = abortControllerRef.current?.signal;
+        const response = await axios.post(
+            `${API_BASE_URL}/performance/branches-campaign-summary`,
+            { user_id: userData.user_id || userData.id, name: userData.name, role: userData.role, branch: userData.branch },
+            { signal }
+        );
+        const branches = response.data?.branches || {};
+        if (!isMounted.current) return branches;
+        const engaged = {}, remaining = {}, allocation = {};
+        Object.entries(branches).forEach(([code, d]) => {
+            if (d?.engaged) engaged[code] = d.engaged;
+            if (d?.remaining) remaining[code] = d.remaining;
+            if (d?.allocation) allocation[code] = d.allocation;
+        });
+        // prev spread LAST: anything already fetched in richer per-branch form
+        // (e.g. by the Branch Customers modal) keeps winning over the batch data.
+        setBranchEngagedData(prev => ({ ...engaged, ...prev }));
+        setBranchRemainingData(prev => ({ ...remaining, ...prev }));
+        setAllocationSummary(prev => ({ ...allocation, ...prev }));
+        return branches;
+    }, [userData]);
+
+    // Batch-first loader with per-branch fallback (older servers / batch failure).
+    const ensureBranchSummaries = useCallback(async (branchList) => {
+        if (!branchList || branchList.length === 0) return;
+        if (branchSummariesRequestedRef.current) return; // already requested / in flight
+        branchSummariesRequestedRef.current = true;
+        let covered = null;
+        try {
+            covered = await fetchAllBranchSummaries();
+        } catch (error) {
+            if (axios.isCancel(error) || error.name === 'CanceledError') return;
+            console.error('Batch branch summary failed — falling back to per-branch fetches:', error);
+        }
+        // Fetch per-branch anything the batch didn't cover (or everything, if it
+        // failed) — a branch missing from the batch would otherwise stay stuck
+        // in its loading skeleton forever.
+        branchList.forEach(branch => {
+            if (branch.branch && !(covered && covered[branch.branch])) {
+                fetchBranchEngagedData(branch.branch);
+                fetchBranchRemainingData(branch.branch);
+                fetchBranchAllocationSummary(branch.branch);
+            }
+        });
+    }, [fetchAllBranchSummaries, fetchBranchEngagedData, fetchBranchRemainingData, fetchBranchAllocationSummary]);
+
     useEffect(() => {
         if (loadedTabs.branches && branchPerformance && branchPerformance.length > 0 && (isMasterAdmin || isITAdmin || isBranchAdmin)) {
-            branchPerformance.forEach(branch => {
-                if (branch.branch) {
-                    if (!branchEngagedData[branch.branch]) {
-                        fetchBranchEngagedData(branch.branch);
-                    }
-                    if (!branchRemainingData[branch.branch]) {
-                        fetchBranchRemainingData(branch.branch);
-                    }
-                    if (!allocationSummary[branch.branch]) {
-                        fetchBranchAllocationSummary(branch.branch);
-                    }
-                }
-            });
+            ensureBranchSummaries(branchPerformance);
         }
-    }, [branchPerformance, fetchBranchEngagedData, fetchBranchRemainingData, fetchBranchAllocationSummary, branchEngagedData, branchRemainingData, allocationSummary, loadedTabs.branches]);
+    }, [branchPerformance, ensureBranchSummaries, loadedTabs.branches]);
 
     const getTotalRemainingCustomers = (branchCode) => {
         const remainingData = branchRemainingData[branchCode];
@@ -1361,12 +1401,9 @@ const Dashboard = () => {
         if (activeTab === 'overall' && (isMasterAdmin || isITAdmin) && loadedTabs.overall && !isLoadingData.current) {
             if (branchPerformance.length === 0) fetchBranchPerformance();
             if (branches.length === 0) fetchAllBranches();
-            // Only fetch engaged/remaining for the graph (NO allocationSummary here)
+            // Only fetch engaged/remaining for the graph — ONE batch call for all branches
             if (branchPerformance.length > 0) {
-                branchPerformance.forEach(branch => {
-                    if (!branchEngagedData[branch.branch]) fetchBranchEngagedData(branch.branch);
-                    if (!branchRemainingData[branch.branch]) fetchBranchRemainingData(branch.branch);
-                });
+                ensureBranchSummaries(branchPerformance);
             }
         }
     }, [activeTab, isMasterAdmin, isITAdmin, loadedTabs.overall, branchPerformance.length, branches.length]);
@@ -2327,10 +2364,7 @@ const Dashboard = () => {
                 setBranchPerfFetched(true);
                 hasFetchedBranchPerformance.current = true; // ← MARK AS FETCHED
                 if (response.data?.length > 0) {
-                    response.data.forEach(branch => {
-                        if (!branchEngagedData[branch.branch]) fetchBranchEngagedData(branch.branch);
-                        if (!branchRemainingData[branch.branch]) fetchBranchRemainingData(branch.branch);
-                    });
+                    ensureBranchSummaries(response.data);
                 }
             }
             return response.data;
@@ -2342,7 +2376,7 @@ const Dashboard = () => {
             }
             return [];
         }
-    }, [userData, timePeriod, customStartDate, customEndDate, branchEngagedData, branchRemainingData]);
+    }, [userData, timePeriod, customStartDate, customEndDate, ensureBranchSummaries]);
 
     const fetchBranchPerformanceForBranchAdmin = useCallback(async () => {
         const signal = abortControllerRef.current?.signal; // ADD THIS
@@ -3156,16 +3190,28 @@ const Dashboard = () => {
                             <div className="h-7 w-14 rounded-lg dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
                         </div>
                         <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-300 to-transparent"></div>
-                        <div className="w-[60%] space-y-2">
-                            <div className="flex justify-between items-center">
-                                <div className="h-3 w-16 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
-                                <div className="h-4 w-10 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
+                        {i === 2 ? (
+                            /* 3rd card mirrors the real status grid (WIP / FR / R / NC / C) */
+                            <div className="w-[60%] grid grid-cols-3 gap-x-2 gap-y-1.5 max-sm:grid-cols-2">
+                                {[0, 1, 2, 3, 4].map((j) => (
+                                    <div key={j} className="flex justify-between items-center">
+                                        <div className="h-3 w-7 rounded dash-shimmer" style={{ '--shimmer-delay': `${(i * 0.12) + (j * 0.05)}s` }}></div>
+                                        <div className="h-4 w-6 rounded dash-shimmer" style={{ '--shimmer-delay': `${(i * 0.12) + (j * 0.05)}s` }}></div>
+                                    </div>
+                                ))}
                             </div>
-                            <div className="flex justify-between items-center">
-                                <div className="h-3 w-16 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
-                                <div className="h-4 w-10 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
+                        ) : (
+                            <div className="w-[60%] space-y-2">
+                                <div className="flex justify-between items-center">
+                                    <div className="h-3 w-16 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
+                                    <div className="h-4 w-10 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <div className="h-3 w-16 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
+                                    <div className="h-4 w-10 rounded dash-shimmer" style={{ '--shimmer-delay': `${i * 0.12}s` }}></div>
+                                </div>
                             </div>
-                        </div>
+                        )}
                     </div>
                 </div>
             ))}
@@ -3294,7 +3340,7 @@ const Dashboard = () => {
         <div className="min-h-screen py-0 px-0">
             {/* Header with gradient */}
             <div
-                className="px-2 sm:px-6 lg:px-8 py-2 mb-3 mx-2 sm:mx-4 border border-gray-300 rounded-xl"
+                className="dash-welcome px-2 sm:px-6 lg:px-8 py-2 mb-3 mx-2 sm:mx-4 border border-gray-300 rounded-xl"
                 style={{ background: "white" }}
             >
                 <div className="max-w-7xl mx-auto">
@@ -3616,7 +3662,7 @@ const Dashboard = () => {
                         </button>
 
                         <div className={`${isMobileMenuOpen ? 'block' : 'hidden'} lg:block`}>
-                            <nav className="flex flex-col lg:flex-row lg:space-x-2 max-lg:gap-2">
+                            <nav className="dash-tabs flex flex-col lg:flex-row lg:space-x-2 max-lg:gap-2">
                                 {/* Overall Performance Tab */}
                                 <button
                                     onClick={() => {
@@ -3736,7 +3782,7 @@ const Dashboard = () => {
                             no box waits for another box's request. */}
 
                                 {/* 3 Summary Cards */}
-                                {!summaryStats ? (loading && <SummaryCardsSkeleton />) : (
+                                {!summaryStats ? <SummaryCardsSkeleton /> : (
                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-3 dash-fade-in">
                                         {/* 1st Card */}
                                         <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3">
@@ -4926,7 +4972,7 @@ const Dashboard = () => {
                                             overflowX: 'auto'
                                         }}
                                     >
-                                        <table className="min-w-full divide-y divide-gray-200 border border-gray-200" style={{ minWidth: '1400px' }}>
+                                        <table className="min-w-full divide-y divide-gray-200 border border-gray-200 whitespace-nowrap" style={{ width: 'max-content', minWidth: '100%' }}>
                                             <thead className="bg-gray-50">
                                                 <tr>
                                                     <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider w-12 border-r border-gray-200">

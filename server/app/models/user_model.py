@@ -24,6 +24,7 @@ class User(Base):
     is_blocked = Column(Boolean, default=False)
     can_export = Column(Boolean, default=False)
     can_access_expense = Column(Boolean, default=False)
+    theme = Column(String(10), nullable=True, default="light")  # 'light' | 'dark' — UI preference, applied on login
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

@@ -888,6 +888,44 @@ async def get_branch_total_customers(
             detail=str(e)
         )
     
+@router.post("/branches-campaign-summary")
+async def get_branches_campaign_summary(
+    user_info: UserInfo,
+    db: Session = Depends(get_db)
+):
+    """
+    Aggregate campaign stats for ALL branches in ONE call — used by the dashboard's
+    Branch-wise Asset Progress chart and Branch Overview tab instead of hitting the
+    three per-branch endpoints once per branch.
+    """
+    try:
+        if not is_admin(user_info.role):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only admins can view branch campaign summaries"
+            )
+        only_branch = user_info.branch if user_info.role.lower() == 'branch_admin' else None
+        result = await emp_per_controller.EmployeePerformanceController.get_all_branches_campaign_summary(
+            db, only_branch
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Could not compute branch summaries"
+            )
+        return {"branches": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in branches-campaign-summary endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
 @router.post("/branch-customer-allocate-summary/{branch_code}")
 async def get_branch_customer_allocate_summary(
     branch_code: str,

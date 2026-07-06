@@ -222,11 +222,26 @@ function Navbar({ children }) {
     document.documentElement.classList.contains('dark')
   );
   const toggleTheme = () => {
-    setDarkMode((prev) => {
-      const next = !prev;
-      applyTheme(next ? 'dark' : 'light');
-      return next;
-    });
+    const next = !darkMode;
+    const theme = next ? 'dark' : 'light';
+    applyTheme(theme);
+    setDarkMode(next);
+
+    // Persist per-user so the preference follows the account across
+    // devices/sessions (login re-applies it from the DB). Best-effort —
+    // the local toggle already applied either way.
+    try {
+      const stored = JSON.parse(sessionStorage.getItem('user') || 'null');
+      if (stored?.user_id) {
+        sessionStorage.setItem('user', JSON.stringify({ ...stored, theme }));
+        axios.put(`${import.meta.env.VITE_BACKEND_URL}/users/theme`, {
+          user_id: stored.user_id,
+          theme,
+        }).catch((e) => console.warn('Theme save failed:', e?.message));
+      }
+    } catch (e) {
+      console.warn('Theme save skipped:', e?.message);
+    }
   };
 
   // Read the raw string every render (cheap) but only JSON.parse when the
@@ -923,7 +938,9 @@ function Navbar({ children }) {
     }
 
     return (
-      <div className="relative flex-shrink-0">
+      /* nav-logo-box: in DARK mode only (see index.css) this becomes a black
+         rounded square with an animated sky-blue light traveling its border. */
+      <div className="nav-logo-box relative flex-shrink-0">
         <img
           src="/logo.png"
           alt="KALA Care Logo"
@@ -1452,7 +1469,7 @@ function Navbar({ children }) {
                 <Logo collapsed={!sidebarOpen} />
               </div>
               {sidebarOpen && (
-                <div className="flex flex-col items-center w-full">
+                <div className="nav-brand-name flex flex-col items-center w-full">
                   <span className="text-[15px] font-bold text-[#2f3192] leading-tight text-center">
                     KALA Care Global LLP.,
                   </span>

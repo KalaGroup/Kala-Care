@@ -243,6 +243,57 @@ const CustomerEng2 = () => {
     { key: 'remarks', label: 'Remarks' },
   ];
 
+  // Prepended to SAVED letter HTML before html2canvas rasterization (PDF / print /
+  // email) so letters generated before the table-style fix still come out with
+  // visible borders and vertically-centered cell text. !important beats the old
+  // inline styles baked into the stored HTML; current letters already match.
+  const LETTER_PDF_TABLE_CSS =
+    '<style>' +
+    'table{border-collapse:collapse !important;}' +
+    'tr{height:auto !important;}' +
+    'td,th{vertical-align:middle !important;height:auto !important;min-height:0 !important;' +
+    'padding-top:3px !important;padding-bottom:10px !important;line-height:1.15 !important;' +
+    'border-color:#9ca3af !important;box-sizing:border-box !important;}' +
+    'td > *,th > *{margin-top:0 !important;margin-bottom:0 !important;}' +
+    '</style>';
+
+  // Force cell centering + tight line boxes DIRECTLY on the holder's elements before
+  // html2canvas rasterizes it (print / PDF / email). html2canvas reads presentational
+  // attributes (valign/height) and element styles more reliably than stylesheet rules,
+  // and it paints each text line at the BOTTOM of its line box — so without this pass
+  // cell text renders glued to the bottom border. Mirrors the proven normalizer in
+  // BranchLetterReportModal.
+  const normalizeLetterHolderForCanvas = (holder) => {
+    holder.querySelectorAll('[valign]').forEach(el => el.removeAttribute('valign'));
+    holder.querySelectorAll('[height]').forEach(el => el.removeAttribute('height'));
+    holder.querySelectorAll('*').forEach(el => {
+      const tag = el.tagName;
+      if (tag === 'IMG' || tag === 'BR' || tag === 'HR') return;
+      const disp = window.getComputedStyle(el).display;
+      if (disp !== 'inline') {
+        el.style.setProperty('height', 'auto', 'important');
+        el.style.setProperty('min-height', '0', 'important');
+      }
+      if (tag === 'TD' || tag === 'TH' || disp === 'table-cell') {
+        el.style.setProperty('vertical-align', 'middle', 'important');
+        el.style.setProperty('padding-top', '3px', 'important');
+        el.style.setProperty('padding-bottom', '10px', 'important');
+        el.style.setProperty('line-height', '1.15', 'important');
+      }
+    });
+    holder.querySelectorAll('td, th, td *, th *').forEach(el => {
+      const t = el.tagName;
+      if (t === 'IMG' || t === 'BR' || t === 'HR') return;
+      el.style.setProperty('line-height', '1.15', 'important');
+    });
+    holder.querySelectorAll('td > *, th > *').forEach(el => {
+      el.style.setProperty('margin-top', '0', 'important');
+      el.style.setProperty('margin-bottom', '0', 'important');
+      el.style.setProperty('padding-top', '0', 'important');
+      el.style.setProperty('padding-bottom', '0', 'important');
+    });
+  };
+
   const [showLetterWizard, setShowLetterWizard] = useState(false);
   const [letterStep, setLetterStep] = useState(1);   // 1=Format, 2=Letter, 3=Review & Send
   const [wizardLetterFormats, setWizardLetterFormats] = useState([]);
@@ -3245,30 +3296,47 @@ const CustomerEng2 = () => {
       return cuts;
     }
 
-    // A row is "cuttable" if it has no dark pixels except possibly a few (table vertical
-    // borders), so the thin strip beside a table border still counts as a safe cut line.
-    const rowIsCuttable = (y) => {
-      if (y <= 0 || y >= H) return false;
+    // Dark-pixel count of a row (early-exit once clearly busy).
+    const borderLimit = Math.max(6, Math.floor(W * 0.02)); // tolerate vertical borders
+    const darkInRow = (y) => {
+      if (y <= 0 || y >= H) return Infinity;
       let dark = 0;
-      const limit = Math.max(6, Math.floor(W * 0.02)); // tolerate vertical borders
       for (let x = 0; x < W; x++) {
         const i = (y * W + x) * 4;
         if (data[i] < 230 || data[i + 1] < 230 || data[i + 2] < 230) {
-          if (++dark > limit) return false;
+          if (++dark > borderLimit) return dark;
         }
       }
-      return true;
+      return dark;
     };
+
+    // STRICTLY blank row = nothing on it at all (a couple of anti-alias px allowed).
+    // Rows inside a table always contain its vertical border pixels, so cutting only
+    // on strictly blank rows can never split a table — when a page boundary lands
+    // mid-table the search walks up past the whole table and cuts in the gap above
+    // it, pushing the ENTIRE table onto the next page.
+    const STRICT_BLANK = 2;
 
     let pos = 0;
     while (pos + sliceHpx < H) {
       const ideal = pos + sliceHpx;
-      const minAllowed = pos + Math.floor(sliceHpx * 0.65); // never shrink a page below 65%
       let cut = -1;
-      for (let y = ideal; y >= minAllowed; y--) {
-        if (rowIsCuttable(y)) { cut = y; break; }
+      // Pass 1 — keep tables whole: nearest strictly blank row, searching up to 75%
+      // of the page so even a near-page-tall table can hop to the next page.
+      const deepMin = pos + Math.floor(sliceHpx * 0.25);
+      for (let y = ideal; y >= deepMin; y--) {
+        if (darkInRow(y) <= STRICT_BLANK) { cut = y; break; }
       }
-      if (cut === -1) cut = ideal; // no blank row found — use the fixed boundary
+      // Pass 2 — old behavior (near-blank, vertical borders tolerated) within the
+      // bottom 35%. Only reached when no blank gap exists at all — e.g. a table
+      // taller than one page, which must be cut somewhere.
+      if (cut === -1) {
+        const minAllowed = pos + Math.floor(sliceHpx * 0.65);
+        for (let y = ideal; y >= minAllowed; y--) {
+          if (darkInRow(y) <= borderLimit) { cut = y; break; }
+        }
+      }
+      if (cut === -1 || cut <= pos) cut = ideal; // fixed boundary fallback
       cuts.push(cut);
       pos = cut;
     }
@@ -3324,8 +3392,10 @@ const CustomerEng2 = () => {
     holder.style.top = '0';
     holder.style.width = '780px';
     holder.style.background = '#ffffff';
+    holder.className = 'keep-light'; // letter = paper — stays white in dark mode
     holder.innerHTML = buildLetterHtml(false, true, true);
     document.body.appendChild(holder);
+    normalizeLetterHolderForCanvas(holder);
 
     const imgs = Array.from(holder.querySelectorAll('img'));
     await Promise.all(imgs.map(im => im.complete ? Promise.resolve()
@@ -3404,8 +3474,10 @@ const CustomerEng2 = () => {
     holder.style.top = '0';
     holder.style.width = '780px';
     holder.style.background = '#ffffff';
-    holder.innerHTML = bodyHtml;
+    holder.className = 'keep-light'; // letter = paper — stays white in dark mode
+    holder.innerHTML = LETTER_PDF_TABLE_CSS + bodyHtml;
     document.body.appendChild(holder);
+    normalizeLetterHolderForCanvas(holder);
 
     const imgs = Array.from(holder.querySelectorAll('img'));
     await Promise.all(imgs.map(im => im.complete ? Promise.resolve()
@@ -3490,8 +3562,10 @@ const CustomerEng2 = () => {
       holder.style.top = '0';
       holder.style.width = `${LETTER_W}px`;
       holder.style.background = '#ffffff';
-      holder.innerHTML = bodyHtml;
+      holder.className = 'keep-light'; // letter = paper — stays white in dark mode
+      holder.innerHTML = LETTER_PDF_TABLE_CSS + bodyHtml;
       document.body.appendChild(holder);
+      normalizeLetterHolderForCanvas(holder);
 
       const innerImgs = Array.from(holder.querySelectorAll('img'));
       await Promise.all(innerImgs.map(im => im.complete ? Promise.resolve()
@@ -4268,8 +4342,10 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     const holder = document.createElement('div');
     holder.style.position = 'fixed'; holder.style.left = '-10000px'; holder.style.top = '0';
     holder.style.width = '780px'; holder.style.background = '#ffffff';
+    holder.className = 'keep-light'; // letter = paper — stays white in dark mode
     holder.innerHTML = `<div style="max-width:780px;margin:0 auto;background:#fff;">${html}</div>`;
     document.body.appendChild(holder);
+    normalizeLetterHolderForCanvas(holder);
     const imgs = Array.from(holder.querySelectorAll('img'));
     await Promise.all(imgs.map(im => im.complete ? Promise.resolve() : new Promise(res => { im.onload = res; im.onerror = res; })));
     try {
@@ -4333,7 +4409,7 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
 
   const buildLetterTableHtml = (intro, cols, rows, getCell) => {
     if (rows.length === 0 || cols.length === 0) return '';
-    const B = '#e5e7eb';
+    const B = '#9ca3af';
     // Real <table> + vertical-align:middle. html2canvas (PDF/print) honors
     // vertical-align on table cells but NOT align-items on flex, so cells now
     // center identically in the on-screen preview AND the printed/downloaded PDF.
@@ -4341,8 +4417,8 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     const colgroup = `<colgroup>${cols.map(c =>
       `<col style="width:${(((LETTER_COL_WEIGHTS[c.key] || 1) / totalW) * 100).toFixed(3)}%" />`
     ).join('')}</colgroup>`;
-    const baseTd = `border:1px solid ${B};padding:2px 8px 8px;text-align:center;vertical-align:middle;` +
-      `line-height:1.3;word-break:break-word;overflow-wrap:anywhere;`;
+    const baseTd = `border:1px solid ${B};padding:3px 8px 10px;text-align:center;vertical-align:middle;` +
+      `line-height:1.15;word-break:break-word;overflow-wrap:anywhere;`;
     const headerCells = cols.map(c =>
       `<td style="${baseTd}background:#f3f4f6;font-weight:bold;">${escapeLetterHtml(c.label)}</td>`
     ).join('');
@@ -4406,15 +4482,15 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
   const buildServiceCycleHtml = () => {
     const rows = nonEmptyServiceCycleRows();
     if (rows.length === 0) return '';
-    const B = '#e5e7eb';
+    const B = '#9ca3af';
     // Real <table> + vertical-align:middle so cells center the same in the preview AND
     // the html2canvas PDF/print. Left-aligned with pre-wrap for multi-line Remarks.
     const totalW = SERVICE_CYCLE_COLS.reduce((s, c) => s + (LETTER_COL_WEIGHTS[c.key] || 1), 0);
     const colgroup = `<colgroup>${SERVICE_CYCLE_COLS.map(c =>
       `<col style="width:${(((LETTER_COL_WEIGHTS[c.key] || 1) / totalW) * 100).toFixed(3)}%" />`
     ).join('')}</colgroup>`;
-    const baseTd = `border:1px solid ${B};padding:2px 8px 8px;text-align:left;vertical-align:middle;` +
-      `line-height:1.5;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;`;
+    const baseTd = `border:1px solid ${B};padding:3px 8px 10px;text-align:left;vertical-align:middle;` +
+      `line-height:1.15;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;`;
     const headerCells = SERVICE_CYCLE_COLS.map(c =>
       `<td style="${baseTd}background:#f3f4f6;font-weight:bold;">${escapeLetterHtml(c.label)}</td>`
     ).join('');
@@ -4553,8 +4629,10 @@ ${f.start_para}`;
       holder.style.top = '0';
       holder.style.width = `${LETTER_W}px`;
       holder.style.background = '#ffffff';
+      holder.className = 'keep-light'; // letter = paper — stays white in dark mode
       holder.innerHTML = buildLetterHtml(false, true, true);
       document.body.appendChild(holder);
+      normalizeLetterHolderForCanvas(holder);
 
       const innerImgs = Array.from(holder.querySelectorAll('img'));
       await Promise.all(innerImgs.map(im => im.complete ? Promise.resolve()
@@ -7091,7 +7169,7 @@ ${f.start_para}`;
                                 }
                                 if (colId === 'last_followup_user') {
                                   return (
-                                    <td key={colId} className="px-1 py-1 text-[12px] text-black whitespace-nowrap border-r border-gray-200 w-[65px] text-left">
+                                    <td key={colId} className="pl-2 pr-1 py-1 text-[12px] text-black whitespace-nowrap border-r border-gray-200 w-[65px] text-left">
                                       <div className="truncate" title={customer.last_followup_user || "-"}>
                                         {customer.last_followup_user || "-"}
                                       </div>

@@ -101,6 +101,7 @@ def login(user_login: UserLogin, db: Session = Depends(get_db)):
                     "is_blocked": user.is_blocked,
                     "can_export": user.can_export,
                     "can_access_expense": user.can_access_expense,
+                    "theme": user.theme or "light",
                     "session_id": session_id,
                     "branches": [
                         {
@@ -746,6 +747,42 @@ def toggle_expense_access(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error toggling expense access: {str(e)}"
         )    
+
+@router.put("/theme")
+def update_theme(payload: dict, db: Session = Depends(get_db)):
+    """Persist the user's light/dark preference so it follows them across
+    devices and sessions (applied automatically at login)."""
+    try:
+        user_id = payload.get("user_id")
+        theme = payload.get("theme")
+
+        if not user_id or theme not in ("light", "dark"):
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"success": False, "message": "user_id and theme ('light'|'dark') are required"}
+            )
+
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"success": False, "message": "User not found"}
+            )
+
+        user.theme = theme
+        db.commit()
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"success": True, "theme": theme}
+        )
+    except Exception as e:
+        db.rollback()
+        print(f"Theme update error: {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"success": False, "message": "Internal server error"}
+        )
 
 @router.post("/logout")
 def logout(payload: dict, db: Session = Depends(get_db)):

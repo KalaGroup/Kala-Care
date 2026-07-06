@@ -60,7 +60,7 @@ const PrintSheet = ({ app, services, parts, onClose }) => {
                 </button>
             </div>
             <div className="mx-print-scroll flex-1 overflow-auto p-7 flex justify-center max-md:p-2">
-                <div className="mx-sheet relative bg-white shadow-2xl" style={{ width: 880, maxWidth: '100%', minHeight: 1100, padding: '48px 52px', color: '#13181d', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>
+                <div className="mx-sheet keep-light relative bg-white shadow-2xl" style={{ width: 880, maxWidth: '100%', minHeight: 1100, padding: '48px 52px', color: '#13181d', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>
                     <div className="absolute inset-0 pointer-events-none flex items-center justify-center overflow-hidden">
                         <div style={{ transform: 'rotate(-30deg)', fontSize: 64, fontWeight: 800, letterSpacing: '0.04em', whiteSpace: 'nowrap', color: 'rgba(191,55,46,0.07)' }}>FOR INTERNAL USE ONLY</div>
                     </div>

@@ -2428,6 +2428,198 @@ class EmployeePerformanceController:
             return None
 
     @staticmethod
+    async def get_all_branches_campaign_summary(db: Session, only_branch: str = None):
+        """
+        ONE-call replacement for the dashboard's per-branch fan-out over
+        branch-campaign-customers + branch-total-customers + allocate-summary.
+
+        Returns, per branch, the SAME aggregate numbers those endpoints produce —
+        shaped exactly like their responses minus the heavy per-customer lists
+        (the dashboard charts read only aggregates; the Branch Customers modal
+        still calls the per-branch endpoints when it is actually opened).
+
+        Data is pulled with three slim queries (campaigns, 2-column customer map,
+        5-column follow-ups) instead of N branches × full ORM loads.
+        """
+        try:
+            from app.models.campaign_model import Campaign
+            from app.models.customer_model import Customer
+            from app.models.engagement_model import FollowUp
+
+            campaigns = db.query(Campaign).all()
+
+            # instance_id -> branch for every customer (two indexed columns)
+            cust_branch = {}
+            branch_customers = {}
+            for iid, br in db.query(Customer.instance_id, Customer.branch_id).all():
+                if not iid:
+                    continue
+                cust_branch[iid] = br
+                if br:
+                    branch_customers.setdefault(br, set()).add(iid)
+
+            # Also seed every branch that has USERS (e.g. HO) even when no customer
+            # is assigned to it — otherwise those branches are missing from the
+            # response and their dashboard box never leaves the loading skeleton.
+            from app.models.user_model import User as _User
+            for (br,) in db.query(_User.branch).distinct().all():
+                if br:
+                    branch_customers.setdefault(br, set())
+
+            if only_branch is not None:
+                branch_customers = {only_branch: branch_customers.get(only_branch, set())}
+
+            # Latest follow-up per (campaign, customer) + per-pair count — slim columns.
+            # Mirrors the per-branch logic: campaign stats are based on each engaged
+            # customer's LATEST follow-up status within that campaign.
+            DT_MIN = datetime(1900, 1, 1)
+            latest = {}           # (campaign_id, iid) -> [sort_key, status, count]
+            branch_attended = {}  # branch -> set(iid) with ANY follow-up (for allocation)
+            for cid, iid, status_val, created, fid in db.query(
+                FollowUp.campaign_id,
+                FollowUp.customer_instance_id,
+                FollowUp.status,
+                FollowUp.created_at,
+                FollowUp.id,
+            ).all():
+                if not iid:
+                    continue
+                br = cust_branch.get(iid)
+                if br is None or br not in branch_customers:
+                    continue
+                branch_attended.setdefault(br, set()).add(iid)
+                key = (cid, iid)
+                sort_key = (created or DT_MIN, fid or 0)
+                cur = latest.get(key)
+                if cur is None:
+                    latest[key] = [sort_key, status_val, 1]
+                else:
+                    cur[2] += 1
+                    if sort_key > cur[0]:
+                        cur[0] = sort_key
+                        cur[1] = status_val
+
+            # Aggregate engaged stats per (campaign, branch)
+            camp_branch = {}
+            for (cid, iid), (skey, st, cnt) in latest.items():
+                br = cust_branch.get(iid)
+                agg = camp_branch.setdefault((cid, br), {
+                    'engaged_ids': set(), 'followups': 0,
+                    'completed': 0, 'wip': 0, 'rejected': 0,
+                    'rescheduled': 0, 'not_connected': 0, 'pending': 0,
+                })
+                agg['engaged_ids'].add(iid)
+                agg['followups'] += cnt
+                s = (st or '').lower()
+                if s in ('completed', 'wip', 'rejected', 'rescheduled', 'not_connected', 'pending'):
+                    agg[s] += 1
+
+            all_asset_ids = set()
+            campaign_assets = {}
+            for campaign in campaigns:
+                asset_set = set(campaign.asset_numbers or [])
+                campaign_assets[campaign.id] = asset_set
+                all_asset_ids |= asset_set
+
+            result = {}
+            for br, br_cust_set in branch_customers.items():
+                campaign_list = []
+                remaining_campaigns = []
+                remaining_union = set()
+                totals = {'engaged': 0, 'followups': 0, 'completed': 0, 'wip': 0,
+                          'rejected': 0, 'rescheduled': 0, 'not_connected': 0, 'pending': 0}
+                total_allocate_sum = 0
+
+                for campaign in campaigns:
+                    agg = camp_branch.get((campaign.id, br))
+                    engaged_ids = agg['engaged_ids'] if agg else set()
+                    matched_assets = campaign_assets[campaign.id] & br_cust_set
+                    total_allocate = len(matched_assets | engaged_ids)
+                    engaged = len(engaged_ids)
+                    completed = agg['completed'] if agg else 0
+
+                    campaign_list.append({
+                        'campaign_id': campaign.id,
+                        'campaign_name': campaign.name,
+                        'service': campaign.service,
+                        'description': campaign.description or '',
+                        'status': campaign.status,
+                        'total_customers': engaged,
+                        'total_allocate': total_allocate,
+                        'total_followups': agg['followups'] if agg else 0,
+                        'completed_followups': completed,
+                        'wip_followups': agg['wip'] if agg else 0,
+                        'rejected_followups': agg['rejected'] if agg else 0,
+                        'rescheduled_followups': agg['rescheduled'] if agg else 0,
+                        'not_connected_followups': agg['not_connected'] if agg else 0,
+                        'pending_followups': agg['pending'] if agg else 0,
+                        'completion_rate': round((completed / engaged * 100) if engaged > 0 else 0, 2),
+                    })
+
+                    if matched_assets:
+                        remaining_union |= matched_assets
+                        remaining_campaigns.append({
+                            'campaign_id': campaign.id,
+                            'campaign_name': campaign.name,
+                            'remaining_customers': len(matched_assets),
+                            'status': campaign.status,
+                        })
+
+                    totals['engaged'] += engaged
+                    totals['followups'] += agg['followups'] if agg else 0
+                    for k in ('completed', 'wip', 'rejected', 'rescheduled', 'not_connected', 'pending'):
+                        totals[k] += agg[k] if agg else 0
+                    total_allocate_sum += total_allocate
+
+                campaign_list.sort(key=lambda x: x['campaign_name'])
+
+                attended_set = branch_attended.get(br, set())
+                allocated = (br_cust_set & all_asset_ids) | attended_set
+
+                result[br] = {
+                    'engaged': {
+                        'branch_code': br,
+                        'branch_name': get_branch_display_name(br),
+                        'total_campaigns': len(campaigns),
+                        'total_customers': totals['engaged'],
+                        'total_allocate': total_allocate_sum,
+                        'total_followups': totals['followups'],
+                        'completed_followups': totals['completed'],
+                        'wip_followups': totals['wip'],
+                        'rejected_followups': totals['rejected'],
+                        'rescheduled_followups': totals['rescheduled'],
+                        'not_connected_followups': totals['not_connected'],
+                        'pending_followups': totals['pending'],
+                        'branch_completion_rate': round(
+                            (totals['completed'] / totals['engaged'] * 100)
+                            if totals['engaged'] > 0 else 0, 2),
+                        'campaigns': campaign_list,
+                    },
+                    'remaining': {
+                        'branch_code': br,
+                        'total_customers_across_campaigns': len(remaining_union),
+                        'campaigns': remaining_campaigns,
+                    },
+                    'allocation': {
+                        'branch_code': br,
+                        'branch_name': get_branch_display_name(br),
+                        'total_allocated_customers': len(allocated),
+                        'attended_customers': len(attended_set),
+                        'attended_percentage': round(
+                            (len(attended_set) / len(allocated) * 100)
+                            if allocated else 0, 2),
+                    },
+                }
+
+            return result
+
+        except Exception as e:
+            print(f"Error in get_all_branches_campaign_summary: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    @staticmethod
     async def get_non_followup_unique_customer_stats(db: Session, user_id: str):
         """
         Get unique customer count and their latest status breakdown
@@ -2904,7 +3096,10 @@ class EmployeePerformanceController:
             from app.models.letter_model import LetterSendRecord
             from app.models.customer_model import Customer
 
-            rows = db.query(
+            # PERF: `attachments` stores full base64 file CONTENT — never select it
+            # for a listing. Names are extracted inside SQL Server (OPENJSON 2016+,
+            # STRING_AGG 2017+) with a fallback to the old column select.
+            base_cols = [
                 LetterSendRecord.id,
                 LetterSendRecord.ref_no,
                 LetterSendRecord.financial_year,
@@ -2919,15 +3114,29 @@ class EmployeePerformanceController:
                 LetterSendRecord.email_to,
                 LetterSendRecord.email_cc,          # NEW — only if your model has this column (see note below)
                 LetterSendRecord.whatsapp_to,
-                LetterSendRecord.attachments,       # NEW — needed to read the file names
                 LetterSendRecord.status,
                 LetterSendRecord.error_message,
                 LetterSendRecord.sent_by_id,
                 LetterSendRecord.sent_by_name,
                 LetterSendRecord.created_at,
-            ).filter(
-                LetterSendRecord.sent_by_id == user_id
-            ).order_by(LetterSendRecord.created_at.desc()).all()
+            ]
+            from sqlalchemy import literal_column
+            names_expr = literal_column(
+                "(SELECT STRING_AGG(COALESCE(JSON_VALUE(a.[value], '$.name'), "
+                "CASE WHEN a.[type] = 1 THEN a.[value] END), '||') "
+                "FROM OPENJSON(letter_send_records.attachments) a)"
+            ).label('attachment_names')
+            fast_names = True
+            try:
+                rows = db.query(*base_cols, names_expr).filter(
+                    LetterSendRecord.sent_by_id == user_id
+                ).order_by(LetterSendRecord.created_at.desc()).all()
+            except Exception:
+                db.rollback()
+                fast_names = False
+                rows = db.query(*base_cols, LetterSendRecord.attachments).filter(
+                    LetterSendRecord.sent_by_id == user_id
+                ).order_by(LetterSendRecord.created_at.desc()).all()
 
             if not rows:
                 return {"total": 0, "letters": []}
@@ -2947,11 +3156,14 @@ class EmployeePerformanceController:
                 cust = customer_map.get(r.instance_id)
 
                 # File NAMES only — drop the heavy base64 `content` before sending to the UI
-                attachment_names = [
-                    (a.get("name") if isinstance(a, dict) else a)
-                    for a in (r.attachments or [])
-                    if (a.get("name") if isinstance(a, dict) else a)
-                ]
+                if fast_names:
+                    attachment_names = [n for n in (r.attachment_names or '').split('||') if n]
+                else:
+                    attachment_names = [
+                        (a.get("name") if isinstance(a, dict) else a)
+                        for a in (r.attachments or [])
+                        if (a.get("name") if isinstance(a, dict) else a)
+                    ]
 
                 letters.append({
                     "s_no": idx,
@@ -3342,7 +3554,11 @@ class EmployeePerformanceController:
             user_name_map = {u.user_id: u.name for u in branch_users}
             branch_user_ids = list(user_name_map.keys())   # a branch has few users -> safe IN()
 
-            rows = db.query(
+            # PERF: the `attachments` JSON column stores full base64 file CONTENT —
+            # selecting it drags megabytes per letter across the wire just to show
+            # file names. Extract the names inside SQL Server instead (OPENJSON needs
+            # 2016+, STRING_AGG 2017+); if that fails, fall back to the old column.
+            base_cols = [
                 LetterSendRecord.id,
                 LetterSendRecord.ref_no,
                 LetterSendRecord.instance_id,
@@ -3355,14 +3571,28 @@ class EmployeePerformanceController:
                 LetterSendRecord.email_to,
                 LetterSendRecord.email_cc,
                 LetterSendRecord.whatsapp_to,
-                LetterSendRecord.attachments,
                 LetterSendRecord.status,
                 LetterSendRecord.sent_by_id,
                 LetterSendRecord.sent_by_name,
                 LetterSendRecord.created_at,
-            ).filter(
-                LetterSendRecord.sent_by_id.in_(branch_user_ids)
-            ).order_by(LetterSendRecord.created_at.desc()).all()
+            ]
+            from sqlalchemy import literal_column
+            names_expr = literal_column(
+                "(SELECT STRING_AGG(COALESCE(JSON_VALUE(a.[value], '$.name'), "
+                "CASE WHEN a.[type] = 1 THEN a.[value] END), '||') "
+                "FROM OPENJSON(letter_send_records.attachments) a)"
+            ).label('attachment_names')
+            fast_names = True
+            try:
+                rows = db.query(*base_cols, names_expr).filter(
+                    LetterSendRecord.sent_by_id.in_(branch_user_ids)
+                ).order_by(LetterSendRecord.created_at.desc()).all()
+            except Exception:
+                db.rollback()
+                fast_names = False
+                rows = db.query(*base_cols, LetterSendRecord.attachments).filter(
+                    LetterSendRecord.sent_by_id.in_(branch_user_ids)
+                ).order_by(LetterSendRecord.created_at.desc()).all()
 
             if not rows:
                 return {"total": 0, "sent": 0, "draft": 0, "letters": []}
@@ -3390,11 +3620,14 @@ class EmployeePerformanceController:
                     draft_count += 1
 
                 # File NAMES only — never the heavy base64 content
-                attachment_names = [
-                    (a.get("name") if isinstance(a, dict) else a)
-                    for a in (r.attachments or [])
-                    if (a.get("name") if isinstance(a, dict) else a)
-                ]
+                if fast_names:
+                    attachment_names = [n for n in (r.attachment_names or '').split('||') if n]
+                else:
+                    attachment_names = [
+                        (a.get("name") if isinstance(a, dict) else a)
+                        for a in (r.attachments or [])
+                        if (a.get("name") if isinstance(a, dict) else a)
+                    ]
 
                 letters.append({
                     "s_no": idx,

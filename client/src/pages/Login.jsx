@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { FaEye, FaEyeSlash } from "react-icons/fa";
+import { applyTheme } from '../theme';
 
 // ===== THEME COLOR =====
 const themeColor = '#2f3192';
@@ -216,8 +217,13 @@ const Login = () => {
                     can_export: response.data.user.can_export,
                     can_access_expense: response.data.user.can_access_expense === true,  // <-- new
                     session_id: response.data.user.session_id,  // <-- login session for logout tracking
+                    theme: response.data.user.theme || 'light', // <-- saved UI theme (dark/light)
                     branches: branches                      // <-- all accessible branches
                 }));
+
+                // Restore the user's saved theme from the DB — dark mode follows
+                // the account, not the browser, until they switch it off.
+                applyTheme(response.data.user.theme || 'light');
 
                 navigate('/dashboard');
             }
