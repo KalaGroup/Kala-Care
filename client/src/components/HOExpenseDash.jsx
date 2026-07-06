@@ -141,7 +141,6 @@ const HOExpenseDash = () => {
   const getBranchDisplayName = (code) => BRANCH_MAP[code] || code || 'No Branch';
   const getUserTypeDisplay = () => {
     if (user?.role === 'master_admin') return 'Master Admin';
-    if (user?.role === 'it_admin') return 'IT Admin';
     if (user?.role === 'employee' && user?.branch === 'HO') return 'HO Employee';
     return 'User';
   };

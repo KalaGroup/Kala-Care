@@ -205,7 +205,7 @@ const LocalVendorBillHistoryModal = ({
                       { key: 'total_amount', label: 'Total Amount (₹)' },
                       { key: 'paid_date', label: 'Paid Date' },
                     ])}
-                    className="ml-auto inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg"
+                    className="export-btn ml-auto inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg"
                     style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}>
                     Export Vouchers
                   </button>
@@ -254,7 +254,7 @@ const LocalVendorBillHistoryModal = ({
                       { key: 'submitted_by_name', label: 'Submitted By' },
                       { key: 'ho_paid_date', label: 'HO Paid Date' },
                     ])}
-                    className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg"
+                    className="export-btn inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg"
                     style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}>
                     Export Records
                   </button>

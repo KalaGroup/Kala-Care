@@ -5,7 +5,7 @@ from enum import Enum
 
 class UserRole(str, Enum):
     MASTER_ADMIN = "master_admin"
-    IT_ADMIN = "it_admin"
+    IT_ADMIN = "it_admin"  # DEPRECATED: role removed from the app; kept only so legacy DB rows still load
     BRANCH_ADMIN = "branch_admin"
     EMPLOYEE = "employee"
 
@@ -146,7 +146,7 @@ class BulkUserCreate(BaseModel):
     
     @validator('role')
     def validate_role(cls, v):
-        valid_roles = ['master_admin', 'it_admin', 'branch_admin', 'employee']
+        valid_roles = ['master_admin', 'branch_admin', 'employee']
         if v not in valid_roles:
             raise ValueError(f'Role must be one of: {", ".join(valid_roles)}')
         return v

@@ -101,17 +101,17 @@ function RouteFallback() {
 
 // Helper function to check if user is any type of admin
 const isAdmin = (role) => {
-  return role === 'master_admin' || role === 'it_admin' || role === 'branch_admin';
+  return role === 'master_admin' || role === 'branch_admin';
 };
 
-// Helper function to check if user can access import (only master_admin and it_admin)
+// Helper function to check if user can access import (only master_admin)
 const canAccessImport = (role) => {
-  return role === 'master_admin' || role === 'it_admin';
+  return role === 'master_admin';
 };
 
-// Helper function to check if user can access all pages (only master_admin and it_admin)
+// Helper function to check if user can access all pages (only master_admin)
 const canAccessAllPages = (role) => {
-  return role === 'master_admin' || role === 'it_admin';
+  return role === 'master_admin';
 };
 
 // Helper function to check if user can access Expense pages.
@@ -121,7 +121,7 @@ const canAccessAllPages = (role) => {
 const canAccessExpensePages = (user) => {
   if (!user) return false;
 
-  if (user.role === 'master_admin' || user.role === 'it_admin') {
+  if (user.role === 'master_admin') {
     return true;
   }
 
@@ -224,48 +224,48 @@ function Layout() {
 
       {/* Profile Page - All authenticated users can access */}
       <Route path="/profile" element={
-        <ProtectedRoute allowedRoles={['master_admin', 'it_admin', 'branch_admin', 'employee']}>
+        <ProtectedRoute allowedRoles={['master_admin', 'branch_admin', 'employee']}>
           <Profile />
         </ProtectedRoute>
       } />
 
       {/* Dashboard Page - All authenticated users can access */}
       <Route path="/dashboard" element={
-        <ProtectedRoute allowedRoles={['master_admin', 'it_admin', 'branch_admin', 'employee']}>
+        <ProtectedRoute allowedRoles={['master_admin', 'branch_admin', 'employee']}>
           <Dashboard />
         </ProtectedRoute>
       } />
 
       {/* Customer Engagement Pages - All authenticated users can access */}
       <Route path="/customer-engagement" element={
-        <ProtectedRoute allowedRoles={['master_admin', 'it_admin', 'branch_admin', 'employee']}>
+        <ProtectedRoute allowedRoles={['master_admin', 'branch_admin', 'employee']}>
           <CustomerEng />
         </ProtectedRoute>
       } />
 
       <Route path="/customer-engagement-2" element={
-        <ProtectedRoute allowedRoles={['master_admin', 'it_admin', 'branch_admin', 'employee']}>
+        <ProtectedRoute allowedRoles={['master_admin', 'branch_admin', 'employee']}>
           <CustomerEng2 />
         </ProtectedRoute>
       } />
 
       {/* Sales and Finance Page - All authenticated users can access */}
       <Route path="/sales-finance" element={
-        <ProtectedRoute allowedRoles={['master_admin', 'it_admin']}>
+        <ProtectedRoute allowedRoles={['master_admin']}>
           <SalseANDFinance />
         </ProtectedRoute>
       } />
 
       {/* MOM Tracking Page - All authenticated users can access */}
       <Route path="/mom-tracking" element={
-        <ProtectedRoute allowedRoles={['master_admin', 'it_admin']}>
+        <ProtectedRoute allowedRoles={['master_admin']}>
           <MOMTracking />
         </ProtectedRoute>
       } />
 
       {/* Knowledge Book Page */}
       <Route path="/knowledge-book" element={
-        <ProtectedRoute allowedRoles={['master_admin', 'it_admin', 'branch_admin', 'employee']}
+        <ProtectedRoute allowedRoles={['master_admin', 'branch_admin', 'employee']}
         >
           <KnowledgeBook />
         </ProtectedRoute>
@@ -274,7 +274,7 @@ function Layout() {
       {/* MODIFIED: Expense Page - With branch check for employees */}
       <Route path="/expense" element={
         <ProtectedRoute
-          allowedRoles={['master_admin', 'it_admin', 'branch_admin', 'employee']}
+          allowedRoles={['master_admin', 'branch_admin', 'employee']}
           customCheck={canAccessExpensePages}
         >
           <Expense />
@@ -284,44 +284,44 @@ function Layout() {
       {/* MODIFIED: Expense Dashboard Page - With branch check for employees */}
       <Route path="/expense-dashboard" element={
         <ProtectedRoute
-          allowedRoles={['master_admin', 'it_admin', 'branch_admin', 'employee']}
+          allowedRoles={['master_admin', 'branch_admin', 'employee']}
           customCheck={canAccessExpensePages}
         >
           <ExDashboard />
         </ProtectedRoute>
       } />
 
-      {/* Customers Page - ONLY master_admin and it_admin can access */}
+      {/* Customers Page - ONLY master_admin can access */}
       <Route path="/customers" element={
-        <ProtectedRoute allowedRoles={['master_admin', 'it_admin']}>
+        <ProtectedRoute allowedRoles={['master_admin']}>
           <Customer />
         </ProtectedRoute>
       } />
 
-      {/* Import Page - ONLY master_admin and it_admin can access */}
+      {/* Import Page - ONLY master_admin can access */}
       <Route path="/import" element={
-        <ProtectedRoute allowedRoles={['master_admin', 'it_admin']}>
+        <ProtectedRoute allowedRoles={['master_admin']}>
           <Import />
         </ProtectedRoute>
       } />
 
-      {/* Campaigns Page - ONLY master_admin and it_admin can access */}
+      {/* Campaigns Page - ONLY master_admin can access */}
       <Route path="/campaigns" element={
-        <ProtectedRoute allowedRoles={['master_admin', 'it_admin']}>
+        <ProtectedRoute allowedRoles={['master_admin']}>
           <Campaign />
         </ProtectedRoute>
       } />
 
       {/* Maintenance Check Schedule */}
       <Route path="/maintenance-schedule" element={
-        <ProtectedRoute allowedRoles={['master_admin', 'it_admin', 'branch_admin', 'employee']}>
+        <ProtectedRoute allowedRoles={['master_admin', 'branch_admin', 'employee']}>
           <MaintenanceSchedule />
         </ProtectedRoute>
       } />
 
       {/* Maintenance Reports — separate page */}
       <Route path="/maintenance-reports" element={
-        <ProtectedRoute allowedRoles={['master_admin', 'it_admin']}>
+        <ProtectedRoute allowedRoles={['master_admin']}>
           <MaintenanceReports />
         </ProtectedRoute>
       } />

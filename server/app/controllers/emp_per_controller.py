@@ -3191,6 +3191,21 @@ class EmployeePerformanceController:
             today = now.date()
             MAX_OPEN_SESSION_SECS = 10 * 3600  # cap a forgotten open tab at 10h
 
+            # Login times per user (sorted) — an open session can't be Active
+            # if the same user logged in again later; it was superseded.
+            logins_by_user = {}
+            for s in sessions:
+                if s.login_time:
+                    logins_by_user.setdefault(s.user_id, []).append(s.login_time)
+            for lst in logins_by_user.values():
+                lst.sort()
+
+            def next_login_after(s):
+                for t in logins_by_user.get(s.user_id, []):
+                    if t > s.login_time:
+                        return t
+                return None
+
             def fmt_secs(secs):
                 if not secs or secs < 0:
                     return "0h 0m"
@@ -3215,6 +3230,16 @@ class EmployeePerformanceController:
 
                 if not s.login_time:
                     return None, "no-logout", 0
+
+                # Superseded: the user logged in again after this open session,
+                # so it can't still be live — close it at that next login.
+                nxt = next_login_after(s)
+                if nxt:
+                    dur = int((nxt - s.login_time).total_seconds())
+                    if dur > MAX_OPEN_SESSION_SECS:
+                        nxt = s.login_time + timedelta(seconds=MAX_OPEN_SESSION_SECS)
+                        dur = MAX_OPEN_SESSION_SECS
+                    return nxt, "relogin", max(dur, 0)
 
                 # Open session on TODAY's date.
                 if day == today:

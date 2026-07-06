@@ -12,10 +12,9 @@ const ExDashboard = () => {
     return <BranchAdminExpenseDash />;
   }
 
-  // Master admin / IT admin at HO → HO dashboard
+  // Master admin at HO → HO dashboard
   if (
     role === 'master_admin' ||
-    role === 'it_admin' ||
     (role === 'employee' && branch === 'HO')
   ) {
     return <HOExpenseDash />;

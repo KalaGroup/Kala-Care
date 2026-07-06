@@ -1131,7 +1131,7 @@ const BranchOE = ({
                                             { key: 'expenses_description', label: 'Description' },
                                         ]
                                     )}
-                                    className="inline-flex items-center gap-1 px-2 py-1.5 text-white text-[10px] font-semibold rounded-lg"
+                                    className="export-btn inline-flex items-center gap-1 px-2 py-1.5 text-white text-[10px] font-semibold rounded-lg"
                                     style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                                 >
                                     <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1406,7 +1406,7 @@ const BranchOE = ({
                                             { key: 'ho_paid_date', label: 'HO Paid Date' },
                                         ]
                                     )}
-                                    className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg shadow-sm hover:shadow-md transition-all"
+                                    className="export-btn inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg shadow-sm hover:shadow-md transition-all"
                                     style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                                 >
                                     <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1853,7 +1853,7 @@ const BranchOE = ({
                                             { key: 'amount', label: 'Amount (₹)' },
                                         ]
                                     )}
-                                    className="px-4 py-1.5 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 max-sm:w-full max-sm:justify-center"
+                                    className="export-btn px-4 py-1.5 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 max-sm:w-full max-sm:justify-center"
                                     style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                                 >
                                     <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">

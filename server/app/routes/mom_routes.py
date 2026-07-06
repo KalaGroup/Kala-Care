@@ -22,8 +22,8 @@ def get_db():
 
 # ---------------- ROLE HELPERS ---------------- #
 
-ADMIN_ROLES = {UserRole.MASTER_ADMIN.value, UserRole.IT_ADMIN.value, UserRole.BRANCH_ADMIN.value}
-MASTER_ROLES = {UserRole.MASTER_ADMIN.value, UserRole.IT_ADMIN.value}
+ADMIN_ROLES = {UserRole.MASTER_ADMIN.value, UserRole.BRANCH_ADMIN.value}
+MASTER_ROLES = {UserRole.MASTER_ADMIN.value}
 
 
 def _resolve_user(db: Session, user_id: Optional[str]):

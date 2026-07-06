@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
+import { canExportExcel } from '../utils/exportPermission';
 
 const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl, allReportCampaigns = null }) => {
     const [customers, setCustomers] = useState([]);
@@ -611,11 +612,12 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                                 )}
                             </div>
 
-                            {/* Export button */}
+                            {/* Export button — only for users with the can_export permission */}
+                            {canExportExcel() && (
                             <button
                                 onClick={exportToExcel}
                                 disabled={exportLoading || customers.length === 0}
-                                className="px-3 py-1.5 bg-white text-[#2f3192] text-[11px] sm:text-xs font-semibold rounded-lg hover:bg-white/90 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-full sm:w-auto"
+                                className="export-btn px-3 py-1.5 bg-white text-[#2f3192] text-[11px] sm:text-xs font-semibold rounded-lg hover:bg-white/90 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-full sm:w-auto"
                             >
                                 {exportLoading ? (
                                     <>
@@ -631,6 +633,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                                     </>
                                 )}
                             </button>
+                            )}
 
                             {/* Close button */}
                             <button

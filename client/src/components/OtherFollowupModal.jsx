@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
+import { canExportExcel } from '../utils/exportPermission';
 
 const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
     const [customers, setCustomers] = useState([]);
@@ -244,10 +245,11 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                             )}
                         </div>
 
+                        {canExportExcel() && (
                         <button
                             onClick={exportToExcel}
                             disabled={exportLoading || customers.length === 0}
-                            className="px-2.5 sm:px-3 py-1 bg-gradient-to-r from-green-600 to-green-700 text-white text-[11px] sm:text-xs font-medium rounded-lg hover:from-green-700 hover:to-green-800 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-full sm:w-auto"
+                            className="export-btn px-2.5 sm:px-3 py-1 bg-gradient-to-r from-green-600 to-green-700 text-white text-[11px] sm:text-xs font-medium rounded-lg hover:from-green-700 hover:to-green-800 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-full sm:w-auto"
                         >
                             {exportLoading ? (
                                 <>
@@ -263,6 +265,7 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                                 </>
                             )}
                         </button>
+                        )}
                     </div>
 
                     {/* Table Section */}

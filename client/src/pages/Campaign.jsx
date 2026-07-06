@@ -5,6 +5,7 @@ import 'react-datepicker/dist/react-datepicker.css';
 import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { canExportExcel } from '../utils/exportPermission';
 import {
   MegaphoneIcon,
   PlusIcon,
@@ -2931,14 +2932,16 @@ const Campaign = () => {
                                     <XMarkIcon className="h-3 w-3" />
                                     Remove All
                                   </button>
-                                  <button
-                                    type="button"
-                                    onClick={exportInvalidAssets}
-                                    className="text-xs text-red-600 hover:text-red-800 font-medium flex items-center gap-0.5"
-                                  >
-                                    <DocumentArrowUpIcon className="h-3 w-3" />
-                                    Export
-                                  </button>
+                                  {canExportExcel() && (
+                                    <button
+                                      type="button"
+                                      onClick={exportInvalidAssets}
+                                      className="export-btn text-xs font-medium flex items-center gap-0.5 px-2 py-0.5 rounded"
+                                    >
+                                      <DocumentArrowUpIcon className="h-3 w-3" />
+                                      Export
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                               <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
@@ -3505,14 +3508,16 @@ const Campaign = () => {
                                     <XMarkIcon className="h-3 w-3" />
                                     Remove All
                                   </button>
-                                  <button
-                                    type="button"
-                                    onClick={exportInvalidAssets}
-                                    className="text-xs text-red-600 hover:text-red-800 font-medium flex items-center gap-0.5"
-                                  >
-                                    <DocumentArrowUpIcon className="h-3 w-3" />
-                                    Export
-                                  </button>
+                                  {canExportExcel() && (
+                                    <button
+                                      type="button"
+                                      onClick={exportInvalidAssets}
+                                      className="export-btn text-xs font-medium flex items-center gap-0.5 px-2 py-0.5 rounded"
+                                    >
+                                      <DocumentArrowUpIcon className="h-3 w-3" />
+                                      Export
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                               <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">

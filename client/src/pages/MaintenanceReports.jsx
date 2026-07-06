@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
+import { canExportExcel } from '../utils/exportPermission';
 import {
     DocumentChartBarIcon, ChartBarIcon, ClockIcon, UsersIcon,
     ArrowDownTrayIcon, ArrowPathIcon, Squares2X2Icon, ExclamationTriangleIcon,
@@ -179,11 +180,13 @@ const CoverageReport = ({ master, services }) => {
                 <ChartBarIcon className="h-4 w-4" style={{ color: themeColor }} />
                 <p className="text-[13px] font-semibold text-gray-800">Service Coverage Matrix</p>
                 <span className="text-[11px] text-gray-400 hidden sm:inline">{master.length} codes × {cols.length} services · ✓ has parts · ✗ none</span>
-                <button onClick={exportXlsx}
-                    className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90"
-                    style={{ backgroundColor: themeColor }}>
-                    <ArrowDownTrayIcon className="h-3.5 w-3.5" /> Export Excel
-                </button>
+                {canExportExcel() && (
+                    <button onClick={exportXlsx}
+                        className="export-btn ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90"
+                        style={{ backgroundColor: themeColor }}>
+                        <ArrowDownTrayIcon className="h-3.5 w-3.5" /> Export Excel
+                    </button>
+                )}
             </div>
             <div className="overflow-x-auto r-scroll">
                 <table className="min-w-[760px] w-full border-collapse text-[12px]">
@@ -339,11 +342,13 @@ const ActivityReport = ({ master, activity }) => {
                             )}
                         </div>
 
-                        <button onClick={exportXlsx} disabled={data.groups.length === 0}
-                            className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
-                            style={{ backgroundColor: themeColor }}>
-                            <ArrowDownTrayIcon className="h-3.5 w-3.5" /> Export Excel
-                        </button>
+                        {canExportExcel() && (
+                            <button onClick={exportXlsx} disabled={data.groups.length === 0}
+                                className="export-btn ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+                                style={{ backgroundColor: themeColor }}>
+                                <ArrowDownTrayIcon className="h-3.5 w-3.5" /> Export Excel
+                            </button>
+                        )}
                     </div>
 
                     {/* Count line */}

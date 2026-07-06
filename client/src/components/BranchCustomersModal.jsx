@@ -901,7 +901,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                 <button
                                     onClick={exportToExcel}
                                     disabled={exportLoading || !campaignsWithAllocate.length}
-                                    className="px-3.5 py-1.5 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+                                    className="export-btn px-3.5 py-1.5 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
                                 >
                                     {exportLoading ? (
                                         <>

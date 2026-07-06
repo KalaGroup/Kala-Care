@@ -1231,7 +1231,7 @@ export default function MOMTracking() {
 
             {/* ---- sheet header block (like the top of the Excel) ---- */}
             <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-              <div className="px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
+              <div className="mom-view-head px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
                 <div className="flex items-center gap-2.5">
                   <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 fs-10 font-bold text-white" style={{ background: BRAND }}>
                     <span className="h-2 w-2 rounded-full bg-white" style={{ animation: 'livedot 1.4s infinite' }} /> LIVE
@@ -1239,7 +1239,7 @@ export default function MOMTracking() {
                   <div className="text-sm font-bold uppercase" style={{ letterSpacing: '0.16em', color: BRAND_DARK }}>Minutes of Meeting</div>
                 </div>
                 <div className="flex items-center gap-2 max-md:flex-wrap">
-                  {canExport && <button onClick={exportDraft} className="kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: BRAND }}><Download size={13} /> Export Excel</button>}
+                  {canExport && <button onClick={exportDraft} className="export-btn kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: BRAND }}><Download size={13} /> Export Excel</button>}
                   <button onClick={() => setStep(1)} className="kc-lift inline-flex items-center gap-1 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: '#5b6170' }}><ChevronLeft size={13} /> Setup</button>
                 </div>
               </div>
@@ -1535,7 +1535,7 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col" style={{ maxHeight: '92vh' }} onClick={(e) => e.stopPropagation()}>
         {/* header */}
-        <div className="px-4 py-3 flex items-start justify-between rounded-t-2xl border-b border-gray-100 max-md:flex-wrap max-md:gap-2" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
+        <div className="mom-view-head px-4 py-3 flex items-start justify-between rounded-t-2xl border-b border-gray-100 max-md:flex-wrap max-md:gap-2" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
           <div className="min-w-0">
             <div className="fs-9 uppercase tracking-wide text-gray-400" style={{ letterSpacing: '0.14em' }}>Minutes of Meeting</div>
             <div className="text-base font-bold text-gray-800">{data.branchName}</div>
@@ -1551,7 +1551,7 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
             </div>
           </div>
           <div className="flex items-center gap-2 max-md:flex-wrap">
-            {canExport && <button onClick={() => onExport(data)} className="kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-bold max-sm:text-xs max-sm:px-2" style={{ borderColor: '#dfe3f2', color: BRAND }}><Download size={13} /> Download Excel</button>}
+            {canExport && <button onClick={() => onExport(data)} className="export-btn kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-bold max-sm:text-xs max-sm:px-2" style={{ borderColor: '#dfe3f2', color: BRAND }}><Download size={13} /> Download Excel</button>}
             <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100"><X className="h-4 w-4" /></button>
           </div>
         </div>
@@ -1775,7 +1775,7 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-end gap-1.5">
-                          {canExport && <button onClick={() => onExport(m)} title="Download Excel" className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50"><Download size={13} /></button>}
+                          {canExport && <button onClick={() => onExport(m)} title="Download Excel" className="export-btn rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50"><Download size={13} /></button>}
                           {canDelete && <button onClick={() => onDelete(m)} title="Delete meeting" className="rounded-lg border border-gray-200 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50"><Trash2 size={13} /></button>}
                           <button onClick={() => onView(m)} className="kc-lift rounded-lg px-2.5 py-1.5 fs-11 font-bold text-white" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})` }}>View sheet</button>
                         </div>
@@ -2140,7 +2140,7 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col" style={{ maxHeight: '86vh' }} onClick={(e) => e.stopPropagation()}>
-        <div className="px-4 py-3 flex items-center justify-between rounded-t-2xl border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
+        <div className="mom-view-head px-4 py-3 flex items-center justify-between rounded-t-2xl border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
           <div>
             <div className="text-sm font-bold text-gray-800">Master setup</div>
             <div className="fs-10 text-gray-400">Discussion areas pre-filled into every new meeting sheet</div>

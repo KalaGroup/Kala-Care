@@ -529,7 +529,7 @@ const Dashboard = () => {
 
                 // Set role-based flags
                 const isMaster = role === 'master_admin';
-                const isIT = role === 'it_admin';
+                const isIT = false; // it_admin role removed from the application
                 const isBranch = role === 'branch_admin';
                 const isEmp = role === 'employee';
                 const isAdminUser = isMaster || isIT || isBranch;
@@ -4562,7 +4562,7 @@ const Dashboard = () => {
                                         {canExport && (
                                             <button
                                                 onClick={exportBranchEmployeesTable}
-                                                className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded font-medium transition-colors flex items-center gap-1.5 max-sm:w-full max-sm:justify-center"
+                                                className="export-btn px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded font-medium transition-colors flex items-center gap-1.5 max-sm:w-full max-sm:justify-center"
                                             >
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -4894,7 +4894,7 @@ const Dashboard = () => {
                                             <button
                                                 onClick={exportCampaignPerformanceToExcel}
                                                 disabled={campaignLoading || campaignPerformance.length === 0}
-                                                className="w-full sm:w-auto px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap"
+                                                className="export-btn w-full sm:w-auto px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap"
                                             >
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -5254,7 +5254,7 @@ const Dashboard = () => {
                                         <button
                                             onClick={exportActivityStatsToExcel}
                                             disabled={activityLoading || !activityStats || activityStats.length === 0}
-                                            className="px-2 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap max-sm:w-full"
+                                            className="export-btn px-2 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap max-sm:w-full"
                                         >
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -5833,7 +5833,7 @@ const Dashboard = () => {
                                         <button
                                             onClick={exportRrStatsToExcel}
                                             disabled={rrLoading || !rrStats || rrStats.length === 0}
-                                            className="px-2 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap max-sm:w-full"
+                                            className="export-btn px-2 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap max-sm:w-full"
                                         >
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />

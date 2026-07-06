@@ -45,9 +45,31 @@ def login(user_login: UserLogin, db: Session = Depends(get_db)):
         
         # ---- Record login time (IST) in login_sessions ----
         from app.models.login_activity_model import LoginSession, now_ist
+        from datetime import timedelta
         session_id = None
         try:
             login_ts = now_ist()
+
+            # A new login supersedes any still-open session of this user.
+            # The client's logout signals (manual/auto/close) are best-effort:
+            # on a crash, killed tab, or a re-login that replaces sessionStorage,
+            # none of them fire and the old row would stay "Active" forever.
+            open_sessions = db.query(LoginSession).filter(
+                LoginSession.user_id == user.user_id,
+                LoginSession.logout_time.is_(None),
+            ).all()
+            for old in open_sessions:
+                if old.login_time:
+                    # Close at the new login, capped at login+10h (same cap the
+                    # report uses) so a days-old orphan can't get a huge duration.
+                    close_at = min(login_ts, old.login_time + timedelta(hours=10))
+                    old.duration_seconds = max(int((close_at - old.login_time).total_seconds()), 0)
+                else:
+                    close_at = login_ts
+                    old.duration_seconds = 0
+                old.logout_time = close_at
+                old.logout_type = "relogin"
+
             login_session = LoginSession(
                 user_id=user.user_id,
                 user_name=user.name,
@@ -113,7 +135,7 @@ def create_employee(
     try:
         # Check if requester is admin (Master Admin or IT Admin)
         admin = UserController.get_user_by_id(db, user_id)
-        if not admin or admin.role not in ["master_admin", "it_admin"]:
+        if not admin or admin.role not in ["master_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only Master Admins and IT Admins can create employees"
@@ -156,7 +178,7 @@ async def bulk_import_employees(
     """Bulk import employees from Excel/CSV file"""
     try:
         admin = UserController.get_user_by_id(db, user_id)
-        if not admin or admin.role not in ["master_admin", "it_admin"]:
+        if not admin or admin.role not in ["master_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only Master Admins and IT Admins can import employees"
@@ -288,7 +310,7 @@ def export_employees(
     try:
         # Check if user is Master Admin or IT Admin
         admin = UserController.get_user_by_id(db, user_id)
-        if not admin or admin.role not in ["master_admin", "it_admin"]:
+        if not admin or admin.role not in ["master_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only Master Admins and IT Admins can export employees"
@@ -452,7 +474,7 @@ def update_employee_role(
     try:
         # Check if user is Master Admin or IT Admin
         admin = UserController.get_user_by_id(db, user_id)
-        if not admin or admin.role not in ["master_admin", "it_admin"]:
+        if not admin or admin.role not in ["master_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only Master Admins and IT Admins can update user roles"
@@ -638,7 +660,7 @@ def list_employee_branches(employee_user_id: str,
                            user_id: str = Header(...),
                            db: Session = Depends(get_db)):
     admin = UserController.get_user_by_id(db, user_id)
-    if not admin or admin.role not in ["master_admin", "it_admin", "branch_admin"]:
+    if not admin or admin.role not in ["master_admin", "branch_admin"]:
         raise HTTPException(403, "Not allowed")
     branches = UserController.get_user_branches(db, employee_user_id)
     return {
@@ -690,7 +712,7 @@ def toggle_expense_access(
     """Toggle employee expense access permission (Master Admin and IT Admin only)"""
     try:
         admin = UserController.get_user_by_id(db, user_id)
-        if not admin or admin.role not in ["master_admin", "it_admin"]:
+        if not admin or admin.role not in ["master_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only Master Admins and IT Admins can change expense access"

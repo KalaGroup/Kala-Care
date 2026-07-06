@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 import { IoClose } from "react-icons/io5";
+import { canExportExcel } from '../utils/exportPermission';
 
 const themeColor = '#2f3192';
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
@@ -52,6 +53,7 @@ const EmployeeTime = ({ isOpen, onClose, userData }) => {
     const [reportDate, setReportDate] = useState(getTodayStr());
     const [branchFilter, setBranchFilter] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
+    const canExport = canExportExcel();
 
     const fetchReport = useCallback(async () => {
         if (!isOpen || !userData) return;
@@ -160,13 +162,15 @@ const EmployeeTime = ({ isOpen, onClose, userData }) => {
                             className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] text-black"
                         />
                     </div>
-                    <button
-                        onClick={exportToExcel}
-                        disabled={!rows.length}
-                        className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
-                    >
-                        Export to Excel
-                    </button>
+                    {canExport && (
+                        <button
+                            onClick={exportToExcel}
+                            disabled={!rows.length}
+                            className="export-btn px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
+                        >
+                            Export to Excel
+                        </button>
+                    )}
                 </div>
 
                 {/* Table */}

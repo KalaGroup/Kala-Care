@@ -2339,7 +2339,7 @@ class EngagementController:
             CampaignCSPInfo.campaign_id.in_(csp_campaign_ids)
         )
 
-        is_master = (role or '').lower() in ('master_admin', 'it_admin')
+        is_master = (role or '').lower() in ('master_admin',)
         if not is_master and branch_id and str(branch_id).upper() != 'HO':
             rows_q = rows_q.filter(CampaignCSPInfo.branch_id == str(branch_id))
 

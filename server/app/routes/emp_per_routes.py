@@ -37,16 +37,16 @@ class CampaignFilterRequest(BaseModel):
     campaign_ids: Optional[List[int]] = None
 
 def is_admin(role: str) -> bool:
-    admin_roles = ['master_admin', 'it_admin', 'branch_admin']
+    admin_roles = ['master_admin', 'branch_admin']
     return role.lower() in admin_roles
 
 def is_super_admin(role: str) -> bool:
-    super_admin_roles = ['master_admin', 'it_admin']
+    super_admin_roles = ['master_admin']
     return role.lower() in super_admin_roles
 
 def can_view_branch_data(role: str) -> bool:
     """Check if user can view branch-level data (includes branch_admin)"""
-    allowed_roles = ['master_admin', 'it_admin', 'branch_admin']
+    allowed_roles = ['master_admin', 'branch_admin']
     return role.lower() in allowed_roles    
 
 def convert_ist_to_utc_datetime(date_str: str, is_end_date: bool = False):
@@ -192,7 +192,7 @@ async def get_all_employees_performance(
     Get performance for all employees with time filter or custom date range (admin only)
     """
     try:
-        # Check if user has admin role (master_admin, it_admin, or branch_admin)
+        # Check if user has admin role (master_admin or branch_admin)
         if not is_admin(user_info.role):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -246,7 +246,7 @@ async def get_branch_performance(
     Get branch-wise performance with time filter or custom date range (admin only)
     """
     try:
-        # Check if user has admin role (master_admin, it_admin, or branch_admin)
+        # Check if user has admin role (master_admin or branch_admin)
         if not is_admin(user_info.role):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -293,10 +293,10 @@ async def get_all_branches(
     db: Session = Depends(get_db)
 ):
     """
-    Get all branch codes (super admin only - master_admin and it_admin)
+    Get all branch codes (super admin only - master_admin)
     """
     try:
-        # Only master_admin and it_admin can see all branches
+        # Only master_admin can see all branches
         if not is_super_admin(user_info.role):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -581,7 +581,7 @@ async def get_activity_statistics(
     Branch Admins: See only their branch
     """
     try:
-        # Allow master_admin, it_admin, AND branch_admin
+        # Allow master_admin AND branch_admin
         if not can_view_branch_data(request.user_info.role):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -642,7 +642,7 @@ async def get_rr_statistics(
     Branch Admins: See only their branch
     """
     try:
-        # Allow master_admin, it_admin, AND branch_admin
+        # Allow master_admin AND branch_admin
         if not can_view_branch_data(request.user_info.role):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -701,7 +701,7 @@ async def get_campaigns_list(
     Branch Admins: See campaigns from their branch only
     """
     try:
-        # Allow master_admin, it_admin, AND branch_admin
+        # Allow master_admin AND branch_admin
         if not can_view_branch_data(user_info.role):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

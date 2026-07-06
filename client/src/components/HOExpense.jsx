@@ -859,7 +859,6 @@ const HOExpense = () => {
 
   const getUserTypeDisplay = () => {
     if (user?.role === 'master_admin') return 'Master Admin';
-    if (user?.role === 'it_admin') return 'IT Admin';
     if (user?.role === 'employee' && user?.branch === 'HO') return 'HO Employee';
     return 'User';
   };
@@ -4412,7 +4411,7 @@ const HOExpense = () => {
                             { key: 'total_count', label: 'Total' },
                           ]
                         )}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] sm:text-xs font-medium rounded-lg transition-all shadow-md hover:shadow-lg"
+                        className="export-btn inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] sm:text-xs font-medium rounded-lg transition-all shadow-md hover:shadow-lg"
                         style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                       >
                         <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -4601,7 +4600,7 @@ const HOExpense = () => {
                                 { key: 'end_date', label: 'End Date' },
                               ]
                             )}
-                            className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] sm:text-xs font-medium rounded-lg transition-all shadow-md hover:shadow-lg"
+                            className="export-btn inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] sm:text-xs font-medium rounded-lg transition-all shadow-md hover:shadow-lg"
                             style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                           >
                             <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -4858,7 +4857,7 @@ const HOExpense = () => {
                                 { key: 'total', label: 'Total Amount' },
                               ]
                             )}
-                            className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg"
+                            className="export-btn inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg"
                             style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                           >
                             <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg>
@@ -4882,7 +4881,7 @@ const HOExpense = () => {
                                 { key: 'total', label: 'Total Amount' },
                               ]
                             )}
-                            className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg"
+                            className="export-btn inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg"
                             style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                           >
                             <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg>
@@ -4922,7 +4921,7 @@ const HOExpense = () => {
                                     { key: 'verification_status', label: 'Status' },
                                   ]
                                 )}
-                                className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg"
+                                className="export-btn inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg"
                                 style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                               >
                                 <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg>
@@ -5197,7 +5196,7 @@ const HOExpense = () => {
                               { key: 'verified_amount', label: 'Verified Amount' },
                             ]
                           )}
-                          className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg"
+                          className="export-btn inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg"
                           style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                         >
                           <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg>
@@ -5377,7 +5376,7 @@ const HOExpense = () => {
                                 ]
                               );
                             }}
-                            className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg"
+                            className="export-btn inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg"
                             style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                           >
                             <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg>
@@ -5425,7 +5424,7 @@ const HOExpense = () => {
                                 headers
                               );
                             }}
-                            className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg"
+                            className="export-btn inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg"
                             style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                           >
                             <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg>
@@ -5859,7 +5858,7 @@ const HOExpense = () => {
                           const safeName = (selectedEngineerDetail?.name || 'records').replace(/[\\/:*?"<>|]/g, '_');
                           exportToExcel(enriched, `tada_${safeName}_${tabLabel}.xlsx`, headers);
                         }}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] sm:text-xs font-medium rounded-lg transition-all shadow-md hover:shadow-lg"
+                        className="export-btn inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] sm:text-xs font-medium rounded-lg transition-all shadow-md hover:shadow-lg"
                         style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                       >
                         <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -6622,7 +6621,7 @@ const HOExpense = () => {
                               ]
                             );
                           }}
-                          className="inline-flex items-center gap-1 px-2 py-1.5 text-white text-[10px] font-medium rounded-lg transition-all hover:shadow-md"
+                          className="export-btn inline-flex items-center gap-1 px-2 py-1.5 text-white text-[10px] font-medium rounded-lg transition-all hover:shadow-md"
                           style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                         >
                           <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">

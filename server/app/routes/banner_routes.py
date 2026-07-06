@@ -57,12 +57,11 @@ async def upload_banners(
     user_role: Optional[str] = Header(None),  # Get role from header
     db: Session = Depends(get_db)
 ):
-    """Upload up to 3 banner images (admin only - master_admin, it_admin, branch_admin)"""
+    """Upload up to 3 banner images (admin only - master_admin, branch_admin)"""
     
     # Define allowed admin roles
     ALLOWED_ADMIN_ROLES = [
         UserRole.MASTER_ADMIN.value,  # "master_admin"
-        UserRole.IT_ADMIN.value,       # "it_admin"
         UserRole.BRANCH_ADMIN.value    # "branch_admin"
     ]
     
@@ -81,7 +80,7 @@ async def upload_banners(
     if not is_authorized:
         raise HTTPException(
             status_code=403, 
-            detail="Only master_admin, it_admin, or branch_admin can upload banners"
+            detail="Only master_admin or branch_admin can upload banners"
         )
     
     # Check if at least one file is provided

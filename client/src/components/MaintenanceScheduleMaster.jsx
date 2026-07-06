@@ -13,6 +13,7 @@ import {
     themeColor, themeDark, themeSoft,
 } from './maintenanceApi';
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
+import { canExportExcel } from '../utils/exportPermission';
 
 const chipCls = { R: 'bg-blue-50 text-blue-700', C: 'bg-amber-50 text-amber-700', T: 'bg-emerald-50 text-emerald-700' };
 const Chip = React.memo(({ a }) => {
@@ -243,21 +244,25 @@ const MasterData = () => {
                                 Clear
                             </button>
 
-                            <button
-                                onClick={() => exportXlsx(selCodes)}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-2 text-[12px] font-semibold text-white transition"
-                            >
-                                <ArrowDownTrayIcon className="h-4 w-4" /> Export selected
-                            </button>
+                            {canExportExcel() && (
+                                <button
+                                    onClick={() => exportXlsx(selCodes)}
+                                    className="export-btn inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-2 text-[12px] font-semibold text-white transition"
+                                >
+                                    <ArrowDownTrayIcon className="h-4 w-4" /> Export selected
+                                </button>
+                            )}
                         </>
                     )}
 
-                    <button
-                        onClick={() => exportXlsx(null)}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-2 text-[12px] font-semibold text-white transition"
-                    >
-                        <ArrowDownTrayIcon className="h-4 w-4" /> Export all
-                    </button>
+                    {canExportExcel() && (
+                        <button
+                            onClick={() => exportXlsx(null)}
+                            className="export-btn inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-2 text-[12px] font-semibold text-white transition"
+                        >
+                            <ArrowDownTrayIcon className="h-4 w-4" /> Export all
+                        </button>
+                    )}
 
                     <button
                         onClick={doRefresh}

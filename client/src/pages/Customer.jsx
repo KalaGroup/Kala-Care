@@ -363,13 +363,13 @@ const SortableTableHeader = ({ id, children, className, style, width, onResizeSt
 };
 
 // Fixed Table Header Component
-const FixedTableHeader = ({ children, className, width, onResizeStart, isResizing }) => {
+const FixedTableHeader = ({ children, className, width, minWidth = 60, onResizeStart, isResizing }) => {
   const [isHovering, setIsHovering] = useState(false);
 
   return (
     <th
       className={`${className} relative select-none`}
-      style={{ width: width ? `${width}px` : 'auto', minWidth: '60px' }}
+      style={{ width: width ? `${width}px` : 'auto', minWidth: `${minWidth}px` }}
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
     >
@@ -1342,9 +1342,9 @@ const Customer = () => {
             )}
 
             {canExport && (
-              <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-all whitespace-nowrap">
+              <button onClick={handleExport} className="export-btn flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-all whitespace-nowrap">
                 <CiExport className="h-3.5 w-3.5" style={{ color: themeColor }} />
-                <span className="text-xs font-medium text-black">Export {selectedRows.length > 0 ? `Selected (${selectedRows.length})` : 'All'}</span>
+                <span className="text-xs text-white">Export {selectedRows.length > 0 ? `Selected (${selectedRows.length})` : 'All'}</span>
               </button>
             )}
           </div>
@@ -1394,7 +1394,7 @@ const Customer = () => {
               </div>
             )}
             {canExport && (
-              <button onClick={handleExport} className="w-full flex items-center justify-center gap-1.5 px-2.5 py-2 bg-white border border-gray-300 rounded-lg text-xs text-black">
+              <button onClick={handleExport} className="export-btn w-full flex items-center justify-center gap-1.5 px-2.5 py-2 bg-white border border-gray-300 rounded-lg text-xs text-black">
                 <CiExport className="h-3.5 w-3.5" style={{ color: themeColor }} />
                 <span>Export {selectedRows.length > 0 ? `Selected (${selectedRows.length})` : 'All'}</span>
               </button>
@@ -1474,36 +1474,49 @@ const Customer = () => {
                     <thead className="bg-gray-50 sticky top-0 z-10">
                       <tr>
                         {canExport && (
-                          <FixedTableHeader className="px-2.5 py-1 w-10 bg-gray-50 border-r-2 border-gray-300" width={columnWidths['select-col'] || 50} onResizeStart={(e) => handleResizeStart(e, 'select-col')} isResizing={resizingColumn === 'select-col'}>
+                          <FixedTableHeader className="px-2 py-1 w-8 bg-gray-50 border-r-2 border-gray-300" width={columnWidths['select-col'] || 34} minWidth={34} onResizeStart={(e) => handleResizeStart(e, 'select-col')} isResizing={resizingColumn === 'select-col'}>
                             <input type="checkbox" checked={selectedRows.length === tableData.length && tableData.length > 0} onChange={handleSelectAll} className="rounded border-gray-300 w-3.5 h-3.5 cursor-pointer" style={{ accentColor: themeColor }} />
                           </FixedTableHeader>
                         )}
                         <FixedTableHeader className="px-2.5 py-1 text-left text-[11px] font-medium text-black uppercase tracking-wider min-w-[60px] whitespace-nowrap border-r-2 border-gray-300" width={columnWidths['sno-col'] || 80} onResizeStart={(e) => handleResizeStart(e, 'sno-col')} isResizing={resizingColumn === 'sno-col'}>
                           Sr. No.
                         </FixedTableHeader>
-                        {getOrderedColumns().map((column, index) => (
-                          <SortableTableHeader key={column} id={column} className={`px-2.5 py-1 text-left text-[11px] font-medium text-black uppercase tracking-wider min-w-[140px] whitespace-nowrap ${index !== getOrderedColumns().length - 1 ? 'border-r-2 border-gray-300' : ''}`} width={columnWidths[column] || 150} onResizeStart={(e) => handleResizeStart(e, column)} isResizing={resizingColumn === column}>
-                            {column.replace(/_/g, ' ')}
-                          </SortableTableHeader>
-                        ))}
+                        {getOrderedColumns().map((column, index) => {
+                          const isLocationColumn = column.toLowerCase().includes('location');
+                          return (
+                            <SortableTableHeader key={column} id={column} className={`px-2.5 py-1 text-left text-[11px] font-medium text-black uppercase tracking-wider ${isLocationColumn ? 'min-w-[90px]' : 'min-w-[140px]'} whitespace-nowrap ${index !== getOrderedColumns().length - 1 ? 'border-r-2 border-gray-300' : ''}`} width={columnWidths[column] || (isLocationColumn ? 100 : 150)} onResizeStart={(e) => handleResizeStart(e, column)} isResizing={resizingColumn === column}>
+                              {column.replace(/_/g, ' ')}
+                            </SortableTableHeader>
+                          );
+                        })}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {tableData.map((record, index) => (
                         <tr key={record.id || record.instance_id || index} className="hover:bg-gray-50 transition-all group cursor-pointer" onClick={(e) => handleView(record, e)}>
                           {canExport && (
-                            <td className="px-2.5 py-1 bg-white group-hover:bg-gray-50 border-r-2 border-gray-200" style={{ width: columnWidths['select-col'] || 50 }} onClick={(e) => e.stopPropagation()}>
+                            <td className="px-2 py-1 bg-white group-hover:bg-gray-50 border-r-2 border-gray-200" style={{ width: columnWidths['select-col'] || 34 }} onClick={(e) => e.stopPropagation()}>
                               <input type="checkbox" checked={selectedRows.includes(record.id)} onChange={() => handleRowSelect(record.id)} className="rounded border-gray-300 w-3.5 h-3.5 cursor-pointer" style={{ accentColor: themeColor }} />
                             </td>
                           )}
                           <td className="px-2.5 py-1 text-xs text-black text-center bg-white group-hover:bg-gray-50 border-r-2 border-gray-200" style={{ width: columnWidths['sno-col'] || 80 }}>
                             {(currentPage - 1) * pageSize + index + 1}
                           </td>
-                          {getOrderedColumns().map((column, colIndex) => (
-                            <td key={column} className={`px-2.5 py-1 text-xs text-black whitespace-nowrap ${colIndex !== getOrderedColumns().length - 1 ? 'border-r-2 border-gray-200' : ''}`} style={{ width: columnWidths[column] || 150 }}>
-                              {highlightText(formatValue(record[column]), globalSearchTerm)}
-                            </td>
-                          ))}
+                          {getOrderedColumns().map((column, colIndex) => {
+                            const isLocationColumn = column.toLowerCase().includes('location');
+                            const cellValue = formatValue(record[column]);
+                            const cellWidth = columnWidths[column] || (isLocationColumn ? 100 : 150);
+                            return (
+                              <td
+                                key={column}
+                                className={`px-2.5 py-1 text-xs text-black whitespace-nowrap ${isLocationColumn ? 'overflow-hidden text-ellipsis' : ''} ${colIndex !== getOrderedColumns().length - 1 ? 'border-r-2 border-gray-200' : ''}`}
+                                style={{ width: cellWidth, ...(isLocationColumn ? { maxWidth: cellWidth } : {}) }}
+                                title={isLocationColumn && cellValue !== '-' ? cellValue : undefined}
+                              >
+                                {highlightText(cellValue, globalSearchTerm)}
+                              </td>
+                            );
+                          })}
                         </tr>
                       ))}
                     </tbody>

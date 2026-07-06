@@ -520,7 +520,7 @@ const CustomerEng = () => {
     const [showFollowupDetails, setShowFollowupDetails] = useState(false);
 
     // Check if current user is admin
-    const isAdmin = currentUser?.role === 'master_admin' || currentUser?.role === 'it_admin';
+    const isAdmin = currentUser?.role === 'master_admin';
 
     const getStatusLetter = (status) => {
         switch (status) {
@@ -595,7 +595,7 @@ const CustomerEng = () => {
             if (!currentUser) return;
             try {
                 const role = (currentUser.role || '').toLowerCase();
-                const isMasterOrIT = role === 'master_admin' || role === 'it_admin';
+                const isMasterOrIT = role === 'master_admin';
 
                 const payload = {
                     user_id: currentUser.user_id || currentUser.id,
@@ -6791,7 +6791,7 @@ ${f.start_para}`;
                                     placeholder="Search by ID, name, mobile..."
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
-                                    className="w-full pl-7 pr-7 py-1 text-xs border-2 border-black rounded-md bg-white text-black placeholder-gray-400"
+                                    className="w-full pl-7 pr-7 py-1 text-xs border-1 border-gray-300 rounded-md bg-white text-black placeholder-gray-400"
                                 />
                                 {searchTerm && (
                                     <button
@@ -6817,7 +6817,7 @@ ${f.start_para}`;
                             {userCanExport && (
                                 <button
                                     onClick={exportToXLSX}
-                                    className="px-2 py-1 text-xs border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center gap-1 w-full sm:w-auto justify-center"
+                                    className="export-btn px-2 py-1 text-xs border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center gap-1 w-full sm:w-auto justify-center"
                                 >
                                     <CiExport className="h-3.5 w-3.5" style={{ color: themeColor }} />
                                     <span>Export</span>
@@ -7066,7 +7066,7 @@ ${f.start_para}`;
                                         <span
                                             className="min-w-[52px] tabular-nums px-1 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md text-center text-green-600 cursor-default flex items-center justify-center"
                                             title={
-                                                (currentUser?.role === 'master_admin' || currentUser?.role === 'it_admin')
+                                                (currentUser?.role === 'master_admin')
                                                     ? 'Overall company completed (from Dashboard)'
                                                     : 'Your completed count (from My Performance)'
                                             }

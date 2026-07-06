@@ -6,7 +6,7 @@ import enum
 
 class UserRole(str, enum.Enum):
     MASTER_ADMIN = "master_admin"
-    IT_ADMIN = "it_admin"
+    IT_ADMIN = "it_admin"  # DEPRECATED: role removed from the app; kept only so legacy DB rows still load
     BRANCH_ADMIN = "branch_admin"
     EMPLOYEE = "employee"
 

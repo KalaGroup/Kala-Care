@@ -111,7 +111,6 @@ const branchMap = {
 // Role display names
 const roleMap = {
   'master_admin': 'Master Admin',
-  'it_admin': 'IT Admin',
   'branch_admin': 'Branch Admin',
   'employee': 'Employee'
 };
@@ -150,13 +149,13 @@ const engagementItems = [
     path: '/customer-engagement',
     name: 'Drive Data',
     description: 'Drive-based customer interactions',
-    allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
+    allowedRoles: ['master_admin', 'branch_admin', 'employee']
   },
   {
     path: '/customer-engagement-2',
     name: 'Non-Drive Data',
     description: 'Non-drive customer interactions',
-    allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
+    allowedRoles: ['master_admin', 'branch_admin', 'employee']
   }
 ];
 
@@ -165,13 +164,13 @@ const expenseTrackingItems = [
     path: '/expense-dashboard',
     name: 'Dashboard',
     description: 'Expense Dashboard View',
-    allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
+    allowedRoles: ['master_admin', 'branch_admin', 'employee']
   },
   {
     path: '/expense',
     name: 'Expense',
     description: 'Expense Entry & Management',
-    allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
+    allowedRoles: ['master_admin', 'branch_admin', 'employee']
   }
 ];
 
@@ -243,8 +242,8 @@ function Navbar({ children }) {
   };
 
   // Role checks
-  const isAdmin = user?.role === 'master_admin' || user?.role === 'it_admin' || user?.role === 'branch_admin';
-  const isMasterOrITAdmin = user?.role === 'master_admin' || user?.role === 'it_admin';
+  const isAdmin = user?.role === 'master_admin' || user?.role === 'branch_admin';
+  const isMasterOrITAdmin = user?.role === 'master_admin';
   const isMasterAdmin = user?.role === 'master_admin';
   const isEmployee = user?.role === 'employee';
 
@@ -725,7 +724,7 @@ function Navbar({ children }) {
         name: 'Dashboard',
         icon: HomeIcon,
         description: 'View your dashboard',
-        allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
+        allowedRoles: ['master_admin', 'branch_admin', 'employee']
       }
     ];
 
@@ -753,21 +752,21 @@ function Navbar({ children }) {
         name: 'Data - Upload',
         icon: CloudArrowUpIcon,
         description: 'Upload customer data',
-        allowedRoles: ['master_admin', 'it_admin']
+        allowedRoles: ['master_admin']
       },
       {
         path: '/customers',
         name: 'Customers Data Hub',
         icon: UserGroupIcon,
         description: 'Manage your clients',
-        allowedRoles: ['master_admin', 'it_admin']
+        allowedRoles: ['master_admin']
       },
       {
         path: '/campaigns',
         name: 'Drive Creation',
         icon: CiFlag1,
         description: 'Create & track drives',
-        allowedRoles: ['master_admin', 'it_admin']
+        allowedRoles: ['master_admin']
       }
     ];
 
@@ -800,14 +799,14 @@ function Navbar({ children }) {
         name: 'MOM Tracking',
         icon: ClipboardDocumentListIcon,
         description: 'Minutes of Meeting tracking',
-        allowedRoles: ['master_admin', 'it_admin']
+        allowedRoles: ['master_admin']
       },
       {
         path: '/knowledge-book',
         name: 'Knowledge Bank',
         icon: BookOpenIcon,
         description: 'Product brochures, photos, videos & documents',
-        allowedRoles: ['master_admin', 'it_admin', 'branch_admin', 'employee']
+        allowedRoles: ['master_admin', 'branch_admin', 'employee']
 
       },
       // {
@@ -815,7 +814,7 @@ function Navbar({ children }) {
       //   name: 'Sales',
       //   icon: CurrencyRupeeIcon,
       //   description: 'Sales and financial management',
-      //   allowedRoles: ['master_admin', 'it_admin']
+      //   allowedRoles: ['master_admin']
       // }
     ];
 
@@ -841,7 +840,7 @@ function Navbar({ children }) {
   // granted from the Profile page edit modal.
   const canAccessExpensePages = () => {
     if (!user) return false;
-    if (user.role === 'master_admin' || user.role === 'it_admin') {
+    if (user.role === 'master_admin') {
       return true;
     }
     if (user.role === 'branch_admin' || user.role === 'employee') {

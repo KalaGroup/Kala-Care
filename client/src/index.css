@@ -405,8 +405,16 @@ html.dark .bg-\[\#f6f8fc\] { background-color: #171a20 !important; }
 /* Yellow highlight cells (e.g. Due Date in CSP Info) → amber tint that
    blends with dark rows while still reading as a highlight */
 html.dark .bg-\[\#ffdb62\] { background-color: rgba(234, 179, 8, 0.18) !important; }
-/* …but the sidebar's yellow brand panels become near-black panels */
-html.dark aside .bg-\[\#ffdb62\] { background-color: #12151b !important; }
+/* …but the sidebar's yellow brand panels (top logo header + bottom
+   profile section) get a deep amber-tinted surface in dark mode —
+   still clearly "the yellow panels", but dark-friendly — with a
+   hairline separating them from the nav area. */
+html.dark aside .bg-\[\#ffdb62\] {
+  background-color: #1b1810 !important;
+  background-image: linear-gradient(180deg, rgba(234, 179, 8, 0.10), rgba(234, 179, 8, 0.04)) !important;
+}
+html.dark aside .bg-\[\#ffdb62\]:first-child { border-bottom: 1px solid rgba(234, 179, 8, 0.22); }
+html.dark aside .bg-\[\#ffdb62\]:last-child { border-top: 1px solid rgba(234, 179, 8, 0.22); }
 
 /* Brand blue buttons / headers → sky blue */
 html.dark .bg-\[\#2f3192\],
@@ -1044,3 +1052,97 @@ textarea:focus {
 aside a[aria-current="page"] {
   box-shadow: inset 2.5px 0 0 var(--erp-accent);
 }
+
+/* ============================================================
+   MOBILE RESPONSIVE PASS — extends the earlier <1024px safety
+   net. Only kicks in on phone widths; desktop/tablet untouched.
+   The :not([class*=":grid-cols-"]) guard skips any grid that
+   already declares its own responsive columns (sm:/md:/lg:).
+   ============================================================ */
+@media (max-width: 767.98px) {
+  /* Toolbars / header action bars wrap instead of overflowing.
+     flex-wrap only takes effect when content genuinely can't fit. */
+  .justify-between {
+    flex-wrap: wrap;
+    row-gap: 0.375rem;
+  }
+
+  /* No modal or panel may exceed the viewport width */
+  [class*="max-w-"] { max-width: 100%; }
+}
+
+@media (max-width: 639.98px) {
+  /* Fixed 3/4-column grids (stat blocks, label/value trios) collapse
+     to 2 columns; col-span-2 values wrap below their label naturally. */
+  .grid-cols-3:not([class*=":grid-cols-"]),
+  .grid-cols-4:not([class*=":grid-cols-"]) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Desktop paddings relax so cards don't waste half the screen */
+  .p-6 { padding: 1rem; }
+  .p-5 { padding: 0.875rem; }
+  .px-6 { padding-left: 1rem; padding-right: 1rem; }
+  .p-8 { padding: 1.25rem; }
+}
+
+@media (max-width: 479.98px) {
+  /* On the narrowest phones, fixed 2-up grids stack fully */
+  .grid-cols-2:not([class*=":grid-cols-"]) {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+}
+
+/* ============================================================
+   EXPORT BUTTONS — one look app-wide. Every Excel-export button
+   carries the `export-btn` class; these rules recolor it green in
+   light mode and a muted "low" green in dark mode, overriding the
+   button's own bg/text/border classes and inline styles.
+   Layout (padding, size, radius) is left to each button.
+   ============================================================ */
+button.export-btn, a.export-btn {
+  background: #16a34a !important;          /* green-600 */
+  background-image: none !important;       /* kill gradient variants */
+  color: #ffffff !important;
+  border-color: #15803d !important;
+}
+button.export-btn:hover:not(:disabled), a.export-btn:hover {
+  background: #15803d !important;          /* green-700 */
+}
+button.export-btn svg { color: #ffffff !important; }
+
+html.dark button.export-btn, html.dark a.export-btn {
+  background: #14532d !important;          /* low green (green-900) */
+  background-image: none !important;
+  color: #bbf7d0 !important;
+  border-color: rgba(34, 197, 94, 0.4) !important;
+}
+html.dark button.export-btn:hover:not(:disabled), html.dark a.export-btn:hover {
+  background: #166534 !important;
+}
+html.dark button.export-btn svg { color: #bbf7d0 !important; }
+
+/* ============================================================
+   DARK THEME — MOM Tracking meeting-sheet view modal.
+   The sheet's header strip and thead row use light inline styles
+   (gradient / #f1f3fb / BRAND_DARK text) that the generic override
+   nets miss, so the modal rendered half light, half dark. Force
+   every part of the sheet to dark surfaces here. Light theme is
+   untouched (all rules scoped to html.dark).
+   ============================================================ */
+html.dark .mom-view-head {
+  background: linear-gradient(120deg, #1c2130, #12151d) !important;
+  border-color: #2e3440 !important;
+}
+/* Titles inside those headers set inline color: BRAND_DARK (#23255f) —
+   unreadable navy on the now-dark strip. Lift to light sky. */
+html.dark .mom-view-head [style*="color: rgb(35, 37, 95)"] { color: #7dd3fc !important; }
+html.dark .mom-sheet thead tr {
+  background: #10141c !important;
+  color: #7dd3fc !important;
+}
+html.dark .mom-sheet thead th { background: transparent !important; }
+/* Row base — the zebra (:nth-child(even)) and :hover rules defined
+   earlier have higher specificity, so striping and hover keep working. */
+html.dark .mom-sheet tbody tr { background-color: #171a20 !important; }
+html.dark .mom-sheet tbody td { background-color: transparent !important; }

@@ -46,13 +46,13 @@ class QueryResponse(BaseModel):
 # Helper functions
 def is_admin(role: str) -> bool:
     """Check if user role is any type of admin"""
-    admin_roles = ["master_admin", "it_admin", "branch_admin"]
+    admin_roles = ["master_admin", "branch_admin"]
     result = role in admin_roles
     return result
 
 def can_view_all_queries(role: str) -> bool:
     """Check if user can view all queries (Master Admin or IT Admin)"""
-    result = role in ["master_admin", "it_admin"]
+    result = role in ["master_admin"]
     return result
 
 # Routes

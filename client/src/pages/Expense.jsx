@@ -12,8 +12,8 @@ const Expense = () => {
     user?.role === 'branch_admin' ||
     (user?.role === 'employee' && user?.branch !== 'HO');
 
-  // HO-level views: master_admin, it_admin, or an employee at HO
-  const isMasterOrITAdmin = user?.role === 'master_admin' || user?.role === 'it_admin';
+  // HO-level views: master_admin or an employee at HO
+  const isMasterOrITAdmin = user?.role === 'master_admin';
   const isHOEmployee = user?.role === 'employee' && user?.branch === 'HO';
   const showHOExpense = isMasterOrITAdmin || isHOEmployee;
 

@@ -89,8 +89,7 @@ class UserController:
     def can_admin_manage_role(admin_role: UserRole, target_role: UserRole) -> bool:
         """Check if admin can manage a specific role"""
         role_hierarchy = {
-            UserRole.MASTER_ADMIN: [UserRole.MASTER_ADMIN, UserRole.IT_ADMIN, UserRole.BRANCH_ADMIN, UserRole.EMPLOYEE],
-            UserRole.IT_ADMIN: [UserRole.IT_ADMIN, UserRole.BRANCH_ADMIN, UserRole.EMPLOYEE],
+            UserRole.MASTER_ADMIN: [UserRole.MASTER_ADMIN, UserRole.BRANCH_ADMIN, UserRole.EMPLOYEE],
             UserRole.BRANCH_ADMIN: [UserRole.BRANCH_ADMIN, UserRole.EMPLOYEE],
             UserRole.EMPLOYEE: []
         }
@@ -101,8 +100,6 @@ class UserController:
         """Check if admin can see a specific user"""
         if admin_user.role == UserRole.MASTER_ADMIN:
             return True
-        elif admin_user.role == UserRole.IT_ADMIN:
-            return True  # IT Admin sees all employees
         elif admin_user.role == UserRole.BRANCH_ADMIN:
             return target_user.branch == admin_user.branch
         return False
@@ -121,7 +118,7 @@ class UserController:
             )
         
         # Check if creator can create users (Master Admin or IT Admin)
-        if creator.role not in [UserRole.MASTER_ADMIN, UserRole.IT_ADMIN]:
+        if creator.role not in [UserRole.MASTER_ADMIN]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only Master Admins and IT Admins can create employees"
@@ -189,7 +186,7 @@ class UserController:
     def create_bulk_users(db: Session, users_data, admin_user_id: str):
         """Create multiple users at once"""
         admin = db.query(User).filter(User.user_id == admin_user_id).first()
-        if not admin or admin.role not in [UserRole.MASTER_ADMIN, UserRole.IT_ADMIN, UserRole.BRANCH_ADMIN]:
+        if not admin or admin.role not in [UserRole.MASTER_ADMIN, UserRole.BRANCH_ADMIN]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only admins can create employees"
@@ -287,7 +284,7 @@ class UserController:
         UserController.initialize_admin_user(db)
         
         admin = db.query(User).filter(User.user_id == admin_user_id).first()
-        if not admin or admin.role not in [UserRole.MASTER_ADMIN, UserRole.IT_ADMIN, UserRole.BRANCH_ADMIN]:
+        if not admin or admin.role not in [UserRole.MASTER_ADMIN, UserRole.BRANCH_ADMIN]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only admins can view employees"
@@ -311,7 +308,7 @@ class UserController:
         UserController.initialize_admin_user(db)
         
         admin = db.query(User).filter(User.user_id == admin_user_id).first()
-        if not admin or admin.role not in [UserRole.MASTER_ADMIN, UserRole.IT_ADMIN, UserRole.BRANCH_ADMIN]:
+        if not admin or admin.role not in [UserRole.MASTER_ADMIN, UserRole.BRANCH_ADMIN]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only admins can update employees"
@@ -416,7 +413,7 @@ class UserController:
         UserController.initialize_admin_user(db)
         
         admin = db.query(User).filter(User.user_id == admin_user_id).first()
-        if not admin or admin.role not in [UserRole.MASTER_ADMIN, UserRole.IT_ADMIN]:
+        if not admin or admin.role not in [UserRole.MASTER_ADMIN]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only Master Admin and IT Admin can delete employees"
@@ -435,18 +432,6 @@ class UserController:
                 detail="Cannot delete the master admin user"
             )
         
-        # IT Admin cannot delete Master Admin or other IT Admins
-        if admin.role == UserRole.IT_ADMIN:
-            if employee.role == UserRole.MASTER_ADMIN:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="IT Admin cannot delete Master Admin"
-                )
-            if employee.role == UserRole.IT_ADMIN:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="IT Admin cannot delete another IT Admin"
-                )
         
         db.delete(employee)
         db.commit()
@@ -456,7 +441,7 @@ class UserController:
     def toggle_block_employee(db: Session, employee_id: int, admin_user_id: str, block_status: bool):
         """Toggle employee block status"""
         admin = db.query(User).filter(User.user_id == admin_user_id).first()
-        if not admin or admin.role not in [UserRole.MASTER_ADMIN, UserRole.IT_ADMIN, UserRole.BRANCH_ADMIN]:
+        if not admin or admin.role not in [UserRole.MASTER_ADMIN, UserRole.BRANCH_ADMIN]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only admins can block/unblock employees"
@@ -490,7 +475,7 @@ class UserController:
     def toggle_export_permission(db: Session, employee_id: int, admin_user_id: str, export_status: bool):
         """Toggle employee export permission"""
         admin = db.query(User).filter(User.user_id == admin_user_id).first()
-        if not admin or admin.role not in [UserRole.MASTER_ADMIN, UserRole.IT_ADMIN]:
+        if not admin or admin.role not in [UserRole.MASTER_ADMIN]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only Master Admin and IT Admin can toggle export permission"
@@ -524,7 +509,7 @@ class UserController:
     def create_or_update_bulk_users(db: Session, users_data, admin_user_id: str):
         """Create new users or update existing ones based on user_id"""
         admin = db.query(User).filter(User.user_id == admin_user_id).first()
-        if not admin or admin.role not in [UserRole.MASTER_ADMIN, UserRole.IT_ADMIN, UserRole.BRANCH_ADMIN]:
+        if not admin or admin.role not in [UserRole.MASTER_ADMIN, UserRole.BRANCH_ADMIN]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only admins can create/update employees"
@@ -630,7 +615,7 @@ class UserController:
                           branch_name: str, admin_user_id: str):
         from app.models.user_model import UserBranchAccess
         admin = db.query(User).filter(User.user_id == admin_user_id).first()
-        if not admin or admin.role not in [UserRole.MASTER_ADMIN, UserRole.IT_ADMIN]:
+        if not admin or admin.role not in [UserRole.MASTER_ADMIN]:
             raise HTTPException(403, "Only Master/IT Admin can manage branch access")
     
         employee = db.query(User).filter(User.user_id == employee_user_id).first()
@@ -656,7 +641,7 @@ class UserController:
     def remove_branch_access(db: Session, access_id: int, admin_user_id: str):
         from app.models.user_model import UserBranchAccess
         admin = db.query(User).filter(User.user_id == admin_user_id).first()
-        if not admin or admin.role not in [UserRole.MASTER_ADMIN, UserRole.IT_ADMIN]:
+        if not admin or admin.role not in [UserRole.MASTER_ADMIN]:
             raise HTTPException(403, "Only Master/IT Admin can manage branch access")
     
         access = db.query(UserBranchAccess).filter_by(id=access_id).first()
@@ -673,7 +658,7 @@ class UserController:
     def set_primary_branch(db: Session, employee_user_id: str, branch: str, admin_user_id: str):
         from app.models.user_model import UserBranchAccess
         admin = db.query(User).filter(User.user_id == admin_user_id).first()
-        if not admin or admin.role not in [UserRole.MASTER_ADMIN, UserRole.IT_ADMIN]:
+        if not admin or admin.role not in [UserRole.MASTER_ADMIN]:
             raise HTTPException(403, "Only Master/IT Admin can change primary branch")
     
         target = db.query(UserBranchAccess).filter_by(

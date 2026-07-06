@@ -338,7 +338,7 @@ const TADAHistoryModal = ({ branch, themeColor, onClose, canExport = false }) =>
 
   const ExportBtn = ({ onClick }) => canExport ? (
     <button onClick={onClick}
-      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-white rounded-lg"
+      className="export-btn inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-white rounded-lg"
       style={{ background: 'linear-gradient(135deg, #047857, #065f46)' }}>
       <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />

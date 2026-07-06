@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
-import DeleteDataModal from '../components/DeleteDataModal';
 import DraggableScrollButtons from '../components/DraggableScrollButtons';
 import Swal from 'sweetalert2';
 import {
@@ -28,7 +27,6 @@ const MASTER_ADMIN_ID = import.meta.env.VITE_MASTER_ADMIN_ID;
 const getRoleDisplayName = (role) => {
     const roleMap = {
         'master_admin': 'Master Admin',
-        'it_admin': 'IT Admin',
         'branch_admin': 'Branch Admin',
         'employee': 'Employee'
     };
@@ -39,7 +37,6 @@ const getRoleDisplayName = (role) => {
 const getRoleColor = (role) => {
     const colorMap = {
         'master_admin': 'bg-purple-100 text-purple-800',
-        'it_admin': 'bg-blue-100 text-blue-800',
         'branch_admin': 'bg-green-100 text-green-800',
         'employee': 'bg-gray-100 text-gray-700'
     };
@@ -762,7 +759,7 @@ const CDBUpdateTable = ({ user, showToast }) => {
                         <>
                             <button
                                 onClick={exportToExcel}
-                                className="flex items-center justify-center space-x-1 bg-green-500 hover:bg-green-600 text-white px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-sm hover:shadow flex-shrink-0"
+                                className="export-btn flex items-center justify-center space-x-1 bg-green-500 hover:bg-green-600 text-white px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-sm hover:shadow flex-shrink-0"
                             >
                                 <MdOutlineFileUpload className="text-xs" />
                                 <span>Export</span>
@@ -771,7 +768,7 @@ const CDBUpdateTable = ({ user, showToast }) => {
                             <button
                                 onClick={exportNotDoneToExcel}
                                 disabled={pendingCount === 0}
-                                className={`flex items-center justify-center space-x-1 bg-green-500 hover:bg-green-600 text-white px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-sm hover:shadow flex-shrink-0 ${pendingCount === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                className={`export-btn flex items-center justify-center space-x-1 bg-green-500 hover:bg-green-600 text-white px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-sm hover:shadow flex-shrink-0 ${pendingCount === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 <MdOutlineFileUpload className="text-xs" />
                                 <span>Export Pending ({pendingCount})</span>
@@ -976,7 +973,6 @@ const Profile = () => {
     const [employeeCount, setEmployeeCount] = useState(0);
     const [visibleEmployeeCount, setVisibleEmployeeCount] = useState(50);
     const employeeLoadMoreRef = React.useRef(null); const [previewData, setPreviewData] = useState([]);
-    const [showDeleteDataModal, setShowDeleteDataModal] = useState(false);
     const [editingUserBranches, setEditingUserBranches] = useState([]);
     const [newBranchInput, setNewBranchInput] = useState({ branch: '', branch_name: '' });
     const [formData, setFormData] = useState({
@@ -1020,14 +1016,15 @@ const Profile = () => {
 
     // Role checks
     const isMasterAdmin = user && user.role === 'master_admin';
-    const isITAdmin = user && user.role === 'it_admin';
+    const isITAdmin = false; // it_admin role removed from the application
     const isBranchAdmin = user && user.role === 'branch_admin';
     const isEmployee = user && user.role === 'employee';
 
-    const canDeleteEmployee = isMasterAdmin || isITAdmin;
-    const canGrantExport = isMasterAdmin || isITAdmin;
-    const canGrantExpense = isMasterAdmin || isITAdmin;
-    const canViewCDBUpdate = isMasterAdmin || isITAdmin;
+    const canDeleteEmployee = isMasterAdmin;
+    const canGrantExport = isMasterAdmin;
+    const canGrantExpense = isMasterAdmin;
+    const canViewCDBUpdate = isMasterAdmin;
+    const canExport = isMasterAdmin || (user && user.can_export);
     const RESTRICTED_USER_IDS = (import.meta.env.VITE_RESTRICTED_USER_IDS || '')
         .split(',')
         .map(id => id.trim())
@@ -2133,13 +2130,6 @@ const Profile = () => {
         if (isMasterAdmin) {
             return [
                 { value: 'master_admin', label: 'Master Admin' },
-                { value: 'it_admin', label: 'IT Admin' },
-                { value: 'branch_admin', label: 'Branch Admin' },
-                { value: 'employee', label: 'Employee' }
-            ];
-        } else if (isITAdmin) {
-            return [
-                { value: 'it_admin', label: 'IT Admin' },
                 { value: 'branch_admin', label: 'Branch Admin' },
                 { value: 'employee', label: 'Employee' }
             ];
@@ -2327,18 +2317,6 @@ const Profile = () => {
                                                 >
                                                     <FaImage className="text-xs" />
                                                     <span>Manage Banners</span>
-                                                </button>
-                                            )}
-                                            {(isITAdmin || user?.user_id === MASTER_ADMIN_ID) && (
-                                                <button
-                                                    onClick={() => {
-                                                        setShowDeleteDataModal(true);
-                                                        setShowSettings(false);
-                                                    }}
-                                                    className="w-full px-4 py-2 text-left text-xs text-red-600 hover:bg-red-50 flex items-center space-x-2 transition-colors"
-                                                >
-                                                    <FaTrash className="text-xs" />
-                                                    <span>Delete Data</span>
                                                 </button>
                                             )}
                                             <button
@@ -2581,10 +2559,10 @@ const Profile = () => {
 
                                         {(isMasterAdmin || isITAdmin) && (
                                             <div className="flex space-x-2 whitespace-nowrap order-1 sm:order-2 max-sm:flex-wrap max-sm:gap-y-2">
-                                                {user?.can_export && (
+                                                {canExport && (
                                                     <button
                                                         onClick={handleExportEmployees}
-                                                        className="flex items-center justify-center space-x-1 bg-green-500 hover:bg-green-600 text-white px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-sm hover:shadow"
+                                                        className="export-btn flex items-center justify-center space-x-1 bg-green-500 hover:bg-green-600 text-white px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-sm hover:shadow"
                                                     >
                                                         <MdOutlineFileUpload className="text-xs" />
                                                         <span className="hidden sm:inline">Export</span>
@@ -2993,8 +2971,6 @@ const Profile = () => {
                                             <option
                                                 key={role.value}
                                                 value={role.value}
-                                                disabled={role.value === 'it_admin'}
-                                                style={role.value === 'it_admin' ? { color: '#9ca3af' } : {}}
                                             >
                                                 {role.label}
                                             </option>
@@ -3192,8 +3168,6 @@ const Profile = () => {
                                                     <option
                                                         key={role.value}
                                                         value={role.value}
-                                                        disabled={role.value === 'it_admin'}
-                                                        style={role.value === 'it_admin' ? { color: '#9ca3af' } : {}}
                                                     >
                                                         {role.label}
                                                     </option>
@@ -3514,14 +3488,6 @@ const Profile = () => {
                         </div>
                     </div>
                 </div>
-            )}
-
-            {showDeleteDataModal && (
-                <DeleteDataModal
-                    user={user}
-                    showToast={showToast}
-                    onClose={() => setShowDeleteDataModal(false)}
-                />
             )}
 
             {/* Banner Management Modal */}

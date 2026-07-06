@@ -345,7 +345,7 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
 /* ----------------------------- Page wrapper ----------------------------- */
 const MaintenanceSchedule = () => {
     const role = getRole();
-    const isManager = role === 'master_admin' || role === 'it_admin';
+    const isManager = role === 'master_admin';
     const [showMaster, setShowMaster] = useState(false);
     // { tab, n } — n bumps on every deep-link so the panel re-applies the tab
     // even when the same one is requested twice.

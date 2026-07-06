@@ -571,7 +571,7 @@ const CustomerEng2 = () => {
   const [showFollowupDetails, setShowFollowupDetails] = useState(false);
 
   // Check if current user is admin
-  const isAdmin = currentUser?.role === "master_admin" || currentUser?.role === "it_admin";
+  const isAdmin = currentUser?.role === "master_admin";
 
   const getStatusLetter = (status) => {
     switch (status) {
@@ -5977,7 +5977,7 @@ ${f.start_para}`;
                   placeholder="Search by Instance ID, Name, Mobile..."
                   value={searchTerm}
                   onChange={handleSearchChange}
-                  className="w-full pl-7 pr-7 py-1.5 text-xs border-2 border-black rounded-md bg-white text-black placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
+                  className="w-full pl-7 pr-7 py-1.5 text-xs border-1 border-gray-300 rounded-md bg-white text-black placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
                   autoComplete="off"
                 />
                 {/* Spinner while searching, clear button otherwise */}
@@ -6012,7 +6012,7 @@ ${f.start_para}`;
               {userCanExport && (
                 <button
                   onClick={exportToXLSX}
-                  className="px-2 py-1 text-xs border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center gap-1 w-full sm:w-auto justify-center"
+                  className="export-btn px-2 py-1 text-xs border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center gap-1 w-full sm:w-auto justify-center"
                 >
                   <CiExport className="h-3.5 w-3.5" style={{ color: themeColor }} />
                   <span>Export</span>

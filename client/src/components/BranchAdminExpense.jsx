@@ -1902,7 +1902,7 @@ const BranchAdminExpense = () => {
   const [kmWiseVerifiedOnly, setKmWiseVerifiedOnly] = useState(false);
   const [billWiseVerifiedOnly, setBillWiseVerifiedOnly] = useState(false);
 
-  const isAdmin = user?.role === 'master_admin' || user?.role === 'it_admin';
+  const isAdmin = user?.role === 'master_admin';
   const userBranch = String(user?.branch || '').trim();
   const [canExport, setCanExport] = useState(false);
 
@@ -4238,7 +4238,7 @@ const BranchAdminExpense = () => {
   }, [allRecords, isAdmin, userBranch, selectedEngineer]);
 
   const isUploadAllowed = () => {
-    if (isAdmin) return true; // master_admin and it_admin always allowed
+    if (isAdmin) return true; // master_admin always allowed
 
     // Use DB-driven rule if loaded; else fall back to hardcoded defaults
     if (submitRule && Array.isArray(submitRule.allowed_values)) {
@@ -4694,7 +4694,7 @@ const BranchAdminExpense = () => {
   const totalTableWidth = columnOrder.reduce((s, k) => s + (COL_MAP[k]?.width || 120), 0);
 
   const getBranchLabel = c => BRANCH_MAP[c] || c || 'No Branch';
-  const getRoleLabel = () => ({ master_admin: 'Master Admin', it_admin: 'IT Admin', branch_admin: 'Branch Admin', employee: 'Employee' }[user?.role] || 'User');
+  const getRoleLabel = () => ({ master_admin: 'Master Admin', branch_admin: 'Branch Admin', employee: 'Employee' }[user?.role] || 'User');
 
   /* ─── Effective KM rate for the current user's branch (with HO fallback) ──── */
   const myBranchRateInfo = useMemo(() => {
@@ -6641,7 +6641,7 @@ const BranchAdminExpense = () => {
                                   exportToExcel(rows, `tada_${userBranch}_drafts.xlsx`, headers);
                                 }
                               }}
-                              className="w-full px-3 py-2 text-left text-[11px] font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
+                              className="export-btn w-full px-3 py-2 text-left text-[11px] font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
                             >
                               <span className="w-5 h-5 rounded flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}>
                                 <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -6960,7 +6960,7 @@ const BranchAdminExpense = () => {
                                 const rows = salesBmDrafts.map((r, idx) => ({ ...r, sr_no: idx + 1 }));
                                 exportToExcel(rows, `sales_bm_verified_${userBranch}.xlsx`, headers);
                               }}
-                              className="inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-semibold rounded-md shadow-sm"
+                              className="export-btn inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-semibold rounded-md shadow-sm"
                               style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                             >
                               <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -7014,7 +7014,7 @@ const BranchAdminExpense = () => {
                                 const rows = billWiseDrafts.map((r, idx) => ({ ...r, sr_no: idx + 1 }));
                                 exportToExcel(rows, `bill_wise_verified_${userBranch}.xlsx`, headers);
                               }}
-                              className="inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-semibold rounded-md shadow-sm"
+                              className="export-btn inline-flex items-center gap-1.5 px-3 py-1 text-white text-[11px] font-semibold rounded-md shadow-sm"
                               style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                             >
                               <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -7589,7 +7589,7 @@ const BranchAdminExpense = () => {
                                   ]
                                 );
                               }}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md shadow-sm"
+                              className="export-btn inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md shadow-sm"
                               style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                             >
                               <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -7933,7 +7933,7 @@ const BranchAdminExpense = () => {
                                   ]
                                 );
                               }}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md shadow-sm"
+                              className="export-btn inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md shadow-sm"
                               style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                             >
                               <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -8303,7 +8303,7 @@ const BranchAdminExpense = () => {
                             return (
                               <button
                                 onClick={() => exportToExcel(rows, `bill_wise_${billWiseSelectedPeriod.engineerName}_${userBranch}.xlsx`, isBM ? bmCols : seCols)}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md shadow-sm"
+                                className="export-btn inline-flex items-center gap-1 px-2 py-0.5 text-white text-[10px] font-semibold rounded-md shadow-sm"
                                 style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                               >
                                 <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
