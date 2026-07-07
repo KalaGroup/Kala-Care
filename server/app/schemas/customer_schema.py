@@ -386,38 +386,55 @@ class PulseQuotation(PulseQuotationBase):
 # ==================== Regular Bandhan Schemas ====================
 
 class RegularBandhanBase(BaseModel):
+    # NEW quote-style format (matched by Pulse Instance ID only)
     instance_id: Optional[str] = None
     branch_id: Optional[str] = None
-    name_of_agent: Optional[str] = None
+    id_col: Optional[str] = None
     quotation_ref_no: Optional[str] = None
-    password: Optional[str] = None
-    genset_number: Optional[str] = None
-    name: Optional[str] = None
-    email: Optional[str] = None
-    mobile: Optional[str] = None
-    pan_card_no: Optional[str] = None
-    billing_state: Optional[str] = None
-    billing_city: Optional[str] = None
-    billing_location: Optional[str] = None
-    billing_address_1: Optional[str] = None
-    billing_address_2: Optional[str] = None
-    billing_pincode: Optional[str] = None
-    dg_state: Optional[str] = None
-    dg_city: Optional[str] = None
-    dg_location: Optional[str] = None
-    dg_address_1: Optional[str] = None
-    dg_address_2: Optional[str] = None
-    dg_pincode: Optional[str] = None
-    type_of_customer: Optional[str] = None
-    date: Optional[datetime] = None
-    gstn_no: Optional[str] = None
-    payment_type: Optional[str] = None
-    payment_update_date: Optional[datetime] = None
+    company_name: Optional[str] = None
+    engine_no: Optional[str] = None
     contact_person_name: Optional[str] = None
+    mobile_no: Optional[str] = None
+    email_id: Optional[str] = None
+    genset_kva: Optional[str] = None
     zone: Optional[str] = None
+    state: Optional[str] = None
+    city: Optional[str] = None
+    location: Optional[str] = None
+    no_of_years: Optional[int] = None
+    genset_running_per_year: Optional[str] = None
+    created_date_time: Optional[datetime] = None
+    status: Optional[str] = None
+    payment_type: Optional[str] = None
+    transaction_id: Optional[str] = None
+    bank_name: Optional[str] = None
+    account_no: Optional[str] = None
+    date_of_payment: Optional[datetime] = None
+    payment_update_date_time: Optional[datetime] = None
+    is_neft_confirm: Optional[bool] = None
+    is_cheque_confirm: Optional[bool] = None
+    cheque_deposited_address: Optional[str] = None
+    cheque_given_dealership: Optional[str] = None
+    cheque_deposited: Optional[str] = None
+    cheque_to_dealer: Optional[str] = None
+    employee_name: Optional[str] = None
+    pulse_id: Optional[str] = None
+    is_invoice_sent: Optional[bool] = None
+    is_refund: Optional[bool] = None
+    agent_id: Optional[str] = None
+    quote_price: Optional[float] = None
+    quotation_value_including_tax: Optional[float] = None
+    name_of_agent: Optional[str] = None
     actual_amount: Optional[float] = None
     reason_of_short_payment: Optional[str] = None
     status_updated_by_admin: Optional[str] = None
+    quotation_expiry_date: Optional[datetime] = None
+    is_expired: Optional[bool] = None
+    payment_updated_month: Optional[str] = None
+    new_price_applicable: Optional[bool] = None
+    quotation_type: Optional[str] = None
+    first_pm_date: Optional[datetime] = None
+    agreement_start_date: Optional[datetime] = None
 
 class RegularBandhanCreate(RegularBandhanBase):
     pass
@@ -531,7 +548,6 @@ class CustomerBase(BaseModel):
     customer_name: Optional[str] = None
     phone_number: Optional[str] = None
     email: Optional[str] = None
-    pan_number: Optional[str] = None
     branch_id: Optional[str] = None
     location: Optional[str] = None
 
@@ -542,7 +558,6 @@ class CustomerUpdate(BaseModel):
     customer_name: Optional[str] = None
     phone_number: Optional[str] = None
     email: Optional[str] = None
-    pan_number: Optional[str] = None
     location: Optional[str] = None
     last_updated_by: Optional[str] = None
 

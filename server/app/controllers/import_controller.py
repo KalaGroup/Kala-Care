@@ -10,7 +10,7 @@ import re
 from app.models.customer_model import (
     Customer, AMCAgreement, AssetDetailed, AssetService,
     AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
-    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport
+    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, OpenSRData
 )
 
 class ImportController:
@@ -176,7 +176,7 @@ class ImportController:
             'Anubandhan Quotes Report': 'Pulse Instance ID',
             'BandhanPlus Quotes Report': 'Pulse Instance ID',
             'Pulse Quotation - Service Only': 'Instance Id',
-            'Regular Bandhan Customers Report': None,  # No instance_id in this file
+            'Regular Bandhan Customers Report': 'Pulse Instance ID',  # NEW format: matched by this column only
             'LMS Data for ERP': 'Instance ID',
             'Open SR Load Report': 'Instance Id [Asset #]'  # Fixed: Added the correct column name
         }
@@ -221,7 +221,7 @@ class ImportController:
             'Anubandhan Quotes Report': 'EngineNo',
             'BandhanPlus Quotes Report': 'EngineNo',
             'Pulse Quotation - Service Only': None,
-            'Regular Bandhan Customers Report': 'Genset Number',
+            'Regular Bandhan Customers Report': None,  # NEW format: instance-id matching only
             'LMS Data for ERP': None,
             'Open SR Load Report': 'Engine Serial#'
         }
@@ -429,7 +429,6 @@ class ImportController:
                 'customer_name': ['Account'],  # Only 'Account' column for Open SR
                 'phone_number': ['Customer Mobile #', 'Primary Phone#', 'Contact Phone Number'],
                 'email': ['Account/Contact Primary Email', 'Contact Email'],
-                'pan_number': ['PAN Card No.', 'PAN Number'],
                 'location': ['Installation Site Address', 'Location']
             }
         elif file_type == 'Pulse Quotation - Service Only':
@@ -437,7 +436,6 @@ class ImportController:
                 'customer_name': ['Account'],  # Only 'Account' column
                 'phone_number': ['Account/Contact Phone Number', 'CONTACT PHONE NUMBER', 'MobileNo', 'Mobile', 'Customer Mobile #', 'Primary Phone#'],
                 'email': ['Account/Contact Primary Email', 'CONTACT EMAIL ID', 'EmailId', 'Email'],
-                'pan_number': ['PAN Card No.', 'PAN Number', 'PAN'],
                 'location': ['Installation Site Address', 'INSTALLATION SITE ADDRESS', 'Location', 'DG Location', 'Billing Location']
             }
         elif file_type == 'BandhanPlus Quotes Report':
@@ -445,7 +443,6 @@ class ImportController:
                 'customer_name': ['CompanyName', 'Account'],
                 'phone_number': ['MobileNo', 'ContactPersonName', 'Account/Contact Phone Number'],
                 'email': ['EmailId', 'Account/Contact Primary Email'],
-                'pan_number': ['PAN Card No.', 'PAN Number', 'PAN'],
                 'location': ['City']
             }
         elif file_type == 'Asset Detailed Report':
@@ -453,23 +450,21 @@ class ImportController:
                 'customer_name': ['ACCOUNT NAME'],
                 'phone_number': ['CONTACT PHONE NUMBER'],
                 'email': ['CONTACT EMAIL ID'],
-                'pan_number': [],
                 'location': ['INSTALLATION SITE ADDRESS']
             }
         elif file_type == 'Regular Bandhan Customers Report':
+            # NEW format: Company Name / Mobile No / Email Id; location from City
             field_mappings = {
-                'customer_name': ['Name'],
-                'phone_number': ['Mobile'],
-                'email': ['Email'],
-                'pan_number': ['PAN Card No.'],
-                'location': ['Billing Location', 'DG Location', 'City']
+                'customer_name': ['Company Name'],
+                'phone_number': ['Mobile No'],
+                'email': ['Email Id'],
+                'location': ['City']
             }
         elif file_type == 'LMS Data for ERP':
             field_mappings = {
                 'customer_name': ['Account Name'],
                 'phone_number': ['Account Contact Number'],
                 'email': ['Account Contact Email ID'],
-                'pan_number': [],
                 'location': ['Installation Site Address']
             }
         else:
@@ -477,7 +472,6 @@ class ImportController:
                 'customer_name': ['CUSTOMER NAME', 'Name', 'CompanyName', 'ACCOUNT NAME', 'Account', 'Customer Name', 'customer_name', 'name'],
                 'phone_number': ['CONTACT PHONE NUMBER', 'MobileNo', 'Mobile', 'CONTACT PHONE NUMBER', 'Account/Contact Phone Number', 'Customer Mobile #', 'Primary Phone#', 'phone_number', 'mobile_no', 'mobile'],
                 'email': ['CONTACT EMAIL ID', 'EmailId', 'Email', 'CONTACT EMAIL ID', 'Account/Contact Primary Email', 'email_id', 'email'],
-                'pan_number': ['PAN Card No.', 'PAN Number', 'PAN', 'pan_card_no', 'pan_number'],
                 'location': ['INSTALLATION SITE ADDRESS', 'Location', 'DG Location', 'Installation Site Address', 'Billing Location', 'location', 'address']
             }
         #commented by nik
@@ -537,7 +531,6 @@ class ImportController:
                 'customer_name': ['Account'],
                 'phone_number': ['Customer Mobile #', 'Primary Phone#', 'Contact Phone Number'],
                 'email': ['Account/Contact Primary Email', 'Contact Email'],
-                'pan_number': ['PAN Card No.', 'PAN Number'],
                 'location': ['Installation Site Address', 'Location']
             }
         elif file_type == 'Pulse Quotation - Service Only':
@@ -545,7 +538,6 @@ class ImportController:
                 'customer_name': ['Account'],
                 'phone_number': ['Account/Contact Phone Number', 'CONTACT PHONE NUMBER', 'MobileNo', 'Mobile', 'Customer Mobile #', 'Primary Phone#'],
                 'email': ['Account/Contact Primary Email', 'CONTACT EMAIL ID', 'EmailId', 'Email'],
-                'pan_number': ['PAN Card No.', 'PAN Number', 'PAN'],
                 'location': ['Installation Site Address', 'INSTALLATION SITE ADDRESS', 'Location', 'DG Location', 'Billing Location']
             }
         elif file_type == 'BandhanPlus Quotes Report':
@@ -553,7 +545,6 @@ class ImportController:
                 'customer_name': ['CompanyName', 'Account'],
                 'phone_number': ['MobileNo', 'ContactPersonName', 'Account/Contact Phone Number'],
                 'email': ['EmailId', 'Account/Contact Primary Email'],
-                'pan_number': ['PAN Card No.', 'PAN Number', 'PAN'],
                 'location': ['City']
             }
         elif file_type == 'Asset Detailed Report':  # ADD THIS BLOCK
@@ -561,23 +552,21 @@ class ImportController:
                 'customer_name': ['ACCOUNT NAME'],  # Take from ACCOUNT NAME only
                 'phone_number': ['CONTACT PHONE NUMBER'],
                 'email': ['CONTACT EMAIL ID'],
-                'pan_number': [],
                 'location': ['INSTALLATION SITE ADDRESS']
             }
         elif file_type == 'Regular Bandhan Customers Report':
+            # NEW format: Company Name / Mobile No / Email Id; location from City
             field_mappings = {
-                'customer_name': ['Name'],
-                'phone_number': ['Mobile'],
-                'email': ['Email'],
-                'pan_number': ['PAN Card No.'],
-                'location': ['Billing Location', 'DG Location', 'City']
+                'customer_name': ['Company Name'],
+                'phone_number': ['Mobile No'],
+                'email': ['Email Id'],
+                'location': ['City']
             }
         elif file_type == 'LMS Data for ERP':
             field_mappings = {
                 'customer_name': ['Account Name'],
                 'phone_number': ['Account Contact Number'],
                 'email': ['Account Contact Email ID'],
-                'pan_number': [],
                 'location': ['Installation Site Address']
             }
         else:
@@ -585,7 +574,6 @@ class ImportController:
                 'customer_name': ['CUSTOMER NAME', 'Name', 'CompanyName', 'ACCOUNT NAME', 'Account', 'Customer Name', 'customer_name', 'name'],
                 'phone_number': ['CONTACT PHONE NUMBER', 'MobileNo', 'Mobile', 'CONTACT PHONE NUMBER', 'Account/Contact Phone Number', 'Customer Mobile #', 'Primary Phone#', 'phone_number', 'mobile_no', 'mobile'],
                 'email': ['CONTACT EMAIL ID', 'EmailId', 'Email', 'CONTACT EMAIL ID', 'Account/Contact Primary Email', 'email_id', 'email'],
-                'pan_number': ['PAN Card No.', 'PAN Number', 'PAN', 'pan_card_no', 'pan_number'],
                 'location': ['INSTALLATION SITE ADDRESS', 'Location', 'DG Location', 'Installation Site Address', 'Billing Location', 'location', 'address']
             }
         #commented by nik
@@ -719,13 +707,18 @@ class ImportController:
                 'Quotation Lead Assigned Phone Number', 'Quotation Lead Assigned UID'
             ],
             'Regular Bandhan Customers Report': [
-                'Name of Agent', 'Quotation Ref No.', 'Password', 'Genset Number', 'Name',
-                'Email', 'Mobile', 'PAN Card No.', 'Billing State', 'Billing City',
-                'Billing Location', 'Billing Address 1', 'Billing Address 2', 'Billing Pincode',
-                'DG State', 'DG City', 'DG Location', 'DG Address 1', 'DG Address 2',
-                'DG Pincode', 'Type of Customer', 'Date', 'GSTN No.', 'Payment type',
-                'Payment Update Date', 'Contact Person Name', 'Zone', 'Actual Amount',
-                'Reason of Short Payment', 'Status updated by Admin'
+                'Id', 'Quotation Ref No', 'Company Name', 'Engine No', 'Contact Person Name',
+                'Mobile No', 'Email Id', 'Genset KVA', 'Zone', 'State', 'City', 'Location',
+                'No Of Years', 'Genset Running Per Year', 'Created Date Time', 'Status',
+                'PaymentType', 'Transaction Id', 'Bank Name', 'Account No', 'Date Of Payment',
+                'Payment Update Date Time', 'Is NEFT Confirm', 'Is Cheque Confirm',
+                'Cheque deposited-Address of YES Bank Branch', 'cheque given-Name of KOEL Dealership',
+                'Cheque Deposited', 'Cheque To Dealer', 'Employee Name', 'Pulse Id',
+                'Is Invoice Sent', 'Is Refund', 'Agent Id', 'QuotePrice',
+                'Quotation Value Including tax', 'Name of Agent', 'Actual Amount',
+                'Reason of Short Payment', 'Status updated by Admin', 'Quotation Expiry Date',
+                'IsExpired', 'Payment Updated Month', 'Pulse Instance ID', 'New Price Applicable',
+                'Quotation Type', 'First PM Date', 'Agreement start date'
             ],
             'LMS Data for ERP': [
                 'LEAD NUMBER', 'LEAD CREATED DATE', 'MODE OF LEAD CREATION', 'LEAD RAISED BY',
@@ -796,7 +789,7 @@ class ImportController:
             'Anubandhan Quotes Report': ['Pulse Instance ID', 'QuotationRefNo', 'EngineNo'],
             'BandhanPlus Quotes Report': ['Pulse Instance ID', 'QuotationRefNo', 'EngineNo'],
             'Pulse Quotation - Service Only': ['Instance Id', 'Quote ID'],
-            'Regular Bandhan Customers Report': ['Genset Number', 'Quotation Ref No.'],
+            'Regular Bandhan Customers Report': ['Pulse Instance ID', 'Quotation Ref No'],
             'LMS Data for ERP': ['INSTANCE ID', 'LEAD NUMBER'],
             'Open SR Load Report': ['Service Request #', 'Instance Id [Asset #]', 'Engine Serial#']
         }
@@ -1682,117 +1675,123 @@ class ImportController:
         return imported_count, updated_count
     
     def import_regular_bandhan(self, file: UploadFile):
-        """Import Regular Bandhan Customers Report - Override existing records"""
+        """Import Regular Bandhan (NEW quote-style format).
+        - Rows are matched by 'Pulse Instance ID' ONLY (no engine-serial matching).
+        - ONE row per instance_id: the FIRST occurrence in the file wins; later
+          duplicates of the same instance_id are skipped.
+        - Rows without a Pulse Instance ID are skipped.
+        - The file has no branch column — the customer's branch_id is never changed.
+        """
         contents = file.file.read()
         df = pd.read_excel(io.BytesIO(contents))
-        
+
         is_valid, message = self.validate_file_format(df, 'Regular Bandhan Customers Report')
         if not is_valid:
             raise HTTPException(status_code=400, detail=f"Invalid file format for Regular Bandhan Customers Report: {message}")
-        
+
         # ── FAST: dict iteration + bulk preload ──
         records = df.to_dict('records')
-        
-        # Pre-build engine_serial -> instance_id map ONCE (instead of 6 queries per row)
-        all_serials = [self.extract_engine_serial_no(r, 'Regular Bandhan Customers Report') for r in records]
-        engine_to_iid = self._build_engine_to_instance_map(all_serials)
-        
-        all_iids = list(engine_to_iid.values())
+
+        all_iids = list({self.convert_to_string(r.get('Pulse Instance ID')) for r in records} - {None, ''})
         customer_cache = self._bulk_load_by_instance_id(Customer, all_iids)
-        
-        # Pre-load existing RegularBandhan rows by quotation_ref_no in ONE query batch
-        all_quote_refs = [self.convert_to_string(r.get('Quotation Ref No.')) for r in records]
-        all_quote_refs = list({q for q in all_quote_refs if q})
-        existing_by_quote = {}
-        for i in range(0, len(all_quote_refs), 1000):
-            chunk = all_quote_refs[i:i + 1000]
-            for rb in self.db.query(RegularBandhan).filter(RegularBandhan.quotation_ref_no.in_(chunk)).all():
-                if rb.quotation_ref_no and rb.quotation_ref_no not in existing_by_quote:
-                    existing_by_quote[rb.quotation_ref_no] = rb
-        
+
+        # Existing RegularBandhan rows by instance_id in ONE query batch (upsert targets)
+        existing_by_iid = {}
+        for i in range(0, len(all_iids), 1000):
+            chunk = all_iids[i:i + 1000]
+            for rb in self.db.query(RegularBandhan).filter(RegularBandhan.instance_id.in_(chunk)).all():
+                if rb.instance_id and rb.instance_id not in existing_by_iid:
+                    existing_by_iid[rb.instance_id] = rb
+
         imported_count = 0
         updated_count = 0
-        
+        seen_iids = set()  # first occurrence in the file wins
+
         with self.db.no_autoflush:
             for row in records:
                 try:
-                    engine_serial_no = self.extract_engine_serial_no(row, 'Regular Bandhan Customers Report')
-                    quotation_ref_no = self.convert_to_string(row.get('Quotation Ref No.'))
-                    
-                    if not engine_serial_no:
+                    instance_id = self.convert_to_string(row.get('Pulse Instance ID'))
+                    if not instance_id:
                         continue
-                    
-                    # O(1) lookup instead of 6 queries per row
-                    instance_id = engine_to_iid.get(engine_serial_no)
-                    
-                    # Get branch_id from preloaded customer cache (O(1))
-                    branch_id = None
-                    if instance_id:
-                        cust = customer_cache.get(instance_id)
-                        if cust and cust.branch_id:
-                            branch_id = cust.branch_id
-                    
-                    # Update or create customer
-                    if instance_id:
-                        self.update_or_create_customer(instance_id, row, 'Regular Bandhan Customers Report', cache=customer_cache)
-                    
-                    # Prepare bandhan data
+                    if instance_id in seen_iids:
+                        continue  # duplicate instance_id in file — keep first occurrence only
+                    seen_iids.add(instance_id)
+
+                    # Record branch_id comes from the CUSTOMER (read-only) — the file
+                    # has no branch column and must not change the customer's branch.
+                    cust = customer_cache.get(instance_id)
+                    branch_id = cust.branch_id if cust and cust.branch_id else None
+
+                    # Fill blank customer fields (Company Name / Mobile No / Email Id / City)
+                    self.update_or_create_customer(instance_id, row, 'Regular Bandhan Customers Report', cache=customer_cache)
+
                     bandhan_data = {
                         'instance_id': instance_id,
                         'branch_id': branch_id,
-                        'name_of_agent': self.truncate_string(row.get('Name of Agent')),
-                        'quotation_ref_no': quotation_ref_no,
-                        'password': self.truncate_string(row.get('Password'), 200),
-                        'genset_number': engine_serial_no,
-                        'name': self.truncate_string(row.get('Name')),
-                        'email': self.truncate_string(row.get('Email')),
-                        'mobile': self.truncate_string(row.get('Mobile'), 50),
-                        'pan_card_no': self.truncate_string(row.get('PAN Card No.'), 50),
-                        'billing_state': self.truncate_string(row.get('Billing State'), 200),
-                        'billing_city': self.truncate_string(row.get('Billing City'), 200),
-                        'billing_location': self.truncate_string(row.get('Billing Location')),
-                        'billing_address_1': self.convert_to_string(row.get('Billing Address 1')),
-                        'billing_address_2': self.convert_to_string(row.get('Billing Address 2')),
-                        'billing_pincode': self.truncate_string(row.get('Billing Pincode'), 20),
-                        'dg_state': self.truncate_string(row.get('DG State'), 200),
-                        'dg_city': self.truncate_string(row.get('DG City'), 200),
-                        'dg_location': self.truncate_string(row.get('DG Location')),
-                        'dg_address_1': self.convert_to_string(row.get('DG Address 1')),
-                        'dg_address_2': self.convert_to_string(row.get('DG Address 2')),
-                        'dg_pincode': self.truncate_string(row.get('DG Pincode'), 20),
-                        'type_of_customer': self.truncate_string(row.get('Type of Customer'), 200),
-                        'date': self.parse_date(row.get('Date')),
-                        'gstn_no': self.truncate_string(row.get('GSTN No.'), 100),
-                        'payment_type': self.truncate_string(row.get('Payment type'), 100),
-                        'payment_update_date': self.parse_date(row.get('Payment Update Date')),
+                        'id_col': self.convert_to_string(row.get('Id')),
+                        'quotation_ref_no': self.convert_to_string(row.get('Quotation Ref No')),
+                        'company_name': self.truncate_string(row.get('Company Name')),
+                        'engine_no': self.truncate_string(row.get('Engine No'), 200),
                         'contact_person_name': self.truncate_string(row.get('Contact Person Name')),
+                        'mobile_no': self.truncate_string(row.get('Mobile No'), 50),
+                        'email_id': self.truncate_string(row.get('Email Id')),
+                        'genset_kva': self.truncate_string(row.get('Genset KVA'), 100),
                         'zone': self.truncate_string(row.get('Zone'), 200),
+                        'state': self.truncate_string(row.get('State'), 200),
+                        'city': self.truncate_string(row.get('City'), 200),
+                        'location': self.truncate_string(row.get('Location')),
+                        'no_of_years': self.convert_to_numeric(row.get('No Of Years')),
+                        'genset_running_per_year': self.truncate_string(row.get('Genset Running Per Year'), 100),
+                        'created_date_time': self.parse_date(row.get('Created Date Time')),
+                        'status': self.truncate_string(row.get('Status'), 100),
+                        'payment_type': self.truncate_string(row.get('PaymentType'), 100),
+                        'transaction_id': self.truncate_string(row.get('Transaction Id'), 200),
+                        'bank_name': self.truncate_string(row.get('Bank Name')),
+                        'account_no': self.truncate_string(row.get('Account No'), 200),
+                        'date_of_payment': self.parse_date(row.get('Date Of Payment')),
+                        'payment_update_date_time': self.parse_date(row.get('Payment Update Date Time')),
+                        'is_neft_confirm': self.convert_to_boolean(row.get('Is NEFT Confirm')),
+                        'is_cheque_confirm': self.convert_to_boolean(row.get('Is Cheque Confirm')),
+                        'cheque_deposited_address': self.convert_to_string(row.get('Cheque deposited-Address of YES Bank Branch')),
+                        'cheque_given_dealership': self.truncate_string(row.get('cheque given-Name of KOEL Dealership')),
+                        'cheque_deposited': self.truncate_string(row.get('Cheque Deposited'), 200),
+                        'cheque_to_dealer': self.truncate_string(row.get('Cheque To Dealer'), 200),
+                        'employee_name': self.truncate_string(row.get('Employee Name')),
+                        'pulse_id': self.convert_to_string(row.get('Pulse Id')),
+                        'is_invoice_sent': self.convert_to_boolean(row.get('Is Invoice Sent')),
+                        'is_refund': self.convert_to_boolean(row.get('Is Refund')),
+                        'agent_id': self.convert_to_string(row.get('Agent Id')),
+                        'quote_price': self.convert_to_float(row.get('QuotePrice')),
+                        'quotation_value_including_tax': self.convert_to_float(row.get('Quotation Value Including tax')),
+                        'name_of_agent': self.truncate_string(row.get('Name of Agent')),
                         'actual_amount': self.convert_to_float(row.get('Actual Amount')),
                         'reason_of_short_payment': self.convert_to_string(row.get('Reason of Short Payment')),
                         'status_updated_by_admin': self.convert_to_string(row.get('Status updated by Admin')),
+                        'quotation_expiry_date': self.parse_date(row.get('Quotation Expiry Date')),
+                        'is_expired': self.convert_to_boolean(row.get('IsExpired')),
+                        'payment_updated_month': self.truncate_string(row.get('Payment Updated Month'), 50),
+                        'new_price_applicable': self.convert_to_boolean(row.get('New Price Applicable')),
+                        'quotation_type': self.truncate_string(row.get('Quotation Type'), 50),
+                        'first_pm_date': self.parse_date(row.get('First PM Date')),
+                        'agreement_start_date': self.parse_date(row.get('Agreement start date')),
                     }
-                    
-                    # O(1) lookup instead of SELECT per row
-                    existing = existing_by_quote.get(quotation_ref_no) if quotation_ref_no else None
-                    
+
+                    existing = existing_by_iid.get(instance_id)
                     if existing:
-                        # Update existing record
                         self.update_record(existing, bandhan_data)
                         updated_count += 1
                     else:
-                        # Create new record
                         bandhan = RegularBandhan(**bandhan_data)
                         self.db.add(bandhan)
-                        if quotation_ref_no:
-                            existing_by_quote[quotation_ref_no] = bandhan
+                        existing_by_iid[instance_id] = bandhan
                         imported_count += 1
-                        
+
                 except IntegrityError:
                     self.db.rollback()
                     continue
                 except Exception:
                     continue
-        
+
         self.db.commit()
         return imported_count, updated_count
     
@@ -1950,59 +1949,11 @@ class ImportController:
         return imported_count, updated_count
     
     def match_pending_regular_bandhan(self):
-        """Match Regular Bandhan records that don't have instance_id yet"""
-        pending = self.db.query(RegularBandhan).filter(
-            RegularBandhan.instance_id.is_(None)
-        ).all()
-        if not pending:
-            return 0
-        
-        # Bulk pre-build the lookup maps (used to be 6 queries per row, now 6 queries TOTAL)
-        serials = [p.genset_number for p in pending if p.genset_number]
-        engine_to_iid = self._build_engine_to_instance_map(serials)
-        
-        iids_found = list(set(engine_to_iid.values()))
-        customer_cache = self._bulk_load_by_instance_id(Customer, iids_found)
-        iid_to_branch = self._build_instance_to_branch_map(iids_found)
-        
-        matched = 0
-        for record in pending:
-            if not record.genset_number:
-                continue
-            instance_id = engine_to_iid.get(record.genset_number)
-            if not instance_id:
-                continue
-            
-            record.instance_id = instance_id
-            matched += 1
-            
-            # Update branch_id from customer
-            customer = customer_cache.get(instance_id)
-            if customer and customer.branch_id:
-                record.branch_id = customer.branch_id
-            
-            # Update customer details
-            if customer:
-                if not customer.customer_name and record.name:
-                    customer.customer_name = self.truncate_string(record.name, 500)
-                if not customer.phone_number and record.mobile:
-                    phone = re.sub(r'\D', '', record.mobile)
-                    customer.phone_number = phone[:50]
-                if not customer.email and record.email:
-                    customer.email = self.truncate_string(record.email, 500)
-                if not customer.pan_number and record.pan_card_no:
-                    customer.pan_number = self.truncate_string(record.pan_card_no, 50)
-                
-                if not customer.branch_id:
-                    branch_id = iid_to_branch.get(instance_id)
-                    if branch_id:
-                        customer.branch_id = branch_id
-        
-        if matched > 0:
-            self.db.commit()
-        
-        return matched
-    
+        """OBSOLETE with the NEW Regular Bandhan format: rows are matched by
+        'Pulse Instance ID' at import time and rows without one are skipped, so
+        there are no pending (instance-less) records to match anymore."""
+        return 0
+
     def match_pending_open_sr_records(self):
         """Match Open SR Load Report records that don't have instance_id yet"""
         pending = self.db.query(OpenSRLoadReport).filter(
@@ -2045,6 +1996,107 @@ class ImportController:
         
         return matched
     
+    def import_open_sr_data(self, file):
+        """Import 'Open SR Data' — ONE row per instance_id, upserted on re-import.
+        ONLY instance_ids that already exist in the customers table are stored;
+        every other row is skipped (this file enriches known customers, it never
+        creates new ones)."""
+        contents = file.file.read()
+        df = pd.read_excel(io.BytesIO(contents))
+
+        # Case/spacing-insensitive header lookup so small header variations
+        # ("OIL CHANGE FLAG" / "Oil Change Flag") don't break the import.
+        norm = {str(c).strip().lower(): c for c in df.columns if pd.notna(c)}
+
+        def col(*names):
+            for n in names:
+                c = norm.get(n.lower())
+                if c is not None:
+                    return c
+            return None
+
+        iid_col = col('INSTANCE ID', 'Instance Id [Asset #]', 'Instance Id', 'Asset Number')
+        if not iid_col:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file format for Open SR Data: missing 'INSTANCE ID' column"
+            )
+
+        # value getter for a header (returns None when the column is absent)
+        def val(row, *names):
+            c = col(*names)
+            return row.get(c) if c else None
+
+        def norm_iid(v):
+            s = self.convert_to_string(v)
+            if not s:
+                return None
+            if 'Asset #:' in s:
+                s = s.split('Asset #:')[-1].strip()
+            return s or None
+
+        records = df.to_dict('records')
+
+        all_iids = list({norm_iid(r.get(iid_col)) for r in records} - {None})
+        customer_cache = self._bulk_load_by_instance_id(Customer, all_iids)
+
+        # Existing open_sr_data rows for these instance_ids (upsert targets)
+        existing = {}
+        for i in range(0, len(all_iids), 1000):
+            chunk = all_iids[i:i + 1000]
+            for rec in self.db.query(OpenSRData).filter(OpenSRData.instance_id.in_(chunk)).all():
+                existing[rec.instance_id] = rec
+
+        imported_count = 0
+        updated_count = 0
+
+        with self.db.no_autoflush:
+            for row in records:
+                iid = norm_iid(row.get(iid_col))
+                if not iid:
+                    continue
+                cust = customer_cache.get(iid)
+                if not cust:
+                    continue  # instance_id not in customers table — skip
+
+                data = {
+                    'zone_name': self.truncate_string(val(row, 'ZONE NAME'), 200),
+                    'asm_name': self.truncate_string(val(row, 'ASM NAME')),
+                    'sd_id': self.truncate_string(val(row, 'SD ID'), 100),
+                    'sd_name': self.truncate_string(val(row, 'SD NAME')),
+                    'branch_id': self.truncate_string(val(row, 'BRANCH ID'), 100) or cust.branch_id,
+                    'branch_name': self.truncate_string(val(row, 'BRANCH NAME')),
+                    'application_code': self.truncate_string(val(row, 'APPLICATION CODE'), 200),
+                    'engine_serial_no': self.truncate_string(val(row, 'ENGINE SERIAL NO'), 200),
+                    'engine_model': self.truncate_string(val(row, 'ENGINE MODEL'), 200),
+                    'segment': self.truncate_string(val(row, 'SEGMENT'), 200),
+                    'product_segment': self.truncate_string(val(row, 'PRODUCT SEGMENT'), 200),
+                    'account_name': self.truncate_string(val(row, 'ACCOUNT NAME')),
+                    'sr_number': self.truncate_string(val(row, 'SR NUMBER'), 200),
+                    'sr_type': self.truncate_string(val(row, 'SR TYPE'), 200),
+                    'sr_subtype': self.truncate_string(val(row, 'SR SUBTYPE', 'SR SUB TYPE', 'SR SUB-TYPE'), 200),
+                    'sr_open_date': self.parse_date(val(row, 'SR OPEN DATE')),
+                    'sr_close_date': self.parse_date(val(row, 'SR CLOSE DATE')),
+                    'mode_of_sr': self.truncate_string(val(row, 'MODE OF SR'), 200),
+                    'zero_labour_flag': self.truncate_string(val(row, 'ZERO LABOUR FLAG', 'ZERO LABOR FLAG'), 100),
+                    'oil_change_flag': self.truncate_string(val(row, 'OIL CHANGE FLAG', 'OIL CHANGE FLG'), 100),
+                    'count_of_tasks': self.convert_to_string(val(row, 'COUNT OF TASKS')),
+                }
+
+                rec = existing.get(iid)
+                if rec:
+                    for k, v in data.items():
+                        setattr(rec, k, v)
+                    updated_count += 1
+                else:
+                    rec = OpenSRData(instance_id=iid, **data)
+                    self.db.add(rec)
+                    existing[iid] = rec
+                    imported_count += 1
+
+        self.db.commit()
+        return imported_count, updated_count
+
     def process_file(self, file: UploadFile, file_type: str):
         """Process uploaded file based on type"""
         try:
@@ -2058,7 +2110,8 @@ class ImportController:
                 'Pulse Quotation - Service Only': self.import_pulse_quotation,
                 'Regular Bandhan Customers Report': self.import_regular_bandhan,
                 'LMS Data for ERP': self.import_lms_data,
-                'Open SR Load Report': self.import_open_sr_load_report
+                'Open SR Load Report': self.import_open_sr_load_report,
+                'Open SR Data': self.import_open_sr_data
             }
             
             if file_type not in import_functions:

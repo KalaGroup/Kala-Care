@@ -59,7 +59,6 @@ class CustomerEditRequest(BaseModel):
     customer_name: Optional[str] = None
     phone_number: Optional[str] = None
     email: Optional[str] = None
-    pan_number: Optional[str] = None
     location: Optional[str] = None
     user_id: str
     user_name: str

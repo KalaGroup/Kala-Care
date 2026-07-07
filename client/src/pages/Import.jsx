@@ -29,8 +29,15 @@ const FILE_TYPES = [
     "Pulse Quotation - Service Only",
     "Regular Bandhan Customers Report",
     "LMS Data for ERP",
-    "Open SR Load Report"
+    "Open SR Load Report",
+    "Open SR Data"
 ];
+
+// Frontend-only display names; the original value is still sent to the backend
+const FILE_TYPE_LABELS = {
+    "Open SR Data": "Close SR Report"
+};
+const getFileTypeLabel = (type) => FILE_TYPE_LABELS[type] || type;
 
 // Define expected columns for each file type to display in the UI
 const FILE_TYPE_COLUMNS = {
@@ -130,13 +137,18 @@ const FILE_TYPE_COLUMNS = {
         "Quotation Lead Assigned Phone Number", "Quotation Lead Assigned UID"
     ],
     "Regular Bandhan Customers Report": [
-        "Name of Agent", "Quotation Ref No.", "Password", "Genset Number", "Name",
-        "Email", "Mobile", "PAN Card No.", "Billing State", "Billing City",
-        "Billing Location", "Billing Address 1", "Billing Address 2", "Billing Pincode",
-        "DG State", "DG City", "DG Location", "DG Address 1", "DG Address 2",
-        "DG Pincode", "Type of Customer", "Date", "GSTN No.", "Payment type",
-        "Payment Update Date", "Contact Person Name", "Zone", "Actual Amount",
-        "Reason of Short Payment", "Status updated by Admin"
+        "Id", "Quotation Ref No", "Company Name", "Engine No", "Contact Person Name",
+        "Mobile No", "Email Id", "Genset KVA", "Zone", "State", "City", "Location",
+        "No Of Years", "Genset Running Per Year", "Created Date Time", "Status",
+        "PaymentType", "Transaction Id", "Bank Name", "Account No", "Date Of Payment",
+        "Payment Update Date Time", "Is NEFT Confirm", "Is Cheque Confirm",
+        "Cheque deposited-Address of YES Bank Branch", "cheque given-Name of KOEL Dealership",
+        "Cheque Deposited", "Cheque To Dealer", "Employee Name", "Pulse Id",
+        "Is Invoice Sent", "Is Refund", "Agent Id", "QuotePrice",
+        "Quotation Value Including tax", "Name of Agent", "Actual Amount",
+        "Reason of Short Payment", "Status updated by Admin", "Quotation Expiry Date",
+        "IsExpired", "Payment Updated Month", "Pulse Instance ID", "New Price Applicable",
+        "Quotation Type", "First PM Date", "Agreement start date"
     ],
     "LMS Data for ERP": [
         "Lead Number", "Lead Created Date", "Lead Raised By", "Lead Status",
@@ -184,6 +196,13 @@ const FILE_TYPE_COLUMNS = {
         "Bandhan PM JC creation Lock Removal flag updated Date",
         "Account Id", "SR Created BY", "eFSR KRM Number", "Dry CSP Approved by",
         "Dry CSP Approved Date"
+    ],
+    "Open SR Data": [
+        "ZONE NAME", "ASM NAME", "SD ID", "SD NAME", "BRANCH ID", "BRANCH NAME",
+        "INSTANCE ID", "APPLICATION CODE", "ENGINE SERIAL NO", "ENGINE MODEL",
+        "SEGMENT", "PRODUCT SEGMENT", "ACCOUNT NAME", "SR NUMBER", "SR TYPE",
+        "SR SUBTYPE", "SR OPEN DATE", "SR CLOSE DATE", "MODE OF SR",
+        "ZERO LABOUR FLAG", "OIL CHANGE FLAG", "COUNT OF TASKS"
     ]
 };
 
@@ -353,7 +372,7 @@ const Import = () => {
 
             return {
                 valid: false,
-                message: `File format doesn't match ${fileType}. Missing columns: ${missingMessage}`
+                message: `File format doesn't match ${getFileTypeLabel(fileType)}. Missing columns: ${missingMessage}`
             };
         }
 
@@ -623,7 +642,7 @@ const Import = () => {
                                         >
                                             <option value="" disabled>Select a file type</option>
                                             {FILE_TYPES.map(type => (
-                                                <option key={type} value={type}>{type}</option>
+                                                <option key={type} value={type}>{getFileTypeLabel(type)}</option>
                                             ))}
                                         </select>
                                         <ChevronDownIcon
@@ -669,7 +688,7 @@ const Import = () => {
                                     <div className="px-2 sm:px-3 py-1.5 sm:py-2 border-b border-blue-200 bg-blue-100/50">
                                         <h3 className="text-[11px] sm:text-xs font-semibold text-black flex items-center gap-1.5">
                                             <DocumentTextIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                                            Expected File Format for: {selectedFileType}
+                                            Expected File Format for: {getFileTypeLabel(selectedFileType)}
                                         </h3>
                                     </div>
                                     <div className="p-2 sm:p-3 overflow-x-auto">

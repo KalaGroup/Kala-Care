@@ -58,8 +58,6 @@ class EditCustomerController:
                 existing_history.edited_phone_number = edited_data['phone_number']
             if edited_data.get('email') is not None:
                 existing_history.edited_email = edited_data['email']
-            if edited_data.get('pan_number') is not None:
-                existing_history.edited_pan_number = edited_data['pan_number']
             if edited_data.get('location') is not None:
                 existing_history.edited_location = edited_data['location']
             
@@ -78,26 +76,23 @@ class EditCustomerController:
                 "customer_name": customer.customer_name,
                 "phone_number": customer.phone_number,
                 "email": customer.email,
-                "pan_number": customer.pan_number,
                 "location": customer.location
             }
-            
+
             history_entry = CustomerEditHistory(
                 customer_id=customer_id,
                 instance_id=instance_id,
-                
+
                 # Original data (preserved forever)
                 original_customer_name=original_data.get('customer_name'),
                 original_phone_number=original_data.get('phone_number'),
                 original_email=original_data.get('email'),
-                original_pan_number=original_data.get('pan_number'),
                 original_location=original_data.get('location'),
-                
+
                 # Edited data (from this edit)
                 edited_customer_name=edited_data.get('customer_name', original_data['customer_name']),
                 edited_phone_number=edited_data.get('phone_number', original_data['phone_number']),
                 edited_email=edited_data.get('email', original_data['email']),
-                edited_pan_number=edited_data.get('pan_number', original_data['pan_number']),
                 edited_location=edited_data.get('location', original_data['location']),
                 
                 # User info
@@ -176,7 +171,6 @@ class EditCustomerController:
                 "customer_name": customer.customer_name,
                 "phone_number": customer.phone_number,
                 "email": customer.email,
-                "pan_number": customer.pan_number,
                 "location": customer.location,
                 "created_at": customer.created_at
             },
@@ -184,7 +178,6 @@ class EditCustomerController:
                 "customer_name": latest_edit.edited_customer_name if latest_edit else customer.customer_name,
                 "phone_number": latest_edit.edited_phone_number if latest_edit else customer.phone_number,
                 "email": latest_edit.edited_email if latest_edit else customer.email,
-                "pan_number": latest_edit.edited_pan_number if latest_edit else customer.pan_number,
                 "location": latest_edit.edited_location if latest_edit else customer.location
             } if latest_edit else None,
             "edit_history": [
@@ -200,7 +193,6 @@ class EditCustomerController:
                         "customer_name": h.edited_customer_name,
                         "phone_number": h.edited_phone_number,
                         "email": h.edited_email,
-                        "pan_number": h.edited_pan_number,
                         "location": h.edited_location
                     }
                 }
@@ -294,7 +286,6 @@ class EditCustomerController:
                     "customer_name": customer.customer_name,
                     "phone_number": customer.phone_number,
                     "email": customer.email,
-                    "pan_number": customer.pan_number,
                     "location": customer.location,
                     "created_at": customer.created_at
                 },
@@ -302,7 +293,6 @@ class EditCustomerController:
                     "customer_name": latest_edit.edited_customer_name,
                     "phone_number": latest_edit.edited_phone_number,
                     "email": latest_edit.edited_email,
-                    "pan_number": latest_edit.edited_pan_number,
                     "location": latest_edit.edited_location
                 } if latest_edit else None,
                 "edit_history": [
@@ -318,7 +308,6 @@ class EditCustomerController:
                             "customer_name": h.edited_customer_name,
                             "phone_number": h.edited_phone_number,
                             "email": h.edited_email,
-                            "pan_number": h.edited_pan_number,
                             "location": h.edited_location
                         }
                     }
@@ -408,14 +397,14 @@ class EditCustomerController:
         # Write headers
         writer.writerow([
             'ID', 'Customer ID', 'Instance ID',
-            'Original Customer Name', 'Original Phone Number', 'Original Email', 
-            'Original PAN Number', 'Original Location',
+            'Original Customer Name', 'Original Phone Number', 'Original Email',
+            'Original Location',
             'Edited Customer Name', 'Edited Phone Number', 'Edited Email',
-            'Edited PAN Number', 'Edited Location',
+            'Edited Location',
             'User ID', 'User Name', 'Is Original Preserved', 'Edit Count',
             'Created At', 'Last Edited At'
         ])
-        
+
         # Write data rows
         for entry in entries:
             writer.writerow([
@@ -425,12 +414,10 @@ class EditCustomerController:
                 entry.original_customer_name or '',
                 entry.original_phone_number or '',
                 entry.original_email or '',
-                entry.original_pan_number or '',
                 entry.original_location or '',
                 entry.edited_customer_name or '',
                 entry.edited_phone_number or '',
                 entry.edited_email or '',
-                entry.edited_pan_number or '',
                 entry.edited_location or '',
                 entry.user_id,
                 entry.user_name,
@@ -596,8 +583,8 @@ class EditCustomerController:
             return e if e else '-'
 
         headers = ['ID', 'Customer ID', 'Instance ID', 'Original Name', 'Original Phone',
-                   'Original Email', 'Original PAN', 'Original Location', 'Edited Name',
-                   'Edited Phone', 'Edited Email', 'Edited PAN', 'Edited Location',
+                   'Original Email', 'Original Location', 'Edited Name',
+                   'Edited Phone', 'Edited Email', 'Edited Location',
                    'User ID', 'User Name', 'Edit Count', 'Created At', 'Last Edited']
         ths = "".join(f'<td bgcolor="#764ba2" style="{grad}{th_s}">{h}</td>' for h in headers)
 
@@ -612,12 +599,10 @@ class EditCustomerController:
                 (entry.original_customer_name or '-', False),
                 (entry.original_phone_number or '-', False),
                 (entry.original_email or '-', False),
-                (entry.original_pan_number or '-', False),
                 (entry.original_location or '-', False),
                 (diff(entry.original_customer_name, entry.edited_customer_name), True),
                 (diff(entry.original_phone_number, entry.edited_phone_number), True),
                 (diff(entry.original_email, entry.edited_email), True),
-                (diff(entry.original_pan_number, entry.edited_pan_number), True),
                 (diff(entry.original_location, entry.edited_location), True),
                 (entry.user_id, False),
                 (entry.user_name, False),

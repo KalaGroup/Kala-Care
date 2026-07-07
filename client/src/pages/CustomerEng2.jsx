@@ -583,7 +583,6 @@ const CustomerEng2 = () => {
     customer_name: "",
     phone_number: "",
     email: "",
-    pan_number: "",
     location: "",
   });
   const [editCustomerLoading, setEditCustomerLoading] = useState(false);
@@ -1612,7 +1611,6 @@ const CustomerEng2 = () => {
         customer_name: editCustomerForm.customer_name || null,
         phone_number: editCustomerForm.phone_number || null,
         email: editCustomerForm.email || null,
-        pan_number: editCustomerForm.pan_number || null,
         location: editCustomerForm.location || null,
         user_id: userId,
         user_name: userName,
@@ -1669,7 +1667,6 @@ const CustomerEng2 = () => {
         email: listCustomer.email,
         branch_id: listCustomer.branch_id,
         location: null,
-        pan_number: null,
       });
     }
     // Reset stale data from previous customer so old boxes don't flash
@@ -5216,7 +5213,6 @@ ${f.start_para}`;
       customer_name: customerDetails?.customer_name || "",
       phone_number: customerDetails?.phone_number || "",
       email: customerDetails?.email || "",
-      pan_number: customerDetails?.pan_number || "",
       location: customerDetails?.location || "",
     });
     setShowEditCustomerModal(true);
@@ -5456,7 +5452,9 @@ ${f.start_para}`;
     const anubandhan = data.anubandhan_quotes?.[0] || null;
     const bandhanPlus = data.bandhan_plus_quotes?.[0] || null;
     const openSRData = data.open_sr_load_reports?.[0] || null;
+    const openSRExtra = data.open_sr_data?.[0] || null; // 'Open SR Data' import (open/close dates + flags)
     const pulseData = data.pulse_quotations?.[0] || null;
+    const regularBandhan = data.regular_bandhan?.[0] || null; // NEW quote-style Regular Bandhan file
 
     // Branch name mapping
     const getBranchName = (branchId) => {
@@ -5620,6 +5618,24 @@ ${f.start_para}`;
                 <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Quotation Type</p>
                 <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Created Date</p>
                 <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Expiry Date</p>
+              </div>
+
+              {/* Row 0: Regular Bandhan (NEW quote-style file) - Mobile responsive */}
+              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:sm:gap-4">
+                <div className="flex justify-between sm:justify-center items-center sm:block">
+                  <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
+                  <p className="text-xs text-black font-normal text-left sm:text-center">
+                    {regularBandhan ? `Regular Bandhan${regularBandhan.quotation_type ? ` - ${regularBandhan.quotation_type}` : ''}` : '-'}
+                  </p>
+                </div>
+                <div className="flex justify-between sm:justify-center items-center sm:block mt-1 sm:mt-0">
+                  <span className="text-[11px] font-bold text-black sm:hidden">Created: </span>
+                  <p className="text-xs text-black font-normal text-left sm:text-center">{formatShortDate(regularBandhan?.created_date_time)}</p>
+                </div>
+                <div className="flex justify-between sm:justify-center items-center sm:block mt-1 sm:mt-0">
+                  <span className="text-[11px] font-bold text-black sm:hidden">Expiry: </span>
+                  <p className="text-xs text-black font-normal text-left sm:text-center">{formatShortDate(regularBandhan?.quotation_expiry_date)}</p>
+                </div>
               </div>
 
               {/* Row 1: Anubandhan Plus - Mobile responsive */}
@@ -5894,6 +5910,22 @@ ${f.start_para}`;
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
                   <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">Due Date:</p>
                   <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{formatShortDate(openSRData?.sr_due_date)}</p>
+                </div>
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                  <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">SR Open Date:</p>
+                  <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{formatShortDate(openSRExtra?.sr_open_date)}</p>
+                </div>
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                  <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">SR Close Date:</p>
+                  <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{formatShortDate(openSRExtra?.sr_close_date)}</p>
+                </div>
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                  <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">Oil Change Flag:</p>
+                  <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{openSRExtra?.oil_change_flag || '-'}</p>
+                </div>
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                  <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">Zero Labour Flag:</p>
+                  <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{openSRExtra?.zero_labour_flag || '-'}</p>
                 </div>
               </div>
             </div>

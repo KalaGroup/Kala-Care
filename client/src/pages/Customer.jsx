@@ -213,6 +213,20 @@ const TABLES = [
     bulkDeleteEndpoint: '/customers/open-sr-load-reports/bulk-delete',
     exportEndpoint: '/customers/open-sr-load-reports/export',
     supportsPagination: true
+  },
+  {
+    id: 'open_sr_data',
+    name: 'Close SR Report',
+    icon: DocumentTextIcon,
+    color: '#14B8A6',
+    bgColor: '#F0FDFA',
+    endpoint: '/customers/open-sr-data/',
+    singleEndpoint: (id) => `/customers/open-sr-data/${id}`,
+    updateEndpoint: (id) => `/customers/open-sr-data/${id}`,
+    deleteEndpoint: (id) => `/customers/open-sr-data/${id}`,
+    bulkDeleteEndpoint: '/customers/open-sr-data/bulk-delete',
+    exportEndpoint: '/customers/open-sr-data/export',
+    supportsPagination: true
   }
 ];
 
@@ -780,7 +794,7 @@ const Customer = () => {
     'anubandhan': ['id', 'created_at', 'updated_at', 'id_col', 'zone', 'payment_type', 'transaction_id', 'bank_name', 'account_no', 'date_of_payment', 'payment_update_date_time', 'is_neft_confirm', 'is_cheque_confirm', 'cheque_deposited_address', 'cheque_given_dealership', 'cheque_deposited', 'cheque_to_dealer', 'employee_name', 'pulse_id', 'is_invoice_sent', 'is_refund', 'agent_id', 'quote_price', 'quotation_value_including_tax', 'name_of_agent', 'actual_amount', 'reason_of_short_payment', 'status_updated_by_admin', 'quotation_expiry_date', 'is_expired', 'payment_updated_month', 'pulse_instance_id', 'new_price_applicable'],
     'bandhan_plus': ['id', 'created_at', 'updated_at', 'id_col', 'zone', 'payment_type', 'transaction_id', 'bank_name', 'account_no', 'date_of_payment', 'payment_update_date_time', 'is_neft_confirm', 'is_cheque_confirm', 'cheque_deposited_address', 'cheque_given_dealership', 'cheque_deposited', 'cheque_to_dealer', 'employee_name', 'pulse_id', 'is_invoice_sent', 'is_refund', 'agent_id', 'quote_price', 'quotation_value_including_tax', 'name_of_agent', 'actual_amount', 'reason_of_short_payment', 'status_updated_by_admin', 'is_expired', 'payment_updated_month', 'pulse_instance_id', 'new_price_applicable'],
     'pulse': ['id', 'created_at', 'updated_at', 'exception_enquiry_no', 'lead_no', 'quotation_lead_assigned_name', 'quotation_lead_assigned_job_title', 'quotation_lead_assigned_phone', 'quotation_lead_assigned_uid'],
-    'regular_bandhan': ['id', 'created_at', 'updated_at', 'zone', 'actual_amount', 'reason_of_short_payment', 'status_updated_by_admin'],
+    'regular_bandhan': ['id', 'created_at', 'updated_at', 'id_col', 'zone', 'payment_type', 'transaction_id', 'bank_name', 'account_no', 'date_of_payment', 'payment_update_date_time', 'is_neft_confirm', 'is_cheque_confirm', 'cheque_deposited_address', 'cheque_given_dealership', 'cheque_deposited', 'cheque_to_dealer', 'employee_name', 'pulse_id', 'is_invoice_sent', 'is_refund', 'agent_id', 'quote_price', 'quotation_value_including_tax', 'name_of_agent', 'actual_amount', 'reason_of_short_payment', 'status_updated_by_admin', 'is_expired', 'payment_updated_month', 'new_price_applicable'],
     'lms_data': [
       'id', 'created_at', 'updated_at',
       // existing hidden
@@ -795,7 +809,8 @@ const Customer = () => {
       'labour_invoice_number', 'part_invoice_amount', 'part_invoice_number',
       'lead_assign_to_sd', 'new_contact'
     ],
-    'open_sr_load_reports': ['id', 'created_at', 'updated_at']
+    'open_sr_load_reports': ['id', 'created_at', 'updated_at'],
+    'open_sr_data': ['id', 'created_at', 'updated_at']
   };
 
   const fetchData = async (pageNum = 1, searchValue = globalSearchTerm) => {
@@ -1611,6 +1626,7 @@ const Customer = () => {
                     {customerCompleteData.regular_bandhan?.length > 0 && renderRelatedTable('Regular Bandhan', customerCompleteData.regular_bandhan, 'regular_bandhan')}
                     {customerCompleteData.lms_data?.length > 0 && renderRelatedTable('LMS Data', customerCompleteData.lms_data, 'lms_data')}
                     {customerCompleteData.open_sr_load_reports?.length > 0 && renderRelatedTable('Open SR Load Reports', customerCompleteData.open_sr_load_reports, 'open_sr_load_reports')}
+                    {customerCompleteData.open_sr_data?.length > 0 && renderRelatedTable('Close SR Report', customerCompleteData.open_sr_data, 'open_sr_data')}
                   </div>
                 ) : (
                   <p className="text-center text-black py-3 text-xs">No customer data available</p>

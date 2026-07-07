@@ -67,7 +67,7 @@ const SITEMAP = [
     },
     {
         title: 'Data - Upload (Import)', path: '/import', color: '#be185d',
-        desc: 'Excel data intake for all master tables.',
+        desc: 'Excel data upload for all master tables.',
         features: [
             { label: 'Excel Imports (AMC, Asset, Oil Service, LMS…)' },
             { label: 'Preview & Validation Before Upload' },
@@ -220,7 +220,7 @@ const SitemapModal = ({ onClose }) => {
             onClick={onClose}
         >
             <div
-                className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden"
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl h-[88vh] flex flex-col overflow-hidden"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header */}
@@ -285,23 +285,28 @@ const SitemapModal = ({ onClose }) => {
                             </button>
                         </div>
                     ) : (
-                        <div className="columns-3 max-lg:columns-2 max-sm:columns-1 gap-10">
-                            {filtered.map((m) => (
-                                <div key={m.title} className="break-inside-avoid mb-5">
+                        // Three independent flex columns — expanding a module only reflows its own column
+                        <div className="flex gap-8 max-sm:flex-col items-start">
+                            {[0, 1, 2].map((col) => (
+                                <div key={col} className="flex-1 min-w-0 flex flex-col gap-2 max-sm:w-full">
+                                    {filtered.filter((_, i) => i % 3 === col).map((m) => (
+                                <div key={m.title} className="group relative rounded-lg">
                                     {/* Module — top-level link */}
                                     <button
                                         onClick={() => go(m.path)}
                                         title={m.desc || ''}
                                         className="group/mod w-full text-left flex items-start gap-2 rounded-md -mx-1.5 px-1.5 py-1 transition-colors hover:bg-white hover:shadow-sm"
                                     >
-                                        <span
-                                            className="mt-[7px] w-2 h-2 rounded-full flex-shrink-0 transition-transform group-hover/mod:scale-125"
-                                            style={{ backgroundColor: m.color }}
-                                        />
+                                        {/* Arrowhead bullet — turns blue & rotates down on hover, size stays fixed */}
+                                        <svg
+                                            className="mt-[3px] w-3.5 h-3.5 flex-shrink-0 text-black group-hover:text-[#2f3192] group-focus-within:text-[#2f3192] group-hover:rotate-90 group-focus-within:rotate-90 transition-transform duration-500 ease-[cubic-bezier(.22,.61,.36,1)]"
+                                            fill="currentColor" viewBox="0 0 24 24"
+                                        >
+                                            <path d="M3 3 L21 12 L3 21 L9 12 Z" />
+                                        </svg>
                                         <span className="min-w-0 flex-1">
                                             <span
-                                                className="block text-[13px] font-semibold leading-5 group-hover/mod:underline underline-offset-2"
-                                                style={{ color: THEME }}
+                                                className="block text-[13px] font-semibold leading-5 text-black group-hover:text-[#2f3192] group-focus-within:text-[#2f3192] group-hover:translate-x-0.5 transition-all duration-300"
                                             >
                                                 <Highlight text={m.title} q={q} />
                                             </span>
@@ -311,10 +316,16 @@ const SitemapModal = ({ onClose }) => {
                                         </span>
                                     </button>
 
-                                    {/* Features — nested links with a guide line */}
-                                    <ul className="mt-1 ml-[3px] border-l border-gray-200 pl-3 space-y-px">
-                                        {m.features.map((f) => (
-                                            <li key={f.label}>
+                                    {/* Features — collapsed by default; revealed on hover OR keyboard focus (tab).
+                                        Opens a touch slower with a soft ease; each link then cascades in. */}
+                                    <div className="grid grid-rows-[0fr] group-hover:grid-rows-[1fr] group-focus-within:grid-rows-[1fr] transition-[grid-template-rows] duration-500 ease-[cubic-bezier(.22,.61,.36,1)]">
+                                    <ul className="overflow-hidden mt-1 ml-[3px] border-l border-gray-200 pl-3 space-y-px opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-500 delay-100">
+                                        {m.features.map((f, fi) => (
+                                            <li
+                                                key={f.label}
+                                                className="opacity-0 -translate-x-1.5 group-hover:opacity-100 group-hover:translate-x-0 group-focus-within:opacity-100 group-focus-within:translate-x-0 transition-all duration-300 ease-out"
+                                                style={{ transitionDelay: `${120 + fi * 50}ms` }}
+                                            >
                                                 <button
                                                     onClick={() => go(m.path, f.state)}
                                                     className="group/feat w-full text-left flex items-center gap-1.5 rounded-md px-1.5 py-[3px] transition-all hover:bg-white hover:shadow-sm hover:translate-x-0.5"
@@ -325,7 +336,7 @@ const SitemapModal = ({ onClose }) => {
                                                     >
                                                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                                                     </svg>
-                                                    <span className="min-w-0 text-[12px] leading-5 text-gray-600 group-hover/feat:text-[#2f3192] group-hover/feat:font-medium transition-colors truncate">
+                                                    <span className="min-w-0 text-[12px] leading-5 text-gray-600 group-hover:text-[#2f3192] group-hover/feat:font-medium transition-colors truncate">
                                                         <Highlight text={f.label} q={q} />
                                                     </span>
                                                     {f.state && (
@@ -340,6 +351,9 @@ const SitemapModal = ({ onClose }) => {
                                             </li>
                                         ))}
                                     </ul>
+                                    </div>
+                                </div>
+                                    ))}
                                 </div>
                             ))}
                         </div>

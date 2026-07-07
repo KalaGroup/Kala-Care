@@ -7,7 +7,7 @@ from datetime import datetime
 from app.models.customer_model import (
     Customer, AMCAgreement, AssetDetailed, AssetService,
     AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
-    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport
+    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, OpenSRData
 )
 from app.schemas.customer_schema import (
     CustomerCreate, CustomerUpdate,
@@ -43,7 +43,6 @@ class CustomerController:
                     Customer.instance_id.ilike(search_term),
                     Customer.phone_number.ilike(search_term),
                     Customer.email.ilike(search_term),
-                    Customer.pan_number.ilike(search_term),
                     Customer.location.ilike(search_term)
                 )
             )
@@ -176,8 +175,8 @@ class CustomerController:
             query = query.filter(
                 or_(
                     RegularBandhan.quotation_ref_no.ilike(search_term),
-                    RegularBandhan.name.ilike(search_term),
-                    RegularBandhan.genset_number.ilike(search_term),
+                    RegularBandhan.company_name.ilike(search_term),
+                    RegularBandhan.engine_no.ilike(search_term),
                     RegularBandhan.instance_id.ilike(search_term)
                 )
             )
@@ -233,7 +232,6 @@ class CustomerController:
                     Customer.instance_id.ilike(search_term),
                     Customer.phone_number.ilike(search_term),
                     Customer.email.ilike(search_term),
-                    Customer.pan_number.ilike(search_term),
                     Customer.location.ilike(search_term)
                 )
             )
@@ -771,8 +769,8 @@ class CustomerController:
             query = query.filter(
                 or_(
                     RegularBandhan.quotation_ref_no.ilike(search_term),
-                    RegularBandhan.name.ilike(search_term),
-                    RegularBandhan.genset_number.ilike(search_term),
+                    RegularBandhan.company_name.ilike(search_term),
+                    RegularBandhan.engine_no.ilike(search_term),
                     RegularBandhan.instance_id.ilike(search_term)
                 )
             )
@@ -1023,6 +1021,103 @@ class CustomerController:
         return self.db.query(OpenSRLoadReport).filter(
             OpenSRLoadReport.instance_id == instance_id
         ).order_by(desc(OpenSRLoadReport.sr_due_date)).all()
+
+    # ==================== OPEN SR DATA ====================
+
+    def get_open_sr_data_count(self, search: Optional[str] = None):
+        """Get total count of Open SR Data rows with optional search"""
+        query = self.db.query(OpenSRData)
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                or_(
+                    OpenSRData.instance_id.ilike(search_term),
+                    OpenSRData.branch_id.ilike(search_term),
+                    OpenSRData.branch_name.ilike(search_term),
+                    OpenSRData.account_name.ilike(search_term),
+                    OpenSRData.sr_number.ilike(search_term),
+                    OpenSRData.sr_type.ilike(search_term),
+                    OpenSRData.engine_serial_no.ilike(search_term),
+                    OpenSRData.oil_change_flag.ilike(search_term),
+                    OpenSRData.zero_labour_flag.ilike(search_term)
+                )
+            )
+        return query.count()
+
+    def get_open_sr_data(self, skip: int = 0, limit: Optional[int] = 100, search: Optional[str] = None):
+        """Get all Open SR Data rows with optional search + pagination"""
+        query = self.db.query(OpenSRData)
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                or_(
+                    OpenSRData.instance_id.ilike(search_term),
+                    OpenSRData.branch_id.ilike(search_term),
+                    OpenSRData.branch_name.ilike(search_term),
+                    OpenSRData.account_name.ilike(search_term),
+                    OpenSRData.sr_number.ilike(search_term),
+                    OpenSRData.sr_type.ilike(search_term),
+                    OpenSRData.engine_serial_no.ilike(search_term),
+                    OpenSRData.oil_change_flag.ilike(search_term),
+                    OpenSRData.zero_labour_flag.ilike(search_term)
+                )
+            )
+        query = query.order_by(desc(OpenSRData.updated_at)).offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return [self._open_sr_data_to_dict(r) for r in query.all()]
+
+    def get_open_sr_data_by_instance(self, instance_id: str):
+        """Get Open SR Data rows by instance ID (one row per instance)"""
+        return self.db.query(OpenSRData).filter(
+            OpenSRData.instance_id == instance_id
+        ).all()
+
+    def delete_open_sr_data(self, record_id: int):
+        """Delete one Open SR Data row"""
+        rec = self.db.query(OpenSRData).filter(OpenSRData.id == record_id).first()
+        if not rec:
+            raise HTTPException(status_code=404, detail="Open SR Data record not found")
+        self.db.delete(rec)
+        self.db.commit()
+        return {"message": "Open SR Data record deleted successfully"}
+
+    def bulk_delete_open_sr_data(self, record_ids: List[int]):
+        """Delete multiple Open SR Data rows"""
+        self.db.query(OpenSRData).filter(OpenSRData.id.in_(record_ids)).delete(synchronize_session=False)
+        self.db.commit()
+        return {"message": f"{len(record_ids)} Open SR Data records deleted successfully"}
+
+    def _open_sr_data_to_dict(self, rec):
+        if not rec:
+            return None
+        return {
+            "id": rec.id,
+            "instance_id": rec.instance_id,
+            "zone_name": rec.zone_name,
+            "asm_name": rec.asm_name,
+            "sd_id": rec.sd_id,
+            "sd_name": rec.sd_name,
+            "branch_id": rec.branch_id,
+            "branch_name": rec.branch_name,
+            "application_code": rec.application_code,
+            "engine_serial_no": rec.engine_serial_no,
+            "engine_model": rec.engine_model,
+            "segment": rec.segment,
+            "product_segment": rec.product_segment,
+            "account_name": rec.account_name,
+            "sr_number": rec.sr_number,
+            "sr_type": rec.sr_type,
+            "sr_subtype": rec.sr_subtype,
+            "sr_open_date": rec.sr_open_date,
+            "sr_close_date": rec.sr_close_date,
+            "mode_of_sr": rec.mode_of_sr,
+            "zero_labour_flag": rec.zero_labour_flag,
+            "oil_change_flag": rec.oil_change_flag,
+            "count_of_tasks": rec.count_of_tasks,
+            "created_at": rec.created_at,
+            "updated_at": rec.updated_at
+        }
     
     # ==================== COMPLETE CUSTOMER DATA ====================
     
@@ -1057,7 +1152,8 @@ class CustomerController:
             "regular_bandhan": [self._regular_bandhan_to_dict(a) for a in self.get_regular_bandhan_by_instance(instance_id)],
             "lms_data": [self._lms_data_to_dict(a) for a in self.get_lms_data_by_instance(instance_id)],
             "open_sr_load_reports": [self._open_sr_load_report_to_dict(a) for a in self.get_open_sr_load_reports_by_instance(instance_id)],
-            
+            "open_sr_data": [self._open_sr_data_to_dict(a) for a in self.get_open_sr_data_by_instance(instance_id)],
+
             "amc_agreements_count": amc_agreements_count,
             "asset_detailed_count": asset_detailed_count,
             "asset_services_count": asset_services_count,
@@ -1095,7 +1191,6 @@ class CustomerController:
             "customer_name": customer.customer_name,
             "phone_number": customer.phone_number,
             "email": customer.email,
-            "pan_number": customer.pan_number,
             "location": customer.location,
             "branch_id": customer.branch_id,
             "last_updated_by": customer.last_updated_by,
@@ -1423,36 +1518,53 @@ class CustomerController:
         return {
             "id": record.id,
             "instance_id": record.instance_id,
-            "name_of_agent": record.name_of_agent,
+            "branch_id": record.branch_id,
+            "id_col": record.id_col,
             "quotation_ref_no": record.quotation_ref_no,
-            "password": record.password,
-            "genset_number": record.genset_number,
-            "name": record.name,
-            "email": record.email,
-            "mobile": record.mobile,
-            "pan_card_no": record.pan_card_no,
-            "billing_state": record.billing_state,
-            "billing_city": record.billing_city,
-            "billing_location": record.billing_location,
-            "billing_address_1": record.billing_address_1,
-            "billing_address_2": record.billing_address_2,
-            "billing_pincode": record.billing_pincode,
-            "dg_state": record.dg_state,
-            "dg_city": record.dg_city,
-            "dg_location": record.dg_location,
-            "dg_address_1": record.dg_address_1,
-            "dg_address_2": record.dg_address_2,
-            "dg_pincode": record.dg_pincode,
-            "type_of_customer": record.type_of_customer,
-            "date": record.date,
-            "gstn_no": record.gstn_no,
-            "payment_type": record.payment_type,
-            "payment_update_date": record.payment_update_date,
+            "company_name": record.company_name,
+            "engine_no": record.engine_no,
             "contact_person_name": record.contact_person_name,
+            "mobile_no": record.mobile_no,
+            "email_id": record.email_id,
+            "genset_kva": record.genset_kva,
             "zone": record.zone,
+            "state": record.state,
+            "city": record.city,
+            "location": record.location,
+            "no_of_years": record.no_of_years,
+            "genset_running_per_year": record.genset_running_per_year,
+            "created_date_time": record.created_date_time,
+            "status": record.status,
+            "payment_type": record.payment_type,
+            "transaction_id": record.transaction_id,
+            "bank_name": record.bank_name,
+            "account_no": record.account_no,
+            "date_of_payment": record.date_of_payment,
+            "payment_update_date_time": record.payment_update_date_time,
+            "is_neft_confirm": record.is_neft_confirm,
+            "is_cheque_confirm": record.is_cheque_confirm,
+            "cheque_deposited_address": record.cheque_deposited_address,
+            "cheque_given_dealership": record.cheque_given_dealership,
+            "cheque_deposited": record.cheque_deposited,
+            "cheque_to_dealer": record.cheque_to_dealer,
+            "employee_name": record.employee_name,
+            "pulse_id": record.pulse_id,
+            "is_invoice_sent": record.is_invoice_sent,
+            "is_refund": record.is_refund,
+            "agent_id": record.agent_id,
+            "quote_price": record.quote_price,
+            "quotation_value_including_tax": record.quotation_value_including_tax,
+            "name_of_agent": record.name_of_agent,
             "actual_amount": record.actual_amount,
             "reason_of_short_payment": record.reason_of_short_payment,
             "status_updated_by_admin": record.status_updated_by_admin,
+            "quotation_expiry_date": record.quotation_expiry_date,
+            "is_expired": record.is_expired,
+            "payment_updated_month": record.payment_updated_month,
+            "new_price_applicable": record.new_price_applicable,
+            "quotation_type": record.quotation_type,
+            "first_pm_date": record.first_pm_date,
+            "agreement_start_date": record.agreement_start_date,
             "created_at": record.created_at,
             "updated_at": record.updated_at
         }
@@ -1630,7 +1742,8 @@ class CustomerController:
             'pulse': PulseQuotation,
             'regular_bandhan': RegularBandhan,
             'lms_data': LMSData,
-            'open_sr_load_reports': OpenSRLoadReport
+            'open_sr_load_reports': OpenSRLoadReport,
+            'open_sr_data': OpenSRData
         }
         
         if table_name not in model_map:

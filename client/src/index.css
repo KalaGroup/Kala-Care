@@ -410,11 +410,11 @@ html.dark .bg-\[\#ffdb62\] { background-color: rgba(234, 179, 8, 0.18) !importan
    still clearly "the yellow panels", but dark-friendly — with a
    hairline separating them from the nav area. */
 html.dark aside .bg-\[\#ffdb62\] {
-  background-color: #262013 !important;
-  background-image: linear-gradient(180deg, rgba(234, 179, 8, 0.18), rgba(234, 179, 8, 0.08)) !important;
+  background-color: #3a311b !important;
+  background-image: linear-gradient(180deg, rgba(234, 179, 8, 0.30), rgba(234, 179, 8, 0.14)) !important;
 }
-html.dark aside .bg-\[\#ffdb62\]:first-child { border-bottom: 1px solid rgba(234, 179, 8, 0.3); }
-html.dark aside .bg-\[\#ffdb62\]:last-child { border-top: 1px solid rgba(234, 179, 8, 0.3); }
+html.dark aside .bg-\[\#ffdb62\]:first-child { border-bottom: 1px solid rgba(234, 179, 8, 0.4); }
+html.dark aside .bg-\[\#ffdb62\]:last-child { border-top: 1px solid rgba(234, 179, 8, 0.4); }
 
 /* Brand blue buttons / headers → sky blue */
 html.dark .bg-\[\#2f3192\],
@@ -717,7 +717,7 @@ html.dark .border-green-200 { border-color: rgba(34, 197, 94, 0.35) !important; 
 html.dark .hover\:bg-green-100:hover { background-color: rgba(34, 197, 94, 0.22) !important; }
 html.dark .border-yellow-200 { border-color: rgba(234, 179, 8, 0.35) !important; }
 html.dark .border-yellow-400 { border-color: rgba(234, 179, 8, 0.5) !important; }
-html.dark .bg-orange-200 { background-color: rgba(249, 115, 22, 0.25) !important; }
+html.dark .bg-orange-200 { background-color: rgba(251, 146, 60, 0.35) !important; }
 html.dark .text-orange-800 { color: #fb923c !important; }
 html.dark .text-amber-800 { color: #fcd34d !important; }
 html.dark .text-purple-800,
@@ -1085,6 +1085,16 @@ textarea:focus {
   box-shadow: 0 0 0 3px var(--erp-focus-ring) !important;
 }
 
+/* Inputs wrapped in a .kc-input frame (MOM page): the frame itself
+   glows via :focus-within, so the inner input must not draw its own
+   second ring — that reads as a "box inside a box". */
+.kc-input input:focus,
+.kc-input select:focus,
+.kc-input textarea:focus {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
 /* ----- Active sidebar item — slim accent bar (inset, no layout shift) ----- */
 aside a[aria-current="page"] {
   box-shadow: inset 2.5px 0 0 var(--erp-accent);
@@ -1213,64 +1223,124 @@ html.dark .dash-tabs button.text-white {
   box-shadow: 0 4px 16px rgba(56, 189, 248, 0.28) !important;
 }
 
+
+
 /* ============================================================
-   DARK THEME — Sidebar logo: black rounded square with an
-   animated sky-blue light traveling around its border.
-   The ::before is a spinning conic gradient; the ::after is a
-   black cover inset by 2px, so only a 2px rim of the moving
-   gradient stays visible. Light mode is completely untouched.
+   MOM sheet — theme tokens (adapt to light/dark) for text/chips
+   that used to be brand-blue, plus the Discussion points / Remarks
+   typing fields. Placed in the real stylesheet so Vite CSS HMR
+   applies it reliably.
    ============================================================ */
-@keyframes navLogoOrbit {
-  to { transform: rotate(360deg); }
+:root {
+  --mom-ink: #111827;        /* previously brand-blue text → near-black */
+  --mom-chip-fg: #6b7280;
+  --mom-chip-bg: #f3f4f6;
 }
-html.dark .nav-logo-box {
-  background: #000000;
-  border-radius: 14px;
-  padding: 5px;
-  margin-top: 10px; /* breathing room from the top of the sidebar */
-  overflow: hidden;
-  isolation: isolate; /* keep the negative-z pseudos inside this box */
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.18);
+html.dark {
+  --mom-ink: #e5e7eb;        /* light-grey so it stays readable on dark */
+  --mom-chip-fg: #cbd5e1;
+  --mom-chip-bg: #232833;
 }
-/* Keep the box compact: cap the logo size in dark mode (the collapsed
-   32px logo is already under the cap and stays as-is) */
-html.dark .nav-logo-box img {
-  max-height: 68px;
-  max-width: 68px;
+
+/* Discussion points & Remarks: never show a border/box/ring; blend
+   with the row when idle, and turn the WHOLE cell into one clean
+   white (dark: near-black) block while typing (:focus-within). */
+.mom-sheet .no-ring,
+.mom-sheet .no-ring:hover,
+.mom-sheet .no-ring:focus,
+.mom-sheet textarea.no-ring:focus,
+.mom-sheet input.no-ring:focus {
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  background: transparent !important;
 }
-/* Company name under the logo — breathing room in dark mode only */
-html.dark .nav-brand-name {
-  padding-top: 8px;
-  padding-bottom: 8px;
-}
-html.dark .nav-logo-box::before {
-  content: "";
-  position: absolute;
-  inset: -150%; /* big enough that the rotating gradient always covers the corners */
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    transparent 288deg,
-    rgba(56, 189, 248, 0.35) 316deg,
-    #7dd3fc 342deg,
-    #38bdf8 352deg,
-    transparent 360deg
-  );
-  animation: navLogoOrbit 3.2s linear infinite;
-  z-index: -2;
-}
-html.dark .nav-logo-box::after {
-  content: "";
-  position: absolute;
-  inset: 2px; /* = border thickness of the moving light */
-  background: #000000;
-  border-radius: 12px;
-  z-index: -1;
-}
+.mom-sheet td.mom-fill { background: #fff !important; }
+html.dark .mom-sheet td.mom-fill { background: #171a20 !important; }
+
+/* ============================================================
+   MOM Tracking — micro-animations (presentation only, scoped to
+   the page via the .mom-anim wrapper). No logic/behaviour change.
+   ============================================================ */
+@keyframes momFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+/* opacity-only (NO transform): used on the sheet rows + Step-2 wrapper.
+   A transform animation with fill:both makes the element a permanent
+   containing block, which breaks the position:fixed Responsibility
+   dropdown nested inside it — so these must never animate transform. */
+@keyframes momRowIn  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes momScaleIn{ from { opacity: 0; transform: scale(.95);       } to { opacity: 1; transform: none; } }
+@keyframes momPopIn  { 0% { opacity: 0; transform: scale(.7); } 70% { transform: scale(1.08); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes momFloat  { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+@keyframes momDraw   { from { stroke-dashoffset: 300; } to { stroke-dashoffset: 0; } }
+
+.mom-anim .kc-in       { animation: momFadeUp .38s cubic-bezier(.22,.61,.36,1) both; }
+.mom-anim .kc-fade     { animation: momRowIn .42s ease both; }  /* opacity-only, safe around fixed dropdowns */
+.mom-anim .kc-scale-in { animation: momScaleIn .22s ease-out both; }
+.mom-anim .kc-pop-in   { animation: momPopIn .42s ease both; }
+.mom-anim .kc-float    { animation: momFloat 7s ease-in-out infinite; }
+.mom-anim .kc-float-2  { animation: momFloat 9s ease-in-out infinite; }
+
+/* staggered entrance for report/history-style rows.
+   EXCLUDES .mom-sheet (the editable meeting sheet): its rows contain
+   the position:fixed Responsibility dropdown, and a per-row animation
+   turns each row into its own stacking layer, so later rows would paint
+   over the open dropdown (it looked see-through / half-hidden). */
+.mom-anim table:not(.mom-sheet) tbody tr { animation: momRowIn .32s ease both; }
+.mom-anim table:not(.mom-sheet) tbody tr:nth-child(1)  { animation-delay: .02s; }
+.mom-anim table:not(.mom-sheet) tbody tr:nth-child(2)  { animation-delay: .05s; }
+.mom-anim table:not(.mom-sheet) tbody tr:nth-child(3)  { animation-delay: .08s; }
+.mom-anim table:not(.mom-sheet) tbody tr:nth-child(4)  { animation-delay: .11s; }
+.mom-anim table:not(.mom-sheet) tbody tr:nth-child(5)  { animation-delay: .14s; }
+.mom-anim table:not(.mom-sheet) tbody tr:nth-child(6)  { animation-delay: .17s; }
+.mom-anim table:not(.mom-sheet) tbody tr:nth-child(7)  { animation-delay: .20s; }
+.mom-anim table:not(.mom-sheet) tbody tr:nth-child(8)  { animation-delay: .23s; }
+.mom-anim table:not(.mom-sheet) tbody tr:nth-child(n+9){ animation-delay: .26s; }
+
+/* the donut chart pops in */
+.mom-anim .mom-donut { animation: momPopIn .5s ease both; transform-origin: center; }
+
+/* respect users who prefer no motion */
 @media (prefers-reduced-motion: reduce) {
-  html.dark .nav-logo-box::before {
-    animation: none;
-    /* static ring instead of the traveling light */
-    background: conic-gradient(from 0deg, rgba(56, 189, 248, 0.5), rgba(125, 211, 252, 0.5), rgba(56, 189, 248, 0.5));
+  .mom-anim .kc-in, .mom-anim .kc-scale-in, .mom-anim .kc-pop-in,
+  .mom-anim .kc-float, .mom-anim .kc-float-2,
+  .mom-anim tbody tr, .mom-anim .mom-donut path, .mom-anim .mom-donut circle {
+    animation: none !important;
   }
 }
+
+/* ============================================================
+   DARK THEME — MOM Tracking: Report + Employee-report polish.
+   Fixes from night-mode screenshots; light mode untouched.
+   ============================================================ */
+/* Report tables (Tasks assigned / Responsibility workload /
+   Branch-wise summary): inline near-white row separators
+   (borderTop #f6f6f9) rendered as bright white lines */
+html.dark [style*="border-top: 1px solid rgb(246, 246, 249)"] { border-top-color: #262c38 !important; }
+/* Table header strips using inline #f4f6fb — add to the light-surface net */
+html.dark [style*="background: rgb(244, 246, 251)"] { background-color: #1d222b !important; }
+/* Recharts hover band (Tasks by category etc.) was the default light
+   gray — a harsh block on dark; use a soft sky tint instead */
+html.dark .recharts-tooltip-cursor { fill: rgba(56, 189, 248, 0.10) !important; }
+/* Axis + tick lines: subtle dark instead of whitish */
+html.dark .recharts-cartesian-axis line { stroke: #3a4150 !important; }
+/* Brand-indigo bars (Meetings per month) were nearly invisible on the
+   dark card — lift to sky, matching the app's dark accent */
+html.dark .recharts-rectangle[fill="#2f3192"] { fill: #0ea5e9 !important; }
+
+/* ============================================================
+   DARK THEME — MOM Tracking: setup & history cards.
+   The branch / points-to-discuss selector cards and the History
+   date tile draw their frames via inline `border:` SHORTHANDS,
+   which the border-color nets above don't catch — they rendered
+   as bright white boxes on dark. Light mode untouched.
+   ============================================================ */
+/* Unselected selector cards (Branches grid, Points to discuss) */
+html.dark [style*="border: 1.5px solid rgb(230, 233, 240)"] { border-color: #2e3440 !important; }
+/* Selected selector cards — the navy brand border + 6% indigo tint
+   are nearly invisible on dark; lift to the theme's sky accent */
+html.dark [style*="border: 1.5px solid rgb(47, 49, 146)"] {
+  border-color: rgba(56, 189, 248, 0.55) !important;
+  background: rgba(56, 189, 248, 0.10) !important;
+}
+/* History list — the "7 / Jul" date tile border */
+html.dark [style*="border: 1px solid rgb(226, 230, 245)"] { border-color: #2e3440 !important; }

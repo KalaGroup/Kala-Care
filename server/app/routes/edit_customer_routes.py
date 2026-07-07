@@ -52,8 +52,6 @@ async def save_customer_edit(
         edited_data['phone_number'] = edit_request.phone_number
     if edit_request.email is not None:
         edited_data['email'] = edit_request.email
-    if edit_request.pan_number is not None:
-        edited_data['pan_number'] = edit_request.pan_number
     if edit_request.location is not None:
         edited_data['location'] = edit_request.location
     
@@ -184,7 +182,7 @@ async def compare_original_and_edited(
     edited = result['current_edited_data']
     
     changes = []
-    for field in ['customer_name', 'phone_number', 'email', 'pan_number', 'location']:
+    for field in ['customer_name', 'phone_number', 'email', 'location']:
         if original.get(field) != edited.get(field):
             changes.append({
                 "field": field,

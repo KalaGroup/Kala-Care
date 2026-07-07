@@ -1251,6 +1251,70 @@ async def bulk_delete_open_sr_load_reports(
     return controller.bulk_delete_open_sr_load_reports(request.ids)
 
 
+# ==================== Open SR Data Endpoints ====================
+
+@router.get("/open-sr-data/export")
+async def export_open_sr_data(
+    user_id: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    """Export Open SR Data to CSV - checks if user has export permission"""
+    check_export_permission(user_id, db)
+
+    controller = CustomerController(db)
+    rows = controller.get_open_sr_data(skip=0, limit=None)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    if rows:
+        headers = list(rows[0].keys())
+        writer.writerow(headers)
+        for r in rows:
+            writer.writerow([r.get(h) for h in headers])
+    output.seek(0)
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=open_sr_data_export.csv"}
+    )
+
+
+@router.get("/open-sr-data/")
+async def get_open_sr_data(
+    response: Response,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=-1),  # Allow -1 for all records
+    search: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get all Open SR Data rows with pagination (use limit=-1 for all records)"""
+    controller = CustomerController(db)
+
+    total_count = controller.get_open_sr_data_count(search)
+    response.headers["X-Total-Count"] = str(total_count)
+
+    actual_limit = None if limit == -1 else limit
+    return controller.get_open_sr_data(skip, actual_limit, search)
+
+
+@router.delete("/open-sr-data/{record_id}", response_model=MessageResponse)
+async def delete_open_sr_data(record_id: int, db: Session = Depends(get_db)):
+    """Delete one Open SR Data row"""
+    controller = CustomerController(db)
+    return controller.delete_open_sr_data(record_id)
+
+
+@router.post("/open-sr-data/bulk-delete", response_model=MessageResponse)
+async def bulk_delete_open_sr_data(
+    request: BulkDeleteRequest,
+    db: Session = Depends(get_db)
+):
+    """Delete multiple Open SR Data rows"""
+    controller = CustomerController(db)
+    return controller.bulk_delete_open_sr_data(request.ids)
+
+
 # ==================== Data Retrieval by Instance ID ====================
 
 @router.get("/instance/{instance_id}/amc-agreements", response_model=List[AMCAgreement])
@@ -1395,7 +1459,8 @@ async def get_all_table_counts(
         "pulse": controller.get_pulse_quotations_count(),
         "regular_bandhan": controller.get_regular_bandhan_count(),
         "lms_data": controller.get_lms_data_count(),
-        "open_sr_load_reports": controller.get_open_sr_load_reports_count()
+        "open_sr_load_reports": controller.get_open_sr_load_reports_count(),
+        "open_sr_data": controller.get_open_sr_data_count()
     }
     
     return counts    

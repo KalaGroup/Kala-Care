@@ -13,7 +13,6 @@ class Customer(Base):
     customer_name = Column(String(500), nullable=True)  # Increased size
     phone_number = Column(String(50), nullable=True)
     email = Column(String(500), nullable=True)  # Increased size
-    pan_number = Column(String(50), nullable=True)
     location = Column(String(1000), nullable=True)  # Increased size
     branch_id = Column(String(100), nullable=True)
     
@@ -360,44 +359,63 @@ class PulseQuotation(Base):
 
 
 class RegularBandhan(Base):
+    """NEW format (quote-style export). Matching is by 'Pulse Instance ID' ONLY —
+    one row per instance_id, first occurrence in the file wins. The file has no
+    branch column, so customer branch_id is NEVER touched by this import."""
     __tablename__ = "regular_bandhan"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     instance_id = Column(String(100), index=True, nullable=True)
     branch_id = Column(String(100), nullable=True)
-    
-    # All columns with increased sizes - Text for long fields
-    name_of_agent = Column(String(500), nullable=True)
+
+    # Same structure as AnubandhanQuote + first_pm_date / agreement_start_date
+    id_col = Column(String(100), nullable=True)
     quotation_ref_no = Column(String(200), nullable=True, index=True)
-    password = Column(String(200), nullable=True)
-    genset_number = Column(String(200), nullable=True, index=True)
-    name = Column(String(500), nullable=True)
-    email = Column(String(500), nullable=True)
-    mobile = Column(String(50), nullable=True)
-    pan_card_no = Column(String(50), nullable=True)
-    billing_state = Column(String(200), nullable=True)
-    billing_city = Column(String(200), nullable=True)
-    billing_location = Column(String(500), nullable=True)
-    billing_address_1 = Column(Text, nullable=True)
-    billing_address_2 = Column(Text, nullable=True)
-    billing_pincode = Column(String(20), nullable=True)
-    dg_state = Column(String(200), nullable=True)
-    dg_city = Column(String(200), nullable=True)
-    dg_location = Column(String(500), nullable=True)
-    dg_address_1 = Column(Text, nullable=True)
-    dg_address_2 = Column(Text, nullable=True)
-    dg_pincode = Column(String(20), nullable=True)
-    type_of_customer = Column(String(200), nullable=True)
-    date = Column(DateTime, nullable=True)
-    gstn_no = Column(String(100), nullable=True)
-    payment_type = Column(String(100), nullable=True)
-    payment_update_date = Column(DateTime, nullable=True)
+    company_name = Column(String(500), nullable=True)
+    engine_no = Column(String(200), nullable=True, index=True)
     contact_person_name = Column(String(500), nullable=True)
+    mobile_no = Column(String(50), nullable=True)
+    email_id = Column(String(500), nullable=True)
+    genset_kva = Column(String(100), nullable=True)
     zone = Column(String(200), nullable=True)
+    state = Column(String(200), nullable=True)
+    city = Column(String(200), nullable=True)
+    location = Column(String(500), nullable=True)
+    no_of_years = Column(Integer, nullable=True)
+    genset_running_per_year = Column(String(100), nullable=True)
+    created_date_time = Column(DateTime, nullable=True)
+    status = Column(String(100), nullable=True)
+    payment_type = Column(String(100), nullable=True)
+    transaction_id = Column(String(200), nullable=True)
+    bank_name = Column(String(500), nullable=True)
+    account_no = Column(String(200), nullable=True)
+    date_of_payment = Column(DateTime, nullable=True)
+    payment_update_date_time = Column(DateTime, nullable=True)
+    is_neft_confirm = Column(Boolean, default=False)
+    is_cheque_confirm = Column(Boolean, default=False)
+    cheque_deposited_address = Column(Text, nullable=True)
+    cheque_given_dealership = Column(String(500), nullable=True)
+    cheque_deposited = Column(String(200), nullable=True)
+    cheque_to_dealer = Column(String(200), nullable=True)
+    employee_name = Column(String(500), nullable=True)
+    pulse_id = Column(String(200), nullable=True)
+    is_invoice_sent = Column(Boolean, default=False)
+    is_refund = Column(Boolean, default=False)
+    agent_id = Column(String(200), nullable=True)
+    quote_price = Column(Float, nullable=True)
+    quotation_value_including_tax = Column(Float, nullable=True)
+    name_of_agent = Column(String(500), nullable=True)
     actual_amount = Column(Float, nullable=True)
     reason_of_short_payment = Column(Text, nullable=True)
-    status_updated_by_admin = Column(Text, nullable=True)  # Changed to Text for long messages
-    
+    status_updated_by_admin = Column(Text, nullable=True)
+    quotation_expiry_date = Column(DateTime, nullable=True)
+    is_expired = Column(Boolean, default=False)
+    payment_updated_month = Column(String(50), nullable=True)
+    new_price_applicable = Column(Boolean, default=False)
+    quotation_type = Column(String(50), nullable=True)
+    first_pm_date = Column(DateTime, nullable=True)
+    agreement_start_date = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -564,5 +582,39 @@ class OpenSRLoadReport(Base):
     dry_csp_approved_by = Column(String(500), nullable=True)
     dry_csp_approved_date = Column(DateTime, nullable=True)
     
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+class OpenSRData(Base):
+    """'Open SR Data' import — ONE row per instance_id (upserted on re-import).
+    Only instance_ids that already exist in the customers table are stored;
+    surfaced in the SR Details box (CustomerEng/CustomerEng2) and Customer page."""
+    __tablename__ = "open_sr_data"
+
+    id = Column(Integer, primary_key=True, index=True)
+    instance_id = Column(String(100), unique=True, index=True, nullable=False)
+
+    zone_name = Column(String(200), nullable=True)
+    asm_name = Column(String(500), nullable=True)
+    sd_id = Column(String(100), nullable=True)
+    sd_name = Column(String(500), nullable=True)
+    branch_id = Column(String(100), nullable=True)
+    branch_name = Column(String(500), nullable=True)
+    application_code = Column(String(200), nullable=True)
+    engine_serial_no = Column(String(200), nullable=True, index=True)
+    engine_model = Column(String(200), nullable=True)
+    segment = Column(String(200), nullable=True)
+    product_segment = Column(String(200), nullable=True)
+    account_name = Column(String(500), nullable=True)
+    sr_number = Column(String(200), nullable=True, index=True)
+    sr_type = Column(String(200), nullable=True)
+    sr_subtype = Column(String(200), nullable=True)
+    sr_open_date = Column(DateTime, nullable=True)
+    sr_close_date = Column(DateTime, nullable=True)
+    mode_of_sr = Column(String(200), nullable=True)
+    zero_labour_flag = Column(String(100), nullable=True)
+    oil_change_flag = Column(String(100), nullable=True)
+    count_of_tasks = Column(String(50), nullable=True)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)

@@ -836,7 +836,6 @@ class EngagementController:
             "customer_name": customer.customer_name,
             "phone_number": customer.phone_number,
             "email": customer.email,
-            "pan_number": customer.pan_number,
             "location": customer.location,
             "branch_id": branch_id,
             "last_updated_by": customer.last_updated_by,

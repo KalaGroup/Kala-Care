@@ -13,7 +13,7 @@ from app.controllers.import_controller import ImportController
 from app.models.customer_model import (
     AMCAgreement, AssetDetailed, AssetService,
     AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
-    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport
+    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, OpenSRData
 )
 
 router = APIRouter(prefix="/import", tags=["import"])
@@ -38,7 +38,8 @@ FILE_TYPES = [
     "Pulse Quotation - Service Only",
     "Regular Bandhan Customers Report",
     "LMS Data for ERP",
-    "Open SR Load Report"
+    "Open SR Load Report",
+    "Open SR Data"
 ]
 
 
@@ -160,6 +161,7 @@ FILE_TYPE_MODELS = {
     "Regular Bandhan Customers Report": RegularBandhan,
     "LMS Data for ERP": LMSData,
     "Open SR Load Report": OpenSRLoadReport,
+    "Open SR Data": OpenSRData,
 }
 
 # In-memory cache so clicking through the dropdown doesn't re-hit the DB.
@@ -174,6 +176,7 @@ _UPDATED_AT_TABLES = [
     "amc_agreements", "asset_detailed", "oil_services",
     "anubandhan_plus_quotes", "anubandhan_quotes", "bandhan_plus_quotes",
     "pulse_quotations", "regular_bandhan", "lms_data", "open_sr_load_reports",
+    "open_sr_data",
 ]
 
 

@@ -78,7 +78,7 @@ const formatDriveDate = (dateString) => {
 // ---- Static data hoisted to module scope so it isn't re-allocated on every
 // render of the Navbar (which wraps every page). Pure constants only. ----
 
-// Accent colors as CSS variables so DARK MODE can swap them (see index.css).
+// Accent colors as CSS variables so NIGHT MODE can swap them (see index.css).
 // Light-mode values are identical to the old hardcoded colors.
 const themeColor = 'var(--erp-accent)';
 const logoutColor = 'var(--erp-ink)';
@@ -215,7 +215,7 @@ function Navbar({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Dark mode — a `dark` class on <html> drives all colors (see index.css).
+  // Night mode — a `dark` class on <html> drives all colors (see index.css).
   // index.html applies the saved theme before the app loads, so reading the
   // class here is always in sync with what the user last chose.
   const [darkMode, setDarkMode] = useState(() =>
@@ -938,9 +938,7 @@ function Navbar({ children }) {
     }
 
     return (
-      /* nav-logo-box: in DARK mode only (see index.css) this becomes a black
-         rounded square with an animated sky-blue light traveling its border. */
-      <div className="nav-logo-box relative flex-shrink-0">
+      <div className="relative flex-shrink-0">
         <img
           src="/logo.png"
           alt="KALA Care Logo"
@@ -1469,7 +1467,7 @@ function Navbar({ children }) {
                 <Logo collapsed={!sidebarOpen} />
               </div>
               {sidebarOpen && (
-                <div className="nav-brand-name flex flex-col items-center w-full">
+                <div className="flex flex-col items-center w-full">
                   <span className="text-[15px] font-bold text-[#2f3192] leading-tight text-center">
                     KALA Care Global LLP.,
                   </span>
@@ -2177,7 +2175,7 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
                 type="button"
                 onClick={toggleTheme}
                 className="w-full flex items-center justify-between px-2 py-1 bg-white hover:bg-gray-50 rounded-md border border-gray-200 transition-colors"
-                title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+                title={darkMode ? 'Switch to light mode' : 'Switch to night mode'}
               >
                 <span className="flex items-center gap-1 min-w-0">
                   {darkMode ? (
@@ -2186,7 +2184,7 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
                     <SunIcon className="h-3 w-3 flex-shrink-0 text-amber-500" />
                   )}
                   <span className="text-[10px] font-medium text-gray-700 truncate">
-                    {darkMode ? 'Dark Mode' : 'Light Mode'}
+                    {darkMode ? 'Night Mode' : 'Light Mode'}
                   </span>
                 </span>
                 {/* Small switch track + knob */}
@@ -2203,7 +2201,7 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
                 type="button"
                 onClick={toggleTheme}
                 className="w-full group relative flex items-center justify-center py-0.5 rounded-lg transition-all duration-200"
-                title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+                title={darkMode ? 'Switch to light mode' : 'Switch to night mode'}
               >
                 {darkMode ? (
                   <MoonIcon className="h-4 w-4 text-sky-400" />
@@ -2211,7 +2209,7 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
                   <SunIcon className="h-4 w-4 text-amber-500" />
                 )}
                 <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
-                  {darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                  {darkMode ? 'Switch to Light Mode' : 'Switch to Night Mode'}
                   <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
                 </div>
               </button>

@@ -256,9 +256,10 @@ function Layout() {
         </ProtectedRoute>
       } />
 
-      {/* MOM Tracking Page - All authenticated users can access */}
+      {/* MOM Tracking Page - master admin gets full authoring; branch admin &
+          employee get a read-only personal report (their meetings/tasks/branch). */}
       <Route path="/mom-tracking" element={
-        <ProtectedRoute allowedRoles={['master_admin']}>
+        <ProtectedRoute allowedRoles={['master_admin', 'branch_admin', 'employee']}>
           <MOMTracking />
         </ProtectedRoute>
       } />

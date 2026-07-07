@@ -6,13 +6,15 @@ import {
   ClipboardList, Building2, Plus, Trash2, CheckCircle2,
   AlertTriangle, CalendarDays, Users, X, CornerUpRight, Flag,
   BarChart3, Check, User, ListChecks, Zap, ChevronRight, ChevronLeft,
-  ChevronDown, FileText, MapPin, UserPlus, Download, Search, Lock,
+  ChevronDown, FileText, MapPin, UserPlus, Download, Search,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
-import * as XLSX from 'xlsx-js-style';
+// xlsx-js-style is heavy (~140kB gzip) and only needed when a user actually
+// exports to Excel — loaded on demand inside exportMeetingExcel() so it never
+// weighs down the initial MOM page load (esp. for employees who only view).
 
 /* ============================================================
    THEME — everything on screen follows the Kala Care system
@@ -22,6 +24,7 @@ import * as XLSX from 'xlsx-js-style';
 const BRAND = '#2f3192';
 const BRAND_DARK = '#23255f';
 const BRAND_SOFT = 'rgba(47,49,146,0.10)';
+const INK = 'var(--mom-ink)';       // theme-adaptive: near-black in light, light-grey in dark
 const SHEET = BRAND;                // sheet chrome = system brand
 const SHEET_DARK = BRAND_DARK;
 const SHEET_SOFT = BRAND_SOFT;
@@ -32,9 +35,9 @@ const MOM_API = `${API_BASE_URL}/mom`;
 /* Row status (Task rows only — Information rows have no status) */
 const STATUS = {
   pending: { label: 'Pending', color: '#64748b', soft: 'rgba(100,116,139,0.12)' },
-  in_progress: { label: 'In Progress', color: '#d97706', soft: 'rgba(217,119,6,0.12)' },
+  in_progress: { label: 'WIP', color: '#d97706', soft: 'rgba(217,119,6,0.12)' },
   completed: { label: 'Completed', color: '#059669', soft: 'rgba(5,150,105,0.12)' },
-  overdue: { label: 'Overdue', color: '#dc2626', soft: 'rgba(220,38,38,0.12)' },
+  overdue: { label: 'Overdue', color: '#f87171', soft: 'rgba(248,113,113,0.12)' },
 };
 
 /* Action flag — exactly as in the sheet legend: T = Task, I = Information */
@@ -50,7 +53,6 @@ const DEFAULT_CATEGORIES = {
 const NEW_CAT_COLORS = ['#0ea5e9', '#e11d48', '#16a34a', '#9333ea', '#f59e0b', '#475569', '#db2777', '#0d9488'];
 
 /* Suggested types — the select also has an "Other — type manually…" option */
-const MEETING_TYPES = ['Monthly Branch Review', 'Weekly Sync', 'Special / Ad-hoc'];
 
 /* Column widths of the two sheet tables (kept in sync with the
    top scrollbar strip above the main table) */
@@ -136,7 +138,7 @@ const shadeHex = (hex, pct) => {
   }).join('').toUpperCase();
 };
 
-function exportMeetingExcel(m, brandColor = BRAND) {
+async function exportMeetingExcel(m, brandColor = BRAND) {
   const thin = { style: 'thin', color: { rgb: 'FFD3D8E6' } };
   const BORDER = { top: thin, bottom: thin, left: thin, right: thin };
   const C = {
@@ -147,7 +149,7 @@ function exportMeetingExcel(m, brandColor = BRAND) {
     ink: '1F2937',
     label: shadeHex(brandColor, -0.15),
   };
-  const ST_COLOR = { completed: '059669', in_progress: 'B45309', pending: '64748B', overdue: 'DC2626' };
+  const ST_COLOR = { completed: '059669', in_progress: 'B45309', pending: '64748B', overdue: 'F87171' };
   const S = {
     title: { font: { bold: true, sz: 15, color: { rgb: 'FFFFFF' } }, alignment: { horizontal: 'center', vertical: 'center' }, fill: { fgColor: { rgb: C.brand } }, border: BORDER },
     sub: { font: { sz: 10, color: { rgb: shadeHex(brandColor, 0.88) } }, alignment: { horizontal: 'center', vertical: 'center' }, fill: { fgColor: { rgb: C.dark } }, border: BORDER },
@@ -238,6 +240,8 @@ function exportMeetingExcel(m, brandColor = BRAND) {
     push(row);
   });
 
+  const _xlsx = await import('xlsx-js-style');
+  const XLSX = _xlsx.utils ? _xlsx : (_xlsx.default || _xlsx);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   ws['!merges'] = merges;
   ws['!cols'] = [{ wch: 26 }, { wch: 40 }, { wch: 24 }, { wch: 9 }, { wch: 12 },
@@ -266,27 +270,19 @@ const FlagChip = React.memo(({ f, small }) => (
 ));
 const SourceBadge = React.memo(({ source }) => source === 'manual'
   ? <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }}><UserPlus size={9} /> Manually added</span>
-  : <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: BRAND }}><User size={9} /> Employee</span>);
+  : <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: INK }}><User size={9} /> Employee</span>);
 const CatDot = React.memo(({ color, title }) => <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ background: color || '#94a3b8' }} title={title} />);
-/* initials avatar — deterministic colour per name */
-const AVATAR_HUES = ['#2f3192', '#0d9488', '#d97706', '#7c3aed', '#0ea5e9', '#e11d48', '#059669', '#b45309'];
-const Avatar = React.memo(({ name, size = 22 }) => {
-  const c = AVATAR_HUES[(name || '?').split('').reduce((a, ch) => a + ch.charCodeAt(0), 0) % AVATAR_HUES.length];
-  const init = (name || '?').trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
-  return <span className="rounded-full flex items-center justify-center font-bold text-white flex-shrink-0" style={{ width: size, height: size, fontSize: Math.max(8, size * 0.42), background: c }}>{init}</span>;
-});
-/* overlapping avatar strip (History table) */
+/* initials avatar removed — names are shown as plain text */
+const Avatar = React.memo(() => null);
+/* overlapping avatar strip (History table) — initials circles removed */
 const AvatarStack = React.memo(({ names = [], max = 4 }) => (
   <span className="flex items-center">
-    {names.slice(0, max).map((n, i) => (
-      <span key={`${n}${i}`} className="rounded-full ring-2 ring-white" style={{ marginLeft: i ? -6 : 0 }}><Avatar name={n} size={20} /></span>
-    ))}
     {names.length > max && <span className="ml-1 fs-9 font-bold text-gray-400">+{names.length - max}</span>}
   </span>
 ));
 const Bar2 = React.memo(({ v }) => (
   <div className="h-1.5 w-full rounded-full overflow-hidden" style={{ background: '#eef0f3' }}>
-    <div className="h-full rounded-full" style={{ width: `${v}%`, background: v >= 80 ? '#059669' : v >= 40 ? '#d97706' : '#dc2626', transition: 'width .3s' }} />
+    <div className="h-full rounded-full" style={{ width: `${v}%`, background: v >= 80 ? '#059669' : v >= 40 ? '#d97706' : '#f87171', transition: 'width .3s' }} />
   </div>
 ));
 /* T / I toggle used inside the sheet */
@@ -303,7 +299,7 @@ const FlagToggle = ({ value, onChange }) => (
 );
 const SegStatus = ({ value, onChange }) => (
   <div className="inline-flex items-center rounded-lg border border-gray-200 overflow-hidden flex-shrink-0">
-    {[['pending', 'Pending'], ['in_progress', 'In prog'], ['completed', 'Done']].map(([k, lbl]) => (
+    {[['pending', 'Pending'], ['in_progress', 'WIP'], ['completed', 'Done']].map(([k, lbl]) => (
       <button key={k} type="button" onClick={() => onChange(k)} className="px-2 py-1 fs-10 font-semibold transition"
         style={value === k ? { background: STATUS[k].color, color: '#fff' } : { color: '#9ca3af', background: '#fff' }}>{lbl}</button>
     ))}
@@ -312,10 +308,10 @@ const SegStatus = ({ value, onChange }) => (
 /* legend card — mirrors the "Action Flag" box on the sheet */
 const FlagLegend = React.memo(() => (
   <div className="rounded-xl border border-gray-200 bg-white p-3">
-    <div className="fs-10 font-bold text-gray-500 uppercase tracking-wide mb-1.5 flex items-center gap-1"><Flag size={11} /> Action Flag</div>
+    <div className="fs-10 font-bold text-black uppercase tracking-wide mb-1.5 flex items-center gap-1"><Flag size={11} /> Action Flag</div>
     <div className="space-y-1">
-      <div className="flex items-center gap-2 fs-11"><FlagChip f="T" small /><span className="text-gray-600">Task — owner(s), due date &amp; status</span></div>
-      <div className="flex items-center gap-2 fs-11"><FlagChip f="I" small /><span className="text-gray-600">Information — can be assigned to people, no due date</span></div>
+      <div className="flex items-center gap-2 fs-11"><FlagChip f="T" small /><span className="text-black">Task — owner(s), due date &amp; status</span></div>
+      <div className="flex items-center gap-2 fs-11"><FlagChip f="I" small /><span className="text-black">Information — can be assigned to people, no due date</span></div>
     </div>
   </div>
 ));
@@ -325,7 +321,7 @@ const RemarkHistory = React.memo(({ list }) => !list?.length ? <span className="
     {list.map((p, i) => (
       <div key={i} className="fs-10 leading-snug">
         <span className="inline-block rounded px-1.5 py-0.5 font-bold mr-1.5" style={{ background: '#f1f5f9', color: '#475569' }}>{fmtDDMMYY(p.date)}</span>
-        <span className="text-gray-600">{p.text || <i className="text-gray-400">status: {STATUS[p.status]?.label}</i>}</span>
+        <span className="text-black">{p.text || <i className="text-gray-400">status: {STATUS[p.status]?.label}</i>}</span>
       </div>
     ))}
   </div>
@@ -344,7 +340,7 @@ function ExportColorModal({ onExport, onClose }) {
   const [color, setColor] = useState(BRAND);
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 pt-5 pb-3 flex items-start gap-3">
           <span className="h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${color}1a` }}>
             <Download size={18} style={{ color }} />
@@ -440,11 +436,11 @@ const RespPicker = ({ value = [], options = [], onChange, disabled }) => {
         ) : (
           <span className="flex items-center gap-1 flex-wrap min-w-0">
             {value.slice(0, 2).map((n) => (
-              <span key={n} className="inline-flex items-center gap-1 rounded-full pl-0.5 pr-1.5 py-0.5 fs-10 font-semibold" style={{ background: BRAND_SOFT, color: BRAND }}>
+              <span key={n} className="inline-flex items-center gap-1 rounded-full pl-0.5 pr-1.5 py-0.5 fs-10 font-semibold" style={{ background: BRAND_SOFT, color: INK }}>
                 <Avatar name={n} size={14} /><span className="truncate" style={{ maxWidth: '5.5rem' }}>{n.split(' ')[0]}</span>
               </span>
             ))}
-            {value.length > 2 && <span className="fs-10 font-bold" style={{ color: BRAND }}>+{value.length - 2}</span>}
+            {value.length > 2 && <span className="fs-10 font-bold" style={{ color: INK }}>+{value.length - 2}</span>}
           </span>
         )}
         <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
@@ -454,7 +450,7 @@ const RespPicker = ({ value = [], options = [], onChange, disabled }) => {
           style={{ left: pos.left, top: pos.top, width: pos.width, ...(pos.up ? { transform: 'translateY(-100%)' } : {}) }}>
           <div className="px-2.5 py-1.5 fs-9 font-bold uppercase tracking-wide text-gray-400 border-b border-gray-100 flex items-center justify-between">
             <span>Assign responsibility</span>
-            <span className="rounded-full px-1.5 py-0.5" style={{ background: BRAND_SOFT, color: BRAND }}>{value.length}</span>
+            <span className="rounded-full px-1.5 py-0.5" style={{ background: BRAND_SOFT, color: INK }}>{value.length}</span>
           </div>
           <div className="max-h-52 overflow-y-auto kc-scroll py-1">
             {options.length === 0 && absent.length === 0 && (
@@ -489,7 +485,7 @@ const RespPicker = ({ value = [], options = [], onChange, disabled }) => {
   );
 };
 
-const FontScale = React.memo(() => <style>{`@keyframes livedot{0%,100%{opacity:1}50%{opacity:.35}} @keyframes pop{0%{transform:scale(.4)}70%{transform:scale(1.2)}100%{transform:scale(1)}} .kc-pop{animation:pop .18s ease-out} .kc-lift{transition:transform .15s ease,box-shadow .15s ease} .kc-lift:hover{transform:translateY(-1px);box-shadow:0 10px 22px -10px rgba(35,37,95,.35)} .kc-input{background:#f7f8fc;border:1.5px solid #e6e9f0;border-radius:10px;transition:border-color .15s,box-shadow .15s,background .15s} .kc-input:focus,.kc-input:focus-within{background:#fff;border-color:#2f3192;box-shadow:0 0 0 3px rgba(47,49,146,.10);outline:none} .kc-grid{background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px),repeating-linear-gradient(90deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px)} .kc-scroll::-webkit-scrollbar{height:6px;width:6px} .kc-scroll::-webkit-scrollbar-thumb{background:#d5d9e6;border-radius:8px} .kc-scroll::-webkit-scrollbar-thumb:hover{background:#bfc5d8} .kc-scroll::-webkit-scrollbar-track{background:transparent} .fs-9{font-size:9px;line-height:1.3} .fs-10{font-size:10px;line-height:1.35} .fs-11{font-size:11px;line-height:1.4} .fs-12{font-size:12px;line-height:1.45} .fs-13{font-size:13px;line-height:1.45} .mom-sheet td,.mom-sheet th{border:1px solid #e2e8f0} .mom-sheet thead th{text-align:center;vertical-align:middle} .mom-sheet input,.mom-sheet select,.mom-sheet textarea{background:transparent;border-radius:6px;transition:box-shadow .12s,background .12s} .mom-sheet input:hover,.mom-sheet select:hover,.mom-sheet textarea:hover{background:#f6f8fc} .mom-sheet input:focus,.mom-sheet select:focus,.mom-sheet textarea:focus{background:#fff;box-shadow:inset 0 0 0 1.5px ${BRAND}55} .mom-sheet tbody tr:nth-child(even){background:#fbfcfe} .mom-sheet tbody tr:hover{background:#f2f6ff} .mom-sheet .no-ring:focus{box-shadow:none;background:#fff}`}</style>);
+const FontScale = React.memo(() => <style>{`@keyframes livedot{0%,100%{opacity:1}50%{opacity:.35}} @keyframes pop{0%{transform:scale(.4)}70%{transform:scale(1.2)}100%{transform:scale(1)}} .kc-pop{animation:pop .18s ease-out} .kc-lift{transition:transform .15s ease,box-shadow .15s ease} .kc-lift:hover{transform:translateY(-1px);box-shadow:0 10px 22px -10px rgba(35,37,95,.35)} .kc-input{background:#f7f8fc;border:1.5px solid #e6e9f0;border-radius:10px;transition:border-color .15s,box-shadow .15s,background .15s} .kc-input:focus,.kc-input:focus-within{background:#fff;border-color:#2f3192;box-shadow:0 0 0 3px rgba(47,49,146,.10);outline:none} .kc-grid{background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px),repeating-linear-gradient(90deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px)} .kc-scroll::-webkit-scrollbar{height:6px;width:6px} .kc-scroll::-webkit-scrollbar-thumb{background:#d5d9e6;border-radius:8px} .kc-scroll::-webkit-scrollbar-thumb:hover{background:#bfc5d8} .kc-scroll::-webkit-scrollbar-track{background:transparent} .fs-9{font-size:9px;line-height:1.3} .fs-10{font-size:10px;line-height:1.35} .fs-11{font-size:11px;line-height:1.4} .fs-12{font-size:12px;line-height:1.45} .fs-13{font-size:13px;line-height:1.45} .mom-sheet td,.mom-sheet th{border:1px solid #e2e8f0} .mom-sheet thead th{text-align:center;vertical-align:middle} .mom-sheet input,.mom-sheet select,.mom-sheet textarea{background:transparent;border-radius:6px;transition:box-shadow .12s,background .12s} .mom-sheet input:hover,.mom-sheet select:hover,.mom-sheet textarea:hover{background:#f6f8fc} .mom-sheet input:focus,.mom-sheet select:focus,.mom-sheet textarea:focus{background:#fff;box-shadow:inset 0 0 0 1.5px ${BRAND}55} .mom-sheet tbody tr:nth-child(even){background:#fbfcfe} .mom-sheet tbody tr:hover{background:#f2f6ff}`}</style>);
 
 /* ============================================================
    MAIN COMPONENT
@@ -500,11 +496,24 @@ export default function MOMTracking() {
   const authHeaders = useMemo(() => (me?.user_id ? { 'user-id': me.user_id, 'user-role': me.role || '' } : {}), [me]);
   /* Excel export permission — Master Admin always, others via can_export on the users table */
   const canExport = me?.role === 'master_admin' || me?.can_export === true;
+  const role = me?.role || 'employee';
+  const isMaster = role === 'master_admin';
 
   const [master, setMaster] = useState(DEFAULT_MASTER);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
   const [history, setHistory] = useState({});
-  const [view, setView] = useState('new');            // new | history | reports
+  // Non-master users (branch admin / employee) only get the personal report view.
+  const [view, setView] = useState(isMaster ? 'new' : 'mine');   // new | history | reports | mine
+  // flat, de-duplicated meeting list (history keys the same meeting under every branch)
+  const allMeetings = useMemo(() => {
+    const seen = new Map();
+    Object.values(history).forEach((list) => list.forEach((m) => { if (!seen.has(m.id)) seen.set(m.id, m); }));
+    return [...seen.values()];
+  }, [history]);
+  // whose report the "mine" view shows: self by default; master admin can pick any employee
+  const selfPerson = useMemo(() => ({ name: me?.name, user_id: me?.user_id, branch: me?.branch, branch_name: me?.branch_name }), [me]);
+  const [pickedEmp, setPickedEmp] = useState(null);
+  const reportPerson = (isMaster && pickedEmp) ? pickedEmp : selfPerson;
 
   // Deep-link support: the ERP Sitemap opens a specific view or the masters
   // box via router state — navigate('/mom-tracking', { state: { openView:
@@ -515,8 +524,8 @@ export default function MOMTracking() {
   useEffect(() => {
     const s = routerLocation.state;
     if (!s) return;
-    if (s.openView) setView(s.openView);
-    if (s.openMasters) setMasterOpen(true);
+    if (s.openView && isMaster) setView(s.openView);
+    if (s.openMasters && isMaster) setMasterOpen(true);
     if (s.openView || s.openMasters) {
       routerNavigate(routerLocation.pathname, { replace: true, state: null });
     }
@@ -536,7 +545,9 @@ export default function MOMTracking() {
   const [empSource, setEmpSource] = useState('loading'); // loading | api | error
   useEffect(() => {
     let alive = true;
-    if (!me?.user_id || !API_BASE_URL) { setEmpSource('error'); return; }
+    // Only master admin can (and needs to) list employees — the /users/employees
+    // endpoint 403s for branch admin / employee, so skip it entirely for them.
+    if (!isMaster || !me?.user_id || !API_BASE_URL) { setEmpSource('error'); return; }
     axios.get(`${API_BASE_URL}/users/employees`, { headers: { 'user-id': me.user_id } })
       .then((res) => {
         if (!alive) return;
@@ -604,15 +615,36 @@ export default function MOMTracking() {
   const [manualBranch, setManualBranch] = useState('');
   const [mDate, setMDate] = useState(iso(new Date()));  // mandatory — defaults to today
   const [mLocation, setMLocation] = useState('');
-  const [mType, setMType] = useState(MEETING_TYPES[0]);
+  const [mType, setMType] = useState('');
   const [attendees, setAttendees] = useState([]);
   const [manualName, setManualName] = useState('');
   const [pickBr, setPickBr] = useState('all');        // "Add from employees" picker
   const [pickEmp, setPickEmp] = useState('');
   const [picked, setPicked] = useState(new Set());    // which master points to discuss
 
-  const isCustomType = !MEETING_TYPES.includes(mType);
   const branchLabel = useMemo(() => branches.map((b) => b.name).join(' + '), [branches]);
+
+  /* meeting-type combobox — free text + a dropdown of every type used in
+     saved meetings (most recently used first), defaults appended at the end */
+  const [typeDdOpen, setTypeDdOpen] = useState(false);
+  const typeDdRef = useRef(null);
+  useEffect(() => {
+    if (!typeDdOpen) return;
+    const close = (e) => { if (typeDdRef.current && !typeDdRef.current.contains(e.target)) setTypeDdOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [typeDdOpen]);
+  const usedMeetingTypes = useMemo(() => {
+    const seen = new Map();                       // lowercase -> { name, date of last use }
+    Object.values(history).forEach((ms) => ms.forEach((m) => {
+      const t = (m.type || '').trim();
+      if (!t) return;
+      const k = t.toLowerCase();
+      const prev = seen.get(k);
+      if (!prev || (m.date || '') > prev.date) seen.set(k, { name: t, date: m.date || '' });
+    }));
+    return [...seen.values()].sort((a, b) => (b.date || '').localeCompare(a.date || '')).map((x) => x.name);
+  }, [history]);
 
   const togglePick = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const pickAll = () => setPicked(new Set(master.map((p) => p.id)));
@@ -621,8 +653,7 @@ export default function MOMTracking() {
   /* ---- meeting sheet (Step 2) ---- */
   const [rows, setRows] = useState([]);               // current discussion rows
   const [carry, setCarry] = useState([]);             // pending tasks from previous meetings
-  const [newArea, setNewArea] = useState('');
-  const [newCat, setNewCat] = useState('Other');
+  const [newCat] = useState('Other');
 
   const ping = (msg, type = 'ok') => (type === 'err' ? toast.error(msg) : toast.success(msg));
   const catColor = (n) => categories[n] || '#94a3b8';
@@ -704,7 +735,6 @@ export default function MOMTracking() {
     const next = on ? branches.filter((x) => x.code !== b.code) : [...branches, b];
     setBranches(next);
     syncAttendees(next);
-    if (branches.length === 0 && next.length === 1) setPicked(new Set(master.map((p) => p.id)));  // first branch → all points pre-ticked
     setRows([]); setCarry([]);                       // selection changed → discard previous sheet prefill
   };
   const addManualBranch = () => {
@@ -716,15 +746,13 @@ export default function MOMTracking() {
     const next = [...branches, b];
     setBranches(next);
     syncAttendees(next);
-    if (branches.length === 0) setPicked(new Set(master.map((p) => p.id)));
     setRows([]); setCarry([]);
     setManualBranch('');
     ping('Branch added — pick its attendees from employees or add them manually');
   };
-  /* a manual branch can be deleted only while NO saved meeting uses it */
-  const manualBranchLocked = (b) => (history[b.code] || []).length > 0;
+  /* deleting a manual branch only removes it from the picker —
+     saved minutes keep their own copy of the branch, so history is safe */
   const deleteManualBranch = (b) => {
-    if (manualBranchLocked(b)) return ping('This branch is used in saved minutes — it can no longer be deleted', 'err');
     setManualBranches((p) => p.filter((x) => x.code !== b.code));
     if (branches.some((x) => x.code === b.code)) {
       const next = branches.filter((x) => x.code !== b.code);
@@ -761,7 +789,8 @@ export default function MOMTracking() {
     if (!mType.trim()) return ping('Set the meeting type (pick one or type your own)', 'err');
     if (!attendees.some((a) => a.present)) return ping('Mark at least one attendee as present', 'err');
     const pickedPoints = master.filter((p) => picked.has(p.id));
-    if (!pickedPoints.length) return ping('Select at least one point to discuss', 'err');
+    /* points are optional — the meeting can start with none selected;
+       extra points can still be added live during the meeting */
     /* only the SELECTED master points pre-fill the sheet; anything already
        typed against a still-selected point survives a trip back to setup */
     setRows((prev) => {
@@ -780,7 +809,7 @@ export default function MOMTracking() {
   const resetWizard = () => {
     setStep(1); setBranches([]); setAttendees([]); setManualName(''); setPicked(new Set()); setShowAllAtt(false);
     setManualBranch(''); setPickBr('all'); setPickEmp('');
-    setMDate(iso(new Date())); setMLocation(''); setMType(MEETING_TYPES[0]);
+    setMDate(iso(new Date())); setMLocation(''); setMType('');
     setRows([]); setCarry([]);
   };
 
@@ -807,10 +836,8 @@ export default function MOMTracking() {
     onYes: () => { delRow(r.id); setConfirm(null); },
   });
   const addRow = () => {
-    const a = newArea.trim();
-    if (!a) return ping('Type a discussion area first', 'err');
-    setRows((p) => [...p, { id: uid(), trackId: uid('t'), masterId: null, area: a, category: newCat, point: '', resp: [], due: '', flag: 'I', status: 'pending', remark: '', originDate: mDate, prevRemarks: [] }]);
-    setNewArea(''); ping('Row added to the sheet');
+    const defCat = newCat || Object.keys(categories)[0] || '';
+    setRows((p) => [...p, { id: uid(), trackId: uid('t'), masterId: null, area: '', category: defCat, point: '', resp: [], due: '', flag: 'I', status: 'pending', remark: '', originDate: mDate, prevRemarks: [] }]);
   };
   const updCarry = (id, patch) => setCarry((p) => p.map((c) => c.id === id ? { ...c, ...patch } : c));
 
@@ -867,23 +894,33 @@ export default function MOMTracking() {
 
   /* delete a saved meeting (Master Admin, API mode) — removed from every
      branch list it was filed under */
-  const deleteMeeting = (m) => setConfirm({
-    title: 'Delete this meeting?',
-    meta: `${m.branchName} · ${fmt(m.date)} · ${m.type}`,
-    note: 'This permanently removes the sheet, its attendees and all rows.',
-    yesLabel: 'Yes, delete',
-    onYes: async () => {
-      try {
-        await axios.delete(`${MOM_API}/meetings/${m.id}`, { headers: authHeaders });
-        setHistory((h) => {
-          const next = {};
-          Object.entries(h).forEach(([k, ms]) => { next[k] = ms.filter((x) => x.id !== m.id); });
-          return next;
-        });
-        setConfirm(null); ping('Meeting deleted');
-      } catch (e) { ping(e?.response?.data?.detail || 'Could not delete meeting', 'err'); }
-    },
-  });
+  const deleteMeeting = (m) => {
+    const brNames = (m.branches || []).map((b) => b.name).filter(Boolean);
+    setConfirm({
+      title: 'Delete this meeting?',
+      meta: `${m.branchName} · ${fmt(m.date)} · ${m.type}`,
+      note: brNames.length > 1
+        ? `This meeting was held with ${brNames.length} branches (${brNames.join(', ')}) — it will be deleted from the history of ALL of them. The sheet, its attendees and all rows are permanently removed.`
+        : 'This permanently removes the sheet, its attendees and all rows.',
+      yesLabel: 'Yes, delete',
+      onYes: async () => {
+        try {
+          await axios.delete(`${MOM_API}/meetings/${m.id}`, { headers: authHeaders });
+          setHistory((h) => {
+            const next = {};
+            /* drop branch keys left with no meetings, so deleted-out branches
+               don't linger in the History sidebar as bare codes */
+            Object.entries(h).forEach(([k, ms]) => {
+              const left = ms.filter((x) => x.id !== m.id);
+              if (left.length) next[k] = left;
+            });
+            return next;
+          });
+          setConfirm(null); ping('Meeting deleted');
+        } catch (e) { ping(e?.response?.data?.detail || 'Could not delete meeting', 'err'); }
+      },
+    });
+  };
 
   /* Master-setup persistence (null while API unreachable → modal stays local-only) */
   const persist = histSource === 'api' ? {
@@ -908,14 +945,14 @@ export default function MOMTracking() {
      RENDER
      ======================================================== */
   return (
-    <div className="font-sans">
+    <div className="font-sans mom-anim">
       <FontScale />
       <div className="max-w-7xl mx-auto px-3 sm:px-4 pb-2 max-md:px-2">
 
         {/* ===== HERO (same pattern as Knowledge Bank) ===== */}
-        <div className="rounded-2xl px-3 sm:px-5 py-3 mb-3 text-white relative overflow-hidden" style={{ background: `linear-gradient(120deg, ${BRAND} 0%, ${BRAND_DARK} 100%)` }}>
-          <div className="absolute -right-8 -top-10 h-32 w-32 rounded-full" style={{ background: 'rgba(255,255,255,0.07)' }} />
-          <div className="absolute right-16 -bottom-12 h-24 w-24 rounded-full" style={{ background: 'rgba(255,255,255,0.05)' }} />
+        <div className="kc-in rounded-2xl px-3 sm:px-5 py-3 mb-3 text-white relative overflow-hidden" style={{ background: `linear-gradient(120deg, ${BRAND} 0%, ${BRAND_DARK} 100%)` }}>
+          <div className="kc-float absolute -right-8 -top-10 h-32 w-32 rounded-full" style={{ background: 'rgba(255,255,255,0.07)' }} />
+          <div className="kc-float-2 absolute right-16 -bottom-12 h-24 w-24 rounded-full" style={{ background: 'rgba(255,255,255,0.05)' }} />
           <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <div className="h-9 w-9 rounded-lg flex items-center justify-center bg-white/15 backdrop-blur-sm"><ClipboardList className="h-5 w-5" /></div>
@@ -928,18 +965,23 @@ export default function MOMTracking() {
               <span className="inline-flex items-center gap-1 rounded-full bg-white/15 text-white px-2.5 py-1 text-[11px] font-medium">Meetings: <b className="font-bold">{stats.meetings}</b></span>
               <span className="inline-flex items-center gap-1 rounded-full bg-white/15 text-white px-2.5 py-1 text-[11px] font-medium">Open tasks: <b className="font-bold">{stats.open}</b></span>
               <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium text-white" style={stats.overdue > 0 ? { background: 'rgba(248,113,113,0.3)' } : { background: 'rgba(255,255,255,0.15)' }}>Overdue: <b className="font-bold">{stats.overdue}</b></span>
-              <button onClick={() => setMasterOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1.5 text-[12px] font-medium transition">
-                <ListChecks className="h-3.5 w-3.5" /> Master setup
-              </button>
+              {isMaster && (
+                <button onClick={() => setMasterOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1.5 text-[12px] font-medium transition">
+                  <ListChecks className="h-3.5 w-3.5" /> Master setup
+                </button>
+              )}
             </div>
           </div>
         </div>
 
         {/* ===== VIEW TABS + STEP INDICATOR ===== */}
-        <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
+        <div className="kc-in flex items-center justify-between gap-2 mb-4 flex-wrap">
           <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm w-fit max-sm:max-w-full max-sm:overflow-x-auto">
-            {[{ k: 'new', label: 'New meeting', icon: Zap }, { k: 'history', label: 'History', icon: FileText }, { k: 'reports', label: 'Reports', icon: BarChart3 }].map((t) => (
-              <button key={t.k} onClick={() => setView(t.k)} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 fs-12 font-semibold transition" style={view === t.k ? { background: BRAND_SOFT, color: BRAND } : { color: '#6b7280' }}>
+            {(isMaster
+              ? [{ k: 'new', label: 'New meeting', icon: Zap }, { k: 'history', label: 'History', icon: FileText }, { k: 'reports', label: 'Reports', icon: BarChart3 }, { k: 'mine', label: 'Employee report', icon: Users }]
+              : [{ k: 'mine', label: 'My MOM', icon: Users }]
+            ).map((t) => (
+              <button key={t.k} onClick={() => setView(t.k)} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 fs-12 font-semibold transition" style={view === t.k ? { background: BRAND_SOFT, color: INK } : { color: '#6b7280' }}>
                 <t.icon size={14} /> {t.label}
               </button>
             ))}
@@ -961,7 +1003,7 @@ export default function MOMTracking() {
                       {step > s.n ? <Check size={11} /> : s.n}
                     </span>
                     <div className="leading-tight">
-                      <div className="fs-11 font-bold" style={{ color: step === s.n ? BRAND : '#6b7280' }}>{s.label}</div>
+                      <div className="fs-11 font-bold" style={{ color: step === s.n ? INK : '#6b7280' }}>{s.label}</div>
                       <div className="fs-9 text-gray-400 truncate" style={{ maxWidth: '9rem' }}>{s.sub}</div>
                     </div>
                   </div>
@@ -982,44 +1024,61 @@ export default function MOMTracking() {
             STEP 1 — MEETING SETUP (before starting)
             ================================================ */}
         {view === 'new' && step === 1 && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <div className="kc-in grid grid-cols-1 lg:grid-cols-3 gap-3">
 
             {/* ---- meeting details ---- */}
             <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4 space-y-3">
               <div className="flex items-center gap-2">
-                <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: BRAND_SOFT }}><CalendarDays size={15} style={{ color: BRAND }} /></span>
+                <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: BRAND_SOFT }}><CalendarDays size={15} style={{ color: INK }} /></span>
                 <h2 className="text-[13px] font-bold text-gray-800">Meeting details</h2>
               </div>
 
               <label className="block">
-                <span className="fs-11 font-semibold text-gray-500">Date <span className="text-red-400">*</span> <span className="fs-9 font-normal">(mandatory — defaults to today)</span></span>
+                <span className="fs-11 font-semibold text-gray-500">Date <span className="text-red-300">*</span></span>
                 <div className="kc-input mt-1 flex items-center gap-2 px-3 py-2" style={!mDate ? { borderColor: '#f87171' } : {}}>
                   <CalendarDays size={14} className="text-gray-400" />
                   <input type="date" required value={mDate} onChange={(e) => setMDate(e.target.value)} className="w-full fs-12 text-gray-700 outline-none bg-transparent" />
                 </div>
-                {!mDate && <div className="fs-9 mt-1 font-semibold" style={{ color: '#dc2626' }}>Meeting date is required to start the sheet.</div>}
+                {!mDate && <div className="fs-9 mt-1 font-semibold" style={{ color: '#f87171' }}>Meeting date is required to start the sheet.</div>}
               </label>
 
               <label className="block">
-                <span className="fs-11 font-semibold text-gray-500">Location <span className="text-red-400">*</span></span>
+                <span className="fs-11 font-semibold text-gray-500">Location <span className="text-red-300">*</span></span>
                 <div className="kc-input mt-1 flex items-center gap-2 px-3 py-2">
-                  <MapPin size={14} className="text-gray-400" />
-                  <input value={mLocation} onChange={(e) => setMLocation(e.target.value)} placeholder="e.g. Branch Office — Conference Room" className="w-full fs-12 text-gray-700 outline-none bg-transparent" />
+                  <input value={mLocation} onChange={(e) => setMLocation(e.target.value)} placeholder="e.g. Branch Office — Conference Room" className="w-full fs-12 text-black outline-none bg-transparent" />
                 </div>
               </label>
 
-              <label className="block">
-                <span className="fs-11 font-semibold text-gray-500">Meeting type <span className="text-red-400">*</span></span>
-                <select value={isCustomType ? '__custom' : mType} onChange={(e) => setMType(e.target.value === '__custom' ? '' : e.target.value)} className="kc-input mt-1 w-full px-3 py-2 fs-12 text-gray-700">
-                  {MEETING_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                  <option value="__custom">Other — type manually…</option>
-                </select>
-                {isCustomType && (
-                  <input autoFocus value={mType} onChange={(e) => setMType(e.target.value)}
-                    placeholder="Type the meeting type (e.g. Quarterly Business Review)…"
-                    className="kc-input mt-1.5 w-full px-3 py-2 fs-12 text-gray-700" />
+              <div className="block relative" ref={typeDdRef}>
+                <span className="fs-11 font-semibold text-gray-500">Meeting type <span className="text-red-300">*</span></span>
+                <div className="kc-input mt-1 flex items-center px-3 py-2 relative">
+                  <input value={mType} onChange={(e) => setMType(e.target.value)}
+                    placeholder="Type the meeting type (e.g. Monthly Branch Review)…"
+                    className="w-full fs-12 text-black outline-none bg-transparent pr-6" />
+                  <button type="button" onClick={() => setTypeDdOpen((o) => !o)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-gray-100"
+                    title="Show previously used meeting types">
+                    <ChevronDown size={14} className={`text-gray-500 transition-transform ${typeDdOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
+                {typeDdOpen && (
+                  <div className="absolute z-20 mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden">
+                    <div className="fs-9 font-bold uppercase tracking-wide text-gray-400 px-3 pt-2 pb-1">Previously used meeting types</div>
+                    <div className="max-h-44 overflow-y-auto kc-scroll">
+                      {usedMeetingTypes.length === 0 && (
+                        <div className="px-3 py-2 fs-11 text-gray-400">No meeting types in history yet — type one in the box above.</div>
+                      )}
+                      {usedMeetingTypes.map((t) => (
+                        <button key={t} type="button" onClick={() => { setMType(t); setTypeDdOpen(false); }}
+                          className="w-full text-left px-3 py-1.5 fs-12 text-black hover:bg-gray-50 flex items-center gap-2">
+                          {mType.trim().toLowerCase() === t.toLowerCase() ? <Check size={12} style={{ color: BRAND }} /> : <span className="w-3 flex-shrink-0" />}
+                          <span className="truncate">{t}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
-              </label>
+              </div>
 
               <FlagLegend />
             </div>
@@ -1028,18 +1087,18 @@ export default function MOMTracking() {
             <div className="lg:col-span-2 rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col">
               <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-wrap gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: BRAND_SOFT }}><Building2 size={15} style={{ color: BRAND }} /></span>
-                  <h2 className="text-[13px] font-bold text-gray-800">Branches <span className="text-red-400">*</span></h2>
+                  <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: BRAND_SOFT }}><Building2 size={15} style={{ color: INK }} /></span>
+                  <h2 className="text-[13px] font-bold text-gray-800">Branches <span className="text-red-300">*</span></h2>
                   <span className="fs-11 text-gray-400">select one or more — a joint review can cover multiple branches</span>
                 </div>
-                <span className="fs-10 rounded-full px-2 py-0.5 font-bold" style={{ background: BRAND_SOFT, color: BRAND }}>{branches.length} selected</span>
+                <span className="fs-10 rounded-full px-2 py-0.5 font-bold" style={{ background: BRAND_SOFT, color: INK }}>{branches.length} selected</span>
               </div>
 
               <div className="p-3 flex-1">
                 {branches.length > 0 && (
                   <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
                     {branches.map((b) => (
-                      <span key={b.code} className="inline-flex items-center gap-1 rounded-full pl-2 pr-1 py-1 fs-10 font-bold" style={{ background: BRAND_SOFT, color: BRAND }}>
+                      <span key={b.code} className="inline-flex items-center gap-1 rounded-full pl-2 pr-1 py-1 fs-10 font-bold" style={{ background: BRAND_SOFT, color: INK }}>
                         <Building2 size={10} /> {b.name}
                         {b.manual && <span className="rounded-full px-1 fs-9 font-bold" style={{ background: 'rgba(217,119,6,0.18)', color: '#b45309' }} title="Manually added branch">M</span>}
                         <button onClick={() => toggleBranch(b)} className="rounded-full p-0.5 hover:bg-white/70" title="Remove branch"><X size={10} /></button>
@@ -1050,7 +1109,6 @@ export default function MOMTracking() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 overflow-y-auto kc-scroll pr-1" style={{ maxHeight: '13rem' }}>
                   {allBranchOptions.map((b) => {
                     const on = branches.some((x) => x.code === b.code);
-                    const locked = b.manual && manualBranchLocked(b);
                     return (
                       <div key={b.code} role="button" tabIndex={0} onClick={() => toggleBranch(b)}
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleBranch(b); } }}
@@ -1062,15 +1120,14 @@ export default function MOMTracking() {
                           {on && <Check size={11} color="#fff" className="kc-pop" />}
                         </span>
                         <span className="min-w-0 flex-1">
-                          <span className={`fs-12 block truncate ${on ? 'text-gray-800 font-semibold' : 'text-gray-500'}`} title={b.name}>{b.name}</span>
-                          <span className="fs-9 text-gray-400 block truncate">{b.manual ? 'Manually added' : (b.region || '\u00A0')}</span>
+                          <span className={`fs-12 block truncate text-black ${on ? 'font-semibold' : ''}`} title={b.name}>{b.name}</span>
+                          <span className="fs-9 text-gray-400 block truncate">{b.manual ? '\u00A0' : (b.region || '\u00A0')}</span>
                         </span>
-                        {b.manual && (locked
-                          ? <span className="flex-shrink-0 rounded-lg p-1 text-gray-300" title="Used in saved minutes \u2014 this branch can no longer be deleted"><Lock size={13} /></span>
-                          : <button type="button" onClick={(e) => { e.stopPropagation(); deleteManualBranch(b); }}
-                              className="flex-shrink-0 rounded-lg p-1 text-gray-300 hover:text-red-500 hover:bg-red-50" title="Delete this manual branch">
-                              <Trash2 size={13} />
-                            </button>)}
+                        {b.manual && (
+                          <button type="button" onClick={(e) => { e.stopPropagation(); deleteManualBranch(b); }}
+                            className="flex-shrink-0 rounded-lg p-1 text-gray-300 hover:text-red-400 hover:bg-red-50" title="Delete this manual branch">
+                            <Trash2 size={13} />
+                          </button>)}
                       </div>
                     );
                   })}
@@ -1078,7 +1135,7 @@ export default function MOMTracking() {
                 {branches.length > 0 && (
                   <div className="mt-2.5 fs-10 text-gray-400 flex items-center gap-2 flex-wrap">
                     <span>last meeting across selected: <b className="text-gray-600">{fmt(lastAcross)}</b></span>
-                    {carryPreview > 0 && <span className="rounded-full px-1.5 py-0.5 font-bold" style={{ background: 'rgba(220,38,38,0.1)', color: '#dc2626' }}>{carryPreview} open task{carryPreview > 1 ? 's' : ''} will carry forward</span>}
+                    {carryPreview > 0 && <span className="rounded-full px-1.5 py-0.5 font-bold" style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171' }}>{carryPreview} open task{carryPreview > 1 ? 's' : ''} will carry forward</span>}
                   </div>
                 )}
               </div>
@@ -1089,7 +1146,7 @@ export default function MOMTracking() {
                 <Building2 size={14} className="text-gray-400 flex-shrink-0" />
                 <input value={manualBranch} onChange={(e) => setManualBranch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addManualBranch()}
                   placeholder="Branch not on the list? Add it manually — then pick its attendees below…" className="flex-1 fs-12 bg-transparent outline-none text-gray-700" style={{ minWidth: '12rem' }} />
-                <button onClick={addManualBranch} className="rounded-lg px-3 py-1.5 fs-11 font-semibold text-white" style={{ background: BRAND }}>Add branch manually</button>
+                <button onClick={addManualBranch} className="rounded-lg px-3 py-1.5 fs-11 font-semibold text-white" style={{ background: BRAND }}>Add Location manually</button>
               </div>
             </div>
 
@@ -1097,13 +1154,13 @@ export default function MOMTracking() {
             <div className="lg:col-span-3 rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col">
               <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-wrap gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: BRAND_SOFT }}><Users size={15} style={{ color: BRAND }} /></span>
+                  <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: BRAND_SOFT }}><Users size={15} style={{ color: INK }} /></span>
                   <h2 className="text-[13px] font-bold text-gray-800 flex-shrink-0">Attendees</h2>
                   {branches.length
                     ? <span className="fs-11 text-gray-400 truncate">employees of <b className="text-gray-600">{branchLabel}</b> auto-loaded{empSource === 'error' && ' (employees API not reachable)'}</span>
                     : <span className="fs-11 text-gray-400">select branches to auto-load their employees</span>}
                 </div>
-                <span className="fs-10 rounded-full px-2 py-0.5 font-bold flex-shrink-0" style={{ background: BRAND_SOFT, color: BRAND }}>
+                <span className="fs-10 rounded-full px-2 py-0.5 font-bold flex-shrink-0" style={{ background: BRAND_SOFT, color: INK }}>
                   {attendees.filter((a) => a.present).length} present / {attendees.length}
                 </span>
               </div>
@@ -1132,7 +1189,7 @@ export default function MOMTracking() {
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <SourceBadge source={a.source} />
                               {a.branch && <span className="fs-9 text-gray-400">{a.branch}</span>}
-                              {a.extra && <span className="fs-9 font-bold rounded-full px-1.5 py-0.5" style={{ background: BRAND_SOFT, color: BRAND }} title="Explicitly added from the employee list">added</span>}
+                              {a.extra && <span className="fs-9 font-bold rounded-full px-1.5 py-0.5" style={{ background: BRAND_SOFT, color: INK }} title="Explicitly added from the employee list">added</span>}
                             </div>
                           </td>
                           <td className="px-3 py-2 text-center">
@@ -1144,7 +1201,7 @@ export default function MOMTracking() {
                             </button>
                           </td>
                           <td className="px-2 py-2 text-center">
-                            {(a.source === 'manual' || a.extra) && <button onClick={() => removeAttendee(a.id)} className="text-gray-300 hover:text-red-500" title="Remove"><Trash2 size={14} /></button>}
+                            {(a.source === 'manual' || a.extra) && <button onClick={() => removeAttendee(a.id)} className="text-gray-300 hover:text-red-400" title="Remove"><Trash2 size={14} /></button>}
                           </td>
                         </tr>
                       ))}
@@ -1185,12 +1242,12 @@ export default function MOMTracking() {
             <div className="lg:col-span-3 rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-wrap gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: BRAND_SOFT }}><ListChecks size={15} style={{ color: BRAND }} /></span>
+                  <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: BRAND_SOFT }}><ListChecks size={15} style={{ color: INK }} /></span>
                   <h2 className="text-[13px] font-bold text-gray-800">Points to discuss</h2>
                   <span className="fs-11 text-gray-400">tick the master points for this meeting's agenda — only ticked points appear on the sheet</span>
                 </div>
                 <div className="flex items-center gap-2 max-md:flex-wrap">
-                  <span className="fs-10 rounded-full px-2 py-0.5 font-bold" style={{ background: BRAND_SOFT, color: BRAND }}>{picked.size} of {master.length} selected</span>
+                  <span className="fs-10 rounded-full px-2 py-0.5 font-bold" style={{ background: BRAND_SOFT, color: INK }}>{picked.size} of {master.length} selected</span>
                   <button onClick={pickAll} className="fs-11 font-semibold rounded-md border border-gray-200 px-2 py-1 text-gray-600 hover:bg-gray-50">Select all</button>
                   <button onClick={pickNone} className="fs-11 font-semibold rounded-md border border-gray-200 px-2 py-1 text-gray-600 hover:bg-gray-50">Clear</button>
                 </div>
@@ -1206,9 +1263,8 @@ export default function MOMTracking() {
                       <span className="h-4 w-4 rounded border flex items-center justify-center flex-shrink-0" style={on ? { background: BRAND, borderColor: BRAND } : { borderColor: '#cfcfe0' }}>
                         {on && <Check size={11} color="#fff" className="kc-pop" />}
                       </span>
-                      <CatDot color={catColor(p.category)} title={p.category} />
-                      <span className={`fs-12 flex-1 min-w-0 truncate ${on ? 'text-gray-800 font-semibold' : 'text-gray-500'}`} title={p.title}>{p.title}</span>
-                      <span className="fs-9 font-medium px-1.5 py-0.5 rounded flex-shrink-0" style={{ color: catColor(p.category), background: `${catColor(p.category)}14` }}>{p.category}</span>
+                      <span className={`fs-12 flex-1 min-w-0 truncate text-black ${on ? 'font-semibold' : ''}`} title={p.title}>{p.title}</span>
+                      <span className="fs-9 font-medium px-1.5 py-0.5 rounded flex-shrink-0" style={{ color: 'var(--mom-chip-fg)', background: 'var(--mom-chip-bg)' }}>{p.category}</span>
                     </button>
                   );
                 })}
@@ -1216,7 +1272,7 @@ export default function MOMTracking() {
               <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 flex-wrap gap-2" style={{ background: '#fafafc' }}>
                 <span className="fs-11 text-gray-400">Set everything above first — the meeting sheet opens with these details locked in. Extra points, employees and guests can still be added live during the meeting.</span>
                 <button onClick={openSheet} className="kc-lift inline-flex items-center gap-2 rounded-xl px-5 py-2.5 fs-12 font-bold text-white max-sm:w-full max-sm:justify-center" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})`, boxShadow: '0 6px 16px -6px rgba(47,49,146,.55)' }}>
-                  <Zap size={15} /> Start meeting — open sheet <ChevronRight size={15} />
+                  Start meeting — open sheet <ChevronRight size={15} />
                 </button>
               </div>
             </div>
@@ -1227,19 +1283,19 @@ export default function MOMTracking() {
             STEP 2 — MEETING SHEET (Excel format)
             ================================================ */}
         {view === 'new' && step === 2 && (
-          <div className="space-y-3">
+          <div className="kc-fade space-y-3">
 
             {/* ---- sheet header block (like the top of the Excel) ---- */}
             <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-              <div className="mom-view-head px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
+              <div className="mom-view-head px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #4b5563, #1f2937)' }}>
                 <div className="flex items-center gap-2.5">
-                  <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 fs-10 font-bold text-white" style={{ background: BRAND }}>
-                    <span className="h-2 w-2 rounded-full bg-white" style={{ animation: 'livedot 1.4s infinite' }} /> LIVE
+                  <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 fs-10 font-bold bg-white" style={{ color: '#1f2937' }}>
+                    <span className="h-2 w-2 rounded-full" style={{ background: '#1f2937', animation: 'livedot 1.4s infinite' }} /> LIVE
                   </span>
-                  <div className="text-sm font-bold uppercase" style={{ letterSpacing: '0.16em', color: BRAND_DARK }}>Minutes of Meeting</div>
+                  <div className="text-sm font-bold uppercase text-white" style={{ letterSpacing: '0.16em' }}>Minutes of Meeting</div>
                 </div>
                 <div className="flex items-center gap-2 max-md:flex-wrap">
-                  {canExport && <button onClick={exportDraft} className="export-btn kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: BRAND }}><Download size={13} /> Export Excel</button>}
+                  {canExport && <button onClick={exportDraft} className="export-btn kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: INK }}><Download size={13} /> Export Excel</button>}
                   <button onClick={() => setStep(1)} className="kc-lift inline-flex items-center gap-1 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: '#5b6170' }}><ChevronLeft size={13} /> Setup</button>
                 </div>
               </div>
@@ -1259,19 +1315,19 @@ export default function MOMTracking() {
                     <span key={a.id}
                       className="inline-flex items-center gap-1.5 rounded-full pl-1.5 pr-2 py-1 fs-10 font-medium border transition cursor-pointer select-none"
                       style={a.present
-                        ? { background: SHEET_SOFT, borderColor: 'transparent', color: BRAND }
+                        ? { background: SHEET_SOFT, borderColor: 'transparent', color: INK }
                         : { borderColor: '#e5e7eb', color: '#b7bcc6', textDecoration: 'line-through' }}
                       onClick={() => togglePresent(a.id)}
                       title={a.present ? 'Click to mark absent' : 'Click to mark present'}>
                       <span style={!a.present ? { filter: 'grayscale(1)', opacity: .55 } : {}}><Avatar name={a.name} size={16} /></span> {a.name}
                       {a.source === 'manual' && <span className="rounded-full px-1 fs-9 font-bold" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Manually added">M</span>}
                       {(a.source === 'manual' || a.extra) && (
-                        <button onClick={(e) => { e.stopPropagation(); removeAttendee(a.id); }} className="rounded-full p-0.5 text-gray-300 hover:text-red-500" title="Remove"><Trash2 size={10} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); removeAttendee(a.id); }} className="rounded-full p-0.5 text-gray-300 hover:text-red-400" title="Remove"><Trash2 size={10} /></button>
                       )}
                     </span>
                   ))}
                   {attHidden > 0 && !showAllAtt && (
-                    <button onClick={() => setShowAllAtt(true)} className="inline-flex items-center rounded-full px-2.5 py-1 fs-10 font-bold transition hover:opacity-80" style={{ background: BRAND_SOFT, color: BRAND }}>+{attHidden} more</button>
+                    <button onClick={() => setShowAllAtt(true)} className="inline-flex items-center rounded-full px-2.5 py-1 fs-10 font-bold transition hover:opacity-80" style={{ background: BRAND_SOFT, color: INK }}>+{attHidden} more</button>
                   )}
                   {showAllAtt && attendees.length > ATT_PREVIEW && (
                     <button onClick={() => setShowAllAtt(false)} className="inline-flex items-center rounded-full px-2.5 py-1 fs-10 font-bold transition hover:opacity-80" style={{ background: '#f1f3f9', color: '#5b6170' }}>Show less</button>
@@ -1302,19 +1358,19 @@ export default function MOMTracking() {
 
             {/* ---- SECTION A · review of previous meetings ---- */}
             {carry.length > 0 && (
-              <div className="rounded-2xl border overflow-hidden bg-white shadow-sm" style={{ borderColor: 'rgba(217,119,6,0.35)' }}>
-                <div className="flex items-center justify-between gap-2 px-3 py-2 flex-wrap" style={{ background: 'rgba(217,119,6,0.08)' }}>
+              <div className="rounded-2xl border overflow-hidden bg-white shadow-sm" style={{ borderColor: 'rgba(47,49,146,0.35)' }}>
+                <div className="flex items-center justify-between gap-2 px-3 py-2 flex-wrap" style={{ background: 'rgba(47,49,146,0.08)' }}>
                   <div className="flex items-center gap-2">
-                    <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: 'rgba(217,119,6,0.14)' }}><CornerUpRight size={14} style={{ color: '#b45309' }} /></span>
-                    <span className="fs-13 font-bold" style={{ color: '#b45309' }}>Previous meeting — pending tasks</span>
-                    <span className="rounded-full px-2 py-0.5 fs-10 font-bold bg-white" style={{ color: '#b45309' }}>{carry.length}</span>
+                    <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: 'rgba(47,49,146,0.14)' }}><CornerUpRight size={14} style={{ color: BRAND }} /></span>
+                    <span className="fs-13 font-bold" style={{ color: BRAND }}>Previous meeting — pending tasks</span>
+                    <span className="rounded-full px-2 py-0.5 fs-10 font-bold bg-white" style={{ color: BRAND }}>{carry.length}</span>
                   </div>
-                  <span className="fs-10 font-medium" style={{ color: '#b45309' }}>update status &amp; add this meeting's remark for each</span>
+                  <span className="fs-10 font-medium" style={{ color: BRAND }}>update status &amp; add this meeting's remark for each</span>
                 </div>
                 <div className="overflow-x-auto kc-scroll">
                   <table className="mom-sheet w-full fs-12" style={{ borderCollapse: 'collapse', minWidth: CARRY_MINW }}>
                     <thead>
-                      <tr style={{ background: '#fdf6ec', color: '#92600a' }}>
+                      <tr style={{ background: '#f1f3fb', color: INK }}>
                         <th className="px-2 py-2 fs-11 font-bold" style={{ width: '2.5rem' }}>Sr</th>
                         <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '14rem' }}>Discussion Area / Point</th>
                         <th className="px-2 py-2 fs-11 font-bold" style={{ width: '12.5rem' }}>Responsibility</th>
@@ -1331,15 +1387,14 @@ export default function MOMTracking() {
                         const isOd = c.status !== 'completed' && c.due && od > 0;
                         return (
                           <tr key={c.id} className={c.status === 'completed' ? 'opacity-60' : ''}>
-                            <td className="px-2 py-2 text-center text-gray-500">{i + 1}</td>
+                            <td className="px-2 py-2 text-center text-black">{i + 1}</td>
                             <td className="px-2 py-2">
                               <div className="flex items-center gap-1.5 flex-wrap">
-                                <CatDot color={catColor(c.category)} title={c.category} />
-                                <span className={`font-semibold text-gray-800 ${c.status === 'completed' ? 'line-through' : ''}`}>{c.area}</span>
+                                <span className={`font-semibold text-black ${c.status === 'completed' ? 'line-through' : ''}`}>{c.area}</span>
                                 {isOd && <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 fs-9 font-semibold" style={{ background: STATUS.overdue.soft, color: STATUS.overdue.color }}><AlertTriangle size={9} /> {od}d overdue</span>}
                               </div>
-                              {c.point && <div className="fs-11 text-gray-500 mt-0.5">{c.point}</div>}
-                              <div className="fs-9 text-gray-400 mt-0.5">raised {fmt(c.originDate || c.srcDate)}</div>
+                              {c.point && <div className="fs-11 text-black mt-0.5">{c.point}</div>}
+                              <div className="fs-9 text-black mt-0.5">raised {fmt(c.originDate || c.srcDate)}</div>
                             </td>
                             <td className="px-1 py-1">
                               <RespPicker value={respArr(c.resp)} options={presentNames} onChange={(v) => updCarry(c.id, { resp: v })} />
@@ -1347,7 +1402,7 @@ export default function MOMTracking() {
                             <td className="px-2 py-2 text-center"><FlagChip f={c.flag} small /></td>
                             <td className="px-1 py-1"><input type="date" value={c.due} onChange={(e) => updCarry(c.id, { due: e.target.value })} className="w-full fs-11 text-gray-700 outline-none px-1 py-1 rounded" title="Extend / change due date" /></td>
                             <td className="px-2 py-2"><RemarkHistory list={c.prevRemarks} /></td>
-                            <td className="px-1 py-1"><input value={c.remark} onChange={(e) => updCarry(c.id, { remark: e.target.value })} placeholder="Remark for this meeting…" className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded" /></td>
+                            <td className="px-1 py-1 mom-fill"><input value={c.remark} onChange={(e) => updCarry(c.id, { remark: e.target.value })} placeholder="Remark for this meeting…" className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded" /></td>
                             <td className="px-2 py-2"><SegStatus value={c.status} onChange={(v) => updCarry(c.id, { status: v })} /></td>
                           </tr>
                         );
@@ -1374,7 +1429,7 @@ export default function MOMTracking() {
               <div ref={mainScrollRef} onScroll={() => { if (mainScrollRef.current && topScrollRef.current) topScrollRef.current.scrollLeft = mainScrollRef.current.scrollLeft; }} className="overflow-x-auto kc-scroll">
                 <table className="mom-sheet w-full fs-12" style={{ borderCollapse: 'collapse', minWidth: SHEET_MINW }}>
                   <thead>
-                    <tr style={{ background: '#f1f3fb', color: BRAND_DARK }}>
+                    <tr style={{ background: '#f1f3fb', color: INK }}>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '2.8rem' }}>Sr.no</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '12rem' }}>Discussion Area</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '15rem' }}>Discussion points</th>
@@ -1392,14 +1447,24 @@ export default function MOMTracking() {
                       return (
                         <tr key={r.id}>
                           <td className="px-2 py-2 text-center text-gray-500">{i + 1}</td>
-                          <td className="px-2 py-2">
-                            <div className="flex items-center gap-1.5">
-                              <CatDot color={catColor(r.category)} title={r.category} />
-                              <span className="font-semibold text-gray-800">{r.area}</span>
-                            </div>
-                            <div className="fs-9 mt-0.5 font-medium" style={{ color: catColor(r.category) }}>{r.category}</div>
+                          <td className="px-2 py-2 align-top">
+                            {r.masterId === null ? (
+                              <>
+                                <input value={r.area} onChange={(e) => updRow(r.id, { area: e.target.value })} placeholder="Discussion area…"
+                                  className="no-ring w-full font-semibold text-gray-800 outline-none px-1 py-0.5 rounded border-b border-transparent focus:border-gray-200" />
+                                <select value={r.category} onChange={(e) => updRow(r.id, { category: e.target.value })}
+                                  className="mt-0.5 fs-9 font-medium text-gray-500 bg-transparent outline-none">{Object.keys(categories).map((c) => <option key={c}>{c}</option>)}</select>
+                              </>
+                            ) : (
+                              <>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-semibold text-gray-800">{r.area}</span>
+                                </div>
+                                <div className="fs-9 mt-0.5 font-medium text-gray-500">{r.category}</div>
+                              </>
+                            )}
                           </td>
-                          <td className="px-1 py-1 align-top">
+                          <td className="px-1 py-1 align-top mom-fill">
                             <textarea rows={1} value={r.point}
                               ref={(el) => el && autoGrow(el)}
                               onChange={(e) => { autoGrow(e.target); updRow(r.id, { point: e.target.value }); }}
@@ -1415,15 +1480,15 @@ export default function MOMTracking() {
                               ? <input type="date" value={r.due} onChange={(e) => updRow(r.id, { due: e.target.value })} className="w-full fs-11 text-gray-700 outline-none px-1 py-1 rounded" />
                               : <div className="text-center fs-11 text-gray-300" title="Information rows don't need a due date">—</div>}
                           </td>
-                          <td className="px-1 py-1"><input value={r.remark} onChange={(e) => updRow(r.id, { remark: e.target.value })} placeholder="Remark…" className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded" /></td>
+                          <td className="px-1 py-1 mom-fill"><input value={r.remark} onChange={(e) => updRow(r.id, { remark: e.target.value })} placeholder="Remark…" className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded" /></td>
                           <td className="px-1 py-1">
                             {isT ? (
                               <select value={r.status} onChange={(e) => updRow(r.id, { status: e.target.value })} className="w-full fs-11 font-semibold outline-none px-1.5 py-1.5 rounded-lg" style={{ color: STATUS[r.status].color, background: STATUS[r.status].soft }}>
-                                <option value="pending">Pending</option><option value="in_progress">In Progress</option><option value="completed">Completed</option>
+                                <option value="pending">Pending</option><option value="in_progress">WIP</option><option value="completed">Completed</option>
                               </select>
                             ) : <div className="text-center fs-11 text-gray-300">—</div>}
                           </td>
-                          <td className="px-1 py-2 text-center"><button onClick={() => askDelRow(r)} className="text-gray-300 hover:text-red-500" title="Remove row"><Trash2 size={14} /></button></td>
+                          <td className="px-1 py-2 text-center"><button onClick={() => askDelRow(r)} className="text-gray-300 hover:text-red-400" title="Remove row"><Trash2 size={14} /></button></td>
                         </tr>
                       );
                     })}
@@ -1433,10 +1498,8 @@ export default function MOMTracking() {
               </div>
               {/* add custom row */}
               <div className="flex items-center gap-2 px-3 py-2.5 border-t border-gray-100 flex-wrap" style={{ background: '#fafafc' }}>
-                <Plus size={14} className="text-gray-400" />
-                <input value={newArea} onChange={(e) => setNewArea(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addRow()} placeholder="Add a new discussion area raised during the meeting…" className="flex-1 fs-12 bg-transparent outline-none text-gray-700" style={{ minWidth: '14rem' }} />
-                <select value={newCat} onChange={(e) => setNewCat(e.target.value)} className="rounded-lg border border-gray-200 px-2 py-1.5 fs-11 bg-white outline-none">{Object.keys(categories).map((c) => <option key={c}>{c}</option>)}</select>
-                <button onClick={addRow} className="rounded-lg px-3 py-1.5 fs-11 font-semibold text-white" style={{ background: SHEET }}>Add row</button>
+                <button onClick={addRow} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 fs-11 font-semibold text-white" style={{ background: SHEET }}><Plus size={14} /> Add row</button>
+                <span className="fs-10 text-gray-400">Adds a blank row — type the discussion area, category and point directly in the table.</span>
               </div>
             </div>
 
@@ -1444,7 +1507,7 @@ export default function MOMTracking() {
             <div className="flex items-center justify-between gap-2 rounded-2xl border border-gray-200 bg-white shadow-sm px-3 py-2.5 flex-wrap">
               <button onClick={() => setStep(1)} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 fs-12 font-semibold text-gray-600 hover:bg-gray-50"><ChevronLeft size={15} /> Back to setup</button>
               <div className="flex items-center gap-3 flex-wrap">
-                {unassigned > 0 && <span className="fs-11 font-semibold inline-flex items-center gap-1" style={{ color: '#dc2626' }}><AlertTriangle size={13} /> {unassigned} task{unassigned > 1 ? 's' : ''} without responsibility</span>}
+                {unassigned > 0 && <span className="fs-11 font-semibold inline-flex items-center gap-1" style={{ color: '#f87171' }}><AlertTriangle size={13} /> {unassigned} task{unassigned > 1 ? 's' : ''} without responsibility</span>}
                 <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 fs-11 font-semibold" style={{ background: FLAG.T.bg, color: FLAG.T.color }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: FLAG.T.color }} /><b className="tabular-nums">{taskCount}</b> tasks</span>
                 <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 fs-11 font-semibold" style={{ background: FLAG.I.bg, color: FLAG.I.color }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: FLAG.I.color }} /><b className="tabular-nums">{infoCount}</b> info</span>
                 <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 fs-11 font-semibold" style={{ background: '#f1f3f9', color: '#5b6170' }}><CornerUpRight size={11} /><b className="tabular-nums">{carry.length}</b> carried</span>
@@ -1459,6 +1522,26 @@ export default function MOMTracking() {
 
         {/* ===== REPORTS ===== */}
         {view === 'reports' && <ReportsView history={history} branches={branchOptions} />}
+
+        {/* ===== MY MOM / EMPLOYEE REPORT ===== */}
+        {view === 'mine' && (
+          <div className="kc-in space-y-3">
+            {isMaster && (
+              <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-3 flex items-center gap-2 flex-wrap">
+                <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: BRAND_SOFT }}><Users size={15} style={{ color: INK }} /></span>
+                <span className="fs-12 font-bold text-gray-700">Employee report</span>
+                <select value={pickedEmp?.user_id || ''}
+                  onChange={(e) => { const emp = employees.find((x) => String(x.user_id) === e.target.value); setPickedEmp(emp ? { name: emp.name, user_id: emp.user_id, branch: emp.branch, branch_name: emp.branch_name } : null); }}
+                  className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 fs-12 text-gray-700 outline-none" style={{ minWidth: '16rem' }}>
+                  <option value="">— Myself ({me?.name}) —</option>
+                  {employees.map((emp) => <option key={emp.user_id} value={emp.user_id}>{emp.name}{emp.branch ? ` · ${emp.branch_name || emp.branch}` : ''}</option>)}
+                </select>
+                {pickedEmp && <button onClick={() => setPickedEmp(null)} className="fs-11 font-semibold text-gray-500 hover:text-gray-700">Reset to myself</button>}
+              </div>
+            )}
+            <PersonReport meetings={allMeetings} person={reportPerson} canExport={canExport} onExport={setExportReq} onView={setViewMtg} />
+          </div>
+        )}
       </div>
 
       {/* ===== MASTER SETUP MODAL ===== */}
@@ -1468,12 +1551,12 @@ export default function MOMTracking() {
       {viewMtg && <MeetingSheetModal data={viewMtg} categories={categories} canExport={canExport} onExport={setExportReq} onClose={() => setViewMtg(null)} />}
 
       {/* ===== EXPORT COLOUR PICKER ===== */}
-      {exportReq && <ExportColorModal onExport={(c) => { exportMeetingExcel(exportReq, c); setExportReq(null); }} onClose={() => setExportReq(null)} />}
+      {exportReq && <ExportColorModal onExport={(c) => { exportMeetingExcel(exportReq, c).catch(() => toast.error('Could not generate the Excel file')); setExportReq(null); }} onClose={() => setExportReq(null)} />}
 
       {/* ===== CONFIRM (finalize) ===== */}
       {confirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setConfirm(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-lg:max-h-[90vh] max-lg:overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-lg:max-h-[90vh] max-lg:overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             {/* header */}
             <div className="px-5 pt-5 pb-4 flex items-start gap-3">
               <span className="h-11 w-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: SHEET_SOFT }}>
@@ -1490,7 +1573,6 @@ export default function MOMTracking() {
               <div className="px-5 grid grid-cols-3 gap-2">
                 {confirm.stats.map((s) => (
                   <div key={s.label} className="rounded-xl border border-gray-100 px-2.5 py-2.5 text-center" style={{ background: '#fafbfd' }}>
-                    <s.icon size={15} className="mx-auto mb-1" style={{ color: s.color }} />
                     <div className="text-lg font-bold leading-none" style={{ color: s.value ? '#1f2937' : '#c3c9d4' }}>{s.value}</div>
                     <div className="fs-9 text-gray-400 mt-1 leading-tight">{s.label}</div>
                   </div>
@@ -1533,7 +1615,7 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
   );
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col" style={{ maxHeight: '92vh' }} onClick={(e) => e.stopPropagation()}>
+      <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col" style={{ maxHeight: '92vh' }} onClick={(e) => e.stopPropagation()}>
         {/* header */}
         <div className="mom-view-head px-4 py-3 flex items-start justify-between rounded-t-2xl border-b border-gray-100 max-md:flex-wrap max-md:gap-2" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
           <div className="min-w-0">
@@ -1541,17 +1623,17 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
             <div className="text-base font-bold text-gray-800">{data.branchName}</div>
             {data.branches?.length > 1 && (
               <div className="mt-1 flex items-center gap-1 flex-wrap">
-                {data.branches.map((b) => <span key={b.code} className="rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: BRAND }}>{b.name}</span>)}
+                {data.branches.map((b) => <span key={b.code} className="rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: INK }}>{b.name}</span>)}
               </div>
             )}
-            <div className="fs-10 mt-0.5 text-gray-500 flex items-center gap-3 flex-wrap">
+            <div className="fs-10 mt-0.5 text-black flex items-center gap-3 flex-wrap">
               <span className="inline-flex items-center gap-1"><CalendarDays size={11} /> {fmt(data.date)}</span>
               {data.location && <span className="inline-flex items-center gap-1"><MapPin size={11} /> {data.location}</span>}
               <span>{data.type}</span><span>by {data.conductedBy}</span>
             </div>
           </div>
           <div className="flex items-center gap-2 max-md:flex-wrap">
-            {canExport && <button onClick={() => onExport(data)} className="export-btn kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-bold max-sm:text-xs max-sm:px-2" style={{ borderColor: '#dfe3f2', color: BRAND }}><Download size={13} /> Download Excel</button>}
+            {canExport && <button onClick={() => onExport(data)} className="export-btn kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-bold max-sm:text-xs max-sm:px-2" style={{ borderColor: '#dfe3f2', color: INK }}><Download size={13} /> Download Excel</button>}
             <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100"><X className="h-4 w-4" /></button>
           </div>
         </div>
@@ -1559,23 +1641,23 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {/* attendees + legend */}
           <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2 flex-wrap fs-12 text-gray-500">
+            <div className="flex items-center gap-2 flex-wrap fs-12 text-black">
               <Users size={13} className="text-gray-400" /> Attendees:
-              <span className="fs-10 font-semibold text-gray-400">{present.length} present</span>
+              <span className="fs-10 font-semibold text-black">{present.length} present</span>
               {(showAll ? present : present.slice(0, 8)).map((a) => (
-                <span key={a.id} className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 pl-1 pr-2.5 py-1 fs-10 font-medium text-gray-700">
+                <span key={a.id} className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 pl-1 pr-2.5 py-1 fs-10 font-medium text-black">
                   <Avatar name={a.name} size={16} />{a.name}
-                  {a.branch && <span className="fs-9 text-gray-400">· {a.branch}</span>}
+                  {a.branch && <span className="fs-9 text-black">· {a.branch}</span>}
                   {a.source === 'manual' && <span className="rounded-full px-1 fs-9 font-bold" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Manually added">M</span>}
                 </span>
               ))}
               {present.length > 8 && (
-                <button onClick={() => setShowAll((v) => !v)} className="inline-flex items-center rounded-full px-2.5 py-1 fs-10 font-bold transition hover:opacity-80" style={{ background: BRAND_SOFT, color: BRAND }}>
+                <button onClick={() => setShowAll((v) => !v)} className="inline-flex items-center rounded-full px-2.5 py-1 fs-10 font-bold transition hover:opacity-80" style={{ background: BRAND_SOFT, color: INK }}>
                   {showAll ? 'Show less' : `+${present.length - 8} more`}
                 </button>
               )}
             </div>
-            <div className="flex items-center gap-3 fs-10 text-gray-500">
+            <div className="flex items-center gap-3 fs-10 text-black">
               <span className="inline-flex items-center gap-1"><FlagChip f="T" small /> Task</span>
               <span className="inline-flex items-center gap-1"><FlagChip f="I" small /> Information</span>
             </div>
@@ -1585,7 +1667,7 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
           <div className="overflow-x-auto rounded-xl border border-gray-200">
             <table className="mom-sheet w-full fs-11" style={{ borderCollapse: 'collapse', minWidth: '66rem' }}>
               <thead>
-                <tr style={{ background: '#f1f3fb', color: BRAND_DARK }}>
+                <tr style={{ background: '#f1f3fb', color: INK }}>
                   <th className="px-2 py-2 fs-11 font-bold" style={{ width: '2.8rem' }}>Sr.no</th>
                   <th className="px-2 py-2 fs-11 font-bold">Discussion Area</th>
                   <th className="px-2 py-2 fs-11 font-bold">Discussion points</th>
@@ -1600,14 +1682,14 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
               <tbody>
                 {ordered.map((r, i) => (
                   <tr key={r.id}>
-                    <td className="px-2 py-2 text-center text-gray-500">{i + 1}{r.carried && <div className="fs-9 font-bold" style={{ color: '#b45309' }}>C/F</div>}</td>
-                    <td className="px-2 py-2"><div className="flex items-center gap-1.5"><CatDot color={catColor(r.category)} title={r.category} /><span className="font-semibold text-gray-800">{r.area}</span></div></td>
-                    <td className="px-2 py-2 text-gray-700">{r.point || <span className="text-gray-300">—</span>}</td>
+                    <td className="px-2 py-2 text-center text-black">{i + 1}{r.carried && <div className="fs-9 font-bold" style={{ color: '#b45309' }}>C/F</div>}</td>
+                    <td className="px-2 py-2"><div className="flex items-center gap-1.5"><span className="font-semibold text-black">{r.area}</span></div></td>
+                    <td className="px-2 py-2 text-black">{r.point || <span className="text-gray-300">—</span>}</td>
                     <td className="px-2 py-2">
                       {respArr(r.resp).length ? (
                         <div className="flex items-center gap-1 flex-wrap">
                           {respArr(r.resp).map((n) => (
-                            <span key={n} className="inline-flex items-center gap-1 rounded-full pl-0.5 pr-1.5 py-0.5 fs-10 font-semibold" style={{ background: BRAND_SOFT, color: BRAND }}>
+                            <span key={n} className="inline-flex items-center gap-1 rounded-full pl-0.5 pr-1.5 py-0.5 fs-10 font-semibold" style={{ background: BRAND_SOFT, color: INK }}>
                               <Avatar name={n} size={14} />{n.split(' ')[0]}
                             </span>
                           ))}
@@ -1615,9 +1697,9 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
                       ) : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-2 py-2 text-center"><FlagChip f={r.flag} small /></td>
-                    <td className="px-2 py-2 text-center text-gray-600">{r.flag === 'T' ? fmt(r.due) : '—'}</td>
+                    <td className="px-2 py-2 text-center text-black">{r.flag === 'T' ? fmt(r.due) : '—'}</td>
                     <td className="px-2 py-2"><RemarkHistory list={r.prevRemarks} /></td>
-                    <td className="px-2 py-2 text-gray-700">{r.remark || <span className="text-gray-300">—</span>}</td>
+                    <td className="px-2 py-2 text-black">{r.remark || <span className="text-gray-300">—</span>}</td>
                     <td className="px-2 py-2 text-center"><StatusBadge r={r} /></td>
                   </tr>
                 ))}
@@ -1639,10 +1721,11 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
   const allBranches = useMemo(() => {
     const map = new Map(branches.map((b) => [b.code, { ...b }]));
     Object.keys(history).forEach((code) => {
-      if (!map.has(code)) {
-        const m = (history[code] || [])[0];
-        map.set(code, { code, name: m?.branches?.find((x) => x.code === code)?.name || m?.branchName || code, manual: true });
-      }
+      /* history-only branches (e.g. manually added) appear ONLY while they
+         still have meetings — never as a bare "MB-…" code with 0 meetings */
+      if (map.has(code) || !(history[code] || []).length) return;
+      const m = history[code][0];
+      map.set(code, { code, name: m?.branches?.find((x) => x.code === code)?.name || m?.branchName || code, manual: true });
     });
     return [...map.values()];
   }, [branches, history]);
@@ -1677,15 +1760,15 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
       <aside className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden h-fit">
-        <div className="px-3 py-2.5 border-b border-gray-100 fs-12 font-bold text-gray-700 flex items-center gap-2"><Building2 size={14} style={{ color: BRAND }} /> Branches{source === 'error' && <span className="ml-auto fs-9 font-bold rounded-full px-1.5 py-0.5" style={{ background: 'rgba(220,38,38,0.12)', color: '#b91c1c' }} title="MOM API not reachable">offline</span>}</div>
+        <div className="px-3 py-2.5 border-b border-gray-100 fs-12 font-bold text-gray-700 flex items-center gap-2"><Building2 size={14} style={{ color: INK }} /> Branches{source === 'error' && <span className="ml-auto fs-9 font-bold rounded-full px-1.5 py-0.5" style={{ background: 'rgba(248,113,113,0.12)', color: '#f87171' }} title="MOM API not reachable">offline</span>}</div>
         <div className="overflow-y-auto kc-scroll" style={{ maxHeight: '26rem' }}>
           {allBranches.map((b) => {
             const oc = openCount(b.code);
             return (
               <button key={b.code} onClick={() => setCode(b.code)} className="w-full text-left px-3 py-2 border-b border-gray-50 transition" style={code === b.code ? { background: BRAND_SOFT } : {}}>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="fs-12 font-medium truncate" style={code === b.code ? { color: BRAND } : { color: '#374151' }}>{b.name}</span>
-                  {oc > 0 && <span className="fs-9 font-bold rounded-full px-1.5 py-0.5 flex-shrink-0" style={{ background: 'rgba(220,38,38,0.1)', color: '#dc2626' }} title="Open tasks">{oc}</span>}
+                  <span className="fs-12 font-medium truncate" style={code === b.code ? { color: INK } : { color: '#374151' }}>{b.name}</span>
+                  {oc > 0 && <span className="fs-9 font-bold rounded-full px-1.5 py-0.5 flex-shrink-0" style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171' }} title="Open tasks">{oc}</span>}
                 </div>
                 <div className="fs-10 text-gray-400">{(history[b.code] || []).length} meetings{b.manual ? ' · manual' : ''}</div>
               </button>
@@ -1698,7 +1781,7 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
         {/* toolbar: search · type filter · sort */}
         <div className="px-3 py-2.5 border-b border-gray-100 flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: BRAND_SOFT }}><FileText size={15} style={{ color: BRAND }} /></span>
+            <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: BRAND_SOFT }}><FileText size={15} style={{ color: INK }} /></span>
             <div className="min-w-0">
               <div className="fs-13 font-bold text-gray-800 truncate">{selBranch?.name || '—'}</div>
               <div className="fs-10 text-gray-400">{meetings.length} meeting{meetings.length === 1 ? '' : 's'} recorded{shown.length !== meetings.length ? ` · ${shown.length} shown` : ''}</div>
@@ -1752,14 +1835,18 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
                           <div className="min-w-0">
                             <div className="fs-12 font-bold text-gray-800 flex items-center gap-1.5 flex-wrap">
                               {m.type || 'Meeting'}
-                              {m.branches?.length > 1 && <span className="fs-9 font-bold rounded-full px-1.5 py-0.5" style={{ background: BRAND_SOFT, color: BRAND }} title={m.branches.map((b) => b.name).join(' + ')}>{m.branches.length} branches</span>}
+                              {m.branches?.length > 1 && <span className="fs-9 font-bold rounded-full px-1.5 py-0.5" style={{ background: BRAND_SOFT, color: INK }} title={m.branches.map((b) => b.name).join(' + ')}>{m.branches.length} branches</span>}
                             </div>
-                            <div className="fs-10 text-gray-400 truncate flex items-center gap-1" style={{ maxWidth: '15rem' }}><MapPin size={9} className="flex-shrink-0" /> {m.location || '—'} · {fmt(m.date)}</div>
+                            <div className="fs-10 text-black flex items-center gap-1 min-w-0" style={{ maxWidth: '15rem' }} title={m.location || '—'}>
+                              <MapPin size={9} className="flex-shrink-0" />
+                              <span className="truncate min-w-0">{m.location || '—'}</span>
+                              <span className="flex-shrink-0">· {fmt(m.date)}</span>
+                            </div>
                           </div>
                         </div>
                       </td>
                       <td className="px-3 py-2.5"><div className="flex items-center gap-1.5"><Avatar name={m.conductedBy} size={20} /><span className="fs-11 text-gray-700 truncate" style={{ maxWidth: '8rem' }}>{m.conductedBy}</span></div></td>
-                      <td className="px-3 py-2.5"><div className="flex items-center gap-1.5"><AvatarStack names={presentN} /><span className="fs-9 text-gray-400 flex-shrink-0">{presentN.length} present</span></div></td>
+                      <td className="px-3 py-2.5"><div className="flex items-center gap-1.5 min-w-0" title={presentN.join(', ')}><span className="fs-11 text-gray-700 truncate" style={{ maxWidth: '13rem' }}>{presentN.join(', ') || '—'}</span><span className="fs-9 text-gray-400 flex-shrink-0">({presentN.length})</span></div></td>
                       <td className="px-3 py-2.5 text-center text-gray-700 font-semibold">{m.rows.length}</td>
                       <td className="px-3 py-2.5 text-center">
                         <div className="fs-12 font-bold text-gray-800">{done}<span className="fs-10 font-normal text-gray-400">/{tasks.length}</span></div>
@@ -1776,7 +1863,7 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-end gap-1.5">
                           {canExport && <button onClick={() => onExport(m)} title="Download Excel" className="export-btn rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50"><Download size={13} /></button>}
-                          {canDelete && <button onClick={() => onDelete(m)} title="Delete meeting" className="rounded-lg border border-gray-200 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50"><Trash2 size={13} /></button>}
+                          {canDelete && <button onClick={() => onDelete(m)} title="Delete meeting" className="rounded-lg border border-gray-200 p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-50"><Trash2 size={13} /></button>}
                           <button onClick={() => onView(m)} className="kc-lift rounded-lg px-2.5 py-1.5 fs-11 font-bold text-white" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})` }}>View sheet</button>
                         </div>
                       </td>
@@ -1792,6 +1879,233 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
   );
 }
 
+/* SVG donut arc path (clockwise), start/end in degrees from 12 o'clock */
+const donutArc = (cx, cy, r, startAng, endAng) => {
+  const pt = (ang) => { const a = (ang - 90) * Math.PI / 180; return `${cx + r * Math.cos(a)} ${cy + r * Math.sin(a)}`; };
+  const large = (endAng - startAng) % 360 > 180 ? 1 : 0;
+  return `M ${pt(startAng)} A ${r} ${r} 0 ${large} 1 ${pt(endAng)}`;
+};
+
+/* Detailed meeting grid (enrolled meetings / branch meetings) — full
+   columns with attendees, task breakdown, and View / Excel actions. */
+function MeetingGrid({ title, meetings, onView, onExport }) {
+  const today = iso(new Date());
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-gray-100 fs-12 font-bold text-gray-700">{title}</div>
+      <div className="overflow-x-auto max-h-[26rem] overflow-y-auto">
+        <table className="w-full fs-11" style={{ minWidth: '46rem' }}>
+          <thead className="sticky top-0 z-10"><tr className="text-left text-gray-400" style={{ background: '#f4f6fb' }}>
+            <th className="px-3 py-2 font-semibold">Date</th>
+            <th className="px-3 py-2 font-semibold">Type</th>
+            <th className="px-3 py-2 font-semibold">Location</th>
+            <th className="px-3 py-2 font-semibold">Branch</th>
+            <th className="px-3 py-2 font-semibold text-center">Present</th>
+            <th className="px-3 py-2 font-semibold text-center">Points</th>
+            <th className="px-3 py-2 font-semibold text-center">Tasks</th>
+            <th className="px-3 py-2 font-semibold"></th>
+          </tr></thead>
+          <tbody>
+            {meetings.length === 0 && <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-400">Nothing yet.</td></tr>}
+            {meetings.map((m) => {
+              const present = (m.attendees || []).filter((a) => a.present !== false);
+              const tasks = (m.rows || []).filter((r) => r.flag === 'T');
+              const doneT = tasks.filter((r) => r.status === 'completed').length;
+              const odT = tasks.filter((r) => r.status !== 'completed' && r.due && r.due < today).length;
+              const brName = m.branches?.length ? m.branches.map((b) => b.name || b.code).join(', ') : (m.branchName || m.branchCode);
+              return (
+                <tr key={m.id} className="border-t border-gray-50 hover:bg-[#f7f9ff]">
+                  <td className="px-3 py-2 font-semibold text-gray-800 whitespace-nowrap">{fmt(m.date)}</td>
+                  <td className="px-3 py-2 text-gray-700">{m.type || 'Meeting'}</td>
+                  <td className="px-3 py-2 text-gray-500 truncate" style={{ maxWidth: '10rem' }} title={m.location || ''}>{m.location || '—'}</td>
+                  <td className="px-3 py-2 text-gray-500 truncate" style={{ maxWidth: '10rem' }} title={brName}>{brName}</td>
+                  <td className="px-3 py-2 text-center text-gray-700" title={present.map((a) => a.name).join(', ')}>{present.length}</td>
+                  <td className="px-3 py-2 text-center text-gray-700">{(m.rows || []).length}</td>
+                  <td className="px-3 py-2 text-center whitespace-nowrap">
+                    <span className="font-bold text-gray-800">{doneT}/{tasks.length}</span>
+                    {odT > 0 && <span className="ml-1 fs-9 font-bold rounded-full px-1.5 py-0.5" style={{ background: STATUS.overdue.soft, color: STATUS.overdue.color }}>{odT} od</span>}
+                  </td>
+                  <td className="px-2 py-2 whitespace-nowrap text-right">
+                    {onView && <button onClick={() => onView(m)} className="fs-10 font-bold rounded-lg text-white px-2 py-1 mr-1" style={{ background: BRAND }}>View</button>}
+                    {onExport && <button onClick={() => onExport(m)} className="fs-10 font-bold rounded-lg border px-2 py-1 text-gray-600 hover:bg-gray-50" style={{ borderColor: '#e5e7eb' }}>Excel</button>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   PERSON REPORT — a single person's MOM footprint, computed
+   client-side from the full meeting list:
+     • meetings they were enrolled in (present attendee)
+     • tasks assigned to them (owner name match), latest state
+     • meetings held in their branch
+     • charts: task-status donut + attendance trend
+   Used for self (employee / branch admin) and, for master admin,
+   for any picked employee.
+   ============================================================ */
+function PersonReport({ meetings, person, canExport, onExport, onView }) {
+  const norm = (s) => (s || '').trim().toLowerCase();
+  const data = useMemo(() => {
+    const all = meetings || [];
+    const attendedBy = (m) => (m.attendees || []).some((a) => a.present !== false && (
+      (person.user_id && a.user_id && String(a.user_id) === String(person.user_id)) ||
+      (a.name && person.name && norm(a.name) === norm(person.name))
+    ));
+    const inBranch = (m) => person.branch && (m.branches?.length ? m.branches.some((b) => b.code === person.branch) : m.branchCode === person.branch);
+    const attended = all.filter(attendedBy).sort((a, b) => new Date(b.date) - new Date(a.date));
+    const branchM = all.filter(inBranch).sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // tasks assigned to the person, scoped to meetings they were enrolled in,
+    // de-duplicated across carried meetings by trackId (keep latest state).
+    const owns = (r) => r.flag === 'T' && respArr(r.resp).some((n) => norm(n) === norm(person.name));
+    const byTrack = new Map();
+    attended.forEach((m) => (m.rows || []).forEach((r) => {
+      if (!owns(r)) return;
+      const prev = byTrack.get(r.trackId);
+      const rec = { ...r, meetingDate: m.date, meetingType: m.type, meetingLocation: m.location, meeting: m };
+      if (!prev || new Date(m.date) > new Date(prev.meetingDate)) byTrack.set(r.trackId, rec);
+    }));
+    const today = iso(new Date());
+    const tasks = [...byTrack.values()].sort((a, b) => new Date(b.meetingDate) - new Date(a.meetingDate));
+    const isOd = (t) => t.status !== 'completed' && t.due && t.due < today;
+    const done = tasks.filter((t) => t.status === 'completed').length;
+    const overdue = tasks.filter(isOd).length;
+    const inprog = tasks.filter((t) => t.status === 'in_progress' && !isOd(t)).length;
+    const pending = tasks.length - done - overdue - inprog;
+
+    // attendance trend — last 6 months
+    const months = [];
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); months.push({ key: `${d.getFullYear()}-${d.getMonth()}`, label: d.toLocaleDateString(undefined, { month: 'short' }), count: 0 }); }
+    const mIdx = new Map(months.map((m, i) => [m.key, i]));
+    attended.forEach((m) => { const d = new Date(m.date); const k = `${d.getFullYear()}-${d.getMonth()}`; if (mIdx.has(k)) months[mIdx.get(k)].count += 1; });
+
+    return { attended, branchM, tasks, done, overdue, inprog, pending, open: tasks.length - done, months, isOd,
+      completion: tasks.length ? Math.round((done / tasks.length) * 100) : 0 };
+  }, [meetings, person]);
+
+  const total = data.tasks.length;
+  const seg = [
+    { label: 'Completed', value: data.done, color: STATUS.completed.color },
+    { label: 'Overdue', value: data.overdue, color: STATUS.overdue.color },
+    { label: 'WIP', value: data.inprog, color: STATUS.in_progress.color },
+    { label: 'Pending', value: data.pending, color: STATUS.pending.color },
+  ];
+  let ang = 0;
+  const arcs = seg.filter((s) => s.value > 0).map((s) => { const sweep = (s.value / total) * 360; const a = { color: s.color, start: ang, end: ang + sweep }; ang += sweep; return a; });
+  const maxMonth = Math.max(1, ...data.months.map((m) => m.count));
+
+  const Stat = ({ label, value, color }) => (
+    <div className="kc-pop-in kc-lift rounded-xl border border-gray-100 bg-white px-3 py-2.5 text-center">
+      <div className="text-xl font-bold leading-none" style={{ color: value ? (color || INK) : '#9ca3af' }}>{value}</div>
+      <div className="fs-10 text-gray-400 mt-1 leading-tight">{label}</div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+        <Stat label="Meetings attended" value={data.attended.length} />
+        <Stat label="Branch meetings" value={data.branchM.length} />
+        <Stat label="Tasks assigned" value={total} />
+        <Stat label="Completed" value={data.done} color={STATUS.completed.color} />
+        <Stat label="Open" value={data.open} color={STATUS.in_progress.color} />
+        <Stat label="Overdue" value={data.overdue} color={STATUS.overdue.color} />
+        <Stat label="Completion %" value={data.completion} color={data.completion >= 70 ? STATUS.completed.color : (data.completion >= 40 ? STATUS.in_progress.color : STATUS.overdue.color)} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4">
+          <div className="fs-12 font-bold text-gray-700 mb-2">Task status</div>
+          {total === 0 ? <div className="fs-11 text-gray-400 py-10 text-center">No tasks assigned yet.</div> : (
+            <div className="flex items-center gap-4">
+              <svg width="120" height="120" viewBox="0 0 120 120" className="mom-donut flex-shrink-0">
+                <circle cx="60" cy="60" r="42" fill="none" stroke="#edeff4" strokeWidth="14" />
+                {arcs.length === 1
+                  ? <circle cx="60" cy="60" r="42" fill="none" stroke={arcs[0].color} strokeWidth="14" />
+                  : arcs.map((a, i) => <path key={i} d={donutArc(60, 60, 42, a.start, a.end)} fill="none" stroke={a.color} strokeWidth="14" />)}
+                <text x="60" y="58" textAnchor="middle" style={{ fontSize: 20, fontWeight: 700, fill: 'var(--mom-ink)' }}>{total}</text>
+                <text x="60" y="74" textAnchor="middle" style={{ fontSize: 9, fill: '#9ca3af' }}>tasks</text>
+              </svg>
+              <div className="space-y-1 flex-1">
+                {seg.map((s) => (
+                  <div key={s.label} className="flex items-center gap-2 fs-11">
+                    <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ background: s.color }} />
+                    <span className="text-gray-600 flex-1">{s.label}</span>
+                    <span className="font-bold text-gray-800">{s.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="rounded-2xl border border-gray-200 bg-white p-4">
+          <div className="fs-12 font-bold text-gray-700 mb-2">Meetings attended (last 6 months)</div>
+          <div className="flex items-end gap-2" style={{ height: 96 }}>
+            {data.months.map((m) => (
+              <div key={m.key} className="flex-1 flex flex-col items-center justify-end h-full">
+                <div className="fs-9 font-bold text-gray-500">{m.count || ''}</div>
+                <div className="w-full rounded-t" style={{ height: `${Math.round((m.count / maxMonth) * 70)}px`, minHeight: m.count ? 4 : 2, background: m.count ? BRAND : '#e5e7eb' }} />
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2 mt-1">{data.months.map((m) => <div key={m.key} className="flex-1 text-center fs-9 text-gray-400">{m.label}</div>)}</div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-gray-100 fs-12 font-bold text-gray-700 flex items-center justify-between flex-wrap gap-1">
+          <span>Tasks assigned to {person.name || 'you'} ({total})</span>
+          {total > 0 && <span className="fs-10 font-semibold text-gray-400">{data.done} done · {data.open} open · {data.overdue} overdue</span>}
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full fs-11" style={{ minWidth: '54rem' }}>
+            <thead><tr className="text-left text-gray-400" style={{ background: '#f4f6fb' }}>
+              <th className="px-3 py-2 font-semibold">#</th>
+              <th className="px-3 py-2 font-semibold">Discussion area / point</th>
+              <th className="px-3 py-2 font-semibold">Category</th>
+              <th className="px-3 py-2 font-semibold">Owners</th>
+              <th className="px-3 py-2 font-semibold">Meeting</th>
+              <th className="px-3 py-2 font-semibold">Due</th>
+              <th className="px-3 py-2 font-semibold">Status</th>
+              <th className="px-3 py-2 font-semibold"></th>
+            </tr></thead>
+            <tbody>
+              {data.tasks.length === 0 && <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-400">No tasks assigned.</td></tr>}
+              {data.tasks.map((t, i) => {
+                const od = data.isOd(t);
+                const st = od ? STATUS.overdue : (STATUS[t.status] || STATUS.pending);
+                const odDays = od ? Math.max(1, Math.floor((new Date(iso(new Date())) - new Date(t.due)) / 86400000)) : 0;
+                return (
+                  <tr key={t.trackId} className="border-t border-gray-50 hover:bg-[#f7f9ff] align-top">
+                    <td className="px-3 py-2 text-gray-400">{i + 1}</td>
+                    <td className="px-3 py-2"><div className="font-semibold text-gray-800">{t.area}</div>{t.point && <div className="fs-10 text-gray-500" style={{ maxWidth: '24rem' }}>{t.point}</div>}{t.remark && <div className="fs-9 text-gray-400 mt-0.5" style={{ maxWidth: '24rem' }}>Remark: {t.remark}</div>}</td>
+                    <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{t.category || '—'}</td>
+                    <td className="px-3 py-2 text-gray-600" style={{ maxWidth: '11rem' }}>{respArr(t.resp).join(', ') || '—'}</td>
+                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{t.meetingType || 'Meeting'}<div className="fs-9 text-gray-400">{fmt(t.meetingDate)}</div></td>
+                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{t.due ? fmt(t.due) : '—'}{odDays > 0 && <div className="fs-9 font-bold" style={{ color: STATUS.overdue.color }}>{odDays}d overdue</div>}</td>
+                    <td className="px-3 py-2"><span className="inline-block rounded-full px-2 py-0.5 fs-10 font-bold whitespace-nowrap" style={{ color: st.color, background: st.soft }}>{st.label}</span></td>
+                    <td className="px-2 py-2 text-right">{onView && t.meeting && <button onClick={() => onView(t.meeting)} className="fs-10 font-bold rounded-lg text-white px-2 py-1" style={{ background: BRAND }}>View</button>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <MeetingGrid title={`Meetings enrolled in (${data.attended.length})`} meetings={data.attended} onView={onView} onExport={canExport ? onExport : null} />
+      <MeetingGrid title={`Meetings held in branch (${data.branchM.length})`} meetings={data.branchM} onView={onView} onExport={canExport ? onExport : null} />
+    </div>
+  );
+}
+
 /* ============================================================
    REPORTS VIEW — latest state per tracked task (no double count),
    with a branch scope filter and extra breakdowns:
@@ -1802,10 +2116,11 @@ function ReportsView({ history, branches }) {
   const allBranches = useMemo(() => {
     const map = new Map(branches.map((b) => [b.code, { ...b }]));
     Object.keys(history).forEach((code) => {
-      if (!map.has(code)) {
-        const m = (history[code] || [])[0];
-        map.set(code, { code, name: m?.branches?.find((x) => x.code === code)?.name || m?.branchName || code, manual: true });
-      }
+      /* history-only branches (e.g. manually added) appear ONLY while they
+         still have meetings — never as a bare "MB-…" code with 0 meetings */
+      if (map.has(code) || !(history[code] || []).length) return;
+      const m = history[code][0];
+      map.set(code, { code, name: m?.branches?.find((x) => x.code === code)?.name || m?.branchName || code, manual: true });
     });
     return [...map.values()];
   }, [branches, history]);
@@ -1889,9 +2204,9 @@ function ReportsView({ history, branches }) {
       covered: scope === 'all' ? branchRows.filter((b) => b.meetings > 0).length : 1,
       pie: [
         { name: 'Completed', value: completed, color: '#059669' },
-        { name: 'In Progress', value: inProg, color: '#d97706' },
+        { name: 'WIP', value: inProg, color: '#d97706' },
         { name: 'Pending', value: pend, color: '#64748b' },
-        { name: 'Overdue', value: overRows.length, color: '#dc2626' },
+        { name: 'Overdue', value: overRows.length, color: '#f87171' },
       ],
       cats: Object.values(catMap).sort((a, b) => (b.done + b.open) - (a.done + a.open)),
       trend, owners, aging, branchRows,
@@ -1911,8 +2226,7 @@ function ReportsView({ history, branches }) {
       {/* scope */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="fs-12 font-bold text-gray-700 flex items-center gap-2">
-          <BarChart3 size={15} style={{ color: BRAND }} /> Detailed reports
-          <span className="fs-10 font-normal text-gray-400">latest state per tracked task — carried tasks are never double-counted</span>
+          <BarChart3 size={15} style={{ color: INK }} /> Detailed reports
         </div>
         <select value={scope} onChange={(e) => setScope(e.target.value)} className="kc-input px-2.5 py-1.5 fs-11 font-semibold text-gray-700">
           <option value="all">All branches</option>
@@ -1925,7 +2239,7 @@ function ReportsView({ history, branches }) {
         <KPI icon={CalendarDays} label="Total meetings" value={d.meetings} color={BRAND} />
         <KPI icon={CheckCircle2} label="Task completion" value={`${d.completion}%`} color="#059669" />
         <KPI icon={ListChecks} label="Open tasks" value={d.open} color="#d97706" />
-        <KPI icon={AlertTriangle} label="Overdue tasks" value={d.overdue} color="#dc2626" />
+        <KPI icon={AlertTriangle} label="Overdue tasks" value={d.overdue} color="#f87171" />
         <KPI icon={FileText} label="Information shared" value={d.info} color="#2563eb" hint="Information rows across all meetings" />
         <KPI icon={Zap} label="Avg tasks / meeting" value={d.avg} color="#b45309" />
         <KPI icon={Users} label="Attendance rate" value={`${d.att}%`} color="#7c3aed" hint="Present / listed attendees across meetings" />
@@ -1999,7 +2313,7 @@ function ReportsView({ history, branches }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
-                <Tooltip /><Bar dataKey="v" name="Overdue tasks" fill="#dc2626" radius={[4, 4, 0, 0]} />
+                <Tooltip /><Bar dataKey="v" name="Overdue tasks" fill="#f87171" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -2025,7 +2339,7 @@ function ReportsView({ history, branches }) {
                     <tr key={o.name} style={{ borderTop: '1px solid #f6f6f9' }}>
                       <td className="px-3 py-1.5"><div className="flex items-center gap-1.5"><Avatar name={o.name} size={20} /><span className="font-medium text-gray-800 truncate" style={{ maxWidth: '9rem' }}>{o.name}</span></div></td>
                       <td className="px-3 py-1.5 text-center font-semibold" style={{ color: o.open ? '#b45309' : '#9ca3af' }}>{o.open}</td>
-                      <td className="px-3 py-1.5 text-center">{o.overdue > 0 ? <span className="font-semibold text-red-500">{o.overdue}</span> : <span className="text-gray-300">0</span>}</td>
+                      <td className="px-3 py-1.5 text-center">{o.overdue > 0 ? <span className="font-semibold text-red-400">{o.overdue}</span> : <span className="text-gray-300">0</span>}</td>
                       <td className="px-3 py-1.5 text-center text-gray-600">{o.done}</td>
                       <td className="px-3 py-1.5"><Bar2 v={Math.round(o.done / Math.max(1, o.done + o.open) * 100)} /></td>
                     </tr>
@@ -2058,7 +2372,7 @@ function ReportsView({ history, branches }) {
                   <td className="px-3 py-1.5 text-center text-gray-700">{b.tasks}</td>
                   <td className="px-3 py-1.5 text-center text-gray-600">{b.done}</td>
                   <td className="px-3 py-1.5 text-center">{b.open > 0 ? <span className="font-semibold" style={{ color: '#b45309' }}>{b.open}</span> : <span className="text-gray-300">0</span>}</td>
-                  <td className="px-3 py-1.5 text-center">{b.overdue > 0 ? <span className="font-semibold text-red-500">{b.overdue}</span> : <span className="text-gray-300">0</span>}</td>
+                  <td className="px-3 py-1.5 text-center">{b.overdue > 0 ? <span className="font-semibold text-red-400">{b.overdue}</span> : <span className="text-gray-300">0</span>}</td>
                   <td className="px-3 py-1.5 text-center text-gray-600">{b.info}</td>
                   <td className="px-3 py-1.5 text-center text-gray-600">{b.meetings ? `${b.att}%` : '—'}</td>
                   <td className="px-3 py-1.5"><div className="flex items-center gap-2"><div className="flex-1"><Bar2 v={b.completion} /></div><span className="fs-10 text-gray-500" style={{ width: '2rem', textAlign: 'right' }}>{b.completion}%</span></div></td>
@@ -2139,7 +2453,7 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col" style={{ maxHeight: '86vh' }} onClick={(e) => e.stopPropagation()}>
+      <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col" style={{ maxHeight: '86vh' }} onClick={(e) => e.stopPropagation()}>
         <div className="mom-view-head px-4 py-3 flex items-center justify-between rounded-t-2xl border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
           <div>
             <div className="text-sm font-bold text-gray-800">Master setup</div>
@@ -2164,10 +2478,9 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
             <div className="flex-1 overflow-y-auto p-2.5">
               {master.map((p) => (
                 <div key={p.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50">
-                  <CatDot color={categories[p.category]} title={p.category} />
                   <input value={p.title} onChange={(e) => rename(p.id, e.target.value)} onBlur={() => commitTitle(p.id)} className="flex-1 fs-12 text-gray-800 bg-transparent outline-none border-b border-transparent focus:border-gray-200 py-0.5" />
                   <select value={p.category} onChange={(e) => recat(p.id, e.target.value)} className="rounded-md border border-gray-200 px-1.5 py-1 fs-10 bg-white outline-none">{catKeys.map((c) => <option key={c}>{c}</option>)}</select>
-                  <button onClick={() => remove(p.id)} className="text-gray-300 hover:text-red-500 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => remove(p.id)} className="text-gray-300 hover:text-red-400 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               ))}
             </div>
@@ -2179,7 +2492,6 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
         ) : (
           <>
             <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 max-sm:flex-wrap" style={{ background: '#fafafc' }}>
-              <input type="color" value={newColor} onChange={(e) => setNewColor(e.target.value)} className="h-8 w-9 rounded cursor-pointer border border-gray-200 p-0.5" title="Pick a colour" />
               <input value={newCat} onChange={(e) => setNewCat(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addCat()} placeholder="Add a new category…" className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 fs-12 outline-none" />
               <button onClick={addCat} className="rounded-lg px-3 py-1.5 fs-12 font-semibold text-white inline-flex items-center gap-1" style={{ background: BRAND }}><Plus className="h-3.5 w-3.5" /> Add</button>
             </div>
@@ -2188,10 +2500,9 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
                 const used = master.filter((p) => p.category === name).length;
                 return (
                   <div key={name} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-gray-50">
-                    <input type="color" value={categories[name]} onChange={(e) => setCatColor(name, e.target.value)} onBlur={() => commitColor(name)} className="h-6 w-8 rounded cursor-pointer border border-gray-200 p-0.5" title="Change colour" />
                     <span className="flex-1 fs-12 font-medium text-gray-800">{name}</span>
                     <span className="fs-10 text-gray-400">{used} point{used === 1 ? '' : 's'}</span>
-                    <button onClick={() => removeCat(name)} className="text-gray-300 hover:text-red-500 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => removeCat(name)} className="text-gray-300 hover:text-red-400 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
                   </div>
                 );
               })}
