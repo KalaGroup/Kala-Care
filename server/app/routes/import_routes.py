@@ -43,7 +43,8 @@ FILE_TYPES = [
 ]
 
 
-def run_import_job(job_id: str, file_contents: bytes, filename: str, file_type: str):
+def run_import_job(job_id: str, file_contents: bytes, filename: str, file_type: str,
+                   column_mapping: dict = None):
     """Background task — runs the actual import with its own DB session"""
     db = SessionLocal()
     try:
@@ -64,7 +65,7 @@ def run_import_job(job_id: str, file_contents: bytes, filename: str, file_type: 
         fake_file = FakeUploadFile(file_contents, filename)
 
         controller = ImportController(db)
-        result = controller.process_file(fake_file, file_type)
+        result = controller.process_file(fake_file, file_type, column_mapping=column_mapping)
 
         import_jobs[job_id].update({
             "status": "done",
@@ -95,6 +96,7 @@ async def import_excel(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     file_type: str = Form(...),
+    column_mapping: str = Form(None),
 ):
     """
     Accepts the file and immediately returns a job_id.
@@ -112,6 +114,21 @@ async def import_excel(
             detail="File must be an Excel file (.xlsx or .xls)"
         )
 
+    # Optional user-defined header mapping {"file header": "important column"}
+    # from the Import page — lets a file with e.g. "Dt" upload as "SR Due Date".
+    mapping = None
+    if column_mapping:
+        import json as _json
+        try:
+            parsed = _json.loads(column_mapping)
+            if isinstance(parsed, dict):
+                mapping = {
+                    str(k): str(v) for k, v in parsed.items()
+                    if isinstance(k, str) and isinstance(v, str) and k.strip() and v.strip()
+                }
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="column_mapping must be valid JSON")
+
     # Read the entire file into memory NOW (before the request closes)
     contents = await file.read()
 
@@ -127,7 +144,7 @@ async def import_excel(
         "total_processed": 0,
     }
 
-    background_tasks.add_task(run_import_job, job_id, contents, file.filename, file_type)
+    background_tasks.add_task(run_import_job, job_id, contents, file.filename, file_type, mapping)
 
     # Return immediately — no timeout possible
     return JSONResponse(

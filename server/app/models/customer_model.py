@@ -57,7 +57,10 @@ class AMCAgreement(Base):
     last_agreement_product_name = Column(String(500), nullable=True)
     last_agreement_start_date = Column(DateTime, nullable=True)
     last_agreement_end_date = Column(DateTime, nullable=True)
-    
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -99,7 +102,10 @@ class AssetDetailed(Base):
     krm_subscription_start_date = Column(DateTime, nullable=True)
     krm_subscription_end_date = Column(DateTime, nullable=True)
     kva_rating = Column(String(100), nullable=True)
-    
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -133,7 +139,10 @@ class AssetService(Base):
     last_oil_change_date = Column(DateTime, nullable=True)
     installation_site_address = Column(Text, nullable=True)
     last_service_hrs = Column(String(100), nullable=True)
-    
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -191,7 +200,10 @@ class AnubandhanPlusQuote(Base):
     pulse_instance_id = Column(String(200), nullable=True)
     new_price_applicable = Column(Boolean, default=False)
     quotation_type = Column(String(50), nullable=True)
-    
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -249,7 +261,10 @@ class AnubandhanQuote(Base):
     pulse_instance_id = Column(String(200), nullable=True)
     new_price_applicable = Column(Boolean, default=False)
     quotation_type = Column(String(50), nullable=True)
-    
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -307,7 +322,10 @@ class BandhanPlusQuote(Base):
     pulse_instance_id = Column(String(200), nullable=True)
     new_price_applicable = Column(Boolean, default=False)
     quotation_type = Column(String(50), nullable=True)
-    
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -353,7 +371,10 @@ class PulseQuotation(Base):
     quotation_lead_assigned_job_title = Column(String(500), nullable=True)
     quotation_lead_assigned_phone = Column(String(50), nullable=True)
     quotation_lead_assigned_uid = Column(String(200), nullable=True)
-    
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -415,6 +436,9 @@ class RegularBandhan(Base):
     quotation_type = Column(String(50), nullable=True)
     first_pm_date = Column(DateTime, nullable=True)
     agreement_start_date = Column(DateTime, nullable=True)
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
@@ -499,7 +523,10 @@ class LMSData(Base):
     lead_contact_number = Column(String(50), nullable=True)
     next_action_date = Column(DateTime, nullable=True)
     lead_assign_to_sd = Column(String(500), nullable=True)
-    
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -578,21 +605,29 @@ class OpenSRLoadReport(Base):
     bandhan_pm_jc_creation_lock_removal_flag_updated_date = Column(DateTime, nullable=True)
     account_id = Column(String(200), nullable=True)
     sr_created_by = Column(String(500), nullable=True)
+    sr_created_date = Column(DateTime, nullable=True)
     efsr_krm_number = Column(String(200), nullable=True)
     dry_csp_approved_by = Column(String(500), nullable=True)
     dry_csp_approved_date = Column(DateTime, nullable=True)
-    
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 class OpenSRData(Base):
-    """'Open SR Data' import — ONE row per instance_id (upserted on re-import).
-    Only instance_ids that already exist in the customers table are stored;
+    """'Open SR Data' (Close SR Report) import — ONE row per unique
+    (instance_id, sr_number) combination, upserted on re-import. Only
+    instance_ids that already exist in the customers table are stored;
     surfaced in the SR Details box (CustomerEng/CustomerEng2) and Customer page."""
     __tablename__ = "open_sr_data"
+    __table_args__ = (
+        Index('UQ_open_sr_data_instance_sr', 'instance_id', 'sr_number', unique=True),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    instance_id = Column(String(100), unique=True, index=True, nullable=False)
+    instance_id = Column(String(100), index=True, nullable=False)
 
     zone_name = Column(String(200), nullable=True)
     asm_name = Column(String(500), nullable=True)
@@ -615,6 +650,9 @@ class OpenSRData(Base):
     zero_labour_flag = Column(String(100), nullable=True)
     oil_change_flag = Column(String(100), nullable=True)
     count_of_tasks = Column(String(50), nullable=True)
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)

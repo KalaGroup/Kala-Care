@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { canExportExcel } from '../utils/exportPermission';
 
@@ -18,6 +19,22 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
     // Refs for scroll synchronization
     const tableContainerRef = useRef(null);
     const topScrollBarRef = useRef(null);
+
+    const navigate = useNavigate();
+
+    // Double-click on a row → open the customer on the Drive Data page; that
+    // page falls back to the Non-Drive Data page when the customer is not in
+    // drive data, so the customer opens wherever it is found.
+    const handleOpenCustomer = (customer) => {
+        if (!customer || !customer.instance_id) return;
+        onClose();
+        navigate('/customer-engagement', {
+            state: {
+                openCustomerInstanceId: customer.instance_id,
+                openCustomerId: null
+            }
+        });
+    };
 
     const themeColor = '#2f3192';
 
@@ -276,7 +293,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
             'S.No', 'Instance ID', 'Customer Name', 'Phone Number', 'Email',
             'Branch ID', 'Location', 'Last Status', 'Subtype', 'Last Follow-up User',
             'Last Follow-up User ID', 'Last Follow-up Date', 'Next Follow-up Date',
-            'Latest Flag', 'Latest Remark', 'Quotation Sent', 'Quotation Value', 'Drive Name'
+            'Latest Flag', 'Reject Reason', 'Latest Remark', 'Quotation Sent', 'Quotation Value', 'Drive Name'
         ]);
 
         filteredCustomers.forEach((customer, idx) => {
@@ -295,6 +312,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                 customer.last_followup_date ? new Date(customer.last_followup_date).toLocaleDateString() : 'N/A',
                 customer.next_followup_date ? new Date(customer.next_followup_date).toLocaleDateString() : 'N/A',
                 customer.latest_flag,
+                customer.rr_content || '—',
                 customer.latest_remark || '—',
                 customer.quotation_sent ? 'Yes' : 'No',
                 customer.quotation_value || 0,
@@ -309,7 +327,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
         ws['!cols'] = [
             { wch: 8 }, { wch: 18 }, { wch: 30 }, { wch: 15 }, { wch: 30 },
             { wch: 12 }, { wch: 30 }, { wch: 15 }, { wch: 18 }, { wch: 20 }, { wch: 20 },
-            { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 40 }, { wch: 15 }, { wch: 15 }, { wch: 30 }
+            { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 30 }, { wch: 40 }, { wch: 15 }, { wch: 15 }, { wch: 30 }
         ];
 
         const baseName = isAllReport ? 'all_campaigns' : (campaignInfo?.name?.replace(/\s/g, '_') || 'drive');
@@ -693,6 +711,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Last Follow-up</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Next Follow-up</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Flag</th>
+                                            <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Reject Reason</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Remark</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Quotation</th>
                                             <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300">Drive Name</th>
@@ -700,7 +719,12 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                                     </thead>
                                     <tbody className="bg-white">
                                         {filteredCustomers.map((customer, idx) => (
-                                            <tr key={`${customer.campaign_name || 'c'}-${customer.instance_id || 'x'}-${idx}`} className="hover:bg-gray-50 transition-colors duration-150">
+                                            <tr
+                                                key={`${customer.campaign_name || 'c'}-${customer.instance_id || 'x'}-${idx}`}
+                                                className="hover:bg-gray-50 cursor-pointer transition-colors duration-150"
+                                                onDoubleClick={() => handleOpenCustomer(customer)}
+                                                title="Double-click to open customer details"
+                                            >
                                                 <td className="px-2 py-1.5 text-center text-[11px] text-gray-700 font-medium border border-gray-200">{idx + 1}</td>
                                                 <td className="px-2 py-1.5 text-center text-[11px] font-mono text-gray-700 border border-gray-200">
                                                     {highlightText(customer.instance_id, searchTerm)}
@@ -758,6 +782,9 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                                                             {highlightText(customer.latest_flag, searchTerm)}
                                                         </span>
                                                     </div>
+                                                </td>
+                                                <td className="px-2 py-1.5 text-left text-[11px] text-gray-700 max-w-[180px] truncate border border-gray-200" title={customer.rr_content}>
+                                                    {highlightText(customer.rr_content || '—', searchTerm)}
                                                 </td>
                                                 <td className="px-2 py-1.5 text-left text-[11px] text-gray-700 max-w-[180px] truncate border border-gray-200" title={customer.latest_remark}>
                                                     {highlightText(customer.latest_remark || '—', searchTerm)}

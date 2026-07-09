@@ -785,32 +785,71 @@ const Customer = () => {
     document.removeEventListener('mouseup', handleResizeEnd);
   };
 
+  // Only internal/system fields are hidden — every column that came from the
+  // uploaded Excel file is shown: fixed DB columns AND dynamic (extra_data) ones.
+  const SYSTEM_FIELDS = ['id', 'created_at', 'updated_at'];
   const HIDDEN_FIELDS = {
-    'customers': ['id', 'created_at', 'updated_at', 'last_updated_by'],
-    'amc_agreements': ['id', 'created_at', 'updated_at', 'zone_name', 'sd_id', 'sd_name'],
-    'asset_detailed': ['id', 'created_at', 'updated_at', 'zone_name', 'sd_id', 'sd_name', 'asset_number'],
-    'asset_services': ['id', 'created_at', 'updated_at', 'zone_name', 'sd_id', 'sd_name'],
-    'anubandhan_plus': ['id', 'created_at', 'updated_at', 'zone', 'payment_type', 'transaction_id', 'bank_name', 'account_no', 'date_of_payment', 'payment_update_date_time', 'is_neft_confirm', 'is_cheque_confirm', 'cheque_deposited_address', 'cheque_given_dealership', 'cheque_deposited', 'cheque_to_dealer', 'employee_name', 'pulse_id', 'is_invoice_sent', 'is_refund', 'agent_id', 'quote_price', 'quotation_value_including_tax', 'name_of_agent', 'actual_amount', 'reason_of_short_payment', 'status_updated_by_admin', 'quotation_expiry_date', 'is_expired', 'payment_updated_month', 'pulse_instance_id', 'new_price_applicable'],
-    'anubandhan': ['id', 'created_at', 'updated_at', 'id_col', 'zone', 'payment_type', 'transaction_id', 'bank_name', 'account_no', 'date_of_payment', 'payment_update_date_time', 'is_neft_confirm', 'is_cheque_confirm', 'cheque_deposited_address', 'cheque_given_dealership', 'cheque_deposited', 'cheque_to_dealer', 'employee_name', 'pulse_id', 'is_invoice_sent', 'is_refund', 'agent_id', 'quote_price', 'quotation_value_including_tax', 'name_of_agent', 'actual_amount', 'reason_of_short_payment', 'status_updated_by_admin', 'quotation_expiry_date', 'is_expired', 'payment_updated_month', 'pulse_instance_id', 'new_price_applicable'],
-    'bandhan_plus': ['id', 'created_at', 'updated_at', 'id_col', 'zone', 'payment_type', 'transaction_id', 'bank_name', 'account_no', 'date_of_payment', 'payment_update_date_time', 'is_neft_confirm', 'is_cheque_confirm', 'cheque_deposited_address', 'cheque_given_dealership', 'cheque_deposited', 'cheque_to_dealer', 'employee_name', 'pulse_id', 'is_invoice_sent', 'is_refund', 'agent_id', 'quote_price', 'quotation_value_including_tax', 'name_of_agent', 'actual_amount', 'reason_of_short_payment', 'status_updated_by_admin', 'is_expired', 'payment_updated_month', 'pulse_instance_id', 'new_price_applicable'],
-    'pulse': ['id', 'created_at', 'updated_at', 'exception_enquiry_no', 'lead_no', 'quotation_lead_assigned_name', 'quotation_lead_assigned_job_title', 'quotation_lead_assigned_phone', 'quotation_lead_assigned_uid'],
-    'regular_bandhan': ['id', 'created_at', 'updated_at', 'id_col', 'zone', 'payment_type', 'transaction_id', 'bank_name', 'account_no', 'date_of_payment', 'payment_update_date_time', 'is_neft_confirm', 'is_cheque_confirm', 'cheque_deposited_address', 'cheque_given_dealership', 'cheque_deposited', 'cheque_to_dealer', 'employee_name', 'pulse_id', 'is_invoice_sent', 'is_refund', 'agent_id', 'quote_price', 'quotation_value_including_tax', 'name_of_agent', 'actual_amount', 'reason_of_short_payment', 'status_updated_by_admin', 'is_expired', 'payment_updated_month', 'new_price_applicable'],
-    'lms_data': [
-      'id', 'created_at', 'updated_at',
-      // existing hidden
-      'sd_name', 'sd_id', 'zone', 'instance_id_col', 'order_number', 'order_creation_date',
-      // columns with no data in new file (always blank) — hide them
-      'product_list', 'product_type',
-      // new but low-value-to-show columns — hide to keep table readable
-      'sr_sub_type_2', 'tele_caller_uid', 'tele_caller_mobile_number',
-      'enquiry_allocation_remarks', 'engine_app_code', 'efsr_contact_name',
-      'efsr_customer_number', 'qualifying_date', 'quotation_lead_assigned_uid',
-      'service_engineer_uid', 'sic_code', 'sic_code_type',
-      'labour_invoice_number', 'part_invoice_amount', 'part_invoice_number',
-      'lead_assign_to_sd', 'new_contact'
-    ],
-    'open_sr_load_reports': ['id', 'created_at', 'updated_at'],
-    'open_sr_data': ['id', 'created_at', 'updated_at']
+    'customers': [...SYSTEM_FIELDS, 'last_updated_by'],
+    'amc_agreements': SYSTEM_FIELDS,
+    'asset_detailed': SYSTEM_FIELDS,
+    'asset_services': SYSTEM_FIELDS,
+    'anubandhan_plus': SYSTEM_FIELDS,
+    'anubandhan': SYSTEM_FIELDS,
+    'bandhan_plus': SYSTEM_FIELDS,
+    'pulse': SYSTEM_FIELDS,
+    'regular_bandhan': SYSTEM_FIELDS,
+    'lms_data': SYSTEM_FIELDS,
+    'open_sr_load_reports': SYSTEM_FIELDS,
+    'open_sr_data': SYSTEM_FIELDS
+  };
+
+  // IMPORTANT columns per table (★ in the header): the fields the app actually
+  // uses for matching, customer master data and the Drive / Non-Drive pages.
+  // Everything else — including dynamic columns from extra_data — is reference data.
+  const IMPORTANT_DB_FIELDS = {
+    // 'customers' is intentionally absent: it is a derived table built FROM the
+    // 11 uploaded files, not an uploaded file itself — no bold / grey styling.
+    'amc_agreements': ['instance_id', 'agreement_status', 'agreement_number', 'agreement_name', 'branch_id', 'agreement_start_date', 'agreement_end_date', 'kva_rating'],
+    'asset_detailed': ['instance_id', 'engine_serial_no', 'branch_id', 'warranty_expiry_date', 'goem_oem', 'segment', 'engine_model', 'kva_rating', 'account_name', 'customer_name', 'contact_phone_number', 'contact_email_id', 'installation_site_address', 'commissioning_date', 'product_segment', 'krm_number', 'krm_status'],
+    'asset_services': ['instance_id', 'asset_number', 'engine_serial_no', 'branch_id', 'last_oil_change_date', 'last_oil_change_sr_type', 'last_sr_close_date', 'last_closed_sr_number', 'last_sr_type', 'last_sr_subtype', 'last_service_hrs', 'account_name', 'contact_phone_number'],
+    'anubandhan_plus': ['instance_id', 'pulse_instance_id', 'engine_no', 'quotation_ref_no', 'company_name', 'mobile_no', 'email_id', 'city', 'created_date_time'],
+    'anubandhan': ['instance_id', 'pulse_instance_id', 'engine_no', 'quotation_ref_no', 'company_name', 'mobile_no', 'email_id', 'city', 'created_date_time'],
+    'bandhan_plus': ['instance_id', 'pulse_instance_id', 'engine_no', 'quotation_ref_no', 'company_name', 'mobile_no', 'email_id', 'city', 'created_date_time'],
+    'pulse': ['instance_id', 'quote_id', 'account', 'contact_phone_number', 'contact_primary_email', 'installation_site_address', 'creation_date', 'total_amount'],
+    'regular_bandhan': ['instance_id', 'engine_no', 'quotation_ref_no', 'company_name', 'mobile_no', 'email_id', 'location', 'city'],
+    'lms_data': ['instance_id', 'lead_number', 'branch_id', 'account_name', 'account_contact_number', 'account_contact_email_id', 'installation_site_address', 'lead_created_date', 'lead_status', 'lead_raised_by', 'sr_type', 'sr_sub_type', 'kva_rating', 'service_engineer_name', 'tele_caller_name', 'quotation_number', 'quotation_submit_date', 'quotation_approval_date', 'order_number'],
+    'open_sr_load_reports': ['instance_id', 'service_request_no', 'engine_serial_no', 'sr_due_date', 'sr_type', 'sr_sub_type', 'status', 'account', 'customer_name', 'customer_mobile_no', 'primary_phone_no', 'installation_site_address', 'oil_change_flg', 'segment', 'engine_model'],
+    'open_sr_data': ['instance_id', 'branch_id', 'engine_serial_no', 'account_name', 'sr_number', 'sr_type', 'sr_subtype', 'sr_open_date', 'sr_close_date', 'oil_change_flag', 'zero_labour_flag']
+  };
+
+  // Dynamic columns: each imported row may carry an `extra_data` JSON object with
+  // the file columns that are not fixed DB fields. Merge those keys into the row
+  // so they render, sort and export exactly like normal columns.
+  const expandExtraData = (rows) => {
+    if (!Array.isArray(rows)) return rows;
+    return rows.map(row => {
+      if (!row || !row.extra_data) return row;
+      let extras = null;
+      try { extras = JSON.parse(row.extra_data); } catch { extras = null; }
+      if (!extras || typeof extras !== 'object' || Array.isArray(extras)) return row;
+      const merged = { ...row };
+      delete merged.extra_data;
+      Object.entries(extras).forEach(([key, value]) => {
+        if (!(key in merged)) merged[key] = value;
+      });
+      return merged;
+    });
+  };
+
+  // Union of keys across rows (dynamic columns may not exist on every row)
+  const collectColumns = (rows, hiddenFields) => {
+    const keys = [];
+    rows.forEach(row => {
+      Object.keys(row || {}).forEach(key => {
+        if (!keys.includes(key)) keys.push(key);
+      });
+    });
+    return keys.filter(key => !hiddenFields.includes(key) && key !== 'extra_data');
   };
 
   const fetchData = async (pageNum = 1, searchValue = globalSearchTerm) => {
@@ -839,9 +878,10 @@ const Customer = () => {
         const warm = readWarmCache(warmCacheKey);
         if (warm && Array.isArray(warm.data) && warm.data.length > 0) {
           const hiddenFields = HIDDEN_FIELDS[currentTable.id] || ['id', 'created_at', 'updated_at'];
-          setTableData(warm.data);
-          setTotalCount(warm.totalRecords || warm.data.length);
-          setTableColumns(Object.keys(warm.data[0]).filter(key => !hiddenFields.includes(key)));
+          const warmRows = expandExtraData(warm.data);
+          setTableData(warmRows);
+          setTotalCount(warm.totalRecords || warmRows.length);
+          setTableColumns(collectColumns(warmRows, hiddenFields));
         }
       }
     }
@@ -861,7 +901,8 @@ const Customer = () => {
         params: params
       });
 
-      let newData = response.data;
+      // Merge dynamic (extra_data) columns into the rows before anything else
+      let newData = expandExtraData(response.data);
 
       // IMPORTANT: Get total count from response headers
       // The backend sets 'x-total-count' header
@@ -909,7 +950,7 @@ const Customer = () => {
 
       if (newData.length > 0) {
         const hiddenFields = HIDDEN_FIELDS[currentTable.id] || ['id', 'created_at', 'updated_at'];
-        const columns = Object.keys(newData[0]).filter(key => !hiddenFields.includes(key));
+        const columns = collectColumns(newData, hiddenFields);
         setTableColumns(columns);
         setTablesColumnsCache(prev => ({
           ...prev,
@@ -1090,11 +1131,14 @@ const Customer = () => {
         return;
       }
 
+      // Expand dynamic (extra_data) columns so they export like normal columns
+      exportData = expandExtraData(exportData);
+
       const hiddenFields = HIDDEN_FIELDS[currentTable.id] || ['id', 'created_at', 'updated_at'];
       const filteredData = exportData.map((record, index) => {
         const filteredRecord = { 'Sr. No.': index + 1 };
         Object.keys(record).forEach(key => {
-          if (!hiddenFields.includes(key)) {
+          if (!hiddenFields.includes(key) && key !== 'extra_data') {
             let value = record[key];
             if (value === null || value === undefined) {
               value = '';
@@ -1498,8 +1542,9 @@ const Customer = () => {
                         </FixedTableHeader>
                         {getOrderedColumns().map((column, index) => {
                           const isLocationColumn = column.toLowerCase().includes('location');
+                          const isImportant = (IMPORTANT_DB_FIELDS[currentTable.id] || []).includes(column);
                           return (
-                            <SortableTableHeader key={column} id={column} className={`px-2.5 py-1 text-left text-[11px] font-medium text-black uppercase tracking-wider ${isLocationColumn ? 'min-w-[90px]' : 'min-w-[140px]'} whitespace-nowrap ${index !== getOrderedColumns().length - 1 ? 'border-r-2 border-gray-300' : ''}`} width={columnWidths[column] || (isLocationColumn ? 100 : 150)} onResizeStart={(e) => handleResizeStart(e, column)} isResizing={resizingColumn === column}>
+                            <SortableTableHeader key={column} id={column} className={`px-2.5 py-1 text-left text-[11px] ${isImportant ? 'font-bold bg-gray-100' : 'font-medium'} text-black uppercase tracking-wider ${isLocationColumn ? 'min-w-[90px]' : 'min-w-[140px]'} whitespace-nowrap ${index !== getOrderedColumns().length - 1 ? 'border-r-2 border-gray-300' : ''}`} width={columnWidths[column] || (isLocationColumn ? 100 : 150)} onResizeStart={(e) => handleResizeStart(e, column)} isResizing={resizingColumn === column}>
                               {column.replace(/_/g, ' ')}
                             </SortableTableHeader>
                           );
@@ -1519,12 +1564,13 @@ const Customer = () => {
                           </td>
                           {getOrderedColumns().map((column, colIndex) => {
                             const isLocationColumn = column.toLowerCase().includes('location');
+                            const isImportant = (IMPORTANT_DB_FIELDS[currentTable.id] || []).includes(column);
                             const cellValue = formatValue(record[column]);
                             const cellWidth = columnWidths[column] || (isLocationColumn ? 100 : 150);
                             return (
                               <td
                                 key={column}
-                                className={`px-2.5 py-1 text-xs text-black whitespace-nowrap ${isLocationColumn ? 'overflow-hidden text-ellipsis' : ''} ${colIndex !== getOrderedColumns().length - 1 ? 'border-r-2 border-gray-200' : ''}`}
+                                className={`px-2.5 py-1 text-xs text-black whitespace-nowrap ${isImportant ? 'bg-gray-50' : ''} ${isLocationColumn ? 'overflow-hidden text-ellipsis' : ''} ${colIndex !== getOrderedColumns().length - 1 ? 'border-r-2 border-gray-200' : ''}`}
                                 style={{ width: cellWidth, ...(isLocationColumn ? { maxWidth: cellWidth } : {}) }}
                                 title={isLocationColumn && cellValue !== '-' ? cellValue : undefined}
                               >

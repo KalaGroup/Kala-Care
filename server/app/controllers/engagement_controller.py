@@ -1033,22 +1033,25 @@ class EngagementController:
                     if norm:
                         active_campaign_count_by_instance[norm] = active_campaign_count_by_instance.get(norm, 0) + 1
 
-            # ONE batch query to fetch segment + engine_model for all related assets
-            # (avoids N+1 — single indexed IN() lookup on AssetDetailed.instance_id)
+            # ONE batch query to fetch segment + engine_model + kva_rating for all
+            # related assets (avoids N+1 — single indexed IN() lookup on
+            # AssetDetailed.instance_id; adding kva_rating costs no extra round-trip)
             asset_info_map = {}
             related_instance_ids = [oc.instance_id for oc in other_customers if oc.instance_id]
             if related_instance_ids:
                 asset_rows = self.db.query(
                     AssetDetailed.instance_id,
                     AssetDetailed.segment,
-                    AssetDetailed.engine_model
+                    AssetDetailed.engine_model,
+                    AssetDetailed.kva_rating
                 ).filter(AssetDetailed.instance_id.in_(related_instance_ids)).all()
-                for inst_id, seg, eng_model in asset_rows:
+                for inst_id, seg, eng_model, kva in asset_rows:
                     normalized = self._normalize_id(inst_id)
                     if normalized and normalized not in asset_info_map:
                         asset_info_map[normalized] = {
                             "segment": seg,
-                            "engine_model": eng_model
+                            "engine_model": eng_model,
+                            "kva_rating": kva
                         }
 
             for oc in other_customers:
@@ -1064,6 +1067,7 @@ class EngagementController:
                     "branch_id": oc.branch_id,
                     "segment": asset_info.get("segment"),
                     "engine_model": asset_info.get("engine_model"),
+                    "kva_rating": asset_info.get("kva_rating"),
                     # Frontend only reads `.length`, so this matches the existing shape
                     "campaigns": [None] * camp_count,
                 })

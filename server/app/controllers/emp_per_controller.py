@@ -2741,17 +2741,25 @@ class EmployeePerformanceController:
             # get_my_non_campaign_customers). This was missing here — the loop
             # below referenced an undefined `activity`, so the endpoint always
             # errored into its except-handler and returned an empty list.
-            from app.models.engagement_model import Activity
+            from app.models.engagement_model import Activity, RR
             activity_ids = list({nfu.activity_id for nfu in latest_map.values() if nfu.activity_id})
             activity_map = {}
             if activity_ids:
                 for a in db.query(Activity).filter(Activity.id.in_(activity_ids)).all():
                     activity_map[a.id] = a
 
+            # Bulk-fetch rejection reasons the same way
+            rr_ids = list({nfu.rr_id for nfu in latest_map.values() if nfu.rr_id})
+            rr_map = {}
+            if rr_ids:
+                for r in db.query(RR).filter(RR.id.in_(rr_ids)).all():
+                    rr_map[r.id] = r
+
             customers_list = []
             for idx, (instance_id, nfu) in enumerate(latest_map.items(), 1):
                 customer = customer_map.get(instance_id)
                 activity = activity_map.get(nfu.activity_id) if nfu.activity_id else None
+                rr = rr_map.get(nfu.rr_id) if nfu.rr_id else None
                 customers_list.append({
                     "s_no": idx,
                     "instance_id": instance_id,
@@ -2763,6 +2771,7 @@ class EmployeePerformanceController:
                     "service": nfu.service or "N/A",
                     "remark_type": nfu.remark_type or "other",
                     "activity_content": activity.content if activity else None,
+                    "rr_content": rr.content if rr else None,
                     "last_status": nfu.status,
                     "last_followup_user_name": nfu.user_name or "N/A",
                     "last_followup_user_id": nfu.user_id or "N/A",
@@ -3309,17 +3318,25 @@ class EmployeePerformanceController:
 
             # Bulk-fetch Activity content for the latest non-followups so the
             # All-Follow-ups modal can show an Activity for the "other" rows.
-            from app.models.engagement_model import Activity
+            from app.models.engagement_model import Activity, RR
             activity_ids = list({nfu.activity_id for nfu in latest_map.values() if nfu.activity_id})
             activity_map = {}
             if activity_ids:
                 for a in db.query(Activity).filter(Activity.id.in_(activity_ids)).all():
                     activity_map[a.id] = a
 
+            # Bulk-fetch rejection reasons the same way
+            rr_ids = list({nfu.rr_id for nfu in latest_map.values() if nfu.rr_id})
+            rr_map = {}
+            if rr_ids:
+                for r in db.query(RR).filter(RR.id.in_(rr_ids)).all():
+                    rr_map[r.id] = r
+
             customers_list = []
             for instance_id, nfu in latest_map.items():
                 customer = customer_map.get(instance_id)
                 activity = activity_map.get(nfu.activity_id) if nfu.activity_id else None
+                rr = rr_map.get(nfu.rr_id) if nfu.rr_id else None
                 customers_list.append({
                     "s_no": 0,
                     "instance_id": instance_id,
@@ -3331,6 +3348,7 @@ class EmployeePerformanceController:
                     "service": nfu.service or "N/A",
                     "remark_type": nfu.remark_type or "other",
                     "activity_content": activity.content if activity else None,
+                    "rr_content": rr.content if rr else None,
                     "last_status": nfu.status,
                     "last_followup_user_name": nfu.user_name or "N/A",
                     "last_followup_user_id": nfu.user_id or "N/A",

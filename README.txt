@@ -178,3 +178,17 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
                  AND object_id = OBJECT_ID('dbo.mom_rows'))
     CREATE INDEX IX_mom_rows_track_meeting
         ON dbo.mom_rows (track_id, meeting_id);
+
+
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_followups_user_date' AND object_id = OBJECT_ID('dbo.followups'))
+    CREATE NONCLUSTERED INDEX IX_followups_user_date ON dbo.followups (user_id, followup_date DESC);
+
+-- Dashboard / drive report "customers-with-followups" (filter by campaign, newest first)
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_followups_campaign_date' AND object_id = OBJECT_ID('dbo.followups'))
+    CREATE NONCLUSTERED INDEX IX_followups_campaign_date ON dbo.followups (campaign_id, followup_date DESC);
+
+-- Non-drive customers report (all non-followups of one user)
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_non_followups_user' AND object_id = OBJECT_ID('dbo.non_followups'))
+    CREATE NONCLUSTERED INDEX IX_non_followups_user ON dbo.non_followups (user_id);
+GO

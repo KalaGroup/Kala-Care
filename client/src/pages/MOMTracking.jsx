@@ -6,7 +6,7 @@ import {
   ClipboardList, Building2, Plus, Trash2, CheckCircle2,
   AlertTriangle, CalendarDays, Users, X, CornerUpRight, Flag,
   BarChart3, Check, User, ListChecks, Zap, ChevronRight, ChevronLeft,
-  ChevronDown, FileText, MapPin, UserPlus, Download, Search,
+  ChevronDown, FileText, MapPin, UserPlus, Download, Search, RotateCcw,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
@@ -25,6 +25,13 @@ const BRAND = '#2f3192';
 const BRAND_DARK = '#23255f';
 const BRAND_SOFT = 'rgba(47,49,146,0.10)';
 const INK = 'var(--mom-ink)';       // theme-adaptive: near-black in light, light-grey in dark
+
+// Compact Recharts tooltips — keeps the hover info box small on every chart
+const TIP_PROPS = {
+    contentStyle: { fontSize: 11, padding: '5px 8px', borderRadius: 8, lineHeight: 1.4 },
+    itemStyle: { fontSize: 11, padding: '1px 0' },
+    labelStyle: { fontSize: 11, fontWeight: 600 },
+};
 const SHEET = BRAND;                // sheet chrome = system brand
 const SHEET_DARK = BRAND_DARK;
 const SHEET_SOFT = BRAND_SOFT;
@@ -436,8 +443,8 @@ const RespPicker = ({ value = [], options = [], onChange, disabled }) => {
         ) : (
           <span className="flex items-center gap-1 flex-wrap min-w-0">
             {value.slice(0, 2).map((n) => (
-              <span key={n} className="inline-flex items-center gap-1 rounded-full pl-0.5 pr-1.5 py-0.5 fs-10 font-semibold" style={{ background: BRAND_SOFT, color: INK }}>
-                <Avatar name={n} size={14} /><span className="truncate" style={{ maxWidth: '5.5rem' }}>{n.split(' ')[0]}</span>
+              <span key={n} className="inline-flex items-center justify-center rounded-full px-2 py-0.5 fs-10 font-semibold" style={{ background: BRAND_SOFT, color: INK }}>
+                <span className="truncate" style={{ maxWidth: '5.5rem' }}>{n.split(' ')[0]}</span>
               </span>
             ))}
             {value.length > 2 && <span className="fs-10 font-bold" style={{ color: INK }}>+{value.length - 2}</span>}
@@ -646,9 +653,38 @@ export default function MOMTracking() {
     return [...seen.values()].sort((a, b) => (b.date || '').localeCompare(a.date || '')).map((x) => x.name);
   }, [history]);
 
-  const togglePick = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  /* a master row on the sheet counts as "filled" once anything is typed
+     in it — unselecting its point would drop that data with the row */
+  const rowFilled = (r) => !!(r && ((r.point || '').trim() || (r.remark || '').trim() || respArr(r.resp).length));
+  const togglePick = (p) => {
+    const on = picked.has(p.id);
+    if (on && rowFilled(rows.find((r) => r.masterId === p.id))) {
+      setConfirm({
+        title: 'Unselect this discussion point?',
+        meta: p.title,
+        note: 'This point already has data filled in on the meeting sheet. Unselecting it removes its row — everything typed in it will be lost. Tick it again before opening the sheet to get the data back.',
+        yesLabel: 'Yes, unselect',
+        onYes: () => { setPicked((s) => { const n = new Set(s); n.delete(p.id); return n; }); setConfirm(null); },
+      });
+      return;
+    }
+    setPicked((s) => { const n = new Set(s); if (on) n.delete(p.id); else n.add(p.id); return n; });
+  };
   const pickAll = () => setPicked(new Set(master.map((p) => p.id)));
-  const pickNone = () => setPicked(new Set());
+  const pickNone = () => {
+    const filled = rows.filter((r) => r.masterId && picked.has(r.masterId) && rowFilled(r)).length;
+    if (filled) {
+      setConfirm({
+        title: 'Clear all selected points?',
+        meta: `${filled} point${filled > 1 ? 's' : ''} already filled on the meeting sheet`,
+        note: 'Clearing the selection removes their rows from the sheet — everything typed in them will be lost.',
+        yesLabel: 'Yes, clear all',
+        onYes: () => { setPicked(new Set()); setConfirm(null); },
+      });
+      return;
+    }
+    setPicked(new Set());
+  };
 
   /* ---- meeting sheet (Step 2) ---- */
   const [rows, setRows] = useState([]);               // current discussion rows
@@ -657,6 +693,57 @@ export default function MOMTracking() {
 
   const ping = (msg, type = 'ok') => (type === 'err' ? toast.error(msg) : toast.success(msg));
   const catColor = (n) => categories[n] || '#94a3b8';
+
+  /* ---------- draft persistence (survives refresh / power cut) ----------
+     The whole in-progress wizard — setup fields, branches, attendees,
+     picked points, sheet rows and carried-task edits — is mirrored into
+     localStorage while the user works, restored on the next visit, and
+     cleared when the minutes are saved (resetWizard). */
+  const DRAFT_KEY = `mom_draft_${me?.user_id || 'local'}`;
+  const draftReady = useRef(false);          // don't overwrite the stored draft before it's been read
+  useEffect(() => {
+    if (!isMaster) return;
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        const d = JSON.parse(raw);
+        const fresh = d && (!d.savedAt || Date.now() - d.savedAt < 7 * 86400000);   // drafts expire after 7 days
+        if (fresh && (d.branches?.length || d.rows?.length || d.mLocation || d.mType)) {
+          setStep(d.step === 2 ? 2 : 1);
+          setBranches(d.branches || []);
+          setManualBranches(d.manualBranches || []);
+          if (d.mDate) setMDate(d.mDate);
+          setMLocation(d.mLocation || '');
+          setMType(d.mType || '');
+          setAttendees(d.attendees || []);
+          setPicked(new Set(d.picked || []));
+          setRows(d.rows || []);
+          setCarry(d.carry || []);
+          ping('Restored your unsaved meeting draft');
+        } else {
+          localStorage.removeItem(DRAFT_KEY);
+        }
+      }
+    } catch { try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ } }
+    draftReady.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!isMaster || !draftReady.current) return undefined;
+    const t = setTimeout(() => {                       // small debounce — don't write on every keystroke
+      try {
+        const hasData = branches.length || rows.length || carry.length || attendees.length
+          || picked.size || mLocation.trim() || mType.trim();
+        if (!hasData) { localStorage.removeItem(DRAFT_KEY); return; }
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({
+          step, branches, manualBranches, mDate, mLocation, mType,
+          attendees, picked: [...picked], rows, carry, savedAt: Date.now(),
+        }));
+      } catch { /* storage full / unavailable — draft simply not kept */ }
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMaster, step, branches, manualBranches, mDate, mLocation, mType, attendees, picked, rows, carry]);
 
   /* header pills — latest state per tracked task, meetings counted once
      even when they cover several branches */
@@ -730,12 +817,57 @@ export default function MOMTracking() {
   });
 
   /* ---------- Step-1 actions ---------- */
+  /* rebuild the carry-forward list for a new branch selection, KEEPING any
+     edits (remark / status / due / owners) already made to tasks still carried */
+  const rebuildCarry = (bs) => setCarry((prev) => {
+    const prevBy = new Map(prev.map((c) => [c.trackId, c]));
+    return collectCarry(history, bs.map((b) => b.code)).map((c) => prevBy.get(c.trackId) || c);
+  });
+  /* apply a branch-selection change WITHOUT losing the meeting sheet:
+     discussion rows survive untouched, attendees & carried tasks re-sync */
+  const applyBranches = (next) => { setBranches(next); syncAttendees(next); rebuildCarry(next); };
+
+  /* what gets affected if branch b is unselected — drives the warning shown
+     when the branch's employees already have work on the running sheet */
+  const branchRemovalImpact = (b, next) => {
+    const stay = new Set(attendees.filter((a) => a.source === 'manual' || a.extra).map((a) => a.name.toLowerCase()));
+    next.forEach((x) => branchEmployees(x).forEach((e) => stay.add(e.name.toLowerCase())));
+    const leaving = new Set(branchEmployees(b).map((e) => e.name.toLowerCase()).filter((n) => !stay.has(n)));
+    const hasLeaving = (r) => respArr(r.resp).some((n) => leaving.has(n.toLowerCase()));
+    const assigned = rows.filter(hasLeaving).length + carry.filter(hasLeaving).length;
+    const remainIds = new Set(collectCarry(history, next.map((x) => x.code)).map((c) => c.trackId));
+    const freshBy = new Map(collectCarry(history, [b.code]).map((c) => [c.trackId, c]));
+    const dropped = carry.filter((c) => !remainIds.has(c.trackId));
+    const edited = dropped.filter((c) => {
+      const f = freshBy.get(c.trackId);
+      return (c.remark || '').trim() || (f && (c.status !== f.status || c.due !== f.due));
+    }).length;
+    return { assigned, dropped: dropped.length, edited };
+  };
+  const confirmBranchRemoval = (b, imp, onYes) => {
+    const bits = [];
+    if (imp.assigned) bits.push(`${imp.assigned} row(s) on the sheet are assigned to employees of this branch — the rows and their data stay, but those people are removed from the attendee list (they'll show as absent)`);
+    if (imp.dropped) bits.push(`${imp.dropped} carried task(s) from this branch will be removed from the sheet${imp.edited ? ` — ${imp.edited} of them already have this meeting's updates typed in, and those updates will be lost` : ''}`);
+    setConfirm({
+      title: `Unselect ${b.name}?`,
+      meta: 'This branch is already part of the running meeting',
+      note: `${bits.join('. ')}.`,
+      yesLabel: 'Yes, unselect branch',
+      onYes: () => { onYes(); setConfirm(null); },
+    });
+  };
+
   const toggleBranch = (b) => {
     const on = branches.some((x) => x.code === b.code);
     const next = on ? branches.filter((x) => x.code !== b.code) : [...branches, b];
-    setBranches(next);
-    syncAttendees(next);
-    setRows([]); setCarry([]);                       // selection changed → discard previous sheet prefill
+    if (on) {
+      const imp = branchRemovalImpact(b, next);
+      if (imp.assigned || imp.dropped) {
+        confirmBranchRemoval(b, imp, () => { applyBranches(next); ping(`${b.name} removed from the meeting`); });
+        return;
+      }
+    }
+    applyBranches(next);
   };
   const addManualBranch = () => {
     const n = manualBranch.trim();
@@ -743,24 +875,25 @@ export default function MOMTracking() {
     if (allBranchOptions.some((b) => b.name.toLowerCase() === n.toLowerCase())) return ping('A branch with this name already exists', 'err');
     const b = { code: `MB-${Date.now().toString(36)}`, name: n, region: 'Manual', manual: true };
     setManualBranches((p) => [...p, b]);
-    const next = [...branches, b];
-    setBranches(next);
-    syncAttendees(next);
-    setRows([]); setCarry([]);
+    applyBranches([...branches, b]);
     setManualBranch('');
     ping('Branch added — pick its attendees from employees or add them manually');
   };
   /* deleting a manual branch only removes it from the picker —
      saved minutes keep their own copy of the branch, so history is safe */
   const deleteManualBranch = (b) => {
-    setManualBranches((p) => p.filter((x) => x.code !== b.code));
-    if (branches.some((x) => x.code === b.code)) {
-      const next = branches.filter((x) => x.code !== b.code);
-      setBranches(next);
-      syncAttendees(next);
-      setRows([]); setCarry([]);
+    const selected = branches.some((x) => x.code === b.code);
+    const next = branches.filter((x) => x.code !== b.code);
+    const doDelete = () => {
+      setManualBranches((p) => p.filter((x) => x.code !== b.code));
+      if (selected) applyBranches(next);
+      ping('Manual branch removed');
+    };
+    if (selected) {
+      const imp = branchRemovalImpact(b, next);
+      if (imp.assigned || imp.dropped) { confirmBranchRemoval(b, imp, doDelete); return; }
     }
-    ping('Manual branch removed');
+    doDelete();
   };
   const addEmployeeAttendee = (e) => {
     setAttendees((p) => [...p, { id: uid('a'), name: e.name, user_id: e.user_id, source: 'employee', present: true, branch: e.branchName, extra: true }]);
@@ -811,6 +944,20 @@ export default function MOMTracking() {
     setManualBranch(''); setPickBr('all'); setPickEmp('');
     setMDate(iso(new Date())); setMLocation(''); setMType('');
     setRows([]); setCarry([]);
+    try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ }
+  };
+  /* the top-bar Reset button — warns before wiping the whole wizard */
+  const askReset = () => {
+    const hasData = branches.length || rows.length || carry.length || attendees.length
+      || picked.size || mLocation.trim() || mType.trim();
+    if (!hasData) { resetWizard(); return; }
+    setConfirm({
+      title: 'Reset this meeting?',
+      meta: branchLabel ? `${branchLabel} · ${fmt(mDate)}` : 'Unsaved meeting draft',
+      note: 'Everything will be cleared — branches, attendees, selected points and all data typed on the meeting sheet. The auto-saved draft is removed too. This cannot be undone.',
+      yesLabel: 'Yes, reset all',
+      onYes: () => { resetWizard(); setConfirm(null); ping('Meeting cleared — start fresh'); },
+    });
   };
 
   /* ---------- Step-2 (sheet) actions ---------- */
@@ -965,6 +1112,15 @@ export default function MOMTracking() {
               <span className="inline-flex items-center gap-1 rounded-full bg-white/15 text-white px-2.5 py-1 text-[11px] font-medium">Meetings: <b className="font-bold">{stats.meetings}</b></span>
               <span className="inline-flex items-center gap-1 rounded-full bg-white/15 text-white px-2.5 py-1 text-[11px] font-medium">Open tasks: <b className="font-bold">{stats.open}</b></span>
               <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium text-white" style={stats.overdue > 0 ? { background: 'rgba(248,113,113,0.3)' } : { background: 'rgba(255,255,255,0.15)' }}>Overdue: <b className="font-bold">{stats.overdue}</b></span>
+              {isMaster && view === 'new' && (
+                <button onClick={askReset} title="Clear the whole meeting and start over"
+                  className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition text-white"
+                  style={{ background: 'rgba(248,113,113,0.30)' }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(248,113,113,0.45)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(248,113,113,0.30)'; }}>
+                  <RotateCcw className="h-3.5 w-3.5" /> Reset
+                </button>
+              )}
               {isMaster && (
                 <button onClick={() => setMasterOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1.5 text-[12px] font-medium transition">
                   <ListChecks className="h-3.5 w-3.5" /> Master setup
@@ -981,7 +1137,7 @@ export default function MOMTracking() {
               ? [{ k: 'new', label: 'New meeting', icon: Zap }, { k: 'history', label: 'History', icon: FileText }, { k: 'reports', label: 'Reports', icon: BarChart3 }, { k: 'mine', label: 'Employee report', icon: Users }]
               : [{ k: 'mine', label: 'My MOM', icon: Users }]
             ).map((t) => (
-              <button key={t.k} onClick={() => setView(t.k)} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 fs-12 font-semibold transition" style={view === t.k ? { background: BRAND_SOFT, color: INK } : { color: '#6b7280' }}>
+              <button key={t.k} onClick={() => setView(t.k)} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 fs-12 font-semibold transition ${view === t.k ? 'mom-tab-active' : ''}`} style={view === t.k ? { background: BRAND_SOFT, color: INK } : { color: '#6b7280' }}>
                 <t.icon size={14} /> {t.label}
               </button>
             ))}
@@ -1256,7 +1412,7 @@ export default function MOMTracking() {
                 {master.map((p) => {
                   const on = picked.has(p.id);
                   return (
-                    <button key={p.id} onClick={() => togglePick(p.id)} className="kc-lift flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition"
+                    <button key={p.id} onClick={() => togglePick(p)} className="kc-lift flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition"
                       style={on
                         ? { border: `1.5px solid ${BRAND}`, background: 'rgba(47,49,146,0.06)', boxShadow: '0 4px 12px -8px rgba(47,49,146,.4)' }
                         : { border: '1.5px solid #e6e9f0', background: '#fff' }}>
@@ -1313,13 +1469,13 @@ export default function MOMTracking() {
                   <span className="fs-10 font-semibold text-gray-400 flex-shrink-0">{presentNames.length}/{attendees.length} present</span>
                   {attPreview.map((a) => (
                     <span key={a.id}
-                      className="inline-flex items-center gap-1.5 rounded-full pl-1.5 pr-2 py-1 fs-10 font-medium border transition cursor-pointer select-none"
+                      className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 fs-10 font-medium border transition cursor-pointer select-none"
                       style={a.present
                         ? { background: SHEET_SOFT, borderColor: 'transparent', color: INK }
                         : { borderColor: '#e5e7eb', color: '#b7bcc6', textDecoration: 'line-through' }}
                       onClick={() => togglePresent(a.id)}
                       title={a.present ? 'Click to mark absent' : 'Click to mark present'}>
-                      <span style={!a.present ? { filter: 'grayscale(1)', opacity: .55 } : {}}><Avatar name={a.name} size={16} /></span> {a.name}
+                      {a.name}
                       {a.source === 'manual' && <span className="rounded-full px-1 fs-9 font-bold" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Manually added">M</span>}
                       {(a.source === 'manual' || a.extra) && (
                         <button onClick={(e) => { e.stopPropagation(); removeAttendee(a.id); }} className="rounded-full p-0.5 text-gray-300 hover:text-red-400" title="Remove"><Trash2 size={10} /></button>
@@ -1645,8 +1801,8 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
               <Users size={13} className="text-gray-400" /> Attendees:
               <span className="fs-10 font-semibold text-black">{present.length} present</span>
               {(showAll ? present : present.slice(0, 8)).map((a) => (
-                <span key={a.id} className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 pl-1 pr-2.5 py-1 fs-10 font-medium text-black">
-                  <Avatar name={a.name} size={16} />{a.name}
+                <span key={a.id} className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-2.5 py-1 fs-10 font-medium text-black">
+                  {a.name}
                   {a.branch && <span className="fs-9 text-black">· {a.branch}</span>}
                   {a.source === 'manual' && <span className="rounded-full px-1 fs-9 font-bold" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Manually added">M</span>}
                 </span>
@@ -1689,8 +1845,8 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
                       {respArr(r.resp).length ? (
                         <div className="flex items-center gap-1 flex-wrap">
                           {respArr(r.resp).map((n) => (
-                            <span key={n} className="inline-flex items-center gap-1 rounded-full pl-0.5 pr-1.5 py-0.5 fs-10 font-semibold" style={{ background: BRAND_SOFT, color: INK }}>
-                              <Avatar name={n} size={14} />{n.split(' ')[0]}
+                            <span key={n} className="inline-flex items-center justify-center rounded-full px-2 py-0.5 fs-10 font-semibold" style={{ background: BRAND_SOFT, color: INK }}>
+                              {n.split(' ')[0]}
                             </span>
                           ))}
                         </div>
@@ -2251,7 +2407,7 @@ function ReportsView({ history, branches }) {
         <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-3">
           <div className="fs-12 font-bold text-gray-700 mb-2">Tasks by status <span className="fs-10 font-normal text-gray-400">(latest state per task)</span></div>
           <ResponsiveContainer width="100%" height={230}>
-            <PieChart><Pie data={d.pie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={82} paddingAngle={2}>{d.pie.map((e) => <Cell key={e.name} fill={e.color} />)}</Pie><Tooltip /><Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} /></PieChart>
+            <PieChart><Pie data={d.pie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={82} paddingAngle={2}>{d.pie.map((e) => <Cell key={e.name} fill={e.color} />)}</Pie><Tooltip {...TIP_PROPS} /><Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} /></PieChart>
           </ResponsiveContainer>
         </div>
         <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-3">
@@ -2261,7 +2417,7 @@ function ReportsView({ history, branches }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
               <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10 }} unit="%" />
               <YAxis type="category" dataKey="name" width={88} tick={{ fontSize: 9 }} />
-              <Tooltip formatter={(v) => `${v}%`} /><Bar dataKey="completion" radius={[0, 4, 4, 0]} fill={BRAND} />
+              <Tooltip {...TIP_PROPS} formatter={(v) => `${v}%`} /><Bar dataKey="completion" radius={[0, 4, 4, 0]} fill={BRAND} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -2279,7 +2435,7 @@ function ReportsView({ history, branches }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
                 <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10 }} />
                 <YAxis type="category" dataKey="name" width={78} tick={{ fontSize: 9 }} />
-                <Tooltip /><Legend wrapperStyle={{ fontSize: 11 }} />
+                <Tooltip {...TIP_PROPS} /><Legend wrapperStyle={{ fontSize: 11 }} />
                 <Bar dataKey="done" name="Completed" stackId="a" fill="#059669" />
                 <Bar dataKey="open" name="Open" stackId="a" fill="#d97706" radius={[0, 4, 4, 0]} />
               </BarChart>
@@ -2293,7 +2449,7 @@ function ReportsView({ history, branches }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 10 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
-              <Tooltip /><Bar dataKey="meetings" name="Meetings" fill={BRAND} radius={[4, 4, 0, 0]} />
+              <Tooltip {...TIP_PROPS} /><Bar dataKey="meetings" name="Meetings" fill={BRAND} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -2313,7 +2469,7 @@ function ReportsView({ history, branches }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
-                <Tooltip /><Bar dataKey="v" name="Overdue tasks" fill="#f87171" radius={[4, 4, 0, 0]} />
+                <Tooltip {...TIP_PROPS} /><Bar dataKey="v" name="Overdue tasks" fill="#f87171" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}

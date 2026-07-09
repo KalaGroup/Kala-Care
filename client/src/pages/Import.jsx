@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import {
@@ -206,6 +206,135 @@ const FILE_TYPE_COLUMNS = {
     ]
 };
 
+// ============================================================================
+// REQUIRED COLUMNS — the record keys a file MUST contain; upload is blocked
+// without them. Mirrors the backend's critical-column validation exactly.
+// ============================================================================
+const FILE_TYPE_REQUIRED_COLUMNS = {
+    "AMC Population Report": ["INSTANCE ID", "AGREEMENT NUMBER"],
+    "Asset Detailed Report": ["ASSET NUMBER", "ENGINE SERIAL NO"],
+    "Asset Details with Last Oil Service": ["ASSET NUMBER", "ENGINE SERIAL NO"],
+    "Anubandhan Plus Quotes Report": ["Pulse Instance ID", "QuotationRefNo", "EngineNo"],
+    "Anubandhan Quotes Report": ["Pulse Instance ID", "QuotationRefNo", "EngineNo"],
+    "BandhanPlus Quotes Report": ["Pulse Instance ID", "QuotationRefNo", "EngineNo"],
+    "Pulse Quotation - Service Only": ["Instance Id", "Quote ID"],
+    "Regular Bandhan Customers Report": ["Pulse Instance ID", "Quotation Ref No"],
+    "LMS Data for ERP": ["Instance ID", "Lead Number"],
+    "Open SR Load Report": ["Service Request #", "Instance Id [Asset #]", "Engine Serial#"],
+    "Open SR Data": ["INSTANCE ID", "SR NUMBER", "SR TYPE", "SR SUBTYPE"]
+};
+
+// ============================================================================
+// IMPORTANT COLUMNS — the fixed columns the system actually uses from each
+// file (matching, customer master, Drive / Non-Drive pages). They are matched
+// flexibly (case / spaces / punctuation / known alternate spellings). If one
+// is missing the upload still proceeds but the user is warned. Every other
+// column is dynamic: imported automatically as extra data.
+// ============================================================================
+const FILE_TYPE_IMPORTANT_COLUMNS = {
+    "AMC Population Report": [
+        "INSTANCE ID", "AGREEMENT STATUS", "AGREEMENT NUMBER", "AGREEMENT NAME",
+        "BRANCH ID", "AGREEMENT START DATE", "AGREEMENT END DATE", "KVA RATING"
+    ],
+    "Asset Detailed Report": [
+        "ASSET NUMBER", "ENGINE SERIAL NO", "BRANCH ID", "WARRANTY EXPIRY DATE",
+        "GOEM OEM", "SEGMENT", "ENGINE MODEL", "KVA RATING", "ACCOUNT NAME",
+        "CUSTOMER NAME", "CONTACT PHONE NUMBER", "CONTACT EMAIL ID",
+        "INSTALLATION SITE ADDRESS", "COMMISSIONING DATE", "PRODUCT SEGMENT",
+        "KRM NUMBER", "KRM STATUS"
+    ],
+    "Asset Details with Last Oil Service": [
+        "ASSET NUMBER", "ENGINE SERIAL NO", "BRANCH ID", "LAST OIL CHANGE DATE",
+        "LAST OIL CHANGE SR TYPE", "LAST SR CLOSE DATE", "LAST CLOSED SR NUMBER",
+        "LAST SR TYPE", "LAST SR SUBTYPE", "LAST SERVICE HRS",
+        "ACCOUNT NAME", "CONTACT PHONE NUMBER"
+    ],
+    "Anubandhan Plus Quotes Report": [
+        "Pulse Instance ID", "EngineNo", "QuotationRefNo", "CompanyName",
+        "MobileNo", "EmailId", "City", "CreatedDateTime"
+    ],
+    "Anubandhan Quotes Report": [
+        "Pulse Instance ID", "EngineNo", "QuotationRefNo", "CompanyName",
+        "MobileNo", "EmailId", "City", "CreatedDateTime"
+    ],
+    "BandhanPlus Quotes Report": [
+        "Pulse Instance ID", "EngineNo", "QuotationRefNo", "CompanyName",
+        "MobileNo", "EmailId", "City", "CreatedDateTime"
+    ],
+    "Pulse Quotation - Service Only": [
+        "Instance Id", "Quote ID", "Account", "Account/Contact Phone Number",
+        "Account/Contact Primary Email", "Installation Site Address",
+        "Creation Date", "Total Amount"
+    ],
+    "Regular Bandhan Customers Report": [
+        "Pulse Instance ID", "Genset Number", "Quotation Ref No.", "Name",
+        "Mobile", "Email", "Billing Location", "DG Location",
+        "Billing City", "DG City"
+    ],
+    "LMS Data for ERP": [
+        "Instance ID", "Lead Number", "SD Branch Code", "Account Name",
+        "Account Contact Number", "Account Contact Email ID",
+        "Installation Site Address", "Lead Created Date", "Lead Status",
+        "Lead Raised By", "SR Type", "SR Sub Type", "KVA Rating",
+        "Service Engineer", "Tele Caller", "Quotation Number",
+        "Quotation Submit Date", "Quotation Approval Date", "Order Number"
+    ],
+    "Open SR Load Report": [
+        "Service Request #", "Instance Id [Asset #]", "Engine Serial#",
+        "SR Due Date", "SR Type", "SR Sub-Type", "Status", "Account",
+        "Customer Name", "Customer Mobile #", "Primary Phone#",
+        "Installation Site Address", "Oil Change Flg", "Segment", "Engine Model",
+        "SR Created Date", "Close Date/Time"
+    ],
+    "Open SR Data": [
+        "INSTANCE ID", "BRANCH ID", "ENGINE SERIAL NO", "ACCOUNT NAME",
+        "SR NUMBER", "SR TYPE", "SR SUBTYPE", "SR OPEN DATE", "SR CLOSE DATE",
+        "OIL CHANGE FLAG", "ZERO LABOUR FLAG"
+    ]
+};
+
+// Alternate spellings accepted for required/important columns (word-level
+// renames that case/space normalization can't bridge). Mirrors backend aliases.
+const IMPORTANT_COLUMN_ALIASES = {
+    "Open SR Load Report": {
+        "Engine Serial#": ["Engine Serial No", "Engine Serial Number"],
+        "Service Request #": ["Service Request No", "Service Request Number"],
+        "Instance Id [Asset #]": ["Instance Id", "Instance ID", "Asset Number"],
+        "Oil Change Flg": ["Oil Change Flag"]
+    },
+    "Open SR Data": {
+        "INSTANCE ID": ["Instance Id [Asset #]", "Instance Id", "Asset Number"],
+        "SR SUBTYPE": ["SR SUB TYPE", "SR SUB-TYPE"],
+        "ZERO LABOUR FLAG": ["ZERO LABOR FLAG"],
+        "OIL CHANGE FLAG": ["OIL CHANGE FLG"]
+    },
+    "Regular Bandhan Customers Report": {
+        "Genset Number": ["Genset No", "Engine No"],
+        "Name": ["Company Name"],
+        "Mobile": ["Mobile No", "Mobile Number"],
+        "Email": ["Email Id", "Email ID"],
+        // Location source is Billing/DG Location; Billing/DG City is the
+        // fallback — any one of the group counts as present.
+        "Billing Location": ["Location", "DG Location"],
+        "DG Location": ["Location", "Billing Location"],
+        "Billing City": ["City", "DG City"],
+        "DG City": ["City", "Billing City"],
+        "Quotation Ref No.": ["Quotation Ref No", "QuotationRefNo"]
+    },
+    "LMS Data for ERP": {
+        "SD Branch Code": ["BRANCH ID"],
+        "Service Engineer": ["Service Engineer Name"],
+        "Tele Caller": ["Tele-Caller Name", "Tele Caller Name"],
+        "Quotation Approval Date": ["Quotation Approved Date"],
+        "KVA Rating": ["kVA Rating"]
+    }
+};
+
+// "engine serial no." / "ENGINE  SERIAL NO" / "EngineSerialNo" all become
+// "engineserialno" — spacing, case and punctuation never block an import.
+const tightHeader = (name) =>
+    String(name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
 const Import = () => {
     const [files, setFiles] = useState([]);
     const [uploading, setUploading] = useState(false);
@@ -218,12 +347,19 @@ const Import = () => {
     const [formatError, setFormatError] = useState(null);
     const [lastUpdatedInfo, setLastUpdatedInfo] = useState(null);
     const [lastUpdatedLoading, setLastUpdatedLoading] = useState(false);
+    // Manual header mapping for important columns the file spells differently
+    // (e.g. file has "Dt" instead of "SR Due Date"): { importantColumn: fileHeader | '__SKIP__' }
+    const [columnMapping, setColumnMapping] = useState({});
+    const [mappingInfo, setMappingInfo] = useState({ notFound: [], missing: [], unmatchedHeaders: [] });
+    const [showUploadConfirm, setShowUploadConfirm] = useState(false);
 
-    const themeColor = '#2f3192';
+    // CSS variables from index.css — identical to the old hardcoded colors in
+    // light mode, and switch automatically to the sky accent in dark mode.
+    const themeColor = 'var(--erp-accent)';
     const themeShades = {
-        light: 'rgba(64, 96, 147, 0.1)',
-        medium: 'rgba(64, 96, 147, 0.5)',
-        dark: '#335478',
+        light: 'var(--erp-accent-light)',
+        medium: 'var(--erp-accent-medium)',
+        dark: 'var(--erp-accent-dark)',
     };
 
     // Helper function to extract instance ID from Asset # format
@@ -335,48 +471,70 @@ const Import = () => {
         });
     };
 
-    // Updated validateFileFormat function with proper LMS handling
-    const validateFileFormat = (headers, fileType) => {
-        const expected = FILE_TYPE_COLUMNS[fileType] || [];
+    // Missing IMPORTANT columns BLOCK the upload. The user can resolve a name
+    // mismatch (e.g. file says "Dt" but the column is "SR Due Date") by mapping
+    // the file column in the preview box; the mapping is applied on the server,
+    // the Excel file itself is never modified. Columns are matched flexibly
+    // (case / spaces / punctuation ignored, plus known alternate spellings).
+    const validateFileFormat = (headers, fileType, mapping = {}) => {
+        const required = FILE_TYPE_REQUIRED_COLUMNS[fileType] || [];
+        const important = FILE_TYPE_IMPORTANT_COLUMNS[fileType] || [];
+        const aliases = IMPORTANT_COLUMN_ALIASES[fileType] || {};
 
-        // Clean headers: trim and remove extra spaces
-        const cleanHeaders = headers.map(h => {
-            if (!h) return '';
-            return String(h).trim().replace(/\s+/g, ' ');
-        }).filter(h => h !== ''); // Remove empty headers
+        const cleanHeaders = headers.filter(h => h !== undefined && h !== null && String(h).trim() !== '');
+        const headerKeys = new Set(cleanHeaders.map(h => tightHeader(h)));
+        const requiredKeys = new Set(required.map(c => tightHeader(c)));
 
-        // For all file types, use case-insensitive matching
-        const headersUpper = cleanHeaders.map(h => h.toUpperCase());
-        const expectedUpper = expected.map(col =>
-            String(col).trim().replace(/\s+/g, ' ').toUpperCase()
-        );
+        const autoFound = (col) => {
+            const candidates = [col, ...(aliases[col] || [])];
+            return candidates.some(cand => headerKeys.has(tightHeader(cand)));
+        };
 
-        // Find missing columns
-        const missingColumns = expectedUpper.filter(expectedCol =>
-            !headersUpper.includes(expectedCol)
-        );
+        // Important columns the file does not contain under any accepted spelling
+        const notFound = important.filter(col => !autoFound(col));
 
-        if (missingColumns.length > 0) {
-            // Map back to original expected column names for better error message
-            const missingOriginalNames = missingColumns.map(missing => {
-                const index = expectedUpper.indexOf(missing);
-                return expected[index];
-            });
+        // Of those, which are still unresolved after the user's manual mapping?
+        const missing = notFound.filter(col => {
+            const chosen = mapping[col];
+            if (chosen === '__SKIP__') {
+                // "Not in file" is never allowed for required key columns
+                return requiredKeys.has(tightHeader(col));
+            }
+            return !(chosen && headerKeys.has(tightHeader(chosen)));
+        });
 
-            // Show first 10 missing columns
-            const missingList = missingOriginalNames.slice(0, 10).join(', ');
-            const remainingCount = missingOriginalNames.length - 10;
-            const missingMessage = remainingCount > 0
-                ? `${missingList} and ${remainingCount} more columns`
-                : missingList;
+        // File headers not auto-matched to any important column — these are the
+        // candidates the user can map from
+        const importantKeys = new Set();
+        important.forEach(col => {
+            [col, ...(aliases[col] || [])].forEach(c => importantKeys.add(tightHeader(c)));
+        });
+        const unmatchedHeaders = cleanHeaders.filter(h => !importantKeys.has(tightHeader(h)));
 
+        // How many headers are new/renamed → imported as dynamic columns
+        const knownKeys = new Set((FILE_TYPE_COLUMNS[fileType] || []).map(c => tightHeader(c)));
+        importantKeys.forEach(k => knownKeys.add(k));
+        const dynamicCount = [...headerKeys].filter(k => k && !knownKeys.has(k)).length;
+
+        if (missing.length > 0) {
+            const requiredMissing = missing.filter(c => requiredKeys.has(tightHeader(c)));
             return {
                 valid: false,
-                message: `File format doesn't match ${getFileTypeLabel(fileType)}. Missing columns: ${missingMessage}`
+                notFound, missing, unmatchedHeaders, dynamicCount,
+                message: `Missing important column(s) for ${getFileTypeLabel(fileType)}: ${missing.map(c => c.toUpperCase()).join(', ')}. `
+                    + (requiredMissing.length > 0
+                        ? 'Match them to a file column below (required columns cannot be skipped).'
+                        : 'Match them to a file column below, or mark them as not in the file.')
             };
         }
 
-        return { valid: true, message: '' };
+        return {
+            valid: true,
+            notFound, missing, unmatchedHeaders, dynamicCount,
+            message: dynamicCount > 0
+                ? `All important columns found. ${dynamicCount} extra column(s) will be imported as dynamic data.`
+                : 'All important columns found.'
+        };
     };
 
     const handleFileChange = async (e) => {
@@ -406,19 +564,25 @@ const Import = () => {
     const previewFile = async (file) => {
         setPreviewLoading(true);
         setFormatError(null);
+        setColumnMapping({});
         try {
             const previewData = await readExcelFile(file);
             setFilePreview(previewData);
 
             // Validate format if file type is selected
             if (selectedFileType) {
-                const validation = validateFileFormat(previewData.headers, selectedFileType);
+                const validation = validateFileFormat(previewData.headers, selectedFileType, {});
+                setMappingInfo({
+                    notFound: validation.notFound || [],
+                    missing: validation.missing || [],
+                    unmatchedHeaders: validation.unmatchedHeaders || []
+                });
                 if (!validation.valid) {
                     setFormatError(validation.message);
                     toast.error(validation.message);
                 } else {
                     setFormatError(null);
-                    toast.success('File format validation passed!');
+                    toast.success(validation.message || 'File format validation passed!');
                 }
             }
 
@@ -431,6 +595,20 @@ const Import = () => {
             setPreviewLoading(false);
         }
     };
+
+    // Re-validate whenever the file type or the user's column mapping changes,
+    // so mapping a column immediately clears (or updates) the blocking error.
+    useEffect(() => {
+        if (!filePreview || !selectedFileType) return;
+        const validation = validateFileFormat(filePreview.headers, selectedFileType, columnMapping);
+        setMappingInfo({
+            notFound: validation.notFound || [],
+            missing: validation.missing || [],
+            unmatchedHeaders: validation.unmatchedHeaders || []
+        });
+        setFormatError(validation.valid ? null : validation.message);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedFileType, columnMapping, filePreview]);
 
     const handleDrag = (e) => {
         e.preventDefault();
@@ -469,7 +647,8 @@ const Import = () => {
         }
     };
 
-    const handleUpload = async () => {
+    // Step 1: validate, then ask the user to confirm file + type before uploading
+    const handleUpload = () => {
         if (files.length === 0) { toast.error('Please select a file'); return; }
         if (!selectedFileType) { toast.error('Please select a file type'); return; }
 
@@ -479,13 +658,33 @@ const Import = () => {
             return;
         }
         if (filePreview) {
-            const validation = validateFileFormat(filePreview.headers, selectedFileType);
+            const validation = validateFileFormat(filePreview.headers, selectedFileType, columnMapping);
             if (!validation.valid) { toast.error(validation.message); return; }
         }
+
+        setShowUploadConfirm(true);
+    };
+
+    // Step 2: the actual upload, runs only after the user confirms
+    const performUpload = async () => {
+        setShowUploadConfirm(false);
+        const file = files[0];
+        if (!file) return;
 
         const formData = new FormData();
         formData.append('file', file);
         formData.append('file_type', selectedFileType);
+        // Send the manual header mapping (e.g. {"Dt": "SR Due Date"}) so the
+        // server imports those columns under their proper names
+        const mappingPayload = {};
+        Object.entries(columnMapping).forEach(([importantCol, fileHeader]) => {
+            if (fileHeader && fileHeader !== '__SKIP__') {
+                mappingPayload[fileHeader] = importantCol;
+            }
+        });
+        if (Object.keys(mappingPayload).length > 0) {
+            formData.append('column_mapping', JSON.stringify(mappingPayload));
+        }
 
         setUploading(true);
         const uploadToast = toast.loading('Uploading file...');
@@ -521,6 +720,7 @@ const Import = () => {
                         }]);
                         setFiles([]); setSelectedFileType(''); setFilePreview(null);
                         setShowPreview(false); setFormatError(null);
+                        setColumnMapping({}); setMappingInfo({ notFound: [], missing: [], unmatchedHeaders: [] });
                         const fileInput = document.getElementById('file-input');
                         if (fileInput) fileInput.value = '';
                         return;
@@ -574,6 +774,7 @@ const Import = () => {
         const newFileType = e.target.value;
         setSelectedFileType(newFileType);
         setFormatError(null);
+        setColumnMapping({});
 
         // Fetch when this file type's data was last updated
         fetchLastUpdated(newFileType);
@@ -609,10 +810,7 @@ const Import = () => {
                 {/* Main Card */}
                 <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg sm:shadow-xl overflow-hidden">
                     {/* Card Header */}
-                    <div
-                        className="px-3 sm:px-4 py-2 sm:py-3"
-                        style={{ background: "#2f3192" }}
-                    >
+                    <div className="px-3 sm:px-4 py-2 sm:py-3 bg-[#2f3192]">
                         <h2 className="text-sm sm:text-base font-semibold text-white">Upload New File</h2>
                         <p className="text-white text-opacity-90 text-[10px] sm:text-xs mt-0.5 sm:mt-1">Select a file type and upload your Excel document</p>
                     </div>
@@ -631,13 +829,13 @@ const Import = () => {
                                         <select
                                             value={selectedFileType}
                                             onChange={handleFileTypeChange}
-                                            className="w-full appearance-none border rounded-lg shadow-sm px-2 sm:px-3 py-1.5 sm:py-2 pr-7 sm:pr-8 text-[11px] sm:text-xs focus:ring-2 transition-all bg-white text-black"
+                                            className="w-full appearance-none border border-gray-200 rounded-lg shadow-sm px-2 sm:px-3 py-1.5 sm:py-2 pr-7 sm:pr-8 text-[11px] sm:text-xs focus:ring-2 transition-all bg-white text-black"
                                             style={{
-                                                borderColor: selectedFileType ? '#2f3192' : '#D1D5DB',
-                                                '--tw-ring-color': '#2f3192'
+                                                borderColor: selectedFileType ? 'var(--erp-accent)' : '#D1D5DB',
+                                                '--tw-ring-color': 'var(--erp-accent)'
                                             }}
-                                            onFocus={(e) => e.target.style.borderColor = '#2f3192'}
-                                            onBlur={(e) => e.target.style.borderColor = selectedFileType ? '#2f3192' : '#D1D5DB'}
+                                            onFocus={(e) => e.target.style.borderColor = 'var(--erp-accent)'}
+                                            onBlur={(e) => e.target.style.borderColor = selectedFileType ? 'var(--erp-accent)' : '#D1D5DB'}
                                             disabled={uploading}
                                         >
                                             <option value="" disabled>Select a file type</option>
@@ -647,7 +845,7 @@ const Import = () => {
                                         </select>
                                         <ChevronDownIcon
                                             className="absolute right-2 sm:right-2.5 top-1/2 transform -translate-y-1/2 h-3 w-3 sm:h-3.5 sm:w-3.5 pointer-events-none"
-                                            style={{ color: selectedFileType ? '#2f3192' : '#9CA3AF' }}
+                                            style={{ color: selectedFileType ? 'var(--erp-accent)' : '#9CA3AF' }}
                                         />
                                     </div>
                                     <p className="mt-0.5 text-[10px] text-black">Choose the type of data you're importing</p>
@@ -662,7 +860,7 @@ const Import = () => {
                                                 Checking last update...
                                             </span>
                                         ) : lastUpdatedInfo && lastUpdatedInfo.last_updated ? (
-                                            <div className="inline-flex items-center gap-3 whitespace-nowrap px-3 py-2 border rounded-md bg-gray-50 max-md:flex-wrap max-md:whitespace-normal max-md:w-full">
+                                            <div className="inline-flex items-center gap-3 whitespace-nowrap px-3 py-2 border border-gray-200 rounded-md bg-gray-50 max-md:flex-wrap max-md:whitespace-normal max-md:w-full">
                                                 <ClockIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" style={{ color: themeColor }} />
                                                 <span className="text-[10px] sm:text-xs text-black">
                                                     <span className="font-semibold">Last data update:</span>{" "}
@@ -693,19 +891,32 @@ const Import = () => {
                                     </div>
                                     <div className="p-2 sm:p-3 overflow-x-auto">
                                         <div className="min-w-full">
-                                            <div className="text-[10px] sm:text-xs text-black mb-1 font-medium">Total Columns: {FILE_TYPE_COLUMNS[selectedFileType].length}</div>
-                                            <div className="bg-white rounded-lg border border-blue-200 p-2 max-h-24 overflow-y-auto">
-                                                <div className="flex flex-wrap gap-1.5">
-                                                    {FILE_TYPE_COLUMNS[selectedFileType].map((col, idx) => (
-                                                        <span
-                                                            key={idx}
-                                                            className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-gray-100 text-black border border-gray-200"
-                                                        >
-                                                            {col}
-                                                        </span>
-                                                    ))}
-                                                </div>
-                                            </div>
+                                            {(() => {
+                                                const importantCols = FILE_TYPE_IMPORTANT_COLUMNS[selectedFileType] || [];
+                                                return (
+                                                    <>
+                                                        <div className="text-[10px] sm:text-xs text-black mb-1 font-medium">
+                                                            Important columns in this file: {importantCols.length}
+                                                        </div>
+                                                        <div className="bg-white rounded-lg border border-blue-200 p-2 max-h-28 overflow-y-auto">
+                                                            <div className="flex flex-wrap gap-1.5">
+                                                                {importantCols.map((col, idx) => (
+                                                                    <span
+                                                                        key={idx}
+                                                                        className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-gray-100 text-black border border-gray-200"
+                                                                    >
+                                                                        {col.toUpperCase()}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-[10px] sm:text-[11px] text-gray-600 mt-1.5 leading-snug">
+                                                            Column names can be spelled in any case, spacing or punctuation (e.g. "engine serial no." is accepted).
+                                                            Every other column in the file is imported automatically as a dynamic column.
+                                                        </div>
+                                                    </>
+                                                );
+                                            })()}
                                         </div>
                                     </div>
                                 </div>
@@ -762,7 +973,7 @@ const Import = () => {
                                             <div className="space-y-1.5 sm:space-y-2">
                                                 <p className="text-[11px] sm:text-xs font-medium text-black">Selected file:</p>
                                                 <div className="flex flex-col xs:flex-row items-center justify-center gap-1.5 sm:gap-2">
-                                                    <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded-full border shadow-sm max-w-full">
+                                                    <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded-full border border-gray-200 shadow-sm max-w-full">
                                                         <DocumentTextIcon
                                                             className="h-3 w-3 shrink-0"
                                                             style={{ color: themeColor }}
@@ -795,7 +1006,7 @@ const Import = () => {
                                         {filePreview && (
                                             <button
                                                 onClick={togglePreview}
-                                                className="inline-flex items-center gap-1 px-2 py-1 text-[10px] sm:text-xs font-medium rounded-lg transition-colors border"
+                                                className="inline-flex items-center gap-1 px-2 py-1 text-[10px] sm:text-xs font-medium rounded-lg transition-colors border border-gray-200"
                                                 style={{
                                                     backgroundColor: themeShades.light,
                                                     color: themeColor,
@@ -826,17 +1037,73 @@ const Import = () => {
                                             <h4 className="text-[11px] sm:text-xs font-medium text-red-800">File Format Error</h4>
                                             <p className="text-[10px] sm:text-xs text-red-600 mt-0.5">{formatError}</p>
                                             <p className="text-[10px] text-red-500 mt-1">
-                                                Please select the correct file type or check your file format.
+                                                Match the missing columns below, select the correct file type, or fix the file.
                                             </p>
                                         </div>
                                     </div>
                                 </div>
                             )}
 
+                            {/* Column Mapping — resolve important columns the file names differently */}
+                            {filePreview && selectedFileType && mappingInfo.notFound.length > 0 && (
+                                <div className="bg-white border border-gray-300 rounded-lg p-2 sm:p-3">
+                                    <h4 className="text-[11px] sm:text-xs font-semibold text-black mb-1">
+                                        Match file columns
+                                    </h4>
+                                    <p className="text-[10px] sm:text-[11px] text-gray-600 mb-2">
+                                        These important columns were not found in the file. If the file has them
+                                        under a different name (e.g. "Dt" instead of "Date"), select that column —
+                                        it will be imported with the correct name. Your Excel file is not changed.
+                                    </p>
+                                    <div className="space-y-1.5">
+                                        {mappingInfo.notFound.map((col) => {
+                                            const isRequired = (FILE_TYPE_REQUIRED_COLUMNS[selectedFileType] || [])
+                                                .some(r => tightHeader(r) === tightHeader(col));
+                                            const usedHeaders = new Set(
+                                                Object.entries(columnMapping)
+                                                    .filter(([c, h]) => c !== col && h && h !== '__SKIP__')
+                                                    .map(([, h]) => h)
+                                            );
+                                            const options = mappingInfo.unmatchedHeaders.filter(h => !usedHeaders.has(h));
+                                            const resolved = columnMapping[col] && (
+                                                columnMapping[col] === '__SKIP__' ? !isRequired : true
+                                            );
+                                            return (
+                                                <div key={col} className="flex items-center gap-2 flex-wrap">
+                                                    <span className="font-mono text-[10px] sm:text-[11px] px-1.5 py-0.5 bg-gray-100 border border-gray-200 rounded-md">
+                                                        {col.toUpperCase()}{isRequired ? ' *' : ''}
+                                                    </span>
+                                                    <span className="text-[10px] text-gray-400">=</span>
+                                                    <select
+                                                        value={columnMapping[col] || ''}
+                                                        onChange={(e) => setColumnMapping(prev => ({ ...prev, [col]: e.target.value }))}
+                                                        className="text-[10px] sm:text-[11px] border border-gray-300 rounded-md px-1.5 py-1 bg-white max-w-[240px]"
+                                                    >
+                                                        <option value="">-- select file column --</option>
+                                                        {options.map(h => (
+                                                            <option key={h} value={h}>{h}</option>
+                                                        ))}
+                                                        {!isRequired && (
+                                                            <option value="__SKIP__">Not in file — continue without it</option>
+                                                        )}
+                                                    </select>
+                                                    {resolved && (
+                                                        <CheckCircleIcon className="h-3.5 w-3.5 text-green-600" />
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <p className="text-[10px] text-gray-500 mt-1.5">
+                                        * required — the upload stays blocked until these are matched.
+                                    </p>
+                                </div>
+                            )}
+
                             {/* File Preview Section */}
                             {showPreview && filePreview && (
-                                <div className="mt-3 sm:mt-4 border rounded-lg sm:rounded-xl overflow-hidden">
-                                    <div className="px-2 sm:px-3 py-1.5 sm:py-2 border-b flex flex-col xs:flex-row xs:items-center justify-between gap-1.5"
+                                <div className="mt-3 sm:mt-4 border border-gray-200 rounded-lg sm:rounded-xl overflow-hidden">
+                                    <div className="px-2 sm:px-3 py-1.5 sm:py-2 border-b border-gray-200 flex flex-col xs:flex-row xs:items-center justify-between gap-1.5"
                                         style={{ backgroundColor: themeShades.light }}>
                                         <div className="flex items-center gap-1.5">
                                             <TableCellsIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" style={{ color: themeColor }} />
@@ -855,7 +1122,7 @@ const Import = () => {
                                                     {filePreview.headers.map((header, index) => (
                                                         <th
                                                             key={index}
-                                                            className="px-1.5 sm:px-2 py-1 sm:py-1.5 text-left font-medium text-black uppercase tracking-wider border-r last:border-r-0 whitespace-nowrap"
+                                                            className="px-1.5 sm:px-2 py-1 sm:py-1.5 text-left font-medium text-black uppercase tracking-wider border-r border-gray-200 last:border-r-0 whitespace-nowrap"
                                                         >
                                                             {header || `Col ${index + 1}`}
                                                         </th>
@@ -868,7 +1135,7 @@ const Import = () => {
                                                         {filePreview.headers.map((_, colIndex) => (
                                                             <td
                                                                 key={colIndex}
-                                                                className="px-1.5 sm:px-2 py-1 sm:py-1.5 border-r last:border-r-0 whitespace-nowrap text-black"
+                                                                className="px-1.5 sm:px-2 py-1 sm:py-1.5 border-r border-gray-200 last:border-r-0 whitespace-nowrap text-black"
                                                             >
                                                                 {row && row[colIndex] !== undefined && row[colIndex] !== null
                                                                     ? String(row[colIndex])
@@ -882,7 +1149,7 @@ const Import = () => {
                                     </div>
 
                                     {filePreview.totalRows > 10 && (
-                                        <div className="bg-gray-50 px-2 sm:px-3 py-1 text-[10px] sm:text-xs text-black text-center border-t">
+                                        <div className="bg-gray-50 px-2 sm:px-3 py-1 text-[10px] sm:text-xs text-black text-center border-t border-gray-200">
                                             Showing first 10 rows of {filePreview.totalRows} total rows
                                         </div>
                                     )}
@@ -954,7 +1221,7 @@ const Import = () => {
 
                             {/* Results Section */}
                             {results.length > 0 && (
-                                <div className="mt-3 sm:mt-4 border-t pt-3 sm:pt-4">
+                                <div className="mt-3 sm:mt-4 border-t border-gray-200 pt-3 sm:pt-4">
                                     <h3 className="text-xs sm:text-sm font-semibold text-black mb-2 sm:mb-3">Upload Results</h3>
                                     <div className="space-y-1.5 sm:space-y-2">
                                         {results.map((result, index) => (
@@ -999,6 +1266,70 @@ const Import = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Upload Confirmation Modal */}
+            {showUploadConfirm && files[0] && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-4 sm:p-5">
+                        <div className="flex items-start gap-2">
+                            <InformationCircleIcon className="h-5 w-5 flex-shrink-0" style={{ color: themeColor }} />
+                            <div className="min-w-0 flex-1">
+                                <h3 className="text-sm font-semibold text-black">Confirm upload</h3>
+                                <p className="text-xs text-gray-600 mt-1">
+                                    Please make sure this is the correct file before uploading:
+                                </p>
+                                <div className="mt-2 bg-gray-50 border border-gray-200 rounded-lg p-2 text-xs space-y-1">
+                                    <div>
+                                        <span className="text-gray-500">File: </span>
+                                        <span className="font-medium text-black break-all">{files[0].name}</span>
+                                    </div>
+                                    <div>
+                                        <span className="text-gray-500">Import as: </span>
+                                        <span className="font-medium text-black">{getFileTypeLabel(selectedFileType)}</span>
+                                    </div>
+                                    {filePreview && (
+                                        <div>
+                                            <span className="text-gray-500">Rows: </span>
+                                            <span className="font-medium text-black">{filePreview.totalRows}</span>
+                                            <span className="text-gray-500"> · Columns: </span>
+                                            <span className="font-medium text-black">{filePreview.totalColumns}</span>
+                                        </div>
+                                    )}
+                                    {Object.entries(columnMapping).filter(([, h]) => h && h !== '__SKIP__').length > 0 && (
+                                        <div>
+                                            <span className="text-gray-500">Matched columns: </span>
+                                            <span className="font-medium text-black">
+                                                {Object.entries(columnMapping)
+                                                    .filter(([, h]) => h && h !== '__SKIP__')
+                                                    .map(([col, hdr]) => `${hdr} → ${col}`)
+                                                    .join(', ')}
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+                                <p className="text-[11px] text-gray-500 mt-2">
+                                    Existing records with the same key will be updated; new records will be added.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-2 mt-4">
+                            <button
+                                onClick={() => setShowUploadConfirm(false)}
+                                className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 text-black hover:bg-gray-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={performUpload}
+                                className="px-3 py-1.5 text-xs rounded-lg text-white font-medium hover:opacity-90"
+                                style={{ background: themeColor }}
+                            >
+                                Yes, upload this file
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

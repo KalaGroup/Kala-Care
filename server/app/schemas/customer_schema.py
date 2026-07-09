@@ -30,6 +30,7 @@ class AMCAgreementBase(BaseModel):
     last_agreement_product_name: Optional[str] = None
     last_agreement_start_date: Optional[datetime] = None
     last_agreement_end_date: Optional[datetime] = None
+    extra_data: Optional[str] = None
 
 class AMCAgreementCreate(AMCAgreementBase):
     pass
@@ -79,6 +80,7 @@ class AssetDetailedBase(BaseModel):
     krm_subscription_start_date: Optional[datetime] = None
     krm_subscription_end_date: Optional[datetime] = None
     kva_rating: Optional[str] = None
+    extra_data: Optional[str] = None
 
 class AssetDetailedCreate(AssetDetailedBase):
     pass
@@ -120,6 +122,7 @@ class AssetServiceBase(BaseModel):
     last_oil_change_date: Optional[datetime] = None
     installation_site_address: Optional[str] = None
     last_service_hrs: Optional[str] = None
+    extra_data: Optional[str] = None
 
 class AssetServiceCreate(AssetServiceBase):
     pass
@@ -185,6 +188,7 @@ class AnubandhanPlusQuoteBase(BaseModel):
     pulse_instance_id: Optional[str] = None
     new_price_applicable: Optional[bool] = None
     quotation_type: Optional[str] = None
+    extra_data: Optional[str] = None
 
 class AnubandhanPlusQuoteCreate(AnubandhanPlusQuoteBase):
     pass
@@ -250,6 +254,7 @@ class AnubandhanQuoteBase(BaseModel):
     pulse_instance_id: Optional[str] = None
     new_price_applicable: Optional[bool] = None
     quotation_type: Optional[str] = None
+    extra_data: Optional[str] = None
 
 class AnubandhanQuoteCreate(AnubandhanQuoteBase):
     pass
@@ -315,6 +320,7 @@ class BandhanPlusQuoteBase(BaseModel):
     pulse_instance_id: Optional[str] = None
     new_price_applicable: Optional[bool] = None
     quotation_type: Optional[str] = None
+    extra_data: Optional[str] = None
 
 class BandhanPlusQuoteCreate(BandhanPlusQuoteBase):
     pass
@@ -368,6 +374,7 @@ class PulseQuotationBase(BaseModel):
     quotation_lead_assigned_job_title: Optional[str] = None
     quotation_lead_assigned_phone: Optional[str] = None
     quotation_lead_assigned_uid: Optional[str] = None
+    extra_data: Optional[str] = None
 
 class PulseQuotationCreate(PulseQuotationBase):
     pass
@@ -435,6 +442,7 @@ class RegularBandhanBase(BaseModel):
     quotation_type: Optional[str] = None
     first_pm_date: Optional[datetime] = None
     agreement_start_date: Optional[datetime] = None
+    extra_data: Optional[str] = None
 
 class RegularBandhanCreate(RegularBandhanBase):
     pass
@@ -526,6 +534,7 @@ class LMSDataBase(BaseModel):
     lead_contact_number: Optional[str] = None
     next_action_date: Optional[datetime] = None
     lead_assign_to_sd: Optional[str] = None
+    extra_data: Optional[str] = None
 
 class LMSDataCreate(LMSDataBase):
     pass
@@ -702,9 +711,11 @@ class OpenSRLoadReportBase(BaseModel):
     bandhan_pm_jc_creation_lock_removal_flag_updated_date: Optional[datetime] = None
     account_id: Optional[str] = None
     sr_created_by: Optional[str] = None
+    sr_created_date: Optional[datetime] = None
     efsr_krm_number: Optional[str] = None
     dry_csp_approved_by: Optional[str] = None
     dry_csp_approved_date: Optional[datetime] = None
+    extra_data: Optional[str] = None
 
 class OpenSRLoadReportCreate(OpenSRLoadReportBase):
     pass

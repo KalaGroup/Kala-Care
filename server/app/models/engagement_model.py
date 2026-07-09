@@ -1,11 +1,18 @@
-from sqlalchemy import Column, String, DateTime, Text, Integer, ForeignKey, Boolean, Float, text
+from sqlalchemy import Column, String, DateTime, Text, Integer, ForeignKey, Boolean, Float, text, Index
 from sqlalchemy.orm import relationship
 from app.database import Base
 
 
 class FollowUp(Base):
     __tablename__ = "followups"
-    
+    __table_args__ = (
+        # My Performance reports: filter by user, newest first
+        Index('IX_followups_user_date', 'user_id', 'followup_date'),
+        # Drive/dashboard reports: all follow-ups of one campaign, newest first
+        Index('IX_followups_campaign_date', 'campaign_id', 'followup_date'),
+    )
+
+
     id = Column(Integer, primary_key=True, index=True)
     customer_id = Column(Integer, ForeignKey("customers.id"))
     customer_instance_id = Column(String(100), index=True, nullable=True)

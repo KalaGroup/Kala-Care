@@ -76,76 +76,12 @@ os.makedirs(BANNER_DIR, exist_ok=True)
 
 # ---------------- CREATE DATABASE TABLES ---------------- #
 
-# The Regular Bandhan import file changed to a quote-style format with a
-# completely different column set. If the table still has the OLD shape
-# (genset_number present, company_name absent), drop it here so create_all
-# below recreates it with the new schema. Old-format rows are obsolete.
-def _migrate_regular_bandhan_table(engine):
-    from sqlalchemy import text
-    with engine.begin() as conn:
-        conn.execute(text(
-            "IF COL_LENGTH('regular_bandhan', 'genset_number') IS NOT NULL "
-            "AND COL_LENGTH('regular_bandhan', 'company_name') IS NULL "
-            "DROP TABLE regular_bandhan"
-        ))
-
-try:
-    _migrate_regular_bandhan_table(engine)
-except Exception as e:
-    print(f"[regular-bandhan-migrate] skipped: {e}")
-
+# create_all creates any table that does not exist yet; it NEVER alters an
+# existing table. Schema changes to existing tables (new columns, key/index
+# changes) are applied manually via databaseSQl.txt in SSMS.
 print("Creating/Updating database tables...")
 Base.metadata.create_all(bind=engine)
 print("Tables created/updated successfully!")
-
-# create_all only creates missing TABLES — it never adds new columns to an
-# existing table. Idempotent per-column ALTERs live here instead.
-def ensure_user_columns(engine):
-    from sqlalchemy import text
-    with engine.begin() as conn:
-        conn.execute(text(
-            "IF COL_LENGTH('users', 'theme') IS NULL "
-            "ALTER TABLE users ADD theme VARCHAR(10) NULL"
-        ))
-
-try:
-    ensure_user_columns(engine)
-except Exception as e:
-    print(f"[user-columns] skipped: {e}")
-
-# open_sr_data started life with only the 4 display fields; the model now
-# covers the full 22-column import file. Add any missing column in place.
-def ensure_open_sr_data_columns(engine):
-    from sqlalchemy import text
-    columns = {
-        'zone_name': 'VARCHAR(200)',
-        'asm_name': 'VARCHAR(500)',
-        'sd_id': 'VARCHAR(100)',
-        'sd_name': 'VARCHAR(500)',
-        'branch_name': 'VARCHAR(500)',
-        'application_code': 'VARCHAR(200)',
-        'engine_serial_no': 'VARCHAR(200)',
-        'engine_model': 'VARCHAR(200)',
-        'segment': 'VARCHAR(200)',
-        'product_segment': 'VARCHAR(200)',
-        'account_name': 'VARCHAR(500)',
-        'sr_number': 'VARCHAR(200)',
-        'sr_type': 'VARCHAR(200)',
-        'sr_subtype': 'VARCHAR(200)',
-        'mode_of_sr': 'VARCHAR(200)',
-        'count_of_tasks': 'VARCHAR(50)',
-    }
-    with engine.begin() as conn:
-        for name, sqltype in columns.items():
-            conn.execute(text(
-                f"IF COL_LENGTH('open_sr_data', '{name}') IS NULL "
-                f"ALTER TABLE open_sr_data ADD {name} {sqltype} NULL"
-            ))
-
-try:
-    ensure_open_sr_data_columns(engine)
-except Exception as e:
-    print(f"[open-sr-data-columns] skipped: {e}")
 
 # Ensure performance indexes for the hot list/dashboard queries. Idempotent
 # (IF NOT EXISTS) — after the first run this is a fast no-op on every startup.

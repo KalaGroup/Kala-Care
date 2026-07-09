@@ -1,9 +1,13 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, Numeric
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, Numeric, Index
 from sqlalchemy.sql import func
 from app.database import Base
 
 class NonFollowUp(Base):
     __tablename__ = "non_followups"
+    __table_args__ = (
+        # Non-drive customer reports: all rows of one user
+        Index('IX_non_followups_user', 'user_id'),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)

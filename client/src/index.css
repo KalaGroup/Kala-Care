@@ -1344,3 +1344,42 @@ html.dark [style*="border: 1.5px solid rgb(47, 49, 146)"] {
 }
 /* History list — the "7 / Jul" date tile border */
 html.dark [style*="border: 1px solid rgb(226, 230, 245)"] { border-color: #2e3440 !important; }
+
+/* ============================================================
+   DARK THEME — "Send Letter" button (Drive & Non-Drive pages).
+   The inline bright amber gradient (#f59e0b → #d97706) is too
+   loud on dark; deepen it while keeping the amber identity.
+   Light mode untouched (inline style still applies there).
+   ============================================================ */
+html.dark .send-letter-btn {
+  background: linear-gradient(135deg, #92400e, #78350f) !important;
+}
+html.dark .send-letter-btn:hover {
+  background: linear-gradient(135deg, #7c3a0c, #632b0c) !important;
+}
+
+/* ============================================================
+   DARK THEME — MOM Tracking view tabs (New meeting / History /
+   Reports / Employee report). The active tab's inline 10% navy
+   tint is invisible on dark — lift it to a clear sky pill so the
+   selected tab is instantly identifiable. Light mode untouched.
+   ============================================================ */
+html.dark .mom-tab-active {
+  background: rgba(56, 189, 248, 0.18) !important;
+  color: #7dd3fc !important;
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35);
+}
+
+/* ============================================================
+   DARK THEME — "R" (Rejected) status filter chip on Drive &
+   Non-Drive pages. Its inline #e34019 orange-red is harsh and
+   unreadable on dark. Unselected: soft red text with a gentle
+   red hover tint; selected: deep red pill with white text.
+   Light mode untouched (inline style still applies there).
+   ============================================================ */
+html.dark .status-r-btn { color: #fca5a5 !important; }
+html.dark .status-r-btn:hover { background: rgba(239, 68, 68, 0.14) !important; }
+html.dark .status-r-btn.status-r-selected {
+  background: #991b1b !important;
+  color: #ffffff !important;
+}

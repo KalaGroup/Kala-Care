@@ -1115,6 +1115,7 @@ class CustomerController:
             "zero_labour_flag": rec.zero_labour_flag,
             "oil_change_flag": rec.oil_change_flag,
             "count_of_tasks": rec.count_of_tasks,
+            "extra_data": rec.extra_data,
             "created_at": rec.created_at,
             "updated_at": rec.updated_at
         }
@@ -1228,6 +1229,7 @@ class CustomerController:
             "last_agreement_product_name": agreement.last_agreement_product_name,
             "last_agreement_start_date": agreement.last_agreement_start_date,
             "last_agreement_end_date": agreement.last_agreement_end_date,
+            "extra_data": agreement.extra_data,
             "created_at": agreement.created_at,
             "updated_at": agreement.updated_at
         }
@@ -1268,6 +1270,7 @@ class CustomerController:
             "krm_subscription_start_date": asset.krm_subscription_start_date,
             "krm_subscription_end_date": asset.krm_subscription_end_date,
             "kva_rating": asset.kva_rating,
+            "extra_data": asset.extra_data,
             "created_at": asset.created_at,
             "updated_at": asset.updated_at
         }
@@ -1300,6 +1303,7 @@ class CustomerController:
             "last_oil_change_date": service.last_oil_change_date,
             "installation_site_address": service.installation_site_address,
             "last_service_hrs": service.last_service_hrs,
+            "extra_data": service.extra_data,
             "created_at": service.created_at,
             "updated_at": service.updated_at
         }
@@ -1355,6 +1359,7 @@ class CustomerController:
             "pulse_instance_id": quote.pulse_instance_id,
             "new_price_applicable": quote.new_price_applicable,
             "quotation_type": quote.quotation_type,
+            "extra_data": quote.extra_data,
             "created_at": quote.created_at,
             "updated_at": quote.updated_at
         }
@@ -1410,6 +1415,7 @@ class CustomerController:
             "pulse_instance_id": quote.pulse_instance_id,
             "new_price_applicable": quote.new_price_applicable,
             "quotation_type": quote.quotation_type,
+            "extra_data": quote.extra_data,
             "created_at": quote.created_at,
             "updated_at": quote.updated_at
         }
@@ -1465,6 +1471,7 @@ class CustomerController:
             "pulse_instance_id": quote.pulse_instance_id,
             "new_price_applicable": quote.new_price_applicable,
             "quotation_type": quote.quotation_type,
+            "extra_data": quote.extra_data,
             "created_at": quote.created_at,
             "updated_at": quote.updated_at
         }
@@ -1508,6 +1515,7 @@ class CustomerController:
             "quotation_lead_assigned_job_title": quote.quotation_lead_assigned_job_title,
             "quotation_lead_assigned_phone": quote.quotation_lead_assigned_phone,
             "quotation_lead_assigned_uid": quote.quotation_lead_assigned_uid,
+            "extra_data": quote.extra_data,
             "created_at": quote.created_at,
             "updated_at": quote.updated_at
         }
@@ -1565,6 +1573,7 @@ class CustomerController:
             "quotation_type": record.quotation_type,
             "first_pm_date": record.first_pm_date,
             "agreement_start_date": record.agreement_start_date,
+            "extra_data": record.extra_data,
             "created_at": record.created_at,
             "updated_at": record.updated_at
         }
@@ -1648,6 +1657,7 @@ class CustomerController:
             "next_action_date": record.next_action_date,
             "lead_assign_to_sd": record.lead_assign_to_sd,
     
+            "extra_data": record.extra_data,
             "created_at": record.created_at,
             "updated_at": record.updated_at
         }
@@ -1722,9 +1732,11 @@ class CustomerController:
             "bandhan_pm_jc_creation_lock_removal_flag_updated_date": report.bandhan_pm_jc_creation_lock_removal_flag_updated_date,
             "account_id": report.account_id,
             "sr_created_by": report.sr_created_by,
+            "sr_created_date": report.sr_created_date,
             "efsr_krm_number": report.efsr_krm_number,
             "dry_csp_approved_by": report.dry_csp_approved_by,
             "dry_csp_approved_date": report.dry_csp_approved_date,
+            "extra_data": report.extra_data,
             "created_at": report.created_at,
             "updated_at": report.updated_at
         }

@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from fastapi import UploadFile, HTTPException
 import io
 import re
+import json
 
 from app.models.customer_model import (
     Customer, AMCAgreement, AssetDetailed, AssetService,
@@ -13,9 +14,201 @@ from app.models.customer_model import (
     PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, OpenSRData
 )
 
+# ==========================================================================
+# DYNAMIC COLUMN SUPPORT
+#
+# Every header the code knows about, per file type, spelled exactly the way
+# the import functions reference it (the "canonical" name). Before any file
+# is processed its headers are renamed to these canonical names using a
+# flexible match (exact -> case/extra-space insensitive -> alphanumeric-only),
+# so "agreement end date", "AGREEMENT  END  DATE" or "Agreement End Date"
+# all import fine. Columns that match nothing here are treated as DYNAMIC:
+# they are kept per-row as JSON in the new `extra_data` column instead of
+# breaking the import.
+# ==========================================================================
+
+_QUOTE_FILE_COLUMNS = [
+    'Id', 'QuotationRefNo', 'CompanyName', 'EngineNo', 'ContactPersonName',
+    'MobileNo', 'EmailId', 'GensetKVA', 'Zone', 'State', 'City', 'Location',
+    'NoOfYears', 'GensetRunningPerYear', 'CreatedDateTime', 'Status',
+    'PaymentType', 'TransactionId', 'BankName', 'AccountNo', 'DateOfPayment',
+    'PaymentUpdateDateTime', 'IsNEFTConfirm', 'IsChequeConfirm',
+    'Cheque deposited-Address of YES Bank Branch', 'cheque given-Name of KOEL Dealership',
+    'Cheque Deposited', 'Cheque To Dealer', 'Employee Name', 'Pulse Id',
+    'IsInvoiceSent', 'IsRefund', 'AgentId', 'QuotePrice',
+    'Quotation Value Including tax', 'Name of Agent', 'Actual Amount',
+    'Reason of Short Payment', 'Status updated by Admin', 'Quotation Expiry Date',
+    'IsExpired', 'Payment Updated Month', 'Pulse Instance ID', 'New Price Applicable',
+    'QuotationType'
+]
+
+FILE_KNOWN_COLUMNS = {
+    'AMC Population Report': [
+        'INSTANCE ID', 'ZONE NAME', 'SD ID', 'SD NAME', 'BRANCH ID', 'BRANCH NAME',
+        'SEGMENT', 'KVA RATING', 'ENGINE MODEL', 'AGREEMENT NUMBER',
+        'NUMBER OF AGREEMENT YEARS', 'AGREEMENT NAME', 'AGREEMENT STATUS',
+        'AGREEMENT TYPE', 'AGREEMENT CREATED DATE', 'AGREEMENT START DATE',
+        'AGREEMENT END DATE', 'AGREEMENT PRODUCT NAME', 'AGREEMENT INVOICE TYPE',
+        'COMMISSIONING DATE', 'LAST AGREEMENT NUMBER', 'LAST AGREEMENT NO OF YEARS',
+        'LAST AGREEMENT TYPE', 'LAST AGREEMENT STATUS', 'LAST AGREEMENT PRODUCT NAME',
+        'LAST AGREEMENT START DATE', 'LAST AGREEMENT END DATE'
+    ],
+    'Asset Detailed Report': [
+        'ZONE NAME', 'SD ID', 'SD NAME', 'BRANCH ID', 'BRANCH NAME', 'DISTRICT',
+        'ASSET NUMBER', 'COMMISSIONING DATE', 'INSTALLATION DATE', 'GOEM OEM',
+        'APPLICATION CODE', 'ENGINE SERIAL NO', 'ENGINE MODEL', 'ACCOUNT NAME',
+        'CUSTOMER NAME', 'CONTACT PHONE NUMBER', 'CONTACT EMAIL ID',
+        'WARRANTY EXPIRY DATE', 'INSTALLATION SITE ADDRESS', 'PRODUCT SEGMENT',
+        'SEGMENT', 'CUSTOMER SEGMENT', 'ASSET OPERATIONAL STATUS', 'KRM NUMBER',
+        'KRM STATUS', 'KRM ACTIVE DATE', 'KRM INACTIVE DATE',
+        'KRM SUBSCRIPTION START DATE', 'KRM SUBSCRIPTION END DATE', 'KVA RATING'
+    ],
+    'Asset Details with Last Oil Service': [
+        'ZONE NAME', 'SD ID', 'SD NAME', 'BRANCH ID', 'BRANCH NAME', 'ASSET NUMBER',
+        'COMMISSIONING DATE', 'PRODUCT SEGMENT', 'APPLICATION CODE',
+        'ENGINE SERIAL NO', 'ACCOUNT NAME', 'CONTACT PHONE NUMBER',
+        'LAST CLOSED SR NUMBER', 'LAST SR TYPE', 'LAST SR SUBTYPE',
+        'LAST SR CLOSE DATE', 'LAST OIL CHANGE SR NUMBER', 'LAST OIL CHANGE SR TYPE',
+        'LAST OIL CHANGE SR SUB TYPE', 'LAST OIL CHANGE DATE',
+        'INSTALLATION SITE ADDRESS', 'LAST SERVICE HRS'
+    ],
+    'Anubandhan Plus Quotes Report': _QUOTE_FILE_COLUMNS,
+    'Anubandhan Quotes Report': _QUOTE_FILE_COLUMNS,
+    'BandhanPlus Quotes Report': _QUOTE_FILE_COLUMNS,
+    'Pulse Quotation - Service Only': [
+        'Creation Date', 'Quote ID', 'First level observations', 'Quote Status',
+        'SR Type', 'SR Sub Type', 'Instance Id', 'Account', 'Bill To Address',
+        'Ship To Address', 'First Name', 'Last Name', 'Account/Contact Phone Number',
+        'Installation Site Address', 'Account/Contact Primary Email', 'Service Dealer',
+        'Labor Amount', 'Parts Amount', 'Total Amount', 'Prepared By', 'Recommended By',
+        'Finance Company Address', 'Account Number', 'Purpose Of Quotation', 'SR#:',
+        'Quote Revised Flag', 'Quote Submitted Date', 'Exception Enquiry #', 'Lead #',
+        'Quotation Lead Assigned Name', 'Quotation Lead Assigned Job Title',
+        'Quotation Lead Assigned Phone Number', 'Quotation Lead Assigned UID'
+    ],
+    'Regular Bandhan Customers Report': [
+        'Id', 'Quotation Ref No', 'Company Name', 'Engine No', 'Contact Person Name',
+        'Mobile No', 'Email Id', 'Genset KVA', 'Zone', 'State', 'City', 'Location',
+        'No Of Years', 'Genset Running Per Year', 'Created Date Time', 'Status',
+        'PaymentType', 'Transaction Id', 'Bank Name', 'Account No', 'Date Of Payment',
+        'Payment Update Date Time', 'Is NEFT Confirm', 'Is Cheque Confirm',
+        'Cheque deposited-Address of YES Bank Branch', 'cheque given-Name of KOEL Dealership',
+        'Cheque Deposited', 'Cheque To Dealer', 'Employee Name', 'Pulse Id',
+        'Is Invoice Sent', 'Is Refund', 'Agent Id', 'QuotePrice',
+        'Quotation Value Including tax', 'Name of Agent', 'Actual Amount',
+        'Reason of Short Payment', 'Status updated by Admin', 'Quotation Expiry Date',
+        'IsExpired', 'Payment Updated Month', 'Pulse Instance ID', 'New Price Applicable',
+        'Quotation Type', 'First PM Date', 'Agreement start date'
+    ],
+    'LMS Data for ERP': [
+        'Sr. No.',  # running row number in some LMS layouts — recognized, not stored
+        'Instance ID', 'Lead Number', 'Lead Created Date', 'Lead Raised By',
+        'Lead Status', 'Lead Raised For', 'Lead Assigned To', 'SD Code', 'SD Name',
+        'SD Branch Name', 'SD Branch Code', 'Service Request Number', 'SR Type',
+        'SR Sub Type', 'SR Sub Type.1', 'Account ID', 'Account Name',
+        'Account Contact Number', 'Account Contact Email ID', 'Tele-Caller Name',
+        'Tele-Caller UID', 'Tele Caller Mobile Number', 'Enquiry Allocation Remarks',
+        'Engine App Code', 'Engine Serial No', 'Engine Model', 'Pin Code', 'Segment',
+        'kVA Rating', 'Commissioning Date', 'Installation Site Address', 'City',
+        'District', 'State', 'Asset Contact Name', 'Asset Contact Phone Number',
+        'eFSR Contact Name', 'eFSR Customer Number', 'Qualifying Date',
+        'Quotation Type', 'Quotation Number', 'Quotation Approved Date',
+        'Mode Of Lead Creation', 'Quotation Submit Date', 'Quotation Labour Amt',
+        'Quotation Part Amt', 'Total Quote Amount', 'Quotation Lead Assigned Name',
+        'Quotation Lead Assigned UID', 'Quotation Lead Assigned Job Title',
+        'Enquiry Loss Reason', 'Service Engineer Name', 'Service Engineer UID',
+        'Service Engineer Mobile Number', 'Order Number', 'SIC Code', 'SIC Code Type',
+        'Labour Invoice Number', 'Part Invoice Amount', 'Part Invoice Number',
+        'Lead Source', 'Next Action Required', 'New Contact', 'Lead Contact Number',
+        'Next Action Date', 'Lead Assign To SD'
+    ],
+    'Open SR Load Report': [
+        'Instance Id [Asset #]', 'Service Request #', 'SR Due Date', 'SR Type',
+        'Appointment Date', 'Service Dealer', 'Status', 'Problem Code',
+        'Close Date/Time', 'VOC', 'Contact Last Name', 'Installation Site Address',
+        'Account', 'Engine App Code', 'Engine Serial#', 'Segment', 'Engine Series',
+        'Engine Model', 'Ticket#', 'Task Start Date', 'Task End Date',
+        'Under Monitoring Date', 'Under Monitoring Remark', 'Convert PM to Wet PM Flag',
+        'Convert PM to Wet PM Flag updated Date', 'Convert PM to Wet PM Flag updated by',
+        'eFSR Engineer Remarks', 'Quick Ticket SR Comments', 'Actual SR Due Date',
+        'SR Sub-Type', 'Customer Name', 'Customer Mobile #', 'Genset Appcode',
+        'Primary Phone#', 'Contact Name', 'Mode', 'Special Tool', 'Special Tool Name',
+        'Repeat', 'Assigned To', 'Oil Change Flg', 'Claim Created', 'Agreement #',
+        'Cancellation Reason', 'CSP Cancellation Reasons', 'CSP Cancellation Remarks',
+        'ASM/ASE Remarks', 'ASM/ASE Remarks Date', 'Battery Charger Availability',
+        'Wet PM Due Flag', 'Cap Limit Approval Remarks', 'Cap Limit Deviation Remarks',
+        'Cap Limit Deviation Status', 'Cap limit User details', 'CSP Prepone Flag',
+        'CSP Prepone Flag updated By', 'Bandhan PM SR closure within 15 days flag',
+        'Bandhan PM Lock Removal flag updated by', 'Bandhan PM Lock Removal flag updated Date',
+        'Bandhan PM SR Closure @90 days max after PM Due Date flag',
+        'Bandhan PM Due Date Lock Removal flag updated by',
+        'Bandhan PM Due Date Lock Removal flag updated Date',
+        'Bandhan Job card creation prior to 60 days flag',
+        'Bandhan PM JC creation Lock Removal flag updated by',
+        'Bandhan PM JC creation Lock Removal flag updated Date',
+        'Account Id', 'SR Created BY', 'SR Created Date', 'eFSR KRM Number',
+        'Dry CSP Approved by', 'Dry CSP Approved Date',
+        'Contact Phone Number', 'Contact Email'
+    ],
+    'Open SR Data': [
+        'INSTANCE ID', 'ZONE NAME', 'ASM NAME', 'SD ID', 'SD NAME', 'BRANCH ID',
+        'BRANCH NAME', 'APPLICATION CODE', 'ENGINE SERIAL NO', 'ENGINE MODEL',
+        'SEGMENT', 'PRODUCT SEGMENT', 'ACCOUNT NAME', 'SR NUMBER', 'SR TYPE',
+        'SR SUBTYPE', 'SR OPEN DATE', 'SR CLOSE DATE', 'MODE OF SR',
+        'ZERO LABOUR FLAG', 'OIL CHANGE FLAG', 'COUNT OF TASKS'
+    ],
+}
+
+# Known alternate spellings that flexible matching alone cannot bridge
+# (word-level renames, not just case/space differences).
+FILE_COLUMN_ALIASES = {
+    'Open SR Load Report': {
+        'Oil Change Flg': ['Oil Change Flag'],
+        'Engine Serial#': ['Engine Serial No', 'Engine Serial Number'],
+        'Service Request #': ['Service Request No', 'Service Request Number'],
+        'Instance Id [Asset #]': ['Instance Id', 'Instance ID', 'Asset Number'],
+    },
+    'Open SR Data': {
+        'INSTANCE ID': ['Instance Id [Asset #]', 'Instance Id', 'Asset Number'],
+        'SR SUBTYPE': ['SR SUB TYPE', 'SR SUB-TYPE'],
+        'ZERO LABOUR FLAG': ['ZERO LABOR FLAG'],
+        'OIL CHANGE FLAG': ['OIL CHANGE FLG'],
+    },
+    'LMS Data for ERP': {
+        'kVA Rating': ['KVA RATING'],
+        'SD Code': ['SD ID'],
+        'SD Branch Code': ['BRANCH ID'],
+        'SD Branch Name': ['BRANCH NAME'],
+        # Second LMS layout (Sr. No. / Instance ID / SR Type / SR Sub Type /
+        # Lead Status / KVA Rating / Service Engineer / Tele Caller /
+        # Quotation Number / Quotation Submit Date / Quotation Approval Date /
+        # Order Number)
+        'Service Engineer Name': ['Service Engineer'],
+        'Tele-Caller Name': ['Tele Caller'],
+        'Quotation Approved Date': ['Quotation Approval Date'],
+    },
+    'AMC Population Report': {
+        'KVA RATING': ['kVA Rating'],
+    },
+    'Regular Bandhan Customers Report': {
+        # Old/alternate export headers mapped onto the canonical ones
+        'Engine No': ['Genset Number', 'Genset No'],
+        'Company Name': ['Name'],
+        'Mobile No': ['Mobile', 'Mobile Number'],
+        'Email Id': ['Email', 'Email ID'],
+        'Location': ['Billing Location', 'DG Location'],
+        'City': ['Billing City', 'DG City'],
+        'Quotation Ref No': ['Quotation Ref No.', 'QuotationRefNo'],
+    },
+}
+
+
 class ImportController:
     def __init__(self, db: Session):
         self.db = db
+        # Optional user-defined header renames from the Import page:
+        # {"file header": "important column name"} — applied before canonicalization.
+        self.user_column_mapping = {}
     
     # ============ BULK PRELOAD HELPERS (NEW) ============
     def _bulk_load_by_instance_id(self, model, instance_ids):
@@ -162,7 +355,112 @@ class ImportController:
         if len(value_str) > max_length:
             return value_str[:max_length-3] + "..."
         return value_str
-    
+
+    # ============ DYNAMIC / FLEXIBLE COLUMN SUPPORT ============
+    @staticmethod
+    def _norm_header(name):
+        """Case-insensitive, extra-whitespace-insensitive header key."""
+        return re.sub(r'\s+', ' ', str(name).strip()).lower()
+
+    @staticmethod
+    def _tight_header(name):
+        """Alphanumeric-only header key ('QuotationRefNo' == 'Quotation Ref No.')."""
+        return re.sub(r'[^a-z0-9]', '', str(name).lower())
+
+    def canonicalize_dataframe(self, df, file_type):
+        """Rename file headers to the canonical names the import code expects,
+        using flexible matching (exact -> normalized -> alphanumeric-only, plus
+        per-file aliases). Any header that matches nothing known is DYNAMIC:
+        it is left untouched and returned in `extra_cols` so each row can keep
+        it as JSON in `extra_data`. Existing import logic is unchanged — it
+        just sees clean canonical headers."""
+        known = FILE_KNOWN_COLUMNS.get(file_type, [])
+        aliases = FILE_COLUMN_ALIASES.get(file_type, {})
+
+        # User-defined renames first (Import page mapping, e.g. "Dt" -> "SR Due Date"):
+        # match the mapping key against actual headers flexibly, then rename.
+        user_mapping = getattr(self, 'user_column_mapping', None)
+        if user_mapping:
+            user_renames = {}
+            targets = set()
+            for col in df.columns:
+                if pd.isna(col):
+                    continue
+                for src, target in user_mapping.items():
+                    if target in targets:
+                        continue
+                    if self._tight_header(col) == self._tight_header(src) and str(col) != str(target):
+                        user_renames[col] = target
+                        targets.add(target)
+                        break
+            if user_renames:
+                df = df.rename(columns=user_renames)
+
+        actual_cols = [c for c in df.columns if pd.notna(c)]
+        by_exact, by_norm, by_tight = {}, {}, {}
+        for c in actual_cols:
+            by_exact.setdefault(str(c).strip(), c)
+            by_norm.setdefault(self._norm_header(c), c)
+            by_tight.setdefault(self._tight_header(c), c)
+
+        used = set()
+        rename_map = {}
+        for canonical in known:
+            candidates = [canonical] + list(aliases.get(canonical, []))
+            found = None
+            for lookup, key_fn in (
+                (by_exact, lambda s: str(s).strip()),
+                (by_norm, self._norm_header),
+                (by_tight, self._tight_header),
+            ):
+                for cand in candidates:
+                    col = lookup.get(key_fn(cand))
+                    if col is not None and col not in used:
+                        found = col
+                        break
+                if found is not None:
+                    break
+            if found is None:
+                continue
+            used.add(found)
+            if found != canonical:
+                rename_map[found] = canonical
+
+        if rename_map:
+            df = df.rename(columns=rename_map)
+
+        known_set = set(known)
+        extra_cols = [
+            c for c in df.columns
+            if pd.notna(c)
+            and c not in known_set
+            and str(c).strip() != ''
+            and not str(c).startswith('Unnamed:')
+        ]
+        return df, extra_cols
+
+    def collect_extra_data(self, row, extra_cols):
+        """Pack the dynamic (unmapped) columns of a row into a JSON string
+        {original header: value}, or None when there is nothing to keep."""
+        if not extra_cols:
+            return None
+        out = {}
+        for col in extra_cols:
+            value = row.get(col)
+            try:
+                if value is None or pd.isna(value) or value == '':
+                    continue
+            except (TypeError, ValueError):
+                pass
+            if isinstance(value, (datetime, pd.Timestamp)):
+                out[str(col)] = str(value)
+            else:
+                str_value = self.convert_to_string(value)
+                if str_value:
+                    out[str(col)] = str_value
+        return json.dumps(out, ensure_ascii=False, default=str) if out else None
+    # ============ END DYNAMIC / FLEXIBLE COLUMN SUPPORT ============
+
     def extract_instance_id(self, row, file_type):
         """Extract instance_id from row based on file type"""
         instance_id = None
@@ -458,7 +756,9 @@ class ImportController:
                 'customer_name': ['Company Name'],
                 'phone_number': ['Mobile No'],
                 'email': ['Email Id'],
-                'location': ['City']
+                # Billing/DG Location is the location source; Billing/DG City is
+                # the fallback (aliases map those headers to Location / City).
+                'location': ['Location', 'City']
             }
         elif file_type == 'LMS Data for ERP':
             field_mappings = {
@@ -560,7 +860,9 @@ class ImportController:
                 'customer_name': ['Company Name'],
                 'phone_number': ['Mobile No'],
                 'email': ['Email Id'],
-                'location': ['City']
+                # Billing/DG Location is the location source; Billing/DG City is
+                # the fallback (aliases map those headers to Location / City).
+                'location': ['Location', 'City']
             }
         elif file_type == 'LMS Data for ERP':
             field_mappings = {
@@ -753,7 +1055,7 @@ class ImportController:
                 'Bandhan Job card creation prior to 60 days flag',
                 'Bandhan PM JC creation Lock Removal flag updated by',
                 'Bandhan PM JC creation Lock Removal flag updated Date',
-                'Account Id', 'SR Created BY', 'eFSR KRM Number',
+                'Account Id', 'SR Created BY', 'SR Created Date', 'eFSR KRM Number',
                 'Dry CSP Approved by', 'Dry CSP Approved Date'
             ]
         }
@@ -791,7 +1093,8 @@ class ImportController:
             'Pulse Quotation - Service Only': ['Instance Id', 'Quote ID'],
             'Regular Bandhan Customers Report': ['Pulse Instance ID', 'Quotation Ref No'],
             'LMS Data for ERP': ['INSTANCE ID', 'LEAD NUMBER'],
-            'Open SR Load Report': ['Service Request #', 'Instance Id [Asset #]', 'Engine Serial#']
+            'Open SR Load Report': ['Service Request #', 'Instance Id [Asset #]', 'Engine Serial#'],
+            'Open SR Data': ['INSTANCE ID', 'SR NUMBER', 'SR TYPE', 'SR SUBTYPE']
         }
         return critical.get(file_type, [])
     
@@ -811,17 +1114,56 @@ class ImportController:
             return None
     
     def update_record(self, existing_record, new_data):
-        """Update existing record with new data"""
+        """Update existing record with new data.
+        A blank cell in the new file NEVER wipes existing data:
+        - None / empty-string values are skipped (the old value is kept)
+        - extra_data (dynamic columns) is MERGED — keys missing from the new
+          file keep their old values, keys present in it are refreshed
+        Non-empty values always overwrite (latest file wins)."""
         for key, value in new_data.items():
-            if hasattr(existing_record, key):
-                setattr(existing_record, key, value)
+            if not hasattr(existing_record, key):
+                continue
+            if key == 'extra_data':
+                merged = self._merge_extra_data(getattr(existing_record, key, None), value)
+                if merged is not None:
+                    setattr(existing_record, key, merged)
+                continue
+            if value is None or (isinstance(value, str) and value.strip() == ''):
+                continue  # empty in new file — keep the existing value
+            setattr(existing_record, key, value)
         return existing_record
+
+    def _merge_extra_data(self, old_json, new_json):
+        """Merge dynamic-column JSON strings: keys in the new file win, keys
+        only in the old data are preserved. Returns None when there is nothing
+        new to apply (so the old value stays untouched)."""
+        if not new_json:
+            return None
+        if not old_json:
+            return new_json
+        try:
+            old = json.loads(old_json)
+            if not isinstance(old, dict):
+                old = {}
+        except (ValueError, TypeError):
+            old = {}
+        try:
+            new = json.loads(new_json)
+            if not isinstance(new, dict):
+                return new_json
+        except (ValueError, TypeError):
+            return new_json
+        old.update(new)
+        return json.dumps(old, ensure_ascii=False, default=str)
     
     def import_amc_agreement(self, file: UploadFile):
         """Import AMC Population Report Report - Only take first ACTIVE record per instance_id"""
         contents = file.file.read()
         df = pd.read_excel(io.BytesIO(contents))
         
+        # Flexible headers: map known columns to canonical names; the rest are dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'AMC Population Report')
+
         is_valid, message = self.validate_file_format(df, 'AMC Population Report')
         if not is_valid:
             raise HTTPException(status_code=400, detail=f"Invalid file format for AMC Population Report: {message}")
@@ -883,6 +1225,7 @@ class ImportController:
                         'last_agreement_product_name': self.truncate_string(row.get('LAST AGREEMENT PRODUCT NAME')),
                         'last_agreement_start_date': self.parse_date(row.get('LAST AGREEMENT START DATE')),
                         'last_agreement_end_date': self.parse_date(row.get('LAST AGREEMENT END DATE')),
+                        'extra_data': self.collect_extra_data(row, extra_cols),
                     }
                     
                     # O(1) lookup from preloaded map
@@ -926,6 +1269,9 @@ class ImportController:
         contents = file.file.read()
         df = pd.read_excel(io.BytesIO(contents))
         
+        # Flexible headers: map known columns to canonical names; the rest are dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'Asset Detailed Report')
+
         is_valid, message = self.validate_file_format(df, 'Asset Detailed Report')
         if not is_valid:
             raise HTTPException(status_code=400, detail=f"Invalid file format for Asset Detailed Report: {message}")
@@ -982,11 +1328,12 @@ class ImportController:
                         'krm_subscription_start_date': self.parse_date(row.get('KRM SUBSCRIPTION START DATE')),
                         'krm_subscription_end_date': self.parse_date(row.get('KRM SUBSCRIPTION END DATE')),
                         'kva_rating': self.truncate_string(row.get('KVA RATING'), 100),
+                        'extra_data': self.collect_extra_data(row, extra_cols),
                     }
-                    
+
                     # O(1) lookup from preloaded map
                     existing = existing_map.get(instance_id) if instance_id else None
-                    
+
                     if existing:
                         # Update existing record
                         self.update_record(existing, asset_data)
@@ -1013,6 +1360,9 @@ class ImportController:
         contents = file.file.read()
         df = pd.read_excel(io.BytesIO(contents))
         
+        # Flexible headers: map known columns to canonical names; the rest are dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'Asset Details with Last Oil Service')
+
         is_valid, message = self.validate_file_format(df, 'Asset Details with Last Oil Service')
         if not is_valid:
             raise HTTPException(status_code=400, detail=f"Invalid file format for Asset Details with Last Oil Service: {message}")
@@ -1061,6 +1411,7 @@ class ImportController:
                         'last_oil_change_date': self.parse_date(row.get('LAST OIL CHANGE DATE')),
                         'installation_site_address': self.convert_to_string(row.get('INSTALLATION SITE ADDRESS')),
                         'last_service_hrs': self.truncate_string(row.get('LAST SERVICE HRS'), 100),
+                        'extra_data': self.collect_extra_data(row, extra_cols),
                     }
                     
                     # O(1) lookup from preloaded map
@@ -1092,6 +1443,9 @@ class ImportController:
         contents = file.file.read()
         df = pd.read_excel(io.BytesIO(contents))
         
+        # Flexible headers: map known columns to canonical names; the rest are dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'Anubandhan Plus Quotes Report')
+
         is_valid, message = self.validate_file_format(df, 'Anubandhan Plus Quotes Report')
         if not is_valid:
             raise HTTPException(status_code=400, detail=f"Invalid file format for Anubandhan Plus Quotes Report: {message}")
@@ -1173,6 +1527,7 @@ class ImportController:
                         'pulse_instance_id': self.truncate_string(row.get('Pulse Instance ID'), 200),
                         'new_price_applicable': self.convert_to_boolean(row.get('New Price Applicable')),
                         'quotation_type': 'Anubandhan Plus',
+                        'extra_data': self.collect_extra_data(row, extra_cols),
                     }
                     
                     # O(1) lookup from preloaded map
@@ -1223,6 +1578,9 @@ class ImportController:
         contents = file.file.read()
         df = pd.read_excel(io.BytesIO(contents))
         
+        # Flexible headers: map known columns to canonical names; the rest are dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'Anubandhan Quotes Report')
+
         is_valid, message = self.validate_file_format(df, 'Anubandhan Quotes Report')
         if not is_valid:
             raise HTTPException(status_code=400, detail=f"Invalid file format for Anubandhan Quotes Report: {message}")
@@ -1304,6 +1662,7 @@ class ImportController:
                         'pulse_instance_id': self.truncate_string(row.get('Pulse Instance ID'), 200),
                         'new_price_applicable': self.convert_to_boolean(row.get('New Price Applicable')),
                         'quotation_type': 'Anubandhan',
+                        'extra_data': self.collect_extra_data(row, extra_cols),
                     }
                     
                     # O(1) lookup from preloaded map
@@ -1334,6 +1693,9 @@ class ImportController:
         contents = file.file.read()
         df = pd.read_excel(io.BytesIO(contents))
         
+        # Flexible headers: map known columns to canonical names; the rest are dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'BandhanPlus Quotes Report')
+
         is_valid, message = self.validate_file_format(df, 'BandhanPlus Quotes Report')
         if not is_valid:
             raise HTTPException(status_code=400, detail=f"Invalid file format for BandhanPlus Quotes Report: {message}")
@@ -1415,6 +1777,7 @@ class ImportController:
                         'pulse_instance_id': self.truncate_string(row.get('Pulse Instance ID'), 200),
                         'new_price_applicable': self.convert_to_boolean(row.get('New Price Applicable')),
                         'quotation_type': 'BandhanPlus',
+                        'extra_data': self.collect_extra_data(row, extra_cols),
                     }
                     
                     # O(1) lookup from preloaded map
@@ -1445,6 +1808,9 @@ class ImportController:
         contents = file.file.read()
         df = pd.read_excel(io.BytesIO(contents))
         
+        # Flexible headers: map known columns to canonical names; the rest are dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'Pulse Quotation - Service Only')
+
         is_valid, message = self.validate_file_format(df, 'Pulse Quotation - Service Only')
         if not is_valid:
             raise HTTPException(status_code=400, detail=f"Invalid file format for Pulse Quotation - Service Only: {message}")
@@ -1513,6 +1879,7 @@ class ImportController:
                         'quotation_lead_assigned_job_title': self.truncate_string(row.get('Quotation Lead Assigned Job Title')),
                         'quotation_lead_assigned_phone': self.truncate_string(row.get('Quotation Lead Assigned Phone Number'), 50),
                         'quotation_lead_assigned_uid': self.truncate_string(row.get('Quotation Lead Assigned UID'), 200),
+                        'extra_data': self.collect_extra_data(row, extra_cols),
                     }
                     
                     # O(1) lookup from preloaded map
@@ -1542,6 +1909,9 @@ class ImportController:
         """Import LMS Data for ERP - Allow multiple records per instance_id (upsert by Lead Number)"""
         contents = file.file.read()
         df = pd.read_excel(io.BytesIO(contents))
+
+        # Flexible headers: map known columns to canonical names; the rest are dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'LMS Data for ERP')
 
         is_valid, message = self.validate_file_format(df, 'LMS Data for ERP')
         if not is_valid:
@@ -1648,6 +2018,7 @@ class ImportController:
                         'lead_contact_number': self.truncate_string(row.get('Lead Contact Number'), 50),
                         'next_action_date': self.parse_date(row.get('Next Action Date')),
                         'lead_assign_to_sd': self.truncate_string(row.get('Lead Assign To SD')),
+                        'extra_data': self.collect_extra_data(row, extra_cols),
                     }
 
                     # Upsert by lead_number so multiple leads per instance_id are ALL kept
@@ -1684,6 +2055,9 @@ class ImportController:
         """
         contents = file.file.read()
         df = pd.read_excel(io.BytesIO(contents))
+
+        # Flexible headers: map known columns to canonical names; the rest are dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'Regular Bandhan Customers Report')
 
         is_valid, message = self.validate_file_format(df, 'Regular Bandhan Customers Report')
         if not is_valid:
@@ -1774,6 +2148,7 @@ class ImportController:
                         'quotation_type': self.truncate_string(row.get('Quotation Type'), 50),
                         'first_pm_date': self.parse_date(row.get('First PM Date')),
                         'agreement_start_date': self.parse_date(row.get('Agreement start date')),
+                        'extra_data': self.collect_extra_data(row, extra_cols),
                     }
 
                     existing = existing_by_iid.get(instance_id)
@@ -1796,32 +2171,58 @@ class ImportController:
         return imported_count, updated_count
     
     def import_open_sr_load_report(self, file: UploadFile):
-        """Import Open SR Load Report - Override existing records"""
+        """Import Open SR Load Report — upserted on the unique combination
+        (Instance Id [Asset #], Service Request #); in-file duplicates of the
+        combination keep the FIRST row only.
+
+        SNAPSHOT SEMANTICS: the uploaded file is the full current picture of
+        open SRs — combinations already in the DB are updated in place, new
+        ones are added, and any DB row whose combination is NOT in the file
+        is deleted (Open SR Load Report only)."""
         contents = file.file.read()
         df = pd.read_excel(io.BytesIO(contents))
         
+        # Flexible headers: map known columns to canonical names; the rest are dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'Open SR Load Report')
+
         is_valid, message = self.validate_file_format(df, 'Open SR Load Report')
         if not is_valid:
             raise HTTPException(status_code=400, detail=f"Invalid file format for Open SR Load Report: {message}")
         
         # ── FAST: dict iteration + bulk preload ──
         records = df.to_dict('records')
-        
+
+        # Unique key = (Instance Id [Asset #], Service Request #). Keep ONLY the
+        # FIRST row in the file for each combination; later duplicates are
+        # ignored — so the customer table is also updated from that first row.
+        seen_keys = set()
+        deduped_records = []
+        for r in records:
+            key = (self.extract_instance_id(r, 'Open SR Load Report'),
+                   self.convert_to_string(r.get('Service Request #')))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped_records.append(r)
+        records = deduped_records
+
         all_iids = [self.extract_instance_id(r, 'Open SR Load Report') for r in records]
         all_serials = [self.extract_engine_serial_no(r, 'Open SR Load Report') for r in records]
         engine_to_iid = self._build_engine_to_instance_map(all_serials)
         all_iids_full = list({*all_iids, *engine_to_iid.values()})
         customer_cache = self._bulk_load_by_instance_id(Customer, all_iids_full)
         
-        # Pre-load existing OpenSRLoadReport rows by service_request_no in ONE query batch
+        # Pre-load existing OpenSRLoadReport rows by service_request_no in ONE
+        # query batch, keyed by the upsert key (instance_id, service_request_no)
         all_srs = list({self.convert_to_string(r.get('Service Request #')) for r in records if r.get('Service Request #') is not None})
         all_srs = [s for s in all_srs if s]
-        existing_by_sr = {}
+        existing_by_key = {}
         for i in range(0, len(all_srs), 1000):
             chunk = all_srs[i:i + 1000]
             for sr in self.db.query(OpenSRLoadReport).filter(OpenSRLoadReport.service_request_no.in_(chunk)).all():
-                if sr.service_request_no and sr.service_request_no not in existing_by_sr:
-                    existing_by_sr[sr.service_request_no] = sr
+                key = (sr.instance_id, sr.service_request_no)
+                if key not in existing_by_key:
+                    existing_by_key[key] = sr
         
         imported_count = 0
         updated_count = 0
@@ -1919,24 +2320,33 @@ class ImportController:
                         'bandhan_pm_jc_creation_lock_removal_flag_updated_date': self.parse_date(row.get('Bandhan PM JC creation Lock Removal flag updated Date')),
                         'account_id': self.truncate_string(row.get('Account Id'), 200),
                         'sr_created_by': self.truncate_string(row.get('SR Created BY')),
+                        'sr_created_date': self.parse_date(row.get('SR Created Date')),
                         'efsr_krm_number': self.truncate_string(row.get('eFSR KRM Number'), 200),
                         'dry_csp_approved_by': self.truncate_string(row.get('Dry CSP Approved by')),
                         'dry_csp_approved_date': self.parse_date(row.get('Dry CSP Approved Date')),
+                        'extra_data': self.collect_extra_data(row, extra_cols),
                     }
                     
-                    # O(1) lookup instead of SELECT per row
-                    existing = existing_by_sr.get(service_request_no) if service_request_no else None
-                    
+                    # O(1) lookup on (instance_id, service_request_no)
+                    existing = None
+                    if service_request_no:
+                        existing = existing_by_key.get((instance_id, service_request_no))
+                        if existing is None and instance_id:
+                            # Legacy/pending row imported before its instance
+                            # was known — adopt it instead of duplicating the SR
+                            existing = existing_by_key.pop((None, service_request_no), None)
+
                     if existing:
                         # Update existing record
                         self.update_record(existing, sr_data)
+                        existing_by_key[(existing.instance_id, existing.service_request_no)] = existing
                         updated_count += 1
                     else:
                         # Create new record
                         sr_report = OpenSRLoadReport(**sr_data)
                         self.db.add(sr_report)
                         if service_request_no:
-                            existing_by_sr[service_request_no] = sr_report
+                            existing_by_key[(instance_id, service_request_no)] = sr_report
                         imported_count += 1
                         
                 except IntegrityError:
@@ -1944,10 +2354,32 @@ class ImportController:
                     continue
                 except Exception:
                     continue
-        
+
+        # SNAPSHOT: remove stale rows — any (instance_id, service_request_no)
+        # combination in the DB that is NOT in the uploaded file. seen_keys
+        # holds every combination present in the file (built during dedup).
+        # Guarded by `records` so an empty/unreadable file never wipes the
+        # table. Rows upserted above are flushed by the query below, so their
+        # keys are in seen_keys and they are never deleted.
+        if records:
+            existing_rows = self.db.query(
+                OpenSRLoadReport.id,
+                OpenSRLoadReport.instance_id,
+                OpenSRLoadReport.service_request_no,
+            ).all()
+            stale_ids = [
+                rid for rid, iid, sr_no in existing_rows
+                if (iid, sr_no) not in seen_keys
+            ]
+            for i in range(0, len(stale_ids), 1000):
+                chunk = stale_ids[i:i + 1000]
+                self.db.query(OpenSRLoadReport).filter(
+                    OpenSRLoadReport.id.in_(chunk)
+                ).delete(synchronize_session=False)
+
         self.db.commit()
         return imported_count, updated_count
-    
+
     def match_pending_regular_bandhan(self):
         """OBSOLETE with the NEW Regular Bandhan format: rows are matched by
         'Pulse Instance ID' at import time and rows without one are skipped, so
@@ -1997,12 +2429,17 @@ class ImportController:
         return matched
     
     def import_open_sr_data(self, file):
-        """Import 'Open SR Data' — ONE row per instance_id, upserted on re-import.
-        ONLY instance_ids that already exist in the customers table are stored;
-        every other row is skipped (this file enriches known customers, it never
-        creates new ones)."""
+        """Import 'Open SR Data' (Close SR Report) — ONE row per unique
+        (instance_id, sr_number) combination, upserted on re-import. If the
+        same combination appears multiple times in the file, the FIRST row
+        wins. ONLY instance_ids that already exist in the customers table are
+        stored; every other row is skipped (this file enriches known
+        customers, it never creates new ones)."""
         contents = file.file.read()
         df = pd.read_excel(io.BytesIO(contents))
+
+        # Flexible headers: map known columns to canonical names; the rest are dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'Open SR Data')
 
         # Case/spacing-insensitive header lookup so small header variations
         # ("OIL CHANGE FLAG" / "Oil Change Flag") don't break the import.
@@ -2022,6 +2459,24 @@ class ImportController:
                 detail="Invalid file format for Open SR Data: missing 'INSTANCE ID' column"
             )
 
+        sr_col = col('SR NUMBER', 'SR NO', 'SR #', 'SERVICE REQUEST NUMBER')
+        if not sr_col:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file format for Open SR Data: missing 'SR NUMBER' column"
+            )
+
+        if not col('SR TYPE'):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file format for Open SR Data: missing 'SR TYPE' column"
+            )
+        if not col('SR SUBTYPE', 'SR SUB TYPE', 'SR SUB-TYPE'):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file format for Open SR Data: missing 'SR SUBTYPE' column"
+            )
+
         # value getter for a header (returns None when the column is absent)
         def val(row, *names):
             c = col(*names)
@@ -2037,15 +2492,32 @@ class ImportController:
 
         records = df.to_dict('records')
 
+        # Unique key = (instance_id, sr_number). Keep ONLY the FIRST row in the
+        # file for each combination; later duplicates are ignored.
+        def norm_sr(v):
+            s = self.convert_to_string(v)
+            return s.strip() if s else ''
+
+        unique_rows = {}
+        for row in records:
+            iid = norm_iid(row.get(iid_col))
+            if not iid:
+                continue
+            key = (iid, norm_sr(row.get(sr_col)))
+            if key not in unique_rows:
+                unique_rows[key] = row
+        records = list(unique_rows.values())
+
         all_iids = list({norm_iid(r.get(iid_col)) for r in records} - {None})
         customer_cache = self._bulk_load_by_instance_id(Customer, all_iids)
 
-        # Existing open_sr_data rows for these instance_ids (upsert targets)
+        # Existing open_sr_data rows for these instance_ids, keyed by the
+        # upsert key (instance_id, sr_number)
         existing = {}
         for i in range(0, len(all_iids), 1000):
             chunk = all_iids[i:i + 1000]
             for rec in self.db.query(OpenSRData).filter(OpenSRData.instance_id.in_(chunk)).all():
-                existing[rec.instance_id] = rec
+                existing[(rec.instance_id, (rec.sr_number or '').strip())] = rec
 
         imported_count = 0
         updated_count = 0
@@ -2081,25 +2553,29 @@ class ImportController:
                     'zero_labour_flag': self.truncate_string(val(row, 'ZERO LABOUR FLAG', 'ZERO LABOR FLAG'), 100),
                     'oil_change_flag': self.truncate_string(val(row, 'OIL CHANGE FLAG', 'OIL CHANGE FLG'), 100),
                     'count_of_tasks': self.convert_to_string(val(row, 'COUNT OF TASKS')),
+                    'extra_data': self.collect_extra_data(row, extra_cols),
                 }
 
-                rec = existing.get(iid)
+                key = (iid, norm_sr(row.get(sr_col)))
+                rec = existing.get(key)
                 if rec:
-                    for k, v in data.items():
-                        setattr(rec, k, v)
+                    # Same empty-safe update as every other table: blank cells
+                    # never wipe existing data, extra_data is merged.
+                    self.update_record(rec, data)
                     updated_count += 1
                 else:
                     rec = OpenSRData(instance_id=iid, **data)
                     self.db.add(rec)
-                    existing[iid] = rec
+                    existing[key] = rec
                     imported_count += 1
 
         self.db.commit()
         return imported_count, updated_count
 
-    def process_file(self, file: UploadFile, file_type: str):
+    def process_file(self, file: UploadFile, file_type: str, column_mapping: dict = None):
         """Process uploaded file based on type"""
         try:
+            self.user_column_mapping = column_mapping or {}
             import_functions = {
                 'AMC Population Report': self.import_amc_agreement,
                 'Asset Detailed Report': self.import_asset_detailed,

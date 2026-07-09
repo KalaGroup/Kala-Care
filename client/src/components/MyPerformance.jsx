@@ -386,11 +386,24 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const handleOpenCustomerFromFollowup = (followup) => {
         if (!followup) return;
         setShowAllFollowupsModal(false);
-        navigate('/customer-engagement', {
+        // Drive follow-ups open the Drive Data page — it falls back to the
+        // Non-Drive page by itself when the customer is not in drive data.
+        // "other" rows have no campaign and go straight to the Non-Drive page.
+        const isDrive = !!followup.campaign_id;
+        navigate(isDrive ? '/customer-engagement' : '/customer-engagement-2', {
             state: {
                 openCustomerInstanceId: followup.customer_instance_id,
-                openCustomerId: followup.customer_id || null
+                openCustomerId: isDrive ? (followup.customer_id || null) : null
             }
+        });
+    };
+
+    // Open one non-drive customer on the Non-Drive Data page
+    const handleOpenCustomerFromNonDrive = (row) => {
+        if (!row || !row.instance_id) return;
+        setShowNonCampaignModal(false);
+        navigate('/customer-engagement-2', {
+            state: { openCustomerInstanceId: row.instance_id }
         });
     };
 
@@ -418,7 +431,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const topScrollRef = useRef(null);
     const bottomScrollRef = useRef(null);
     const tableRef = useRef(null);
-    const tableWidthRef = useRef('100%');
+    // State (not a ref) so the top scrollbar spacer re-renders when the
+    // table's real scroll width changes (e.g. wide drive-name column).
+    const [tableScrollWidth, setTableScrollWidth] = useState('100%');
     const [nonFollowupCount, setNonFollowupCount] = useState(0);
     const [branchAssetCount, setBranchAssetCount] = useState(0);
     const [nonFollowupCustomerStats, setNonFollowupCustomerStats] = useState(null);
@@ -751,9 +766,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         }
     }, [userData]);
 
-    const fetchAllFollowups = useCallback(async () => {
+    // silent=true refreshes in the background without the blocking spinner —
+    // used when the modal already has rows to show from the mount-time prefetch.
+    const fetchAllFollowups = useCallback(async (silent = false) => {
         if (!userData || !userData.user_id) return;
-        setLoadingAllFollowups(true);
+        if (!silent) setLoadingAllFollowups(true);
         try {
             const payload = {
                 user_id: userData.user_id || userData.id,
@@ -774,9 +791,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             setAllFollowupsData(response.data?.followups || []);
         } catch (error) {
             console.error('Error fetching all followups:', error);
-            setAllFollowupsData([]);
+            if (!silent) setAllFollowupsData([]);
         } finally {
-            setLoadingAllFollowups(false);
+            if (!silent) setLoadingAllFollowups(false);
         }
     }, [userData, timePeriod, customStartDate, customEndDate, formatDateForAPI]);
 
@@ -791,7 +808,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setCreatedToDate('');
         setStatusFilter('all');
         setStatusLocked(false);
-        fetchAllFollowups();
+        // Rows are prefetched on mount — show them instantly, refresh silently
+        fetchAllFollowups(allFollowupsData.length > 0);
     };
 
     // Open the All-Follow-ups modal filtered to ONE status (C / WIP / R / FR / NC).
@@ -808,7 +826,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setCreatedToDate('');
         setStatusFilter(status);
         setStatusLocked(true);
-        fetchAllFollowups();
+        // Rows are prefetched on mount — show them instantly, refresh silently
+        fetchAllFollowups(allFollowupsData.length > 0);
     };
 
     const handleOpenQuotationFollowups = () => {
@@ -1769,17 +1788,17 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         }
     };
 
-    // Update table width on mount and resize
+    // Update table width on mount, resize, and whenever the rendered rows change
     useEffect(() => {
         const updateTableWidth = () => {
             if (tableRef.current) {
-                tableWidthRef.current = `${tableRef.current.scrollWidth}px`;
+                setTableScrollWidth(`${tableRef.current.scrollWidth}px`);
             }
         };
         updateTableWidth();
         window.addEventListener('resize', updateTableWidth);
         return () => window.removeEventListener('resize', updateTableWidth);
-    }, [dailyPerformance]);
+    }, [dailyPerformance, tableTimeFilter]);
 
     // Export to Excel
     const exportToExcel = () => {
@@ -1870,9 +1889,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         XLSX.writeFile(wb, `daily_performance_${filterLabel}_${new Date().toISOString().split('T')[0]}.xlsx`);
     };
 
-    const fetchNonCampaignCustomers = useCallback(async () => {
+    const fetchNonCampaignCustomers = useCallback(async (silent = false) => {
         if (!userData || !userData.user_id) return;
-        setLoadingNonCampaign(true);
+        if (!silent) setLoadingNonCampaign(true);
         try {
             const payload = {
                 user_id: userData.user_id || userData.id,
@@ -1887,9 +1906,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             setNonCampaignData(response.data || { total_customers: 0, customers: [] });
         } catch (error) {
             console.error('Error fetching non-campaign customers:', error);
-            setNonCampaignData({ total_customers: 0, customers: [] });
+            if (!silent) setNonCampaignData({ total_customers: 0, customers: [] });
         } finally {
-            setLoadingNonCampaign(false);
+            if (!silent) setLoadingNonCampaign(false);
         }
     }, [userData]);
 
@@ -1898,7 +1917,19 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setNonCampaignSearchTerm('');
         setNonCampaignStatusFilter('all');
         setNonCampaignServiceFilter('all');
-        fetchNonCampaignCustomers();
+        // Rows are prefetched on mount — show them instantly, refresh silently
+        fetchNonCampaignCustomers(nonCampaignData.customers.length > 0);
+    };
+
+    // Open the Non-Drive Customers modal pre-filtered to one status
+    // (clicked from a status pill on the Reached Count card).
+    const handleOpenNonCampaignStatus = (e, status) => {
+        e.stopPropagation(); // don't trigger the card's own "view all" click
+        setShowNonCampaignModal(true);
+        setNonCampaignSearchTerm('');
+        setNonCampaignStatusFilter(status);
+        setNonCampaignServiceFilter('all');
+        fetchNonCampaignCustomers(nonCampaignData.customers.length > 0);
     };
 
     // Base list for the Non-Campaign modal — completed is hidden here (it now
@@ -1953,6 +1984,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             'Branch': c.branch_id || '-',
             'Service / Product': c.service || '-',
             'Activity': c.activity_content || '-',
+            'Reject Reason': c.rr_content || '-',
             'Remark Type': c.remark_type || '-',
             'Follow-up By': c.followup_by || '-',
             'Status': c.last_status || '-',
@@ -2602,7 +2634,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                             <div className="grid grid-cols-2 gap-1.5 shrink-0">
 
                                 {/* WIP */}
-                                <div className="flex items-center justify-center gap-1 bg-yellow-50 border border-yellow-200 rounded-full px-2.5 py-0.5">
+                                <div
+                                    onClick={(e) => handleOpenNonCampaignStatus(e, 'wip')}
+                                    title="Click to view WIP non-drive customers"
+                                    className="flex items-center justify-center gap-1 bg-yellow-50 border border-yellow-200 rounded-full px-2.5 py-0.5 cursor-pointer hover:bg-yellow-100"
+                                >
                                     <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 inline-block"></span>
                                     <span className="text-[10px] sm:text-[11px] font-medium text-yellow-700">W</span>
                                     <span className="text-[10px] sm:text-[11px] font-bold text-yellow-800">
@@ -2616,7 +2652,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 </div>
 
                                 {/* Rejected */}
-                                <div className="flex items-center justify-center gap-1 bg-red-50 border border-red-200 rounded-full px-2.5 py-0.5">
+                                <div
+                                    onClick={(e) => handleOpenNonCampaignStatus(e, 'rejected')}
+                                    title="Click to view rejected non-drive customers"
+                                    className="flex items-center justify-center gap-1 bg-red-50 border border-red-200 rounded-full px-2.5 py-0.5 cursor-pointer hover:bg-red-100"
+                                >
                                     <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block"></span>
                                     <span className="text-[10px] sm:text-[11px] font-medium text-red-700">R</span>
                                     <span className="text-[10px] sm:text-[11px] font-bold text-red-800">
@@ -2630,7 +2670,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 </div>
 
                                 {/* Rescheduled / FR */}
-                                <div className="flex items-center justify-center gap-1 bg-purple-50 border border-purple-200 rounded-full px-2.5 py-0.5">
+                                <div
+                                    onClick={(e) => handleOpenNonCampaignStatus(e, 'rescheduled')}
+                                    title="Click to view rescheduled non-drive customers"
+                                    className="flex items-center justify-center gap-1 bg-purple-50 border border-purple-200 rounded-full px-2.5 py-0.5 cursor-pointer hover:bg-purple-100"
+                                >
                                     <span className="w-1.5 h-1.5 rounded-full bg-purple-500 inline-block"></span>
                                     <span className="text-[10px] sm:text-[11px] font-medium text-purple-700">FR</span>
                                     <span className="text-[10px] sm:text-[11px] font-bold text-purple-800">
@@ -2644,7 +2688,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 </div>
 
                                 {/* NC (Not Connected) */}
-                                <div className="flex items-center justify-center gap-1 bg-gray-50 border border-gray-300 rounded-full px-2.5 py-0.5">
+                                <div
+                                    onClick={(e) => handleOpenNonCampaignStatus(e, 'not_connected')}
+                                    title="Click to view not-connected non-drive customers"
+                                    className="flex items-center justify-center gap-1 bg-gray-50 border border-gray-300 rounded-full px-2.5 py-0.5 cursor-pointer hover:bg-gray-100"
+                                >
                                     <span className="w-1.5 h-1.5 rounded-full bg-gray-500 inline-block"></span>
                                     <span className="text-[10px] sm:text-[11px] font-medium text-gray-700">NC</span>
                                     <span className="text-[10px] sm:text-[11px] font-bold text-gray-800">
@@ -2765,7 +2813,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                         style={{ direction: 'ltr' }}
                         onScroll={handleTopScroll}
                     >
-                        <div className="h-2" style={{ width: tableWidthRef.current }}></div>
+                        <div className="h-2" style={{ width: tableScrollWidth }}></div>
                     </div>
 
                     {/* Main table container */}
@@ -2830,9 +2878,20 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 })}
                                             </td>
                                             <td className="px-2 py-1 text-[11px] text-black border border-gray-200 text-center align-middle">
-                                                <span className="block break-words whitespace-normal" style={{ wordBreak: 'break-word' }}>
-                                                    {day.campaign_name || 'N/A'}
-                                                </span>
+                                                {day.campaign_name ? (
+                                                    // One drive name per line (names come comma-separated)
+                                                    String(day.campaign_name)
+                                                        .split(',')
+                                                        .map(s => s.trim())
+                                                        .filter(Boolean)
+                                                        .map((name, i, arr) => (
+                                                            <span key={i} className="block whitespace-nowrap">
+                                                                {name}{i < arr.length - 1 ? ',' : ''}
+                                                            </span>
+                                                        ))
+                                                ) : (
+                                                    <span className="block">N/A</span>
+                                                )}
                                             </td>
                                             <td className="px-2 py-1 whitespace-nowrap text-[11px] text-black border border-gray-200 text-center">
                                                 {day.first_followup_time ? convertUTCToIST(day.first_followup_time) : '-'}
@@ -2901,7 +2960,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     ))
                                 ) : (
                                     <tr>
-                                        <td colSpan="12" className="px-3 py-4 text-center text-xs text-black border border-gray-200">
+                                        <td colSpan="12" className="px-3 py-8 text-center text-xs text-gray-400 border border-gray-200">
                                             No daily performance data available for selected period
                                         </td>
                                     </tr>
@@ -3212,9 +3271,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                         onClick={() => setCspDaysSort(s => s === 'desc' ? 'asc' : 'desc')}
                                                     >
                                                         <div className="flex items-center justify-center gap-1">
-                                                            <div className="flex flex-col items-start">
+                                                            <div className="flex flex-col items-center">
                                                                 <span>Due/Overdue</span>
-                                                                <pre>    Days</pre>
+                                                                <span>Days</span>
                                                             </div>
                                                             <div className="flex flex-col items-center leading-none">
                                                                 <span className={cspDaysSort === 'asc' ? 'text-black' : 'text-gray-300'}>▲</span>
@@ -3245,9 +3304,13 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                                     </button>
                                                                 ) : '-'}
                                                             </td>
-                                                            <td className="px-2 py-1 border border-gray-200 text-left">{row.customer_name ? highlightMatch(row.customer_name, cspSearchTerm) : '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-left" title={row.customer_name || ''}>
+                                                                <div className="max-w-[180px] truncate">{row.customer_name ? highlightMatch(row.customer_name, cspSearchTerm) : '-'}</div>
+                                                            </td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.branch_id ? highlightMatch(row.branch_id, cspSearchTerm) : '-'}</td>
-                                                            <td className="px-2 py-1 border border-gray-200 text-center">{row.goem_oem ? highlightMatch(row.goem_oem, cspSearchTerm) : '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center" title={row.goem_oem || ''}>
+                                                                <div className="max-w-[160px] truncate mx-auto">{row.goem_oem ? highlightMatch(row.goem_oem, cspSearchTerm) : '-'}</div>
+                                                            </td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.sr_number ? highlightMatch(row.sr_number, cspSearchTerm) : '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.sr_open_date || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.sr_subtype || '-'}</td>
@@ -3428,9 +3491,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                         onClick={() => setOpenCspDaysSort(s => s === 'desc' ? 'asc' : 'desc')}
                                                     >
                                                         <div className="flex items-center justify-center gap-1">
-                                                            <div className="flex flex-col items-start">
+                                                            <div className="flex flex-col items-center">
                                                                 <span>Due/Overdue</span>
-                                                                <pre>    Days</pre>
+                                                                <span>Days</span>
                                                             </div>
                                                             <div className="flex flex-col items-center leading-none">
                                                                 <span className={openCspDaysSort === 'asc' ? 'text-black' : 'text-gray-300'}>▲</span>
@@ -3459,9 +3522,13 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                                     </button>
                                                                 ) : '-'}
                                                             </td>
-                                                            <td className="px-2 py-1 border border-gray-200 text-left">{row.customer_name ? highlightMatch(row.customer_name, openCspSearchTerm) : '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-left" title={row.customer_name || ''}>
+                                                                <div className="max-w-[180px] truncate">{row.customer_name ? highlightMatch(row.customer_name, openCspSearchTerm) : '-'}</div>
+                                                            </td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.branch_id ? highlightMatch(row.branch_id, openCspSearchTerm) : '-'}</td>
-                                                            <td className="px-2 py-1 border border-gray-200 text-center">{row.goem_oem ? highlightMatch(row.goem_oem, openCspSearchTerm) : '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center" title={row.goem_oem || ''}>
+                                                                <div className="max-w-[160px] truncate mx-auto">{row.goem_oem ? highlightMatch(row.goem_oem, openCspSearchTerm) : '-'}</div>
+                                                            </td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.sr_number ? highlightMatch(row.sr_number, openCspSearchTerm) : '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.sr_open_date || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.sr_subtype || '-'}</td>
@@ -3692,8 +3759,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                         <tr
                                                             key={fu.id}
                                                             className="hover:bg-blue-50 cursor-pointer transition-colors"
-                                                            onClick={() => handleOpenCustomerFromFollowup(fu)}
-                                                            title="Click to open customer details"
+                                                            onDoubleClick={() => handleOpenCustomerFromFollowup(fu)}
+                                                            title="Double-click to open customer details"
                                                         >
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{idx + 1}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center whitespace-nowrap">
@@ -4412,6 +4479,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Branch</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Service / Product</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Activity</th>
+                                                    <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Reject Reason</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Follow-up By</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Flag</th>
                                                     <th className="px-2 py-1.5 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">Status</th>
@@ -4425,7 +4493,12 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
                                                 {filteredNonCampaignCustomers.map((c, idx) => (
-                                                    <tr key={c.instance_id || idx} className="hover:bg-gray-50 transition-colors">
+                                                    <tr
+                                                        key={c.instance_id || idx}
+                                                        className="hover:bg-gray-50 cursor-pointer transition-colors"
+                                                        onDoubleClick={() => handleOpenCustomerFromNonDrive(c)}
+                                                        title="Double-click to open customer details"
+                                                    >
                                                         <td className="px-2 py-1 border border-gray-200 text-center">{idx + 1}</td>
                                                         <td className="px-2 py-1 border border-gray-200 text-center">{c.instance_id ? highlightMatch(c.instance_id, nonCampaignSearchTerm) : '-'}</td>
                                                         <td className="px-2 py-1 border border-gray-200 text-left">{c.customer_name ? highlightMatch(c.customer_name, nonCampaignSearchTerm) : '-'}</td>
@@ -4434,6 +4507,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                         <td className="px-2 py-1 border border-gray-200 text-center">{c.branch_id || '-'}</td>
                                                         <td className="px-2 py-1 border border-gray-200 text-left">{c.service ? highlightMatch(c.service, nonCampaignSearchTerm) : '-'}</td>
                                                         <td className="px-2 py-1 border border-gray-200 text-left max-w-[200px] truncate" title={c.activity_content || ''}>{c.activity_content ? highlightMatch(c.activity_content, nonCampaignSearchTerm) : '-'}</td>
+                                                        <td className="px-2 py-1 border border-gray-200 text-left max-w-[200px] truncate" title={c.rr_content || ''}>{c.rr_content || '-'}</td>
                                                         <td className="px-2 py-1 border border-gray-200 text-center capitalize">{c.followup_by || '-'}</td>
                                                         <td className="px-2 py-1 border border-gray-200 text-center">
                                                             {c.latest_flag && c.latest_flag !== 'N/A' ? (

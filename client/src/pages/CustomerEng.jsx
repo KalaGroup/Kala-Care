@@ -462,7 +462,13 @@ const CustomerEng = () => {
     const [customerServices, setCustomerServices] = useState([]);
     const [customerLmsData, setCustomerLmsData] = useState([]);
     const [customerCampaigns, setCustomerCampaigns] = useState([]);
+    // Campaigns the customer is ACTUALLY enrolled in (customerCampaigns falls
+    // back to ALL campaigns when none are assigned, so it can't be used to
+    // know real enrollment — this one can).
+    const [enrolledCampaigns, setEnrolledCampaigns] = useState([]);
     const [allCampaigns, setAllCampaigns] = useState([]);
+    // Master product/service list (campaign_services table) for the "Other" dropdown
+    const [masterServices, setMasterServices] = useState([]);
     const [showManageCampaigns, setShowManageCampaigns] = useState(false);
     const [campaignActionLoading, setCampaignActionLoading] = useState(false);
     const [selectedCampaignTab, setSelectedCampaignTab] = useState(null);
@@ -766,6 +772,14 @@ const CustomerEng = () => {
             autoOpenHandledRef.current = true;
             handleViewCustomer(target.customer_id);
             navigate(location.pathname, { replace: true, state: null });
+        } else if (openCustomerInstanceId) {
+            // Customer is not in drive data (the list here is the FULL drive
+            // list) — fall back to the Non-Drive Data page with the same state.
+            autoOpenHandledRef.current = true;
+            navigate('/customer-engagement-2', {
+                replace: true,
+                state: { openCustomerInstanceId }
+            });
         }
     }, [customers, location.state, location.pathname, navigate]);
 
@@ -1569,19 +1583,31 @@ const CustomerEng = () => {
         return isCspCampaign(campaign);
     });
 
-    // Services available for "Other" (non-campaign) follow-ups — derived from all campaigns
+    // Services available for "Other" (non-campaign) follow-ups — the FULL
+    // master product/service list (campaign_services table), minus the
+    // services of drives this customer is already enrolled in (those are
+    // handled through the drive itself, not "Other").
     const campaignServices = useMemo(() => {
+        const enrolledServices = new Set(
+            (enrolledCampaigns || [])
+                .map(c => (c.service || '').trim().toLowerCase())
+                .filter(Boolean)
+        );
+        // Fall back to services derived from campaigns if the master list
+        // hasn't loaded (keeps the dropdown usable on a failed fetch).
+        const source = masterServices.length > 0
+            ? masterServices.map(s => ({ id: s.id, name: (s.name || '').trim() }))
+            : (allCampaigns || []).map(c => ({ id: c.id, name: (c.service || '').trim() }));
         const seen = new Set();
         const list = [];
-        (allCampaigns || []).forEach(c => {
-            const name = (c.service || '').trim();
-            if (name && !seen.has(name.toLowerCase())) {
-                seen.add(name.toLowerCase());
-                list.push({ id: c.id, name });
-            }
+        source.forEach(({ id, name }) => {
+            const key = name.toLowerCase();
+            if (!name || seen.has(key) || enrolledServices.has(key)) return;
+            seen.add(key);
+            list.push({ id, name });
         });
         return list;
-    }, [allCampaigns]);
+    }, [masterServices, allCampaigns, enrolledCampaigns]);
 
     // Short "Product - N" display names — built once, O(1) lookups (never slows the table).
     const campaignShortNameMap = useMemo(
@@ -1813,6 +1839,17 @@ const CustomerEng = () => {
         } catch (err) {
             console.error('Error fetching drive colors:', err);
         }
+
+        // Master product/service list for the "Other" follow-up dropdown
+        try {
+            const res = await fetch(`${API_BASE_URL}/v1/campaigns/services`);
+            if (res.ok) {
+                const services = await res.json();
+                setMasterServices(Array.isArray(services) ? services : []);
+            }
+        } catch (err) {
+            console.error('Error fetching master services:', err);
+        }
     };
 
     // Fetch customer complete data by instance_id
@@ -1896,6 +1933,7 @@ const CustomerEng = () => {
             const assignedCampaigns = data.campaigns || [];
             const everyCampaign = data.all_campaigns || [];
             setCustomerCampaigns(assignedCampaigns.length > 0 ? assignedCampaigns : everyCampaign);
+            setEnrolledCampaigns(assignedCampaigns);
             setAllCampaigns(everyCampaign);
 
             // Related assets are now pre-computed by the backend (one indexed query)
@@ -2212,6 +2250,7 @@ const CustomerEng = () => {
         setCustomerServices([]);
         setCustomerLmsData([]);
         setCustomerCampaigns([]);
+        setEnrolledCampaigns([]);
         setEditingFollowup(null);
         setSelectedPdf(null);
         setCampaignPdfs([]);
@@ -6215,15 +6254,20 @@ ${f.start_para}`;
                     <div className="border-gray-200 pb-3">
                         <div className="space-y-2">
                             {/* Header Row - Hide on mobile, show on larger screens */}
-                            <div className="hidden sm:grid sm:grid-cols-3 gap-40 max-lg:gap-4">
+                            <div className="hidden sm:grid sm:grid-cols-4 gap-20 max-lg:gap-4">
+                                <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Quotation</p>
                                 <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Quotation Type</p>
                                 <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Created Date</p>
                                 <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Expiry Date</p>
                             </div>
 
                             {/* Row 0: Regular Bandhan (NEW quote-style file) - Mobile responsive */}
-                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:gap-4">
+                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-4 sm:gap-20 max-lg:gap-4">
                                 <div className="flex justify-between sm:justify-center items-center sm:block">
+                                    <span className="text-[11px] font-bold text-black sm:hidden">Quotation: </span>
+                                    <p className="text-xs text-black font-semibold text-left sm:text-center">Regular Bandhan</p>
+                                </div>
+                                <div className="flex justify-between sm:justify-center items-center sm:block mt-1 sm:mt-0">
                                     <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                                     <p className="text-xs text-black font-normal text-left sm:text-center">
                                         {regularBandhan ? `Regular Bandhan${regularBandhan.quotation_type ? ` - ${regularBandhan.quotation_type}` : ''}` : '-'}
@@ -6240,8 +6284,12 @@ ${f.start_para}`;
                             </div>
 
                             {/* Row 1: Anubandhan Plus - Mobile responsive */}
-                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:gap-4">
+                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-4 sm:gap-20 max-lg:gap-4">
                                 <div className="flex justify-between sm:justify-center items-center sm:block">
+                                    <span className="text-[11px] font-bold text-black sm:hidden">Quotation: </span>
+                                    <p className="text-xs text-black font-semibold text-left sm:text-center">Anubandhan Plus</p>
+                                </div>
+                                <div className="flex justify-between sm:justify-center items-center sm:block mt-1 sm:mt-0">
                                     <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                                     <p className="text-xs text-black font-normal text-left sm:text-center">{anubandhanPlus?.quotation_type || '-'}</p>
                                 </div>
@@ -6256,8 +6304,12 @@ ${f.start_para}`;
                             </div>
 
                             {/* Row 2: Anubandhan - Mobile responsive */}
-                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:gap-4">
+                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-4 sm:gap-20 max-lg:gap-4">
                                 <div className="flex justify-between sm:justify-center items-center sm:block">
+                                    <span className="text-[11px] font-bold text-black sm:hidden">Quotation: </span>
+                                    <p className="text-xs text-black font-semibold text-left sm:text-center">Anubandhan</p>
+                                </div>
+                                <div className="flex justify-between sm:justify-center items-center sm:block mt-1 sm:mt-0">
                                     <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                                     <p className="text-xs text-black font-normal text-left sm:text-center">{anubandhan?.quotation_type || '-'}</p>
                                 </div>
@@ -6272,8 +6324,12 @@ ${f.start_para}`;
                             </div>
 
                             {/* Row 3: Bandhan Plus - Mobile responsive */}
-                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:gap-4">
+                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-4 sm:gap-20 max-lg:gap-4">
                                 <div className="flex justify-between sm:justify-center items-center sm:block">
+                                    <span className="text-[11px] font-bold text-black sm:hidden">Quotation: </span>
+                                    <p className="text-xs text-black font-semibold text-left sm:text-center">Bandhan Plus</p>
+                                </div>
+                                <div className="flex justify-between sm:justify-center items-center sm:block mt-1 sm:mt-0">
                                     <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                                     <p className="text-xs text-black font-normal text-left sm:text-center">{bandhanPlus?.quotation_type || '-'}</p>
                                 </div>
@@ -6288,8 +6344,12 @@ ${f.start_para}`;
                             </div>
 
                             {/* Row 4: Pulse Quotation - Mobile responsive */}
-                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:gap-4">
+                            <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-4 sm:gap-20 max-lg:gap-4">
                                 <div className="flex justify-between sm:justify-center items-center sm:block">
+                                    <span className="text-[11px] font-bold text-black sm:hidden">Quotation: </span>
+                                    <p className="text-xs text-black font-semibold text-left sm:text-center">Pulse Quotation</p>
+                                </div>
+                                <div className="flex justify-between sm:justify-center items-center sm:block mt-1 sm:mt-0">
                                     <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                                     <p className="text-xs text-black font-normal text-left sm:text-center">
                                         {pulseData?.quote_id ? 'Pulse Quotation' : '-'}
@@ -6531,150 +6591,152 @@ ${f.start_para}`;
                     })()}
                 </div>
             ),
-            sr: (
-                <div className="p-3 sm:p-4">
-                    <div className="flex flex-col lg:flex-row lg:gap-4 relative">
-                        {/* Vertical Divider Line - Hidden on mobile, visible on lg screens */}
-                        <div className="hidden lg:block absolute left-1/2 top-0 bottom-0 w-px bg-gray-300 transform -translate-x-1/2"></div>
-
-                        {/* Left Side - SR Data */}
-                        <div className="flex-1 mb-4 lg:mb-0">
-                            <div className="space-y-2">
-                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                    <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">SR Number:</p>
-                                    <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{openSRData?.service_request_no || '-'}</p>
-                                </div>
-                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                    <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">Type:</p>
-                                    <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{openSRData?.sr_type || '-'}</p>
-                                </div>
-                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                    <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">Sub-Type:</p>
-                                    <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{openSRData?.sr_sub_type || '-'}</p>
-                                </div>
-                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                    <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">Status:</p>
-                                    <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{openSRData?.status || '-'}</p>
-                                </div>
-                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                    <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">Due Date:</p>
-                                    <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{formatShortDate(openSRData?.sr_due_date)}</p>
-                                </div>
-                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                    <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">SR Open Date:</p>
-                                    <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{formatShortDate(openSRExtra?.sr_open_date)}</p>
-                                </div>
-                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                    <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">SR Close Date:</p>
-                                    <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{formatShortDate(openSRExtra?.sr_close_date)}</p>
-                                </div>
-                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                    <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">Oil Change Flag:</p>
-                                    <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{openSRExtra?.oil_change_flag || '-'}</p>
-                                </div>
-                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                    <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">Zero Labour Flag:</p>
-                                    <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{openSRExtra?.zero_labour_flag || '-'}</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Right Side - Service History Data */}
-                        <div className="flex-1 lg:pl-8">
-                            {customerServices && customerServices.length > 0 ? (
-                                <div className="space-y-4">
-                                    {customerServices.map((service, idx) => (
-                                        <div key={idx} className="space-y-2">
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+            sr: (() => {
+                const oilServices = (customerServices && customerServices.length > 0) ? customerServices : [{}];
+                // ALL Open SR file rows for this instance, latest due date first
+                const openSrRows = [...(data.open_sr_load_reports || [])].sort(
+                    (a, b) => new Date(b.sr_due_date || 0) - new Date(a.sr_due_date || 0)
+                );
+                // ALL Close SR file rows for this instance, latest open date first
+                const closeSrRows = [...(data.open_sr_data || [])].sort(
+                    (a, b) => new Date(b.sr_open_date || 0) - new Date(a.sr_open_date || 0)
+                );
+                return (
+                    <div className="p-3 sm:p-4 space-y-4">
+                        {/* Oil service file data — 4 SR fields left, 5 oil change fields right */}
+                        <div>
+                            <p className="text-[11px] font-bold text-black uppercase tracking-wide mb-1.5">Asset Details with Oil Change Report</p>
+                            <div className="space-y-4">
+                            {oilServices.map((service, idx) => (
+                                <div key={idx} className="flex flex-col lg:flex-row border border-gray-300 rounded divide-y lg:divide-y-0 lg:divide-x divide-gray-300">
+                                    {/* Left Side — 4 SR fields */}
+                                    <div className="flex-1">
+                                        <div>
+                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                                                 <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Closed SR Number:</p>
                                                 <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{service.last_closed_sr_number || '-'}</p>
                                             </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                                                 <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last SR Type:</p>
                                                 <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{service.last_sr_type || '-'}</p>
                                             </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                                                 <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last SR Sub Type:</p>
                                                 <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{service.last_sr_subtype || '-'}</p>
                                             </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                                                 <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last SR Close Date:</p>
                                                 <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{formatShortDate(service.last_sr_close_date)}</p>
                                             </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                                        </div>
+                                    </div>
+
+                                    {/* Right Side — 5 oil change fields */}
+                                    <div className="flex-1">
+                                        <div>
+                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                                                 <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change SR Number:</p>
                                                 <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{service.last_oil_change_sr_number || '-'}</p>
                                             </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                                                 <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change SR Type:</p>
                                                 <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{service.last_oil_change_sr_type || '-'}</p>
                                             </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                                                 <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change SR Sub Type:</p>
                                                 <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{service.last_oil_change_sr_sub_type || '-'}</p>
                                             </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                                                 <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change Date:</p>
                                                 <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{formatShortDate(service.last_oil_change_date)}</p>
                                             </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                                                 <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Service Hours:</p>
                                                 <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{service.last_service_hrs || '-'}</p>
                                             </div>
-                                            {idx < customerServices.length - 1 && (
-                                                <div className="border-t border-gray-200 mt-3 pt-3"></div>
-                                            )}
                                         </div>
-                                    ))}
+                                    </div>
                                 </div>
-                            ) : (
-                                <div className="space-y-4">
-                                    {customerServices.map((service, idx) => (
-                                        <div key={idx} className="space-y-2">
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                                <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Closed SR Number:</p>
-                                                <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                                            </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                                <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last SR Type:</p>
-                                                <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                                            </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                                <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last SR Sub Type:</p>
-                                                <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                                            </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                                <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last SR Close Date:</p>
-                                                <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                                            </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                                <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change SR Number:</p>
-                                                <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                                            </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                                <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change SR Type:</p>
-                                                <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                                            </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                                <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change SR Sub Type:</p>
-                                                <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                                            </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                                <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change Date:</p>
-                                                <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                                            </div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                                                <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Service Hours:</p>
-                                                <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
+                            ))}
+                            </div>
+                        </div>
+
+                        {/* Open SR Report — every Open SR file record of this instance, latest first */}
+                        <div>
+                            <p className="text-[11px] font-bold text-black uppercase tracking-wide mb-1.5">Open SR Report</p>
+                            <div className="overflow-x-auto">
+                                <table className="w-full border-collapse min-w-[520px]">
+                                    <thead>
+                                        <tr>
+                                            <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Number</th>
+                                            <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Created Date</th>
+                                            <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Close Date/Time</th>
+                                            <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Type</th>
+                                            <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Sub-Type</th>
+                                            <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Status</th>
+                                            <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Due Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {openSrRows.length > 0 ? openSrRows.map((sr, idx) => (
+                                            <tr key={idx}>
+                                                <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.service_request_no || '-'}</td>
+                                                <td className="px-2 py-1 border border-gray-200 text-[11px] text-black whitespace-nowrap text-center">{formatShortDate(sr.sr_created_date)}</td>
+                                                <td className="px-2 py-1 border border-gray-200 text-[11px] text-black whitespace-nowrap text-center">{formatShortDate(sr.close_date_time)}</td>
+                                                <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.sr_type || '-'}</td>
+                                                <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.sr_sub_type || '-'}</td>
+                                                <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.status || '-'}</td>
+                                                <td className="px-2 py-1 border border-gray-200 text-[11px] text-black whitespace-nowrap text-center">{formatShortDate(sr.sr_due_date)}</td>
+                                            </tr>
+                                        )) : (
+                                            <tr>
+                                                <td colSpan={7} className="px-2 py-1.5 border border-gray-200 text-[11px] text-gray-500 text-center">No Open SR records</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {/* Close SR Report — every Close SR file record of this instance, latest first */}
+                        <div>
+                            <p className="text-[11px] font-bold text-black uppercase tracking-wide mb-1.5">Close SR Report</p>
+                            <div className="overflow-x-auto">
+                                <table className="w-full border-collapse min-w-[520px]">
+                                    <thead>
+                                        <tr>
+                                            <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Number</th>
+                                            <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Open Date</th>
+                                            <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Close Date</th>
+                                            <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Type</th>
+                                            <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Subtype</th>
+                                            <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Oil Change Flag</th>
+                                            <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Zero Labour Flag</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {closeSrRows.length > 0 ? closeSrRows.map((sr, idx) => (
+                                            <tr key={idx}>
+                                                <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.sr_number || '-'}</td>
+                                                <td className="px-2 py-1 border border-gray-200 text-[11px] text-black whitespace-nowrap text-center">{formatShortDate(sr.sr_open_date)}</td>
+                                                <td className="px-2 py-1 border border-gray-200 text-[11px] text-black whitespace-nowrap text-center">{formatShortDate(sr.sr_close_date)}</td>
+                                                <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.sr_type || '-'}</td>
+                                                <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.sr_subtype || '-'}</td>
+                                                <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.oil_change_flag || '-'}</td>
+                                                <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.zero_labour_flag || '-'}</td>
+                                            </tr>
+                                        )) : (
+                                            <tr>
+                                                <td colSpan={7} className="px-2 py-1.5 border border-gray-200 text-[11px] text-gray-500 text-center">No Close SR records</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
-                </div>
-            ),
+                );
+            })(),
             csp: (() => {
                 // Parse common date formats: DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD
                 const parseDate = (str) => {
@@ -7161,7 +7223,7 @@ ${f.start_para}`;
                                             style={selectedStatus === 'R'
                                                 ? { backgroundColor: '#e34019' }
                                                 : { color: '#e34019' }}
-                                            className={`min-w-[52px] tabular-nums px-1 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'R'
+                                            className={`status-r-btn ${selectedStatus === 'R' ? 'status-r-selected' : ''} min-w-[52px] tabular-nums px-1 py-0.5 text-[12px] whitespace-nowrap font-semibold rounded-md transition-colors text-center ${selectedStatus === 'R'
                                                 ? "text-white shadow-sm"
                                                 : "hover:bg-orange-50"
                                                 }`}
@@ -8538,6 +8600,7 @@ ${f.start_para}`;
                                                 <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">Branch</th>
                                                 <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">Segment</th>
                                                 <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">Engine Model</th>
+                                                <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">KVA Rating</th>
                                                 <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">Applicable Drives</th>
                                                 <th className="px-2 py-1 text-center text-[11px] font-bold text-black">Action</th>
                                             </tr>
@@ -8553,6 +8616,7 @@ ${f.start_para}`;
                                                     branch_id: customerDetails?.branch_id,
                                                     segment: customerCompleteData?.asset_detailed?.[0]?.segment || '-',
                                                     engine_model: customerCompleteData?.asset_detailed?.[0]?.engine_model || '-',
+                                                    kva_rating: customerCompleteData?.asset_detailed?.[0]?.kva_rating || '-',
                                                     campaigns_count: customerCampaigns?.length || 0,
                                                     isCurrent: true,
                                                 };
@@ -8566,6 +8630,7 @@ ${f.start_para}`;
                                                     branch_id: a.branch_id,
                                                     segment: a.segment || '-',
                                                     engine_model: a.engine_model || '-',
+                                                    kva_rating: a.kva_rating || '-',
                                                     campaigns_count: a.campaigns?.length || 0,
                                                     isCurrent: false,
                                                 }));
@@ -8600,6 +8665,7 @@ ${f.start_para}`;
                                                             <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.branch_id || '-'}</td>
                                                             <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.segment || '-'}</td>
                                                             <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.engine_model || '-'}</td>
+                                                            <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.kva_rating || '-'}</td>
                                                             <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.campaigns_count}</td>
                                                             <td className="px-2 py-1.5 text-center text-[11px]">
                                                                 {isViewing ? (
@@ -8884,7 +8950,7 @@ ${f.start_para}`;
                             {isAdmin && (
                                 <button
                                     onClick={openLetterWizard}
-                                    className="px-2 py-1 sm:px-2 sm:py-1.5 text-[11px] sm:text-xs text-black font-semibold rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-1.5"
+                                    className="send-letter-btn px-2 py-1 sm:px-2 sm:py-1.5 text-[11px] sm:text-xs text-black font-semibold rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-1.5"
                                     style={{ background: `linear-gradient(135deg, #f59e0b, #d97706)` }}
                                 >
                                     <PaperAirplaneIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -10053,11 +10119,6 @@ ${f.start_para}`;
                                 <PaperAirplaneIcon className="h-3 w-3 sm:h-4 sm:w-4" style={{ color: themeColor }} />
                                 Letter History
                             </h2>
-                            {letterHistoryLoading && (
-                                <span className="text-[11px] text-gray-400 flex items-center gap-1">
-                                    <ArrowPathIcon className="h-3 w-3 animate-spin" /> Loading…
-                                </span>
-                            )}
                         </div>
 
                         <div className="overflow-x-auto overflow-y-auto max-h-[360px] custom-scrollbar">
@@ -10135,6 +10196,16 @@ ${f.start_para}`;
                                             </tr>
                                         );
                                     })}
+                                    {letterHistoryLoading && letterHistory.length === 0 && (
+                                        <tr>
+                                            <td colSpan="7" className="px-2 py-3 text-center text-[11px] text-gray-500">
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    <ArrowPathIcon className="h-3 w-3 animate-spin" style={{ color: themeColor }} />
+                                                    Loading letter history…
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    )}
                                     {letterHistory.length === 0 && !letterHistoryLoading && (
                                         <tr>
                                             <td colSpan="7" className="px-2 py-3 text-center text-[11px] text-gray-500">

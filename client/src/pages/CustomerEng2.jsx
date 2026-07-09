@@ -375,6 +375,11 @@ const CustomerEng2 = () => {
   const [warrantyFilterPosition, setWarrantyFilterPosition] = useState(null);
   const warrantyFilterRef = useRef(null);
 
+  // Last Followup Date range filter (top bar). Doesn't hide records — it
+  // re-orders them: in-range (oldest→newest), then out-of-range (oldest→
+  // newest), then records without a last followup date.
+  const [followupDateRange, setFollowupDateRange] = useState({ from: '', to: '' });
+
   // Agreement End Date range filter
   const [agreementDateRange, setAgreementDateRange] = useState({ from: '', to: '' });
   const [showAgreementFilter, setShowAgreementFilter] = useState(false);
@@ -387,6 +392,12 @@ const CustomerEng2 = () => {
 
   // New state for completed-first filter
   const [showCompletedFirst, setShowCompletedFirst] = useState(false);
+  // Server-side pagination order for the CURRENT load session. The visible
+  // order is handled client-side (tierSortedCustomers), so toggling the
+  // Completed button must NOT refetch — but "load more" pages have to keep
+  // using the completed_first value the session started with, otherwise the
+  // server re-orders mid-pagination and pages get duplicated/skipped rows.
+  const paginationCompletedFirstRef = useRef(false);
   // Add these 3 lines
   const [selectedBranches, setSelectedBranches] = useState([]);
   const [showBranchFilter, setShowBranchFilter] = useState(false);
@@ -430,12 +441,41 @@ const CustomerEng2 = () => {
     if (!routerLocation.state?.completedFirst) return;
     if (!customers || customers.length === 0) return;
     completedFirstHandledRef.current = true;
+    // Loaded rows re-sort instantly; completed-first page 1 loads silently.
     setShowCompletedFirst(true);
+    setSelectedFlag("all"); // one filter mode at a time
     if (tableContainerRef.current) tableContainerRef.current.scrollTop = 0;
-    fetchNonCampaignCustomers(1, true, true);
+    fetchNonCampaignCustomers(1, true, true, true);
     routerNavigate(routerLocation.pathname, { replace: true, state: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customers, routerLocation.state]);
+
+  // Deep-link: open ONE customer directly (from My Performance / Drive Data
+  // fallback) via router state — navigate('/customer-engagement-2', { state:
+  // { openCustomerInstanceId } }). The customer may not be in the loaded pages
+  // yet, so resolve customer_id with the server-side search endpoint.
+  const autoOpenHandledRef = useRef(false);
+  useEffect(() => {
+    if (autoOpenHandledRef.current) return;
+    const iid = routerLocation.state?.openCustomerInstanceId;
+    if (!iid) return;
+    autoOpenHandledRef.current = true;
+    (async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/v1/engagement/non-campaign-customers?page=1&limit=50&search=${encodeURIComponent(iid)}`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const rows = data.customers || [];
+          const target = rows.find(c => c.instance_id === iid) || rows[0];
+          if (target && target.customer_id) handleViewCustomer(target.customer_id);
+        }
+      } catch { /* customer not found — stay on the list */ }
+      routerNavigate(routerLocation.pathname, { replace: true, state: null });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routerLocation.state]);
   // Server-side search results
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -993,15 +1033,51 @@ const CustomerEng2 = () => {
       } else if (selectedFlag === 'R') {
         // Rejected — latest status is "rejected"
         filtered = filtered.filter(c => c.latest_status === 'rejected');
+      } else if (selectedFlag === 'ALL_STATUS') {
+        // All statuses — WIP + FR + NC + R combined
+        filtered = filtered.filter(c =>
+          ['wip', 'rescheduled', 'not_connected', 'rejected'].includes(c.latest_status)
+        );
+      } else if (selectedFlag === 'ALL_FLAGS') {
+        // All flags — any C1..C7 follow-up flag set
+        filtered = filtered.filter(c =>
+          ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7'].some(k => c.followup_flags?.[k])
+        );
       } else {
         // C1..C7 flags
         filtered = filtered.filter(c => c.followup_flags?.[selectedFlag]);
       }
     }
 
+    // Last Followup Date range: keep ALL records but re-order —
+    // in-range (oldest→newest), then other dated records (oldest→newest),
+    // then records with no last followup date.
+    if (followupDateRange.from || followupDateRange.to) {
+      const from = followupDateRange.from ? new Date(followupDateRange.from) : null;
+      if (from) from.setHours(0, 0, 0, 0);
+      const to = followupDateRange.to ? new Date(followupDateRange.to) : null;
+      if (to) to.setHours(23, 59, 59, 999);
+
+      // Decorate once (avoid re-parsing dates inside the comparator on 40k rows)
+      const decorated = filtered.map((c, idx) => {
+        const t = c.last_followup_date ? new Date(c.last_followup_date).getTime() : NaN;
+        let group;
+        if (Number.isNaN(t)) group = 2; // no date — last
+        else if ((!from || t >= from.getTime()) && (!to || t <= to.getTime())) group = 0; // in range — first
+        else group = 1; // dated but outside range
+        return { c, t, group, idx };
+      });
+      decorated.sort((a, b) => {
+        if (a.group !== b.group) return a.group - b.group;
+        if (a.group === 2) return a.idx - b.idx; // no-date: keep existing order
+        return a.t - b.t; // oldest → newest
+      });
+      return decorated.map(d => d.c);
+    }
+
     // 3-tier sort is NOT redone here — already applied in tierSortedCustomers (filter preserves order)
     return filtered;
-  }, [debouncedSearchTerm, searchResults, tierSortedCustomers, selectedFlag, isAdmin, userBranch, selectedBranches, statusColumnFilter, warrantyDateRange, agreementDateRange]);
+  }, [debouncedSearchTerm, searchResults, tierSortedCustomers, selectedFlag, isAdmin, userBranch, selectedBranches, statusColumnFilter, warrantyDateRange, agreementDateRange, followupDateRange]);
 
   // R (Rejected) count — loaded customers whose latest status is "rejected"
   // (respects branch restriction + the header branch filter, same as the C-flag counts)
@@ -1051,6 +1127,42 @@ const CustomerEng2 = () => {
     }
     return visible.filter(c => c.latest_status === 'rescheduled').length;
   }, [customers, selectedBranches, isAdmin, userBranch]);
+
+  // C (Completed) count — loaded customers whose latest status is "completed"
+  const completedCount = useMemo(() => {
+    let visible = [...customers];
+    if (!isAdmin && userBranch && userBranch !== 'HO') {
+      visible = visible.filter(c => !c.branch_id || String(c.branch_id) === String(userBranch));
+    }
+    if (selectedBranches.length > 0) {
+      visible = visible.filter(c => selectedBranches.includes(String(c.branch_id || '')));
+    }
+    return visible.filter(c => c.latest_status === 'completed').length;
+  }, [customers, selectedBranches, isAdmin, userBranch]);
+
+  // Only ONE filter mode at a time: selecting a flag/status filter switches
+  // Completed-on-top off and clears the Last Followup date filter; turning
+  // Completed-on-top on resets the flag filter to "all" (see the Completed
+  // button onClick); applying the date filter resets to "all" too.
+  const handleFlagSelect = (key) => {
+    setSelectedFlag(key);
+    setFollowupDateRange(prev => (prev.from || prev.to) ? { from: '', to: '' } : prev);
+    if (showCompletedFirst) {
+      setShowCompletedFirst(false);
+      if (tableContainerRef.current) tableContainerRef.current.scrollTop = 0;
+      setTableScrollTop(0);
+    }
+  };
+
+  // Last Followup date filter (top bar) — applying it switches the view back
+  // to the plain "All" filter and turns Completed-on-top off.
+  const handleFollowupDateChange = (field, value) => {
+    setFollowupDateRange(prev => ({ ...prev, [field]: value }));
+    setSelectedFlag("all");
+    if (showCompletedFirst) setShowCompletedFirst(false);
+    if (tableContainerRef.current) tableContainerRef.current.scrollTop = 0;
+    setTableScrollTop(0);
+  };
 
   // Find other assets belonging to the same customer (same phone OR same name)
   // Searches across currently-loaded customers. As user scrolls, more load, so this recomputes.
@@ -1246,8 +1358,16 @@ const CustomerEng2 = () => {
     });
   }, []);
 
-  const fetchNonCampaignCustomers = async (pageNum = 1, reset = false, completedFirstOverride = null) => {
-    const completedFirst = completedFirstOverride !== null ? completedFirstOverride : showCompletedFirst;
+  // silent=true: background refresh — keep the current table visible (no wipe,
+  // no full-page spinner) and swap the data in when the response arrives.
+  const fetchNonCampaignCustomers = async (pageNum = 1, reset = false, completedFirstOverride = null, silent = false) => {
+    // Reset (fresh load) picks the order and pins it for the session;
+    // "load more" pages reuse the pinned value so pagination stays consistent
+    // even if the user toggled the Completed button in between.
+    const completedFirst = completedFirstOverride !== null
+      ? completedFirstOverride
+      : (reset ? showCompletedFirst : paginationCompletedFirstRef.current);
+    if (reset) paginationCompletedFirstRef.current = completedFirst;
 
     // Warm-cache key: includes everything that selects/filters/orders this dataset.
     const warmCacheKey = warmKey('customerEng2:nonCampaignCustomers', {
@@ -1262,17 +1382,24 @@ const CustomerEng2 = () => {
     });
 
     if (reset) {
-      setLoading(true);
-      setCustomers([]);
+      if (silent) {
+        // Keep current rows on screen; loadingMore just blocks concurrent
+        // infinite-scroll fetches while the re-ordered page 1 is in flight.
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+        setCustomers([]);
+      }
       setPage(1);
       setHasMore(true);
     } else {
       setLoadingMore(true);
     }
 
-    // Warm-cache-first paint: only on the very first load (list still empty).
+    // Warm-cache-first paint: on the very first load (list still empty) or on
+    // a silent re-order (Completed toggle) so the swap is instant when cached.
     // The network fetch below ALWAYS runs and its fresh result overwrites this.
-    if (reset && pageNum === 1 && customers.length === 0) {
+    if (reset && pageNum === 1 && (silent || customers.length === 0)) {
       const warm = readWarmCache(warmCacheKey);
       if (warm && Array.isArray(warm.customers) && warm.customers.length > 0) {
         setCustomers(warm.customers);
@@ -5614,15 +5741,20 @@ ${f.start_para}`;
           <div className="border-gray-200 pb-3">
             <div className="space-y-2">
               {/* Header Row - Hide on mobile, show on larger screens */}
-              <div className="hidden sm:grid sm:grid-cols-3 gap-40 max-lg:gap-4">
+              <div className="hidden sm:grid sm:grid-cols-4 gap-20 max-lg:gap-4">
+                <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Quotation</p>
                 <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Quotation Type</p>
                 <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Created Date</p>
                 <p className="text-[11px] font-bold text-black text-center uppercase tracking-wide">Expiry Date</p>
               </div>
 
               {/* Row 0: Regular Bandhan (NEW quote-style file) - Mobile responsive */}
-              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:sm:gap-4">
+              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-4 sm:gap-20 max-lg:sm:gap-4">
                 <div className="flex justify-between sm:justify-center items-center sm:block">
+                  <span className="text-[11px] font-bold text-black sm:hidden">Quotation: </span>
+                  <p className="text-xs text-black font-semibold text-left sm:text-center">Regular Bandhan</p>
+                </div>
+                <div className="flex justify-between sm:justify-center items-center sm:block mt-1 sm:mt-0">
                   <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                   <p className="text-xs text-black font-normal text-left sm:text-center">
                     {regularBandhan ? `Regular Bandhan${regularBandhan.quotation_type ? ` - ${regularBandhan.quotation_type}` : ''}` : '-'}
@@ -5639,8 +5771,12 @@ ${f.start_para}`;
               </div>
 
               {/* Row 1: Anubandhan Plus - Mobile responsive */}
-              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:sm:gap-4">
+              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-4 sm:gap-20 max-lg:sm:gap-4">
                 <div className="flex justify-between sm:justify-center items-center sm:block">
+                  <span className="text-[11px] font-bold text-black sm:hidden">Quotation: </span>
+                  <p className="text-xs text-black font-semibold text-left sm:text-center">Anubandhan Plus</p>
+                </div>
+                <div className="flex justify-between sm:justify-center items-center sm:block mt-1 sm:mt-0">
                   <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                   <p className="text-xs text-black font-normal text-left sm:text-center">{anubandhanPlus?.quotation_type || '-'}</p>
                 </div>
@@ -5655,8 +5791,12 @@ ${f.start_para}`;
               </div>
 
               {/* Row 2: Anubandhan - Mobile responsive */}
-              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:sm:gap-4">
+              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-4 sm:gap-20 max-lg:sm:gap-4">
                 <div className="flex justify-between sm:justify-center items-center sm:block">
+                  <span className="text-[11px] font-bold text-black sm:hidden">Quotation: </span>
+                  <p className="text-xs text-black font-semibold text-left sm:text-center">Anubandhan</p>
+                </div>
+                <div className="flex justify-between sm:justify-center items-center sm:block mt-1 sm:mt-0">
                   <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                   <p className="text-xs text-black font-normal text-left sm:text-center">{anubandhan?.quotation_type || '-'}</p>
                 </div>
@@ -5671,8 +5811,12 @@ ${f.start_para}`;
               </div>
 
               {/* Row 3: Bandhan Plus - Mobile responsive */}
-              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:sm:gap-4">
+              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-4 sm:gap-20 max-lg:sm:gap-4">
                 <div className="flex justify-between sm:justify-center items-center sm:block">
+                  <span className="text-[11px] font-bold text-black sm:hidden">Quotation: </span>
+                  <p className="text-xs text-black font-semibold text-left sm:text-center">Bandhan Plus</p>
+                </div>
+                <div className="flex justify-between sm:justify-center items-center sm:block mt-1 sm:mt-0">
                   <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                   <p className="text-xs text-black font-normal text-left sm:text-center">{bandhanPlus?.quotation_type || '-'}</p>
                 </div>
@@ -5687,8 +5831,12 @@ ${f.start_para}`;
               </div>
 
               {/* Row 4: Pulse Quotation - Mobile responsive */}
-              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-3 sm:gap-40 max-lg:sm:gap-4">
+              <div className="border rounded-lg p-2 sm:p-0 sm:border-none sm:grid sm:grid-cols-4 sm:gap-20 max-lg:sm:gap-4">
                 <div className="flex justify-between sm:justify-center items-center sm:block">
+                  <span className="text-[11px] font-bold text-black sm:hidden">Quotation: </span>
+                  <p className="text-xs text-black font-semibold text-left sm:text-center">Pulse Quotation</p>
+                </div>
+                <div className="flex justify-between sm:justify-center items-center sm:block mt-1 sm:mt-0">
                   <span className="text-[11px] font-bold text-black sm:hidden">Type: </span>
                   <p className="text-xs text-black font-normal text-left sm:text-center">
                     {pulseData?.quote_id ? 'Pulse Quotation' : '-'}
@@ -5882,150 +6030,152 @@ ${f.start_para}`;
           })()}
         </div>
       ),
-      sr: (
-        <div className="p-3 sm:p-4">
-          <div className="flex flex-col lg:flex-row lg:gap-4 relative">
-            {/* Vertical Divider Line - Hidden on mobile, visible on lg screens */}
-            <div className="hidden lg:block absolute left-1/2 top-0 bottom-0 w-px bg-gray-300 transform -translate-x-1/2"></div>
-
-            {/* Left Side - SR Data */}
-            <div className="flex-1 mb-4 lg:mb-0">
-              <div className="space-y-2">
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                  <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">SR Number:</p>
-                  <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{openSRData?.service_request_no || '-'}</p>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                  <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">Type:</p>
-                  <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{openSRData?.sr_type || '-'}</p>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                  <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">Sub-Type:</p>
-                  <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{openSRData?.sr_sub_type || '-'}</p>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                  <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">Status:</p>
-                  <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{openSRData?.status || '-'}</p>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                  <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">Due Date:</p>
-                  <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{formatShortDate(openSRData?.sr_due_date)}</p>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                  <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">SR Open Date:</p>
-                  <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{formatShortDate(openSRExtra?.sr_open_date)}</p>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                  <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">SR Close Date:</p>
-                  <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{formatShortDate(openSRExtra?.sr_close_date)}</p>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                  <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">Oil Change Flag:</p>
-                  <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{openSRExtra?.oil_change_flag || '-'}</p>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                  <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[140px]">Zero Labour Flag:</p>
-                  <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{openSRExtra?.zero_labour_flag || '-'}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Right Side - Service History Data */}
-            <div className="flex-1 lg:pl-8">
-              {customerServices && customerServices.length > 0 ? (
-                <div className="space-y-4">
-                  {customerServices.map((service, idx) => (
-                    <div key={idx} className="space-y-2">
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+      sr: (() => {
+        const oilServices = (customerServices && customerServices.length > 0) ? customerServices : [{}];
+        // ALL Open SR file rows for this instance, latest due date first
+        const openSrRows = [...(data.open_sr_load_reports || [])].sort(
+          (a, b) => new Date(b.sr_due_date || 0) - new Date(a.sr_due_date || 0)
+        );
+        // ALL Close SR file rows for this instance, latest open date first
+        const closeSrRows = [...(data.open_sr_data || [])].sort(
+          (a, b) => new Date(b.sr_open_date || 0) - new Date(a.sr_open_date || 0)
+        );
+        return (
+          <div className="p-3 sm:p-4 space-y-4">
+            {/* Oil service file data — 4 SR fields left, 5 oil change fields right */}
+            <div>
+              <p className="text-[11px] font-bold text-black uppercase tracking-wide mb-1.5">Asset Details with Oil Change Report</p>
+              <div className="space-y-4">
+              {oilServices.map((service, idx) => (
+                <div key={idx} className="flex flex-col lg:flex-row border border-gray-300 rounded divide-y lg:divide-y-0 lg:divide-x divide-gray-300">
+                  {/* Left Side — 4 SR fields */}
+                  <div className="flex-1">
+                    <div>
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                         <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Closed SR Number:</p>
                         <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{service.last_closed_sr_number || '-'}</p>
                       </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                         <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last SR Type:</p>
                         <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{service.last_sr_type || '-'}</p>
                       </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                         <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last SR Sub Type:</p>
                         <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{service.last_sr_subtype || '-'}</p>
                       </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                         <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last SR Close Date:</p>
                         <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{formatShortDate(service.last_sr_close_date)}</p>
                       </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                    </div>
+                  </div>
+
+                  {/* Right Side — 5 oil change fields */}
+                  <div className="flex-1">
+                    <div>
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                         <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change SR Number:</p>
                         <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{service.last_oil_change_sr_number || '-'}</p>
                       </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                         <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change SR Type:</p>
                         <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{service.last_oil_change_sr_type || '-'}</p>
                       </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                         <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change SR Sub Type:</p>
                         <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{service.last_oil_change_sr_sub_type || '-'}</p>
                       </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                         <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change Date:</p>
                         <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{formatShortDate(service.last_oil_change_date)}</p>
                       </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 px-2 py-1.5">
                         <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Service Hours:</p>
                         <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">{service.last_service_hrs || '-'}</p>
                       </div>
-                      {idx < customerServices.length - 1 && (
-                        <div className="border-t border-gray-200 mt-3 pt-3"></div>
-                      )}
                     </div>
-                  ))}
+                  </div>
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  {customerServices.map((service, idx) => (
-                    <div key={idx} className="space-y-2">
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                        <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Closed SR Number:</p>
-                        <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                      </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                        <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last SR Type:</p>
-                        <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                      </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                        <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last SR Sub Type:</p>
-                        <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                      </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                        <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last SR Close Date:</p>
-                        <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                      </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                        <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change SR Number:</p>
-                        <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                      </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                        <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change SR Type:</p>
-                        <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                      </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                        <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change SR Sub Type:</p>
-                        <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                      </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                        <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Last Oil Change Date:</p>
-                        <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                      </div>
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
-                        <p className="text-[11px] font-bold text-black uppercase tracking-wide min-w-[180px]">Service Hours:</p>
-                        <p className="text-xs text-black font-normal break-words flex-1 sm:text-right">-</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              ))}
+              </div>
+            </div>
+
+            {/* Open SR Report — every Open SR file record of this instance, latest first */}
+            <div>
+              <p className="text-[11px] font-bold text-black uppercase tracking-wide mb-1.5">Open SR Report</p>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse min-w-[520px]">
+                  <thead>
+                    <tr>
+                      <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Number</th>
+                      <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Created Date</th>
+                      <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Close Date/Time</th>
+                      <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Type</th>
+                      <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Sub-Type</th>
+                      <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Status</th>
+                      <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Due Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {openSrRows.length > 0 ? openSrRows.map((sr, idx) => (
+                      <tr key={idx}>
+                        <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.service_request_no || '-'}</td>
+                        <td className="px-2 py-1 border border-gray-200 text-[11px] text-black whitespace-nowrap text-center">{formatShortDate(sr.sr_created_date)}</td>
+                        <td className="px-2 py-1 border border-gray-200 text-[11px] text-black whitespace-nowrap text-center">{formatShortDate(sr.close_date_time)}</td>
+                        <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.sr_type || '-'}</td>
+                        <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.sr_sub_type || '-'}</td>
+                        <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.status || '-'}</td>
+                        <td className="px-2 py-1 border border-gray-200 text-[11px] text-black whitespace-nowrap text-center">{formatShortDate(sr.sr_due_date)}</td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan={7} className="px-2 py-1.5 border border-gray-200 text-[11px] text-gray-500 text-center">No Open SR records</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Close SR Report — every Close SR file record of this instance, latest first */}
+            <div>
+              <p className="text-[11px] font-bold text-black uppercase tracking-wide mb-1.5">Close SR Report</p>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse min-w-[520px]">
+                  <thead>
+                    <tr>
+                      <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Number</th>
+                      <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Open Date</th>
+                      <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Close Date</th>
+                      <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Type</th>
+                      <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Subtype</th>
+                      <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Oil Change Flag</th>
+                      <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Zero Labour Flag</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {closeSrRows.length > 0 ? closeSrRows.map((sr, idx) => (
+                      <tr key={idx}>
+                        <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.sr_number || '-'}</td>
+                        <td className="px-2 py-1 border border-gray-200 text-[11px] text-black whitespace-nowrap text-center">{formatShortDate(sr.sr_open_date)}</td>
+                        <td className="px-2 py-1 border border-gray-200 text-[11px] text-black whitespace-nowrap text-center">{formatShortDate(sr.sr_close_date)}</td>
+                        <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.sr_type || '-'}</td>
+                        <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.sr_subtype || '-'}</td>
+                        <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.oil_change_flag || '-'}</td>
+                        <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.zero_labour_flag || '-'}</td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan={7} className="px-2 py-1.5 border border-gray-200 text-[11px] text-gray-500 text-center">No Close SR records</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-        </div>
-      )
+        );
+      })()
     };
 
     // Box titles mapping with enhanced header styling
@@ -6079,6 +6229,38 @@ ${f.start_para}`;
 
             {/* Filters */}
             <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-end gap-2">
+
+              {/* Last Followup Date range — re-orders records, hides none */}
+              <div
+                className="flex items-center gap-1 whitespace-nowrap"
+                title="Order by Last Followup Date — records in this range first (oldest to newest), then other dated records, then records without a date"
+              >
+                <span className="text-xs font-semibold text-gray-600">Last Followup:</span>
+                <input
+                  type="date"
+                  value={followupDateRange.from}
+                  max={followupDateRange.to || undefined}
+                  onChange={(e) => handleFollowupDateChange('from', e.target.value)}
+                  className="border border-gray-300 rounded-md px-1.5 py-1 text-xs bg-white text-gray-700 focus:outline-none focus:border-blue-500"
+                />
+                <span className="text-xs text-gray-400">to</span>
+                <input
+                  type="date"
+                  value={followupDateRange.to}
+                  min={followupDateRange.from || undefined}
+                  onChange={(e) => handleFollowupDateChange('to', e.target.value)}
+                  className="border border-gray-300 rounded-md px-1.5 py-1 text-xs bg-white text-gray-700 focus:outline-none focus:border-blue-500"
+                />
+                {(followupDateRange.from || followupDateRange.to) && (
+                  <button
+                    onClick={() => setFollowupDateRange({ from: '', to: '' })}
+                    className="text-red-500 text-xs font-bold px-1 rounded hover:bg-red-50"
+                    title="Clear Last Followup date filter"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
 
               <div className="relative w-full sm:w-64 flex flex-col">
                 <MagnifyingGlassIcon className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
@@ -6139,11 +6321,26 @@ ${f.start_para}`;
                 className="flex flex-nowrap items-center gap-1 overflow-x-auto max-lg:min-w-0 max-md:w-full"
                 style={{ scrollbarWidth: "thin" }}
               >
-                {/* All Button */}
+                {/* All Button — every record, no flag/status filter */}
                 <button
-                  onClick={() => setSelectedFlag("all")}
-                  title="Show all customers regardless of follow-up flag"
+                  onClick={() => handleFlagSelect("all")}
+                  title="Show all customers — no flag or status filter"
                   className={`px-1.5 py-1 text-sm rounded-md whitespace-nowrap font-bold transition-colors ${selectedFlag === "all"
+                    ? "bg-[#2f3192] text-white shadow-sm"
+                    : "bg-transparent text-black hover:bg-gray-50"
+                    }`}
+                >
+                  All
+                </button>
+
+                {/* Divider */}
+                <span className="self-center px-0.5 text-gray-300 font-bold select-none">|</span>
+
+                {/* All flags — any C1..C7 follow-up flag */}
+                <button
+                  onClick={() => handleFlagSelect("ALL_FLAGS")}
+                  title="All follow-up flags — C1 to C7 combined"
+                  className={`px-1.5 py-1 text-sm rounded-md whitespace-nowrap font-bold transition-colors ${selectedFlag === "ALL_FLAGS"
                     ? "bg-[#2f3192] text-white shadow-sm"
                     : "bg-transparent text-black hover:bg-gray-50"
                     }`}
@@ -6154,8 +6351,8 @@ ${f.start_para}`;
                   }
                 </button>
 
-                {/* Divider */}
-                <span className="self-center px-0.5 text-gray-300 font-bold select-none">|</span>
+                {/* Colon separator */}
+                <span className="self-center px-0.5 text-gray-400 font-bold select-none">:</span>
 
                 {/* Flag Buttons with Titles */}
                 {[
@@ -6172,7 +6369,7 @@ ${f.start_para}`;
                   return (
                     <button
                       key={flag.key}
-                      onClick={() => setSelectedFlag(flag.key)}
+                      onClick={() => handleFlagSelect(flag.key)}
                       title={flag.title}
                       className={`px-2 py-0.5 text-[13px] whitespace-nowrap font-semibold rounded-md transition-colors ${selectedFlag === flag.key
                         ? "bg-[#2f3192] text-white shadow-sm"
@@ -6187,9 +6384,24 @@ ${f.start_para}`;
                 {/* Divider */}
                 <span className="self-center px-0.5 text-gray-300 font-bold select-none">|</span>
 
+                {/* ALL statuses — WIP + FR + NC + R combined (styled like the flag-count All button) */}
+                <button
+                  onClick={() => handleFlagSelect("ALL_STATUS")}
+                  title="All statuses — WIP + FR + NC + R combined"
+                  className={`px-1.5 py-1 text-sm rounded-md whitespace-nowrap font-bold transition-colors ${selectedFlag === "ALL_STATUS"
+                    ? "bg-[#2f3192] text-white shadow-sm"
+                    : "bg-transparent text-black hover:bg-gray-50"
+                    }`}
+                >
+                  All - {wipCount + rescheduledCount + notConnectedCount + rejectedCount}
+                </button>
+
+                {/* Colon separator */}
+                <span className="self-center px-0.5 text-gray-400 font-bold select-none">:</span>
+
                 {/* WIP (Work in Progress) — latest status is "wip" */}
                 <button
-                  onClick={() => setSelectedFlag("WIP")}
+                  onClick={() => handleFlagSelect("WIP")}
                   title="Work in Progress — latest status is WIP"
                   className={`px-2 py-0.5 text-[13px] whitespace-nowrap font-semibold rounded-md transition-colors ${selectedFlag === "WIP"
                     ? "bg-[#2f3192] text-white shadow-sm"
@@ -6201,7 +6413,7 @@ ${f.start_para}`;
 
                 {/* FR (Follow-up Reschedule) — latest status is "rescheduled" */}
                 <button
-                  onClick={() => setSelectedFlag("FR")}
+                  onClick={() => handleFlagSelect("FR")}
                   title="Follow-up Reschedule — latest status is Rescheduled"
                   className={`px-2 py-0.5 text-[13px] whitespace-nowrap font-semibold rounded-md transition-colors ${selectedFlag === "FR"
                     ? "bg-[#2f3192] text-white shadow-sm"
@@ -6211,19 +6423,9 @@ ${f.start_para}`;
                   FR-{rescheduledCount}
                 </button>
 
-                {/* R (Rejected) — latest status is Rejected (red-orange) */}
-                <button
-                  onClick={() => setSelectedFlag("R")}
-                  title="Rejected — latest status is Rejected"
-                  className={`px-2 py-0.5 text-[13px] whitespace-nowrap font-semibold rounded-md transition-colors ${selectedFlag === "R" ? "text-white shadow-sm" : "hover:bg-orange-50"}`}
-                  style={selectedFlag === "R" ? { backgroundColor: "#e34019" } : { color: "#e34019" }}
-                >
-                  R-{rejectedCount}
-                </button>
-
                 {/* NC (Not connected) — latest status is "not_connected" */}
                 <button
-                  onClick={() => setSelectedFlag("NC")}
+                  onClick={() => handleFlagSelect("NC")}
                   title="Not connected — latest status is 'Not Connected'"
                   className={`px-2 py-0.5 text-[13px] whitespace-nowrap font-semibold rounded-md transition-colors ${selectedFlag === "NC"
                     ? "bg-[#2f3192] text-white shadow-sm"
@@ -6232,6 +6434,17 @@ ${f.start_para}`;
                 >
                   NC-{notConnectedCount}
                 </button>
+
+                {/* R (Rejected) — latest status is Rejected (red-orange) */}
+                <button
+                  onClick={() => handleFlagSelect("R")}
+                  title="Rejected — latest status is Rejected"
+                  className={`status-r-btn ${selectedFlag === "R" ? "status-r-selected" : ""} px-2 py-0.5 text-[13px] whitespace-nowrap font-semibold rounded-md transition-colors ${selectedFlag === "R" ? "text-white shadow-sm" : "hover:bg-orange-50"}`}
+                  style={selectedFlag === "R" ? { backgroundColor: "#e34019" } : { color: "#e34019" }}
+                >
+                  R-{rejectedCount}
+                </button>
+
               </div>
 
               {/* RIGHT SIDE : Completed Button with Customer Count */}
@@ -6239,10 +6452,19 @@ ${f.start_para}`;
                 <button
                   onClick={() => {
                     const newVal = !showCompletedFirst;
+                    // Instant: loaded rows re-sort client-side right away
+                    // (tierSortedCustomers), while the correctly-ordered page 1
+                    // loads silently in the background (no table wipe/spinner).
                     setShowCompletedFirst(newVal);
+                    // One filter mode at a time — completed-on-top clears any
+                    // active flag/status filter and the date filter.
+                    if (newVal) {
+                      setSelectedFlag("all");
+                      setFollowupDateRange({ from: '', to: '' });
+                    }
                     if (tableContainerRef.current) tableContainerRef.current.scrollTop = 0;
                     setTableScrollTop(0);
-                    fetchNonCampaignCustomers(1, true, newVal); // reset + override
+                    fetchNonCampaignCustomers(1, true, newVal, true);
                   }}
                   className={`px-3 py-1.5 text-sm rounded-md flex items-center gap-2 transition-all max-sm:text-xs max-sm:px-2 max-sm:whitespace-nowrap ${showCompletedFirst
                     ? "bg-[#2f3192] text-white"
@@ -6251,7 +6473,7 @@ ${f.start_para}`;
                   title={showCompletedFirst ? "Show completed customers at bottom" : "Show completed customers on top"}
                 >
                   {showCompletedFirst
-                    ? "Completed-Send To Bottom"
+                    ? `Completed(${completedCount})-Send To Bottom`
                     : "Completed-Show On Top"}
                 </button>
               </div>
@@ -7625,6 +7847,7 @@ ${f.start_para}`;
                         <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">Branch</th>
                         <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">Segment</th>
                         <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">Engine Model</th>
+                        <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">KVA Rating</th>
                         <th className="px-2 py-1 text-center text-[11px] font-bold text-black">Action</th>
                       </tr>
                     </thead>
@@ -7639,6 +7862,7 @@ ${f.start_para}`;
                           branch_id: customerDetails?.branch_id,
                           segment: customerCompleteData?.asset_detailed?.[0]?.segment || '-',
                           engine_model: customerCompleteData?.asset_detailed?.[0]?.engine_model || '-',
+                          kva_rating: customerCompleteData?.asset_detailed?.[0]?.kva_rating || '-',
                           isCurrent: true,
                         };
 
@@ -7651,6 +7875,7 @@ ${f.start_para}`;
                           branch_id: a.branch_id,
                           segment: a.segment || '-',
                           engine_model: a.engine_model || '-',
+                          kva_rating: a.kva_rating || '-',
                           isCurrent: false,
                         }));
 
@@ -7684,6 +7909,7 @@ ${f.start_para}`;
                               <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.branch_id || '-'}</td>
                               <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.segment || '-'}</td>
                               <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.engine_model || '-'}</td>
+                              <td className="px-2 py-1.5 text-center text-[11px] text-black border-r border-gray-100">{asset.kva_rating || '-'}</td>
                               <td className="px-2 py-1.5 text-center text-[11px]">
                                 {isViewing ? (
                                   <span className="font-semibold text-[10px]" style={{ color: themeColor }}>● Viewing</span>
@@ -7976,7 +8202,7 @@ ${f.start_para}`;
               {isAdmin && (
                 <button
                   onClick={openLetterWizard}
-                  className="px-2 py-1 sm:px-2 sm:py-1.5 text-[11px] sm:text-xs text-black font-semibold rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-1.5"
+                  className="send-letter-btn px-2 py-1 sm:px-2 sm:py-1.5 text-[11px] sm:text-xs text-black font-semibold rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-1.5"
                   style={{ background: `linear-gradient(135deg, #f59e0b, #d97706)` }}
                 >
                   <PaperAirplaneIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -8227,7 +8453,8 @@ ${f.start_para}`;
                     ) : null;
                     const campaignData = campaignFollowupData[campaignId] || {};
                     const showQuoteColumns = !isOther && campaignData.quotation_sent === true;
-                    const showRejectReason = !isOther && campaignData.status === 'rejected';
+                    // Reject reason applies to "Other" followups too (backend stores rr_id for non-followups)
+                    const showRejectReason = campaignData.status === 'rejected';
 
                     return (
                       <tr
@@ -8465,7 +8692,7 @@ ${f.start_para}`;
 
                         {showRejectReasonGlobal && (
                           <td className="px-2 py-2 border border-gray-300 text-center align-middle">
-                            {!isOther && campaignData.status === 'rejected' ? (
+                            {campaignData.status === 'rejected' ? (
                               <select
                                 value={campaignData.rr_id || ""}
                                 //commented by nik
@@ -9213,11 +9440,6 @@ ${f.start_para}`;
                 <PaperAirplaneIcon className="h-3 w-3 sm:h-4 sm:w-4" style={{ color: themeColor }} />
                 Letter History
               </h2>
-              {letterHistoryLoading && (
-                <span className="text-[11px] text-gray-400 flex items-center gap-1">
-                  <ArrowPathIcon className="h-3 w-3 animate-spin" /> Loading…
-                </span>
-              )}
             </div>
 
             <div className="overflow-x-auto overflow-y-auto max-h-[360px] custom-scrollbar">
@@ -9295,6 +9517,16 @@ ${f.start_para}`;
                       </tr>
                     );
                   })}
+                  {letterHistoryLoading && letterHistory.length === 0 && (
+                    <tr>
+                      <td colSpan="7" className="px-2 py-3 text-center text-[11px] text-gray-500">
+                        <span className="inline-flex items-center gap-1.5">
+                          <ArrowPathIcon className="h-3 w-3 animate-spin" style={{ color: themeColor }} />
+                          Loading letter history…
+                        </span>
+                      </td>
+                    </tr>
+                  )}
                   {letterHistory.length === 0 && !letterHistoryLoading && (
                     <tr>
                       <td colSpan="7" className="px-2 py-3 text-center text-[11px] text-gray-500">

@@ -780,7 +780,7 @@ class CampaignController:
 
     def get_campaign_customers_with_followups(self, campaign_id: int) -> Dict[str, Any]:
         """Get all customers for a campaign with their last follow-up data (batched)"""
-        from app.models.engagement_model import FollowUp
+        from app.models.engagement_model import FollowUp, RR
 
         campaign = self.get_campaign(campaign_id)
         if not campaign:
@@ -830,7 +830,19 @@ class CampaignController:
             for c in self.db.query(Customer).filter(Customer.instance_id.in_(chunk)).all():
                 customer_map[c.instance_id] = c
 
+        # Rejection reasons for the latest follow-ups (batched, one query)
+        rr_ids = {
+            f.rr_id
+            for f in list(latest_open.values()) + list(latest_completed.values())
+            if f.rr_id
+        }
+        rr_lookup = {}
+        if rr_ids:
+            for r in self.db.query(RR).filter(RR.id.in_(rr_ids)).all():
+                rr_lookup[r.id] = r
+
         def build_info(customer, fu, default_status=None):
+            rr = rr_lookup.get(fu.rr_id) if fu and fu.rr_id else None
             return {
                 "instance_id": customer.instance_id,
                 "customer_name": customer.customer_name,
@@ -846,6 +858,7 @@ class CampaignController:
                 "next_followup_date": fu.next_followup_date.isoformat() if fu and fu.next_followup_date else None,
                 "latest_flag": fu.followup_flag if fu else None,
                 "latest_remark": fu.followup_remark if fu else None,
+                "rr_content": rr.content if rr else None,
                 "quotation_sent": fu.quotation_sent if fu else False,
                 "quotation_value": fu.quotation_value if fu else None,
             }

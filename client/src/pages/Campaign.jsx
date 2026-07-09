@@ -29,7 +29,9 @@ import {
   EyeIcon,
   TrashIcon,
   ChevronDownIcon,
-  ChevronUpIcon
+  ChevronUpIcon,
+  Squares2X2Icon,
+  TableCellsIcon
 } from '@heroicons/react/24/outline';
 // Code-split the heavy customer-followups modal into its own chunk (loads in the
 // background; it's mounted-but-closed so there is no visual change).
@@ -412,6 +414,15 @@ const Campaign = () => {
   const initialLoadRef = useRef(false);
   const filterTimeoutRef = useRef(null);
   const abortControllerRef = useRef(null);
+
+  // Drives list view: 'grid' cards or 'table' rows (choice remembered)
+  const [campaignView, setCampaignView] = useState(() => {
+    try { return localStorage.getItem('campaignView') === 'table' ? 'table' : 'grid'; } catch { return 'grid'; }
+  });
+  const switchCampaignView = (v) => {
+    setCampaignView(v);
+    try { localStorage.setItem('campaignView', v); } catch { /* storage unavailable */ }
+  };
 
   const [newCampaign, setNewCampaign] = useState({
     name: '',
@@ -2766,17 +2777,39 @@ const Campaign = () => {
               </div>
             </div>
 
-            <div className="relative w-full lg:w-72">
-              <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search drives..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-8 w-full border-2 border-black rounded-md px-2 py-1.5 text-xs focus:ring-2 transition-all text-black"
-                style={{ '--tw-ring-color': themeColor }}
-                disabled={loading}
-              />
+            <div className="flex items-center gap-2 w-full lg:w-auto">
+              <div className="relative flex-1 lg:w-72">
+                <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search drives..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-8 w-full border-2 border-black rounded-md px-2 py-1.5 text-xs focus:ring-2 transition-all text-black"
+                  style={{ '--tw-ring-color': themeColor }}
+                  disabled={loading}
+                />
+              </div>
+
+              {/* Card / Table view toggle — same pattern as Knowledge Bank */}
+              <div className="flex rounded-lg border border-gray-300 bg-white overflow-hidden shrink-0 shadow-sm">
+                <button
+                  onClick={() => switchCampaignView('grid')}
+                  className="p-2 transition"
+                  style={campaignView === 'grid' ? { backgroundColor: 'var(--erp-accent)', color: '#fff' } : { color: '#6b7280' }}
+                  title="Card view"
+                >
+                  <Squares2X2Icon className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => switchCampaignView('table')}
+                  className="p-2 transition"
+                  style={campaignView === 'table' ? { backgroundColor: 'var(--erp-accent)', color: '#fff' } : { color: '#6b7280' }}
+                  title="Table view"
+                >
+                  <TableCellsIcon className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -4601,7 +4634,7 @@ const Campaign = () => {
                   <textarea
                     value={letterFormatData.start_para}
                     onChange={(e) => setLetterFormatData({ ...letterFormatData, start_para: e.target.value })}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black font-mono leading-relaxed"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black leading-relaxed"
                     style={{ '--tw-ring-color': themeColor, minHeight: '150px' }}
                     placeholder={"Opening paragraph..."}
                     disabled={letterFormatSaving}
@@ -4758,7 +4791,7 @@ const Campaign = () => {
                   <textarea
                     value={letterFormatData.end_para}
                     onChange={(e) => setLetterFormatData({ ...letterFormatData, end_para: e.target.value })}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black font-mono leading-relaxed"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black leading-relaxed"
                     style={{ '--tw-ring-color': themeColor, minHeight: '150px' }}
                     placeholder={"Closing paragraph..."}
                     disabled={letterFormatSaving}
@@ -5215,7 +5248,7 @@ const Campaign = () => {
                   <p className="text-xs font-semibold text-black mb-1.5">Start Para</p>
                   <div className="border border-gray-200 rounded-md p-3 bg-gray-50 max-h-[30vh] overflow-y-auto">
                     {viewingLetterFormat.start_para ? (
-                      <pre className="text-sm text-black whitespace-pre-wrap break-words font-mono leading-relaxed">{viewingLetterFormat.start_para}</pre>
+                      <pre className="text-sm text-black whitespace-pre-wrap break-words font-sans leading-relaxed">{viewingLetterFormat.start_para}</pre>
                     ) : <span className="text-sm text-gray-400">No start paragraph provided</span>}
                   </div>
                 </div>
@@ -5283,7 +5316,7 @@ const Campaign = () => {
                   <p className="text-xs font-semibold text-black mb-1.5">End Para</p>
                   <div className="border border-gray-200 rounded-md p-3 bg-gray-50 max-h-[30vh] overflow-y-auto">
                     {viewingLetterFormat.end_para ? (
-                      <pre className="text-sm text-black whitespace-pre-wrap break-words font-mono leading-relaxed">{viewingLetterFormat.end_para}</pre>
+                      <pre className="text-sm text-black whitespace-pre-wrap break-words font-sans leading-relaxed">{viewingLetterFormat.end_para}</pre>
                     ) : <span className="text-sm text-gray-400">No end paragraph provided</span>}
                   </div>
                 </div>
@@ -5389,7 +5422,7 @@ const Campaign = () => {
         )}
 
         {/* Campaigns Grid with Optimized Loading */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <div className={campaignView === 'table' ? 'mb-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6'}>
           {/* Show loading skeletons while campaigns are being loaded */}
           {loading && campaigns.length === 0 && (
             <>
@@ -5400,8 +5433,102 @@ const Campaign = () => {
             </>
           )}
 
+          {/* TABLE VIEW — every drive as one row */}
+          {!loading && campaignView === 'table' && filteredCampaigns.length > 0 && (
+            <div className="bg-white rounded-xl shadow-lg overflow-hidden animate-cardIn">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[980px] border-collapse text-xs">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr className="border-b-2 border-gray-200">
+                      <th className="px-3 py-2 text-center font-bold text-black w-12">Sr.</th>
+                      <th className="px-3 py-2 text-left font-bold text-black">Drive Name</th>
+                      <th className="px-3 py-2 text-left font-bold text-black">Service / Product</th>
+                      <th className="px-3 py-2 text-center font-bold text-black">Status</th>
+                      <th className="px-3 py-2 text-center font-bold text-black whitespace-nowrap">Start Date</th>
+                      <th className="px-3 py-2 text-center font-bold text-black whitespace-nowrap">End Date</th>
+                      <th className="px-3 py-2 text-center font-bold text-black">Assets</th>
+                      <th className="px-3 py-2 text-center font-bold text-black">Pending</th>
+                      <th className="px-3 py-2 text-center font-bold text-black">Completed</th>
+                      <th className="px-3 py-2 text-left font-bold text-black whitespace-nowrap">Created By</th>
+                      <th className="px-3 py-2 text-center font-bold text-black">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredCampaigns.map((campaign, index) => (
+                      <tr key={campaign.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-3 py-2 text-center text-black tabular-nums">{index + 1}</td>
+                        <td className="px-3 py-2">
+                          <button
+                            onClick={() => handleCampaignClick(campaign)}
+                            className="flex items-center gap-2 font-semibold text-black hover:underline text-left"
+                            title="Open drive"
+                          >
+                            <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: campaign.color || themeColor }} />
+                            <span className="truncate max-w-[260px]" title={campaign.name}>{campaign.name}</span>
+                          </button>
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="text-[11px] font-medium px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full whitespace-nowrap">
+                            {campaign.service}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-[11px] capitalize ${getStatusBadgeClass(campaign.status)}`}>
+                            {campaign.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-center text-black whitespace-nowrap">{formatDate(campaign.start_date)}</td>
+                        <td className="px-3 py-2 text-center text-black whitespace-nowrap">{campaign.end_date ? formatDate(campaign.end_date) : 'Ongoing'}</td>
+                        <td className="px-3 py-2 text-center text-black tabular-nums">{campaign.asset_numbers?.length || 0}</td>
+                        <td className="px-3 py-2 text-center text-black tabular-nums">
+                          {campaignCounts[campaign.id]?.pending !== undefined
+                            ? campaignCounts[campaign.id].pending
+                            : campaign.asset_numbers?.length || 0}
+                        </td>
+                        <td className="px-3 py-2 text-center text-green-600 font-semibold tabular-nums">
+                          {campaignCounts[campaign.id]?.completed || 0}
+                        </td>
+                        <td className="px-3 py-2 text-black whitespace-nowrap">{campaign.created_by_name || '-'}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={(e) => openFollowupModal(campaign, e)}
+                              className="px-2 py-1 text-[10px] font-medium text-white bg-[#2f3192] rounded-md hover:bg-[#2f3192]/90 transition-all whitespace-nowrap"
+                              title="View customer follow-ups"
+                            >
+                              View All
+                            </button>
+                            <button
+                              onClick={(e) => openEditModal(campaign, e)}
+                              className="p-1 rounded-md hover:bg-gray-100 transition-all"
+                              title="Edit drive"
+                            >
+                              <PencilIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
+                            </button>
+                            {campaign.status === 'inactive' && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); openDeleteCampaignConfirm(campaign); }}
+                                className="p-1 rounded-md hover:bg-red-50 transition-all"
+                                title="Delete drive"
+                              >
+                                <TrashIcon className="h-3.5 w-3.5 text-red-500" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="bg-gray-50 border-t border-gray-200 px-3 py-1.5 text-[11px] text-gray-500 text-center">
+                {filteredCampaigns.length} drive{filteredCampaigns.length !== 1 ? 's' : ''}
+              </div>
+            </div>
+          )}
+
           {/* Show campaigns progressively — first batch instantly, rest stream in */}
-          {!loading && visibleCampaigns.map((campaign, index) => (
+          {!loading && campaignView === 'grid' && visibleCampaigns.map((campaign, index) => (
             <div
               key={campaign.id}
               className="animate-cardIn"
