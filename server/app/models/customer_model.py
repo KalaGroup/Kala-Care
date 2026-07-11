@@ -2,6 +2,7 @@ from sqlalchemy import Column, String, DateTime, Text, Integer, Float, Boolean, 
 from app.database import Base
 from sqlalchemy.orm import relationship
 import datetime
+from app.time_utils import now_ist
 
 class Customer(Base):
     __tablename__ = "customers"
@@ -20,8 +21,8 @@ class Customer(Base):
 
     followups = relationship("FollowUp", back_populates="customer", cascade="all, delete-orphan")
     
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 
 class AMCAgreement(Base):
@@ -61,8 +62,8 @@ class AMCAgreement(Base):
     # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
     extra_data = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 
 class AssetDetailed(Base):
@@ -106,8 +107,8 @@ class AssetDetailed(Base):
     # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
     extra_data = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 
 class AssetService(Base):
@@ -143,8 +144,8 @@ class AssetService(Base):
     # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
     extra_data = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 
 class AnubandhanPlusQuote(Base):
@@ -204,8 +205,8 @@ class AnubandhanPlusQuote(Base):
     # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
     extra_data = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 
 class AnubandhanQuote(Base):
@@ -265,8 +266,8 @@ class AnubandhanQuote(Base):
     # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
     extra_data = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 
 class BandhanPlusQuote(Base):
@@ -326,8 +327,8 @@ class BandhanPlusQuote(Base):
     # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
     extra_data = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 
 class PulseQuotation(Base):
@@ -375,8 +376,8 @@ class PulseQuotation(Base):
     # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
     extra_data = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 
 class RegularBandhan(Base):
@@ -440,8 +441,8 @@ class RegularBandhan(Base):
     # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
     extra_data = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 
 class LMSData(Base):
@@ -527,8 +528,8 @@ class LMSData(Base):
     # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
     extra_data = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 
 class OpenSRLoadReport(Base):
@@ -613,8 +614,8 @@ class OpenSRLoadReport(Base):
     # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
     extra_data = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 class OpenSRData(Base):
     """'Open SR Data' (Close SR Report) import — ONE row per unique
@@ -654,5 +655,5 @@ class OpenSRData(Base):
     # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
     extra_data = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)

@@ -11,6 +11,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from app.database import SessionLocal
 from app.controllers import emp_per_controller
 from app.models.non_followup_model import NonFollowUp
+from app.time_utils import now_ist
 
 router = APIRouter(prefix="/api/performance", tags=["performance"])
 
@@ -424,7 +425,7 @@ async def export_branch_employees_excel(
         )
         
         if original_start_date and original_end_date:
-            filename = f"branch_{request.branch_code}_{original_start_date}_to_{original_end_date}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            filename = f"branch_{request.branch_code}_{original_start_date}_to_{original_end_date}_{now_ist().strftime('%Y%m%d_%H%M%S')}.xlsx"
         else:
             period_text = {
                 'all': 'all_time',
@@ -433,7 +434,7 @@ async def export_branch_employees_excel(
                 '6months': 'last_6_months',
                 'year': 'last_12_months'
             }.get(time_period, 'all_time')
-            filename = f"branch_{request.branch_code}_{period_text}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            filename = f"branch_{request.branch_code}_{period_text}_{now_ist().strftime('%Y%m%d_%H%M%S')}.xlsx"
         
         return Response(
             content=excel_file.getvalue(),

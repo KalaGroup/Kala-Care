@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime
 from sqlalchemy.sql import func
 from app.database import Base
+from app.time_utils import now_ist
 
 
 class BranchUploadLimit(Base):
@@ -16,5 +17,5 @@ class BranchUploadLimit(Base):
     office_expense_days = Column(Integer, nullable=False, default=30)
     lvb_days = Column(Integer, nullable=False, default=30)
     updated_by = Column(String(100), nullable=True)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=now_ist, onupdate=now_ist)
+    created_at = Column(DateTime(timezone=True), default=now_ist)

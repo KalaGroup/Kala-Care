@@ -1,10 +1,11 @@
 from sqlalchemy.orm import Session
 from datetime import datetime
 from app.models.voucher_counter_model import VoucherCounter
+from app.time_utils import now_ist
 
 
 def get_financial_year(d: datetime = None) -> str:
-    d = d or datetime.now()
+    d = d or now_ist()
     start, end = (d.year, d.year + 1) if d.month >= 4 else (d.year - 1, d.year)
     return f"{str(start)[-2:]}-{str(end)[-2:]}"
 

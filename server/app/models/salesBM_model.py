@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime
 from sqlalchemy.sql import func
 from app.database import Base
+from app.time_utils import now_ist
 
 
 class SalesBM(Base):
@@ -37,4 +38,4 @@ class SalesBM(Base):
     branch_code = Column(String(50), nullable=True)
     created_by = Column(String(100), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=True)
-    submitted_at = Column(DateTime(timezone=True), server_default=func.now())
+    submitted_at = Column(DateTime(timezone=True), default=now_ist)

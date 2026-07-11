@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Boolean
 from sqlalchemy.sql import func
 from app.database import Base
+from app.time_utils import now_ist
 
 class TADAHistory(Base):
     """Table for storing TADA verified data history"""
@@ -67,13 +68,13 @@ class TADAHistory(Base):
     # Metadata
     branch_code = Column(String(50), nullable=True)
     uploaded_by = Column(String(100), nullable=True)
-    uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+    uploaded_at = Column(DateTime(timezone=True), default=now_ist)
     file_name = Column(String(500), nullable=True)
     voucher_no = Column(String(50), nullable=True, index=True)
     
     # History specific fields
     moved_by = Column(String(100), nullable=True)  # Who moved the record
-    moved_at = Column(DateTime(timezone=True), server_default=func.now())  # When it was moved
+    moved_at = Column(DateTime(timezone=True), default=now_ist)  # When it was moved
     moved_from_branch = Column(String(50), nullable=True)  # Original branch
     submitted_by_name = Column(String(200), nullable=True)  # Name of user who submitted
     submitted_by_uid = Column(String(100), nullable=True)   # UID/ID of user who submitted

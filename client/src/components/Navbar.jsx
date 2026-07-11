@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { PiHandshakeDuotone } from "react-icons/pi";
 import Swal from 'sweetalert2';
@@ -244,6 +244,57 @@ function Navbar({ children }) {
     }
   };
 
+  // ── Auto-hide sidebar (hover to open) ─────────────────────────────────
+  // When ON, the sidebar rests as a slim icon rail and glides open while
+  // the mouse is over it; moving away tucks it back in. Desktop only —
+  // mobile keeps its hamburger behaviour. Preference persists locally.
+  const [autoHide, setAutoHide] = useState(() => {
+    try { return localStorage.getItem('kc_sidebar_autohide') === '1'; } catch { return false; }
+  });
+  const autoHideRef = useRef(autoHide);
+  useEffect(() => { autoHideRef.current = autoHide; }, [autoHide]);
+  const hoverCloseTimer = useRef(null);
+  useEffect(() => () => clearTimeout(hoverCloseTimer.current), []);
+
+  const toggleAutoHide = () => {
+    const next = !autoHide;
+    setAutoHide(next);
+    try { localStorage.setItem('kc_sidebar_autohide', next ? '1' : '0'); } catch { /* best-effort */ }
+    if (!isMobile) setSidebarOpen(!next);   // ON → tuck away now, OFF → pin open
+  };
+
+  const handleSidebarHoverEnter = () => {
+    if (!autoHideRef.current || isMobile) return;
+    clearTimeout(hoverCloseTimer.current);
+    if (!sidebarOpen) {
+      // Re-open the dropdown of whichever section the user is currently in,
+      // so the expanded rail lands them exactly where they are.
+      if (isExpenseActive()) setExpenseDropdownOpen(true);
+      else if (isPartInfoActive()) setPartInfoDropdownOpen(true);
+      else if (isEngagementActive()) setEngagementDropdownOpen(true);
+      else if (isEngagementMastersActive()) setEngagementMastersDropdownOpen(true);
+      setSidebarOpen(true);
+    }
+  };
+
+  const handleSidebarHoverLeave = () => {
+    if (!autoHideRef.current || isMobile) return;
+    // Small grace period so skimming past the edge doesn't flicker the rail.
+    clearTimeout(hoverCloseTimer.current);
+    hoverCloseTimer.current = setTimeout(() => setSidebarOpen(false), 300);
+  };
+
+  // While auto-hide is on, hovering a section header slides its submenu open
+  // (accordion style — sibling sections tuck away) so the rail feels fluid:
+  // glide in, sweep down the sections, submenus follow the pointer.
+  const hoverOpenDropdown = (which) => {
+    if (!autoHideRef.current || isMobile) return;
+    setEngagementMastersDropdownOpen(which === 'masters');
+    setPartInfoDropdownOpen(which === 'partinfo');
+    setEngagementDropdownOpen(which === 'engagement');
+    setExpenseDropdownOpen(which === 'expense');
+  };
+
   // Read the raw string every render (cheap) but only JSON.parse when the
   // stored value actually changes. This keeps freshness identical to the old
   // per-render parse while giving `user` a stable identity, so the effects
@@ -344,7 +395,8 @@ function Navbar({ children }) {
       if (mobile) {
         setSidebarOpen(false);
       } else {
-        setSidebarOpen(true);
+        // Desktop: honour auto-hide — rest collapsed until hovered.
+        setSidebarOpen(!autoHideRef.current);
       }
     };
 
@@ -870,7 +922,7 @@ function Navbar({ children }) {
   };
 
   const NavLinks = ({ items, collapsed = false, onClick = () => { } }) => (
-    <nav className="space-y-1">
+    <nav className="space-y-0.5">
       {items.map((item) => (
         <NavLink
           key={item.path}
@@ -879,7 +931,7 @@ function Navbar({ children }) {
           onMouseEnter={() => setHoveredItem(item.path)}
           onMouseLeave={() => setHoveredItem(null)}
           className={({ isActive }) =>
-            `group relative flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200 min-w-full w-max ${isActive
+            `group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200 min-w-full w-max ${isActive
               ? 'text-gray-900 font-medium'
               : 'text-black hover:text-gray-900'
             } ${collapsed ? 'justify-center' : ''}`
@@ -1450,6 +1502,8 @@ function Navbar({ children }) {
       <aside
         onMouseOver={handleNavLinkPrefetch}
         onTouchStart={handleNavLinkPrefetch}
+        onMouseEnter={handleSidebarHoverEnter}
+        onMouseLeave={handleSidebarHoverLeave}
         className={`
         fixed md:relative md:translate-x-0
         h-full bg-white backdrop-blur-xl
@@ -1527,6 +1581,15 @@ function Navbar({ children }) {
                   .nav-scroll::-webkit-scrollbar-thumb:hover {
                     background: #94a3b8;
                   }
+                  /* Submenu drop-in — springy slide + fade when a section opens */
+                  .nav-dd-anim {
+                    animation: navDropIn .22s cubic-bezier(.22, 1, .36, 1);
+                    transform-origin: top;
+                  }
+                  @keyframes navDropIn {
+                    from { opacity: 0; transform: translateY(-6px) scaleY(.9); }
+                    to   { opacity: 1; transform: translateY(0) scaleY(1); }
+                  }
                 `}
               </style>
               {/* Inner content wrapper. Expanded → min-w-full w-max so each row's
@@ -1534,7 +1597,7 @@ function Navbar({ children }) {
                   vertical scrolling (horizontal is clipped, no bar).
                   Collapsed → no clipping so flyouts can escape the sidebar. */}
               <div
-                className={`py-3 ${sidebarOpen ? 'min-w-full w-max pl-3 pr-6' : 'overflow-visible w-full px-2'}`}
+                className={`py-1.5 ${sidebarOpen ? 'min-w-full w-max pl-3 pr-6' : 'overflow-visible w-full px-2'}`}
               >
               <NavLinks items={mainNavItems} collapsed={!sidebarOpen} />
 
@@ -1545,10 +1608,10 @@ function Navbar({ children }) {
                   <div className="mt-1">
                     <button
                       onClick={() => setEngagementMastersDropdownOpen(!engagementMastersDropdownOpen)}
-                      onMouseEnter={() => setHoveredItem('engagement-masters')}
+                      onMouseEnter={() => { setHoveredItem('engagement-masters'); hoverOpenDropdown('masters'); }}
                       onMouseLeave={() => setHoveredItem(null)}
                       className={`
-                        min-w-full w-max group relative flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200
+                        min-w-full w-max group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200
                         ${isEngagementMastersActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
                       `}
                       style={{
@@ -1573,14 +1636,14 @@ function Navbar({ children }) {
                     </button>
 
                     {(engagementMastersDropdownOpen || isEngagementMastersActive()) && (
-                      <div className="ml-5 mt-1 space-y-1 border-l border-gray-200 pl-1.5">
+                      <div className="nav-dd-anim ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
                         {engagementMastersItems.map((item) => (
                           <NavLink
                             key={item.path}
                             to={item.path}
                             onClick={() => { if (isMobile) setSidebarOpen(false); }}
                             className={({ isActive }) =>
-                              `group relative flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
+                              `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
                                 ? 'text-gray-900 font-medium'
                                 : 'text-black hover:text-gray-900'
                               }`
@@ -1609,7 +1672,7 @@ function Navbar({ children }) {
                   <div className="relative mt-2 group/flyout">
                     <button
                       onClick={() => setEngagementMastersDropdownOpen(!engagementMastersDropdownOpen)}
-                      className="w-full group relative flex items-center justify-center px-2 py-1.5 rounded-lg transition-all duration-200"
+                      className="w-full group relative flex items-center justify-center px-2 py-1 rounded-lg transition-all duration-200"
                       title="Engagement Masters"
                     >
                       <TableCellsIcon
@@ -1631,7 +1694,7 @@ function Navbar({ children }) {
                               if (isMobile) setSidebarOpen(false);
                             }}
                             className={({ isActive }) =>
-                              `flex items-center gap-2 px-2 py-1.5 text-sm transition-colors ${isActive
+                              `flex items-center gap-2 px-2 py-1 text-sm transition-colors ${isActive
                                 ? 'text-gray-900 font-medium'
                                 : 'text-black hover:text-gray-900 hover:bg-gray-50'
                               }`
@@ -1664,10 +1727,10 @@ function Navbar({ children }) {
                   <div className="mt-1">
                     <button
                       onClick={() => setPartInfoDropdownOpen(!partInfoDropdownOpen)}
-                      onMouseEnter={() => setHoveredItem('part-detail-info')}
+                      onMouseEnter={() => { setHoveredItem('part-detail-info'); hoverOpenDropdown('partinfo'); }}
                       onMouseLeave={() => setHoveredItem(null)}
                       className={`
-          min-w-full w-max group relative flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200
+          min-w-full w-max group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200
           ${isPartInfoActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
         `}
                       style={{
@@ -1692,7 +1755,7 @@ function Navbar({ children }) {
                     </button>
 
                     {(partInfoDropdownOpen || isPartInfoActive()) && (
-                      <div className="ml-5 mt-1 space-y-1 border-l border-gray-200 pl-1.5">
+                      <div className="nav-dd-anim ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
                         {partDetailItems.map((item) => (
                           <NavLink
                             key={item.path}
@@ -1701,7 +1764,7 @@ function Navbar({ children }) {
                               if (isMobile) setSidebarOpen(false);
                             }}
                             className={({ isActive }) =>
-                              `group relative flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
+                              `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
                                 ? 'text-black font-medium'
                                 : 'text-black hover:text-black'
                               }`
@@ -1732,7 +1795,7 @@ function Navbar({ children }) {
                   <div className="relative mt-2 group/flyout">
                     <button
                       onClick={() => setPartInfoDropdownOpen(!partInfoDropdownOpen)}
-                      className="w-full group relative flex items-center justify-center px-2 py-1.5 rounded-lg transition-all duration-200"
+                      className="w-full group relative flex items-center justify-center px-2 py-1 rounded-lg transition-all duration-200"
                       title="Part Detail Info"
                     >
                       <ClipboardDocumentListIcon
@@ -1753,7 +1816,7 @@ function Navbar({ children }) {
                               if (isMobile) setSidebarOpen(false);
                             }}
                             className={({ isActive }) =>
-                              `block px-2 py-1.5 text-sm transition-colors ${isActive
+                              `block px-2 py-1 text-sm transition-colors ${isActive
                                 ? 'text-black font-medium'
                                 : 'text-black hover:text-black hover:bg-gray-50'
                               }`
@@ -1778,10 +1841,10 @@ function Navbar({ children }) {
                 <div className="mt-1">
                   <button
                     onClick={() => setEngagementDropdownOpen(!engagementDropdownOpen)}
-                    onMouseEnter={() => setHoveredItem('customer-engagement')}
+                    onMouseEnter={() => { setHoveredItem('customer-engagement'); hoverOpenDropdown('engagement'); }}
                     onMouseLeave={() => setHoveredItem(null)}
                     className={`
-        min-w-full w-max group relative flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200
+        min-w-full w-max group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200
         ${isEngagementActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
       `}
                     style={{
@@ -1807,14 +1870,14 @@ function Navbar({ children }) {
 
                   {/* Dropdown Items */}
                   {(engagementDropdownOpen || isEngagementActive()) && (
-                    <div className="ml-5 mt-1 space-y-1 border-l border-gray-200 pl-1.5">
+                    <div className="nav-dd-anim ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
                       {/* Drive List Info — opens the modal (not a route); shown first.
                           Master Admin / IT Admin only. */}
                       {isMasterOrITAdmin && (
                         <button
                           type="button"
                           onClick={() => { setShowDriveNamesModal(true); if (isMobile) setSidebarOpen(false); }}
-                          className="min-w-full w-max group relative flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-200 text-sm text-black hover:text-black hover:bg-gray-50"
+                          className="min-w-full w-max group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-sm text-black hover:text-black hover:bg-gray-50"
                         >
                           <div className="w-1 h-1 rounded-full" style={{ backgroundColor: '#D1D5DB' }} />
                           <span className="flex-1 whitespace-nowrap text-left">Drive List Info</span>
@@ -1829,7 +1892,7 @@ function Navbar({ children }) {
                             if (isMobile) setSidebarOpen(false);
                           }}
                           className={({ isActive }) =>
-                            `group relative flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
+                            `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
                               ? 'text-black font-medium'
                               : 'text-black hover:text-black'
                             }`
@@ -1860,7 +1923,7 @@ function Navbar({ children }) {
                 <div className="relative mt-2 group/flyout">
                   <button
                     onClick={() => setEngagementDropdownOpen(!engagementDropdownOpen)}
-                    className="w-full group relative flex items-center justify-center px-2 py-1.5 rounded-lg transition-all duration-200"
+                    className="w-full group relative flex items-center justify-center px-2 py-1 rounded-lg transition-all duration-200"
                     title="Customer Engagement"
                   >
                     <PiHandshakeDuotone
@@ -1899,7 +1962,7 @@ function Navbar({ children }) {
                             if (isMobile) setSidebarOpen(false);
                           }}
                           className={({ isActive }) =>
-                            `block px-2 py-1.5 text-sm transition-colors ${isActive
+                            `block px-2 py-1 text-sm transition-colors ${isActive
                               ? 'text-black font-medium'
                               : 'text-black hover:text-black hover:bg-gray-50'
                             }`
@@ -1923,10 +1986,10 @@ function Navbar({ children }) {
                     <div className="mt-1">
                       <button
                         onClick={() => setExpenseDropdownOpen(!expenseDropdownOpen)}
-                        onMouseEnter={() => setHoveredItem('expense-tracking')}
+                        onMouseEnter={() => { setHoveredItem('expense-tracking'); hoverOpenDropdown('expense'); }}
                         onMouseLeave={() => setHoveredItem(null)}
                         className={`
-            min-w-full w-max group relative flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200
+            min-w-full w-max group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200
             ${isExpenseActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
           `}
                         style={{
@@ -1952,7 +2015,7 @@ function Navbar({ children }) {
 
                       {/* Dropdown Items */}
                       {(expenseDropdownOpen || isExpenseActive()) && (
-                        <div className="ml-5 mt-1 space-y-1 border-l border-gray-200 pl-1.5">
+                        <div className="nav-dd-anim ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
                           {expenseTrackingItems.map((item) => (
                             <NavLink
                               key={item.path}
@@ -1961,7 +2024,7 @@ function Navbar({ children }) {
                                 if (isMobile) setSidebarOpen(false);
                               }}
                               className={({ isActive }) =>
-                                `group relative flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
+                                `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
                                   ? 'text-black font-medium'
                                   : 'text-black hover:text-black'
                                 }`
@@ -1992,7 +2055,7 @@ function Navbar({ children }) {
                     <div className="relative mt-2 group/flyout">
                       <button
                         onClick={() => setExpenseDropdownOpen(!expenseDropdownOpen)}
-                        className="w-full group relative flex items-center justify-center px-2 py-1.5 rounded-lg transition-all duration-200"
+                        className="w-full group relative flex items-center justify-center px-2 py-1 rounded-lg transition-all duration-200"
                         title="Expense Tracking"
                       >
                         <BanknotesIcon
@@ -2015,7 +2078,7 @@ function Navbar({ children }) {
                                 if (isMobile) setSidebarOpen(false);
                               }}
                               className={({ isActive }) =>
-                                `block px-2 py-1.5 text-sm transition-colors ${isActive
+                                `block px-2 py-1 text-sm transition-colors ${isActive
                                   ? 'text-black font-medium'
                                   : 'text-black hover:text-black hover:bg-gray-50'
                                 }`
@@ -2047,7 +2110,7 @@ function Navbar({ children }) {
                           onMouseEnter={() => setHoveredItem(item.path)}
                           onMouseLeave={() => setHoveredItem(null)}
                           className={({ isActive }) =>
-                            `group relative flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200 min-w-full w-max ${isActive
+                            `group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200 min-w-full w-max ${isActive
                               ? 'text-gray-900 font-medium'
                               : 'text-black hover:text-gray-900'
                             }`
@@ -2114,7 +2177,7 @@ function Navbar({ children }) {
                   onClick={() => setShowSitemapModal(true)}
                   onMouseEnter={() => setHoveredItem('sitemap')}
                   onMouseLeave={() => setHoveredItem(null)}
-                  className="group relative flex items-center justify-center px-2 py-1 rounded-md transition-all duration-200 hover:bg-gray-100 active:scale-[0.98] flex-shrink-0"
+                  className="group relative flex items-center justify-center px-2 py-0.5 rounded-md transition-all duration-200 hover:bg-gray-100 active:scale-[0.98] flex-shrink-0"
                 >
                   <div className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center border border-gray-200">
                     <svg className="w-3 h-3" style={{ color: themeColor }} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -2135,7 +2198,7 @@ function Navbar({ children }) {
                 onClick={() => setShowTerminologyModal(true)}
                 onMouseEnter={() => setHoveredItem('terminology')}
                 onMouseLeave={() => setHoveredItem(null)}
-                className={`group relative flex items-center gap-1.5 px-2 py-1 rounded-md w-full transition-all duration-200 
+                className={`group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md w-full transition-all duration-200 
 hover:bg-gray-100 active:scale-[0.98]
 ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
               >
@@ -2169,32 +2232,57 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
 
           {/* Profile and Logout Section at BOTTOM with margin bottom - UPDATED with NavLink */}
           <div className="flex-shrink-0 px-3 pb-3 pt-2 space-y-1.5 bg-[#ffdb62]">
+            {/* Compact strip — Auto-Hide + Light/Night share ONE row side by side */}
+            <div className={sidebarOpen ? 'flex items-stretch gap-1' : 'space-y-1.5'}>
+            {/* Auto-hide (hover to open) toggle — desktop only */}
+            {!isMobile && (sidebarOpen ? (
+              <button
+                type="button"
+                onClick={toggleAutoHide}
+                className={`flex-1 flex items-center justify-center h-6 rounded-full border transition-all duration-200 active:scale-95 ${autoHide ? 'border-transparent shadow-sm' : 'bg-gray-100 border-gray-200 hover:bg-gray-200'}`}
+                style={autoHide ? { backgroundColor: themeColor } : undefined}
+                title={autoHide ? 'Auto-Hide is ON — menu opens on hover, tucks away after. Click to pin the menu open.' : 'Auto-Hide the menu — it will open on hover and minimize when you move away. Click to turn on.'}
+              >
+                <svg className={`h-3.5 w-3.5 transition-colors ${autoHide ? 'text-white' : 'text-gray-500'}`}
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={toggleAutoHide}
+                className="w-full group relative flex items-center justify-center py-0.5 rounded-lg transition-all duration-200"
+                title={autoHide ? 'Pin menu open' : 'Auto-hide menu (open on hover)'}
+              >
+                <span className={`flex items-center justify-center h-5 w-5 rounded-full transition-colors ${autoHide ? 'shadow-sm' : ''}`}
+                  style={autoHide ? { backgroundColor: themeColor } : undefined}>
+                  <svg className={`h-3.5 w-3.5 ${autoHide ? 'text-white' : 'text-gray-500'}`}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59" />
+                  </svg>
+                </span>
+                <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
+                  {autoHide ? 'Pin Menu Open' : 'Auto-Hide Menu (hover to open)'}
+                  <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
+                </div>
+              </button>
+            ))}
+
             {/* Dark / Light mode toggle */}
             {sidebarOpen ? (
               <button
                 type="button"
                 onClick={toggleTheme}
-                className="w-full flex items-center justify-between px-2 py-1 bg-white hover:bg-gray-50 rounded-md border border-gray-200 transition-colors"
-                title={darkMode ? 'Switch to light mode' : 'Switch to night mode'}
+                className={`flex-1 flex items-center justify-center h-6 rounded-full border transition-all duration-200 active:scale-95 ${darkMode ? 'border-transparent shadow-sm' : 'bg-gray-100 border-gray-200 hover:bg-gray-200'}`}
+                style={darkMode ? { backgroundColor: themeColor } : undefined}
+                title={darkMode ? 'Night Mode is ON — click to switch to light mode' : 'Switch to Night Mode (dark theme)'}
               >
-                <span className="flex items-center gap-1 min-w-0">
-                  {darkMode ? (
-                    <MoonIcon className="h-3 w-3 flex-shrink-0 text-sky-400" />
-                  ) : (
-                    <SunIcon className="h-3 w-3 flex-shrink-0 text-amber-500" />
-                  )}
-                  <span className="text-[10px] font-medium text-gray-700 truncate">
-                    {darkMode ? 'Night Mode' : 'Light Mode'}
-                  </span>
-                </span>
-                {/* Small switch track + knob */}
-                <span
-                  className={`relative inline-flex h-3.5 w-7 flex-shrink-0 items-center rounded-full transition-colors duration-200 ${darkMode ? 'bg-sky-500' : 'bg-gray-300'}`}
-                >
-                  <span
-                    className={`inline-block h-2.5 w-2.5 rounded-full bg-white shadow transform transition-transform duration-200 ${darkMode ? 'translate-x-[15px]' : 'translate-x-[3px]'}`}
-                  />
-                </span>
+                {darkMode ? (
+                  <MoonIcon className="h-3.5 w-3.5 text-white" />
+                ) : (
+                  <SunIcon className="h-3.5 w-3.5 text-amber-500" />
+                )}
               </button>
             ) : (
               <button
@@ -2214,6 +2302,7 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
                 </div>
               </button>
             )}
+            </div>
 
             {/* User Info Section - Changed from div to NavLink */}
             {sidebarOpen ? (

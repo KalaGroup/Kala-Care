@@ -10,6 +10,7 @@ from app.models.expenseAddingData_model import ExpenseHead
 import json
 from app.models.OEH_model import OfficeExpenseHistory
 from app.controllers.OE_controller import OfficeExpenseTempController
+from app.time_utils import now_ist
 
 router = APIRouter(prefix="/office-expenses", tags=["Office Expenses"])
 
@@ -257,7 +258,7 @@ def get_next_voucher_no(
     """Preview the next voucher number for a branch in the FY of paid_date (defaults today)."""
     db = get_db_session()
     try:
-        ref = date.fromisoformat(paid_date) if paid_date else date.today()
+        ref = date.fromisoformat(paid_date) if paid_date else now_ist().date()
         next_no = OfficeExpenseTempController.get_next_voucher_no(db, branch_code, ref)
         return {"next_voucher_no": str(next_no)}
     finally:

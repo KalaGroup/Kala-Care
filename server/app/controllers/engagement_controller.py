@@ -19,6 +19,7 @@ from app.models.non_followup_model import NonFollowUp
 
 import time
 import threading
+from app.time_utils import now_ist
 
 # ---- Non-campaign list cache (kills the per-page full-dataset recomputation) ----
 _NC_CACHE = {
@@ -82,6 +83,20 @@ class EngagementController:
         else:
             return "C7"
     
+    def _flag_for_next_date(self, next_date, fallback_flag=None):
+        """Flag derived LIVE from days until next_followup_date (C1..C7) at
+        read time — so C3 becomes C2 becomes C1 as the date approaches, on
+        every page load, without relying on a background updater."""
+        if not next_date:
+            return fallback_flag
+        today = now_ist().replace(hour=0, minute=0, second=0, microsecond=0)
+        nd = next_date
+        if isinstance(nd, datetime):
+            nd = nd.replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            nd = datetime.combine(nd, datetime.min.time())
+        return self._calculate_flag_from_days((nd - today).days)
+
     def _update_single_followup_flag(self, today: datetime, followup: FollowUp) -> int:
         """
         Update a single follow-up's flag based on its next_followup_date.
@@ -127,7 +142,7 @@ class EngagementController:
         Args:
             customer_id: Optional - if provided, update only for specific customer
         """
-        today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today = now_ist().replace(hour=0, minute=0, second=0, microsecond=0)
         updated_count = 0
         
         if customer_id:
@@ -170,7 +185,7 @@ class EngagementController:
         return {
             "message": f"Updated {updated_count} latest follow-up flags",
             "updated_count": updated_count,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": now_ist().isoformat()
         }
     
     def _normalize_id(self, value):
@@ -647,8 +662,7 @@ class EngagementController:
 
         # ========== Build result using in-memory lookups (NO MORE QUERIES PER CUSTOMER) ==========
         result = []
-        cutoff_90_days = datetime.utcnow() - timedelta(days=90)
-        
+
         for customer in relevant_customers:
             normalized_customer_id = self._normalize_id(customer.instance_id)
             customer_campaign_names = campaign_asset_map[normalized_customer_id]
@@ -658,24 +672,45 @@ class EngagementController:
             
             # Latest followup (any status) - first in sorted-desc list
             latest_followup = customer_followups[0] if customer_followups else None
-            
-            # Latest active followup (excludes rejected/completed)
-            latest_active_followup = next(
-                (f for f in customer_followups if f.status not in ('rejected', 'completed')),
-                None
-            )
-            
+
             latest_status = latest_followup.status if latest_followup else None
-            
-            # Source followup logic (same as before)
-            source_followup = latest_active_followup
-            if not source_followup and latest_followup and latest_followup.followup_date:
-                fdate = latest_followup.followup_date
-                if isinstance(fdate, datetime) and fdate >= cutoff_90_days:
-                    source_followup = latest_followup
-            
-            next_followup_date = source_followup.next_followup_date if source_followup else None
-            followup_flags = self._get_followup_flags(customer, source_followup)
+
+            # Next Followup Date AND flag come from the LATEST SAVE. One save
+            # can create followups for SEVERAL drives at once (rows land within
+            # moments of each other) — each value is taken INDEPENDENTLY from
+            # the newest same-batch row that has it: e.g. NC saved last (next
+            # date but no flag) still shows the flag of the WIP/FR sibling from
+            # the same save; a rejected row saved last still shows the sibling's
+            # next date. Only when the whole batch lacks a value does it stay
+            # empty — old followups from earlier saves are never resurrected.
+            next_followup_date = None
+            flag_source = None
+            if latest_followup:
+                latest_fd = latest_followup.followup_date
+
+                def _in_batch(f):
+                    if f is latest_followup:
+                        return True
+                    return (latest_fd and f.followup_date
+                            and (latest_fd - f.followup_date).total_seconds() <= 300)
+
+                for f in customer_followups:  # sorted desc — newest first
+                    if not _in_batch(f):
+                        break  # older than the batch — stop
+                    if next_followup_date is None and f.next_followup_date is not None:
+                        next_followup_date = f.next_followup_date
+                    if flag_source is None and f.followup_flag:
+                        flag_source = f
+                    if next_followup_date is not None and flag_source is not None:
+                        break
+            # Flag computed LIVE from the flag row's next date (C3→C2→C1 as
+            # days pass) — stored flag only as fallback when no date exists.
+            live_flag = None
+            if flag_source is not None:
+                live_flag = self._flag_for_next_date(flag_source.next_followup_date, flag_source.followup_flag)
+            followup_flags = self._get_followup_flags(
+                customer, type("F", (), {"followup_flag": live_flag})()
+            )
             
             # Build per-campaign status using pre-fetched data
             campaign_status = {}
@@ -1261,11 +1296,11 @@ class EngagementController:
         
         if not data.get('next_followup_date') and data.get('followup_flag'):
             days = self.FOLLOWUP_FLAGS.get(data['followup_flag'], 10)
-            data['next_followup_date'] = datetime.utcnow() + timedelta(days=days)
+            data['next_followup_date'] = now_ist() + timedelta(days=days)
         
         # Ensure followup_date is set
         if not data.get('followup_date'):
-            data['followup_date'] = datetime.utcnow()
+            data['followup_date'] = now_ist()
         
         # Remove any fields not in the model
         data.pop('campaign_name', None)
@@ -1365,7 +1400,7 @@ class EngagementController:
         # Recalculate next follow-up date if flag changed
         if 'followup_flag' in update_data and update_data['followup_flag'] != db_followup.followup_flag:
             days = self.FOLLOWUP_FLAGS.get(update_data['followup_flag'], 10)
-            update_data['next_followup_date'] = datetime.utcnow() + timedelta(days=days)
+            update_data['next_followup_date'] = now_ist() + timedelta(days=days)
         
         # Remove any fields not in the model
         update_data.pop('campaign_name', None)
@@ -1377,7 +1412,7 @@ class EngagementController:
         for key, value in update_data.items():
             setattr(db_followup, key, value)
         
-        db_followup.updated_at = datetime.utcnow()
+        db_followup.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_followup)
         invalidate_non_campaign_cache()
@@ -1588,7 +1623,7 @@ class EngagementController:
             raise HTTPException(status_code=404, detail="Activity not found")
         
         db_activity.content = activity_data.content
-        db_activity.updated_at = datetime.utcnow()
+        db_activity.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_activity)
         
@@ -1662,7 +1697,7 @@ class EngagementController:
             raise HTTPException(status_code=404, detail="RR entry not found")
         
         db_rr.content = rr_data.content
-        db_rr.updated_at = datetime.utcnow()
+        db_rr.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_rr)
         
@@ -1705,7 +1740,7 @@ class EngagementController:
         return hash(tuple(sorted((r.id, str(r.updated_at)) for r in rows)))
 
     # ----- one latest non_followup row per customer (reusable) -----
-    def _windowed_latest_for_ids(self, customer_ids, active_only):
+    def _windowed_latest_for_ids(self, customer_ids, active_only, with_next_only=False, with_flag_only=False):
         out = {}
         if not customer_ids:
             return out
@@ -1727,10 +1762,35 @@ class EngagementController:
             ).filter(NonFollowUp.customer_id.in_(chunk))
             if active_only:
                 q = q.filter(NonFollowUp.status.notin_(['rejected', 'completed']))
+            if with_next_only:
+                q = q.filter(NonFollowUp.next_followup_date.isnot(None))
+            if with_flag_only:
+                q = q.filter(NonFollowUp.followup_flag.isnot(None),
+                             NonFollowUp.followup_flag != '')
             sub = q.subquery()
             for r in self.db.query(sub).filter(sub.c.rn == 1).all():
                 out[r.cid] = r
         return out
+
+    # ----- next date + flag for the LATEST SAVE (batch-aware) -----
+    def _batch_next_and_flag(self, latest, nfd_row, flag_row):
+        """One save can create several followup rows within moments of each
+        other. Each value is taken INDEPENDENTLY from the newest same-batch
+        row (within 5 minutes of the latest) that has it: NC saved last still
+        shows the WIP/FR sibling's flag; a rejected row saved last still shows
+        the sibling's next date. Values from earlier saves stay hidden.
+        The flag is computed LIVE from the flag row's own next date, so it
+        rolls C3→C2→C1 day by day without a background updater."""
+        if not latest:
+            return None, None
+
+        def in_batch(r):
+            return (r is not None and latest.fd and r.fd
+                    and (latest.fd - r.fd).total_seconds() <= 300)
+
+        nfd = nfd_row.nfd if in_batch(nfd_row) else None
+        flag = self._flag_for_next_date(flag_row.nfd, flag_row.flag) if in_batch(flag_row) else None
+        return nfd, flag
 
     # ----- HEAVY work, done ONCE and cached -----
     def _build_non_campaign_index(self):
@@ -1754,15 +1814,19 @@ class EngagementController:
         all_ids = [c.id for c in non_campaign]
 
         latest_map = self._windowed_latest_for_ids(all_ids, active_only=False)
-        active_map = self._windowed_latest_for_ids(all_ids, active_only=True)
+        # newest rows that HAVE a next date / flag — same-save batch fallbacks
+        next_map = self._windowed_latest_for_ids(all_ids, active_only=False, with_next_only=True)
+        flag_map = self._windowed_latest_for_ids(all_ids, active_only=False, with_flag_only=True)
 
         rows_by_id = {}
         enriched = []  # (cid, status, nfd, fd)
         for c in non_campaign:
             latest = latest_map.get(c.id)
-            active = active_map.get(c.id)
             status = latest.status if latest else None
-            flag_src = type("F", (), {"followup_flag": active.flag if active else None})()
+            # Next date + flag from the latest SAVE (batch-aware) — each taken
+            # independently from the newest same-batch row that has it.
+            batch_nfd, batch_flag = self._batch_next_and_flag(latest, next_map.get(c.id), flag_map.get(c.id))
+            flag_src = type("F", (), {"followup_flag": batch_flag})()
             rows_by_id[c.id] = {
                 "customer_id": c.id,
                 "instance_id": c.instance_id,
@@ -1774,10 +1838,10 @@ class EngagementController:
                 "latest_status": status,
                 "last_followup_date": latest.fd if latest else None,
                 "last_followup_user": latest.un if latest else None,
-                "next_followup_date": active.nfd if active else None,
+                "next_followup_date": batch_nfd,
                 "last_followup_remark": latest.rem if latest else None,
             }
-            enriched.append((c.id, status, active.nfd if active else None,
+            enriched.append((c.id, status, batch_nfd,
                              latest.fd if latest else None))
 
         def order_for(completed_first):
@@ -1857,17 +1921,42 @@ class EngagementController:
             )
         ).limit(1000).all()
 
+        # Also match by follow-up USER name — customers whose non-drive
+        # follow-ups were done by a user matching the term. Verified below
+        # against the LATEST follow-up, so this behaves as a
+        # "Last Follow-up User" search.
+        base_ids = {c.id for c in cust}
+        user_customer_ids = [r[0] for r in self.db.query(NonFollowUp.customer_id)
+                             .filter(NonFollowUp.user_name.like(like),
+                                     NonFollowUp.customer_id.isnot(None))
+                             .distinct().limit(1000).all()]
+        extra_ids = [i for i in user_customer_ids if i not in base_ids]
+        if extra_ids:
+            extra_rows = []
+            for i in range(0, len(extra_ids), 1000):
+                extra_rows += self.db.query(
+                    Customer.id, Customer.instance_id, Customer.branch_id,
+                    Customer.customer_name, Customer.phone_number, Customer.email,
+                ).filter(
+                    Customer.id.in_(extra_ids[i:i + 1000]),
+                    Customer.instance_id.isnot(None),
+                ).all()
+            cust = list(cust) + extra_rows
+
         non_campaign = [c for c in cust
                         if c.instance_id and self._normalize_id(c.instance_id) not in campaign_customer_ids]
         ids = [c.id for c in non_campaign]
         latest_map = self._windowed_latest_for_ids(ids, active_only=False)
-        active_map = self._windowed_latest_for_ids(ids, active_only=True)
+        next_map = self._windowed_latest_for_ids(ids, active_only=False, with_next_only=True)
+        flag_map = self._windowed_latest_for_ids(ids, active_only=False, with_flag_only=True)
 
         result = []
         for idx, c in enumerate(non_campaign, start=1):
             latest = latest_map.get(c.id)
-            active = active_map.get(c.id)
-            flag_src = type("F", (), {"followup_flag": active.flag if active else None})()
+            # Next date + flag from the latest SAVE (batch-aware) — same rule
+            # as the main list (see _batch_next_and_flag).
+            batch_nfd, batch_flag = self._batch_next_and_flag(latest, next_map.get(c.id), flag_map.get(c.id))
+            flag_src = type("F", (), {"followup_flag": batch_flag})()
             result.append({
                 "sr_no": idx, "customer_id": c.id, "instance_id": c.instance_id,
                 "branch_id": c.branch_id, "customer_name": c.customer_name or "Unknown",
@@ -1879,9 +1968,18 @@ class EngagementController:
                 "latest_status": latest.status if latest else None,
                 "last_followup_date": latest.fd if latest else None,
                 "last_followup_user": latest.un if latest else None,
-                "next_followup_date": active.nfd if active else None,
+                "next_followup_date": batch_nfd,
                 "last_followup_remark": latest.rem if latest else None,
             })
+
+        # User-name matches count only when the LAST follow-up user matches —
+        # rows found via the base query (id/name/phone/email) always stay.
+        term_lower = term.lower()
+        result = [r for r in result
+                  if r["customer_id"] in base_ids
+                  or term_lower in (r.get("last_followup_user") or "").lower()]
+        for i, r in enumerate(result, start=1):
+            r["sr_no"] = i
 
         all_campaigns_list = [{
             "id": c.id, "name": c.name, "service": c.service,
@@ -2184,11 +2282,11 @@ class EngagementController:
         # Calculate next follow-up date based on flag if not provided
         if not data.get('next_followup_date') and data.get('followup_flag'):
             days = self.FOLLOWUP_FLAGS.get(data['followup_flag'], 10)
-            data['next_followup_date'] = datetime.utcnow() + timedelta(days=days)
+            data['next_followup_date'] = now_ist() + timedelta(days=days)
         
         # Ensure followup_date is set
         if not data.get('followup_date'):
-            data['followup_date'] = datetime.utcnow()
+            data['followup_date'] = now_ist()
         
         # Set remark from user input
         data['followup_remark'] = data.get('followup_remark')
@@ -2245,7 +2343,7 @@ class EngagementController:
         # Recalculate next follow-up date if flag changed
         if 'followup_flag' in update_data and update_data['followup_flag'] != db_non_followup.followup_flag:
             days = self.FOLLOWUP_FLAGS.get(update_data['followup_flag'], 10)
-            update_data['next_followup_date'] = datetime.utcnow() + timedelta(days=days)
+            update_data['next_followup_date'] = now_ist() + timedelta(days=days)
         
         # Remove any fields not in the model
         update_data.pop('campaign_name', None)
@@ -2253,7 +2351,7 @@ class EngagementController:
         for key, value in update_data.items():
             setattr(db_non_followup, key, value)
         
-        db_non_followup.updated_at = datetime.utcnow()
+        db_non_followup.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_non_followup)
         invalidate_non_campaign_cache()
@@ -2403,11 +2501,146 @@ class EngagementController:
                 "due_date": compute_due(row.sr_open_date, row.segment),
             })
 
+        # ---- Latest CSP-drive followup per instance (all batched — fast) ----
+        # For every row's instance, attach the customer's LATEST followup that
+        # belongs to a CSP drive. A drive counts as CSP ONLY when its
+        # PRODUCT/SERVICE contains "csp" (e.g. "CSP", "CSP-PG") — the drive
+        # NAME is deliberately not checked.
+        followup_by_norm: Dict[str, Dict[str, Any]] = {}
+        if result_rows:
+            csp_like_ids = [cid for (cid,) in self.db.query(Campaign.id).filter(
+                Campaign.service.ilike('%csp%')
+            ).all()]
+            if csp_like_ids:
+                # instances -> customer ids (indexed IN lookup, raw + normalized forms)
+                candidates = set()
+                for r in result_rows:
+                    if r["instance_id"]:
+                        candidates.add(str(r["instance_id"]).strip())
+                        candidates.add(self._normalize_id(r["instance_id"]))
+                cand_list = [c for c in candidates if c]
+                norm_by_cust: Dict[int, str] = {}
+                for i in range(0, len(cand_list), 1000):
+                    for cid, inst in self.db.query(Customer.id, Customer.instance_id).filter(
+                            Customer.instance_id.in_(cand_list[i:i + 1000])).all():
+                        norm_by_cust[cid] = self._normalize_id(inst)
+
+                # ONE windowed query per 1000 customers → latest CSP followup each
+                cust_ids = list(norm_by_cust.keys())
+                latest_fu = {}
+                for i in range(0, len(cust_ids), 1000):
+                    chunk = cust_ids[i:i + 1000]
+                    sub = self.db.query(
+                        FollowUp.customer_id.label('cid'),
+                        FollowUp.followup_date.label('fd'),
+                        FollowUp.campaign_id.label('camp'),
+                        FollowUp.csp_subtype.label('subtype'),
+                        FollowUp.followup_by.label('fby'),
+                        FollowUp.followup_flag.label('flag'),
+                        FollowUp.status.label('status'),
+                        FollowUp.next_followup_date.label('nfd'),
+                        FollowUp.activity_id.label('act'),
+                        FollowUp.rr_id.label('rr'),
+                        FollowUp.followup_remark.label('rem'),
+                        FollowUp.quotation_sent.label('qs'),
+                        FollowUp.quotation_no.label('qno'),
+                        FollowUp.quotation_value.label('qval'),
+                        func.row_number().over(
+                            partition_by=FollowUp.customer_id,
+                            order_by=[desc(FollowUp.followup_date), desc(FollowUp.id)],
+                        ).label('rn'),
+                    ).filter(
+                        FollowUp.customer_id.in_(chunk),
+                        FollowUp.campaign_id.in_(csp_like_ids),
+                    ).subquery()
+                    for r in self.db.query(sub).filter(sub.c.rn == 1).all():
+                        latest_fu[r.cid] = r
+
+                # batch name lookups: campaigns, activity content, reject reason
+                camp_map = {c.id: c for c in csp_campaigns}
+                missing_camp = {r.camp for r in latest_fu.values() if r.camp and r.camp not in camp_map}
+                if missing_camp:
+                    for c in self.db.query(Campaign).filter(Campaign.id.in_(list(missing_camp))).all():
+                        camp_map[c.id] = c
+                act_ids = list({r.act for r in latest_fu.values() if r.act})
+                act_map = {a.id: a.content for a in
+                           self.db.query(Activity).filter(Activity.id.in_(act_ids)).all()} if act_ids else {}
+                rr_ids = list({r.rr for r in latest_fu.values() if r.rr})
+                rr_map = {x.id: x.content for x in
+                          self.db.query(RR).filter(RR.id.in_(rr_ids)).all()} if rr_ids else {}
+
+                for cid, r in latest_fu.items():
+                    norm = norm_by_cust.get(cid)
+                    if not norm:
+                        continue
+                    camp = camp_map.get(r.camp)
+                    followup_by_norm[norm] = {
+                        "fu_date": r.fd.isoformat() if r.fd else None,
+                        "fu_drive": camp.name if camp else None,
+                        "fu_service": camp.service if camp else None,
+                        "fu_subtype": r.subtype,
+                        "fu_by": r.fby,
+                        "fu_flag": r.flag,
+                        "fu_status": r.status,
+                        "fu_next_date": r.nfd.isoformat() if r.nfd else None,
+                        "fu_activity": act_map.get(r.act),
+                        "fu_reject_reason": rr_map.get(r.rr),
+                        "fu_remark": r.rem,
+                        "fu_quote_sent": bool(r.qs),
+                        "fu_quote_no": r.qno,
+                        "fu_quote_value": r.qval,
+                    }
+
+        # ---- Last CSP letter send date per instance (batched) ----
+        # Letters count only when their letter FORMAT's products contain "csp"
+        # (campaign_letter_formats.products). Latest sent letter per instance.
+        letter_by_norm: Dict[str, str] = {}
+        if result_rows:
+            from app.models.campaign_model import CampaignLetterFormat
+            fmt_rows = self.db.query(
+                CampaignLetterFormat.id, CampaignLetterFormat.products
+            ).all()
+            csp_fmt_ids = []
+            for fid, products in fmt_rows:
+                plist = products if isinstance(products, list) else []
+                if any('csp' in str(p).lower() for p in plist):
+                    csp_fmt_ids.append(fid)
+            if csp_fmt_ids:
+                cand = set()
+                for r in result_rows:
+                    if r["instance_id"]:
+                        cand.add(str(r["instance_id"]).strip())
+                        cand.add(self._normalize_id(r["instance_id"]))
+                cand_list = [c for c in cand if c]
+                for i in range(0, len(cand_list), 1000):
+                    q = self.db.query(
+                        LetterSendRecord.instance_id,
+                        func.max(LetterSendRecord.created_at),
+                    ).filter(
+                        LetterSendRecord.instance_id.in_(cand_list[i:i + 1000]),
+                        LetterSendRecord.format_type_id.in_(csp_fmt_ids),
+                        LetterSendRecord.status == 'sent',
+                    ).group_by(LetterSendRecord.instance_id)
+                    for inst, last_dt in q.all():
+                        norm = self._normalize_id(inst)
+                        if not norm or not last_dt:
+                            continue
+                        iso = last_dt.isoformat()
+                        if norm not in letter_by_norm or iso > letter_by_norm[norm]:
+                            letter_by_norm[norm] = iso
+
+        for r in result_rows:
+            norm = self._normalize_id(r["instance_id"])
+            fu = followup_by_norm.get(norm)
+            if fu:
+                r.update(fu)
+            r["csp_last_letter_date"] = letter_by_norm.get(norm)
+
         return {
             "total_instances": len(instance_ids),
             "total_rows": len(result_rows),
             "rows": result_rows,
-        }      
+        }
 
 # ==================== Warranty Expiry Map (for CSP due-date cap) ====================
 
@@ -2472,7 +2705,7 @@ class EngagementController:
 # ==================== Letter Sending ====================
 
     def _get_financial_year(self, dt: Optional[datetime] = None) -> str:
-        dt = dt or datetime.utcnow()
+        dt = dt or now_ist()
         year = dt.year
         if dt.month >= 4:  # Apr–Mar Indian financial year
             return f"{year}-{str(year + 1)[-2:]}"

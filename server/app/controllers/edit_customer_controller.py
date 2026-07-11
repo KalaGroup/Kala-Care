@@ -21,6 +21,7 @@ from app.models.edit_customer_model import CustomerEditHistory
 from app.schemas import edit_customer_schema
 from app.models.customer_model import Customer
 from app.models.user_model import User
+from app.time_utils import now_ist
 
 class EditCustomerController:
     def __init__(self, db: Session):
@@ -374,12 +375,12 @@ class EditCustomerController:
             return True
         
         # Check if 10 days have passed since last send
-        days_since_last_send = (datetime.now() - last_send).days
+        days_since_last_send = (now_ist() - last_send).days
         return days_since_last_send >= 10
     
     def get_last_10_days_edit_history(self) -> List[CustomerEditHistory]:
         """Get edit history entries from the last 10 days"""
-        end_date = datetime.now()
+        end_date = now_ist()
         start_date = end_date - timedelta(days=11)
         
         history_entries = self.db.query(CustomerEditHistory).filter(
@@ -444,12 +445,12 @@ class EditCustomerController:
             # Check if we should send email
             if not self._should_send_email(force_send):
                 last_send = self._get_last_email_send_date()
-                days_since = (datetime.now() - last_send).days if last_send else 0
+                days_since = (now_ist() - last_send).days if last_send else 0
                 return False
             
             # Use the reporting window passed in; fall back to the last 11 days
             if end_date is None:
-                end_date = datetime.now()
+                end_date = now_ist()
             if start_date is None:
                 start_date = end_date - timedelta(days=11)
 
@@ -686,7 +687,7 @@ CUSTOMER EDIT HISTORY REPORT
 
 Report Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}
 Total Rows: {len(entries)}
-Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Generated: {now_ist().strftime('%Y-%m-%d %H:%M:%S')}
 
 {'=' * 80}
 

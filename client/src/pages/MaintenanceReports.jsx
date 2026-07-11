@@ -5,20 +5,12 @@ import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 import { canExportExcel } from '../utils/exportPermission';
 import {
     DocumentChartBarIcon, ChartBarIcon, ClockIcon, UsersIcon,
-    ArrowDownTrayIcon, ArrowPathIcon, Squares2X2Icon, ExclamationTriangleIcon,
+    ArrowUpTrayIcon, ArrowPathIcon, Squares2X2Icon, ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
 import {
     getAppCodes, getServices, getActivity, partService, findApp,
     themeColor, themeDark, themeSoft, fmtDateTime,
 } from '../components/maintenanceApi';
-
-/*
-  Part Detail Info — Reports — kept on its own page (route: /maintenance-reports).
-  Two reports as in-page tabs:
-    • Service Coverage  — which services each application code carries (tick / cross)
-    • Search Activity   — look-up counts + who & when (employee + date/time)
-  Data is fetched live from the backend.
-*/
 
 const sortByHours = (svcs) => svcs.slice().sort((a, b) => (parseFloat(a.hours) || 0) - (parseFloat(b.hours) || 0));
 
@@ -153,6 +145,14 @@ const MaintenanceReports = () => {
 /* ----------------------------- Service Coverage ----------------------------- */
 const CoverageReport = ({ master, services }) => {
     const cols = useMemo(() => sortByHours(services), [services]);
+    const [search, setSearch] = useState('');
+    const [segment, setSegment] = useState('');
+
+    // Segment dropdown options — only the segments that actually appear in the table.
+    const segments = useMemo(
+        () => [...new Set(master.map((a) => (a.segment || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+        [master]
+    );
 
     // Coverage matrix (one Set of service ids per app code) is O(codes × parts);
     // memoize it so re-renders don't rebuild it. Pure derivation of master + services.
@@ -160,6 +160,16 @@ const CoverageReport = ({ master, services }) => {
         () => master.map((a) => ({ a, ids: new Set(a.parts.map((p) => partService(services, p).id)) })),
         [master, services]
     );
+
+    const visible = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        return coverage.filter(({ a }) => {
+            if (segment && (a.segment || '').trim() !== segment) return false;
+            if (!q) return true;
+            return String(a.engineModel || '').toLowerCase().includes(q)
+                || String(a.appCode || '').toLowerCase().includes(q);
+        });
+    }, [coverage, search, segment]);
 
     const exportXlsx = () => {
         const aoa = [['Model', 'App Code', 'Segment', ...cols.map((c) => c.short)]];
@@ -179,12 +189,28 @@ const CoverageReport = ({ master, services }) => {
             <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 bg-gray-50 max-sm:flex-wrap max-md:px-2">
                 <ChartBarIcon className="h-4 w-4" style={{ color: themeColor }} />
                 <p className="text-[13px] font-semibold text-gray-800">Service Coverage Matrix</p>
-                <span className="text-[11px] text-gray-400 hidden sm:inline">{master.length} codes × {cols.length} services · ✓ has parts · ✗ none</span>
+                <span className="text-[11px] text-gray-400 hidden sm:inline">
+                    {(search.trim() || segment) ? `${visible.length} of ${master.length}` : master.length} codes × {cols.length} services · ✓ has parts · ✗ none
+                </span>
+                <input value={search} onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search model / app code"
+                    className="ml-auto w-44 rounded-lg border border-gray-200 bg-white px-2 py-1 text-[12px] text-black outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition max-sm:w-full max-sm:ml-0" />
+                <select value={segment} onChange={(e) => setSegment(e.target.value)}
+                    className="max-w-[160px] rounded-lg border border-gray-200 bg-white px-2 py-1 text-[12px] text-black outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition">
+                    <option value="">All segments</option>
+                    {segments.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+                {(search || segment) && (
+                    <button onClick={() => { setSearch(''); setSegment(''); }}
+                        className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-[12px] font-medium text-gray-600 hover:bg-gray-50 transition">
+                        Clear
+                    </button>
+                )}
                 {canExportExcel() && (
                     <button onClick={exportXlsx}
-                        className="export-btn ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90"
+                        className="export-btn inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90"
                         style={{ backgroundColor: themeColor }}>
-                        <ArrowDownTrayIcon className="h-3.5 w-3.5" /> Export Excel
+                        <ArrowUpTrayIcon className="h-3.5 w-3.5" /> Export
                     </button>
                 )}
             </div>
@@ -192,8 +218,8 @@ const CoverageReport = ({ master, services }) => {
                 <table className="min-w-[760px] w-full border-collapse text-[12px]">
                     <thead>
                         <tr className="bg-gray-50 text-[10px] sm:text-[11px] font-semibold text-black uppercase tracking-wider">
-                            <th className="px-3 py-2 text-left border border-gray-200">Model</th>
-                            <th className="px-3 py-2 text-left border border-gray-200">App Code</th>
+                            <th className="px-3 py-2 text-center border border-gray-200">Model</th>
+                            <th className="px-3 py-2 text-center border border-gray-200">App Code</th>
                             <th className="px-3 py-2 text-center border border-gray-200">Segment</th>
                             {cols.map((c) => (
                                 <th key={c.id} title={c.name} className="px-3 py-2 text-center border border-gray-200 whitespace-nowrap">{c.short}</th>
@@ -201,7 +227,14 @@ const CoverageReport = ({ master, services }) => {
                         </tr>
                     </thead>
                     <tbody>
-                        {coverage.map(({ a, ids }) => {
+                        {visible.length === 0 && (
+                            <tr>
+                                <td colSpan={3 + cols.length} className="px-3 py-10 border border-gray-200 text-center text-gray-400">
+                                    No codes match the search / segment filter.
+                                </td>
+                            </tr>
+                        )}
+                        {visible.map(({ a, ids }) => {
                             return (
                                 <tr key={a.appCode} className="hover:bg-indigo-50/40 transition">
                                     <td className="px-3 py-2 border border-gray-200 font-mono text-gray-700">{a.engineModel || '—'}</td>
@@ -232,11 +265,21 @@ const ActivityReport = ({ master, activity }) => {
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
     const [employee, setEmployee] = useState('');
+    const [search, setSearch] = useState('');
+    const [segment, setSegment] = useState('');
 
     // All employees that appear in the activity log (for the filter dropdown).
     const employees = useMemo(
         () => [...new Set(activity.map((e) => e.employee).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
         [activity]
+    );
+
+    // Segment dropdown options — only the segments that actually appear in the log.
+    const segments = useMemo(
+        () => [...new Set(activity
+            .map((e) => (e.segment || (findApp(master, e.code)?.segment) || '').trim())
+            .filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+        [activity, master]
     );
 
     const data = useMemo(() => {
@@ -289,6 +332,19 @@ const ActivityReport = ({ master, activity }) => {
         };
     }, [master, activity, fromDate, toDate, employee]);
 
+    // Search / segment applied AFTER grouping \u2014 visit counts stay intact,
+    // only which rows are displayed changes.
+    const visibleGroups = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        return data.groups.filter((g) => {
+            if (segment && (g.segment || '').trim() !== segment) return false;
+            if (!q) return true;
+            return String(g.employee).toLowerCase().includes(q)
+                || String(g.code).toLowerCase().includes(q)
+                || String(g.engineModel).toLowerCase().includes(q);
+        });
+    }, [data.groups, search, segment]);
+
     const fmtDate = (dk) => (dk
         ? new Date(dk + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })
         : '\u2014');
@@ -313,10 +369,10 @@ const ActivityReport = ({ master, activity }) => {
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 border-b border-gray-200 bg-gray-50 max-md:px-2">
                         <div className="flex items-center gap-2">
                             <ClockIcon className="h-4 w-4" style={{ color: themeColor }} />
-                            <p className="text-[13px] font-semibold text-gray-800 whitespace-nowrap">Activity Log — who &amp; when</p>
+                            <p className="text-[13px] font-semibold text-gray-800 whitespace-nowrap">Activity Log</p>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="ml-auto flex flex-wrap items-center gap-2 max-sm:ml-0">
                             <div className="flex items-center gap-1">
                                 <span className="text-[11px] font-semibold text-gray-500">From</span>
                                 <input type="date" value={fromDate} max={toDate || undefined}
@@ -334,8 +390,16 @@ const ActivityReport = ({ master, activity }) => {
                                 <option value="">All employees</option>
                                 {employees.map((emp) => <option key={emp} value={emp}>{emp}</option>)}
                             </select>
-                            {(fromDate || toDate || employee) && (
-                                <button onClick={() => { setFromDate(''); setToDate(''); setEmployee(''); }}
+                            <input value={search} onChange={(e) => setSearch(e.target.value)}
+                                placeholder="Search employee / code / model"
+                                className="w-48 rounded-lg border border-gray-200 bg-white px-2 py-1 text-[12px] text-black outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition max-sm:w-full" />
+                            <select value={segment} onChange={(e) => setSegment(e.target.value)}
+                                className="max-w-[150px] rounded-lg border border-gray-200 bg-white px-2 py-1 text-[12px] text-black outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition">
+                                <option value="">All segments</option>
+                                {segments.map((s) => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                            {(fromDate || toDate || employee || search || segment) && (
+                                <button onClick={() => { setFromDate(''); setToDate(''); setEmployee(''); setSearch(''); setSegment(''); }}
                                     className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-[12px] font-medium text-gray-600 hover:bg-gray-50 transition">
                                     Clear
                                 </button>
@@ -344,37 +408,37 @@ const ActivityReport = ({ master, activity }) => {
 
                         {canExportExcel() && (
                             <button onClick={exportXlsx} disabled={data.groups.length === 0}
-                                className="export-btn ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+                                className="export-btn inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
                                 style={{ backgroundColor: themeColor }}>
-                                <ArrowDownTrayIcon className="h-3.5 w-3.5" /> Export Excel
+                                <ArrowUpTrayIcon className="h-3.5 w-3.5" /> Export
                             </button>
                         )}
                     </div>
 
                     {/* Count line */}
                     <div className="px-4 py-1.5 border-b border-gray-200 bg-white text-[11px] text-gray-400">
-                        {data.filtering
-                            ? `Showing ${data.shownTotal} of ${data.allTotal} look-ups · ${data.groups.length} rows`
-                            : `${data.allTotal} look-ups total · ${data.groups.length} rows`}
+                        {(data.filtering || search.trim() || segment)
+                            ? `Showing ${data.shownTotal} of ${data.allTotal} look-ups · ${visibleGroups.length} rows`
+                            : `${data.allTotal} look-ups total · ${visibleGroups.length} rows`}
                     </div>
 
-                    {data.groups.length === 0 ? (
+                    {visibleGroups.length === 0 ? (
                         <div className="py-14 text-center text-gray-400 text-[13px]">No look-ups match the selected filters.</div>
                     ) : (
                         <div className="overflow-x-auto r-scroll">
                             <table className="min-w-[720px] w-full border-collapse text-[12px]">
                                 <thead>
                                     <tr className="bg-gray-50 text-[10px] sm:text-[11px] font-semibold text-black uppercase tracking-wider">
-                                        <th className="px-3 py-2 text-left border border-gray-200 w-40">Date</th>
-                                        <th className="px-3 py-2 text-left border border-gray-200">Employee</th>
-                                        <th className="px-3 py-2 text-left border border-gray-200">App Code</th>
-                                        <th className="px-3 py-2 text-left border border-gray-200">Engine Model</th>
+                                        <th className="px-3 py-2 text-center border border-gray-200 w-40">Date</th>
+                                        <th className="px-3 py-2 text-center border border-gray-200">Employee</th>
+                                        <th className="px-3 py-2 text-center border border-gray-200">App Code</th>
+                                        <th className="px-3 py-2 text-center border border-gray-200">Engine Model</th>
                                         <th className="px-3 py-2 text-center border border-gray-200">Segment</th>
                                         <th className="px-3 py-2 text-center border border-gray-200 w-20">Visits</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {data.groups.map((g, i) => (
+                                    {visibleGroups.map((g, i) => (
                                         <tr key={i} className="hover:bg-indigo-50/40 transition">
                                             <td className="px-3 py-2 border border-gray-200 font-mono text-gray-500 whitespace-nowrap">{fmtDate(g.dateKey)}</td>
                                             <td className="px-3 py-2 border border-gray-200 font-medium text-gray-800">{g.employee}</td>

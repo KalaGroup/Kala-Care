@@ -162,11 +162,16 @@ const CDBUpdateTable = ({ user, showToast }) => {
                 return utcDateString;
             }
 
-            const day = date.getUTCDate();
-            const month = date.toLocaleString('en-IN', { month: 'short', timeZone: 'UTC' });
-            const year = date.getUTCFullYear();
-            const hours = date.getUTCHours().toString().padStart(2, '0');
-            const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+            // Tagged strings (Z / +00:00) were parsed as UTC — read the UTC
+            // wall-clock. Naive strings are stored IST and were parsed as
+            // local time — read the local wall-clock so it shows as stored.
+            const tagged = typeof utcDateString === 'string' &&
+                (utcDateString.includes(' +00:00') || utcDateString.includes('Z'));
+            const day = tagged ? date.getUTCDate() : date.getDate();
+            const month = date.toLocaleString('en-IN', tagged ? { month: 'short', timeZone: 'UTC' } : { month: 'short' });
+            const year = tagged ? date.getUTCFullYear() : date.getFullYear();
+            const hours = (tagged ? date.getUTCHours() : date.getHours()).toString().padStart(2, '0');
+            const minutes = (tagged ? date.getUTCMinutes() : date.getMinutes()).toString().padStart(2, '0');
 
             return `${day} ${month} ${year}, ${hours}:${minutes}`;
         } catch (error) {
@@ -317,14 +322,14 @@ const CDBUpdateTable = ({ user, showToast }) => {
     };
 
     const applyDateFilter = (data, filterType) => {
-        const nowUTC = getCurrentUTCDate();
+        const nowUTC = new Date(); // local (IST) now — boundaries below use local midnights
         let filteredData = [...data];
 
         switch (filterType) {
             case 'last10days':
                 const tenDaysAgo = new Date(nowUTC);
-                tenDaysAgo.setUTCDate(tenDaysAgo.getUTCDate() - 10);
-                tenDaysAgo.setUTCHours(0, 0, 0, 0);
+                tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+                tenDaysAgo.setHours(0, 0, 0, 0);
                 filteredData = data.filter(item => {
                     const editedDate = parseUTCDate(item.edited_at);
                     return editedDate && editedDate >= tenDaysAgo;
@@ -332,8 +337,8 @@ const CDBUpdateTable = ({ user, showToast }) => {
                 break;
             case '1month':
                 const oneMonthAgo = new Date(nowUTC);
-                oneMonthAgo.setUTCMonth(oneMonthAgo.getUTCMonth() - 1);
-                oneMonthAgo.setUTCHours(0, 0, 0, 0);
+                oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+                oneMonthAgo.setHours(0, 0, 0, 0);
                 filteredData = data.filter(item => {
                     const editedDate = parseUTCDate(item.edited_at);
                     return editedDate && editedDate >= oneMonthAgo;
@@ -341,8 +346,8 @@ const CDBUpdateTable = ({ user, showToast }) => {
                 break;
             case '3months':
                 const threeMonthsAgo = new Date(nowUTC);
-                threeMonthsAgo.setUTCMonth(threeMonthsAgo.getUTCMonth() - 3);
-                threeMonthsAgo.setUTCHours(0, 0, 0, 0);
+                threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+                threeMonthsAgo.setHours(0, 0, 0, 0);
                 filteredData = data.filter(item => {
                     const editedDate = parseUTCDate(item.edited_at);
                     return editedDate && editedDate >= threeMonthsAgo;
@@ -350,8 +355,8 @@ const CDBUpdateTable = ({ user, showToast }) => {
                 break;
             case '6months':
                 const sixMonthsAgo = new Date(nowUTC);
-                sixMonthsAgo.setUTCMonth(sixMonthsAgo.getUTCMonth() - 6);
-                sixMonthsAgo.setUTCHours(0, 0, 0, 0);
+                sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+                sixMonthsAgo.setHours(0, 0, 0, 0);
                 filteredData = data.filter(item => {
                     const editedDate = parseUTCDate(item.edited_at);
                     return editedDate && editedDate >= sixMonthsAgo;
@@ -359,8 +364,8 @@ const CDBUpdateTable = ({ user, showToast }) => {
                 break;
             case '1year':
                 const oneYearAgo = new Date(nowUTC);
-                oneYearAgo.setUTCFullYear(oneYearAgo.getUTCFullYear() - 1);
-                oneYearAgo.setUTCHours(0, 0, 0, 0);
+                oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+                oneYearAgo.setHours(0, 0, 0, 0);
                 filteredData = data.filter(item => {
                     const editedDate = parseUTCDate(item.edited_at);
                     return editedDate && editedDate >= oneYearAgo;
@@ -418,13 +423,13 @@ const CDBUpdateTable = ({ user, showToast }) => {
     useEffect(() => {
         if (editHistories.length > 0) {
             let filtered = [...editHistories];
-            const nowUTC = getCurrentUTCDate();
+            const nowUTC = new Date(); // local (IST) now — boundaries below use local midnights
 
             switch (dateFilter) {
                 case 'last10days':
                     const tenDaysAgo = new Date(nowUTC);
-                    tenDaysAgo.setUTCDate(tenDaysAgo.getUTCDate() - 10);
-                    tenDaysAgo.setUTCHours(0, 0, 0, 0);
+                    tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+                    tenDaysAgo.setHours(0, 0, 0, 0);
                     filtered = filtered.filter(item => {
                         const editedDate = parseUTCDate(item.edited_at);
                         return editedDate && editedDate >= tenDaysAgo;
@@ -432,8 +437,8 @@ const CDBUpdateTable = ({ user, showToast }) => {
                     break;
                 case '1month':
                     const oneMonthAgo = new Date(nowUTC);
-                    oneMonthAgo.setUTCMonth(oneMonthAgo.getUTCMonth() - 1);
-                    oneMonthAgo.setUTCHours(0, 0, 0, 0);
+                    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+                    oneMonthAgo.setHours(0, 0, 0, 0);
                     filtered = filtered.filter(item => {
                         const editedDate = parseUTCDate(item.edited_at);
                         return editedDate && editedDate >= oneMonthAgo;
@@ -441,8 +446,8 @@ const CDBUpdateTable = ({ user, showToast }) => {
                     break;
                 case '3months':
                     const threeMonthsAgo = new Date(nowUTC);
-                    threeMonthsAgo.setUTCMonth(threeMonthsAgo.getUTCMonth() - 3);
-                    threeMonthsAgo.setUTCHours(0, 0, 0, 0);
+                    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+                    threeMonthsAgo.setHours(0, 0, 0, 0);
                     filtered = filtered.filter(item => {
                         const editedDate = parseUTCDate(item.edited_at);
                         return editedDate && editedDate >= threeMonthsAgo;
@@ -450,8 +455,8 @@ const CDBUpdateTable = ({ user, showToast }) => {
                     break;
                 case '6months':
                     const sixMonthsAgo = new Date(nowUTC);
-                    sixMonthsAgo.setUTCMonth(sixMonthsAgo.getUTCMonth() - 6);
-                    sixMonthsAgo.setUTCHours(0, 0, 0, 0);
+                    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+                    sixMonthsAgo.setHours(0, 0, 0, 0);
                     filtered = filtered.filter(item => {
                         const editedDate = parseUTCDate(item.edited_at);
                         return editedDate && editedDate >= sixMonthsAgo;
@@ -459,8 +464,8 @@ const CDBUpdateTable = ({ user, showToast }) => {
                     break;
                 case '1year':
                     const oneYearAgo = new Date(nowUTC);
-                    oneYearAgo.setUTCFullYear(oneYearAgo.getUTCFullYear() - 1);
-                    oneYearAgo.setUTCHours(0, 0, 0, 0);
+                    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+                    oneYearAgo.setHours(0, 0, 0, 0);
                     filtered = filtered.filter(item => {
                         const editedDate = parseUTCDate(item.edited_at);
                         return editedDate && editedDate >= oneYearAgo;

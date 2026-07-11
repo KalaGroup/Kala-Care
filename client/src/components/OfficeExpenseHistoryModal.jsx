@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import { buildTallyVouchersXml, downloadTallyXml, narrDate } from '../utils/tallyXml';
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
 
@@ -29,6 +30,8 @@ const OfficeExpenseHistoryModal = ({
   const [paidTimers, setPaidTimers] = useState({});
   const [bulkPaid, setBulkPaid] = useState('');
   const [bulkApplying, setBulkApplying] = useState(false);
+  const [tallySelected, setTallySelected] = useState({}); // `${branch_code}-${submit_voucher_no}` -> true
+  const [tallyBusy, setTallyBusy] = useState(false);
 
   const loadGroups = async () => {
     setLoading(true);
@@ -101,6 +104,52 @@ const OfficeExpenseHistoryModal = ({
     }
   };
 
+  // ── TALLY IMPORT ──
+  // One Journal Voucher per OE voucher, mirroring the physical Expenses Voucher:
+  // Dr each Expense Head (GL Code) ledger with its summed amount,
+  // Cr the submitter's (BM's) ledger with the grand total.
+  const runTallyImport = async (targetGroups) => {
+    if (tallyBusy) return;
+    setTallyBusy(true);
+    try {
+      const results = await Promise.all(targetGroups.map(g =>
+        axios.get(`${API_BASE_URL}/office-expenses/history/voucher-records`, {
+          params: { submit_voucher_no: g.submit_voucher_no, branch_code: g.branch_code || undefined },
+        }).then(res => ({ g, recs: res.data || [] })).catch(() => ({ g, recs: null }))
+      ));
+      const vouchers = [];
+      results.forEach(({ g, recs }) => {
+        if (!recs) { toast.error(`Voucher ${g.submit_voucher_no}: failed to load records`); return; }
+        const map = {};
+        recs.forEach(r => {
+          const head = String(r.expenses_head || '').trim() || 'Office Expenses';
+          map[head] = (map[head] || 0) + (parseFloat(r.amount) || 0);
+        });
+        const debits = Object.entries(map)
+          .map(([ledger, amount]) => ({ ledger, amount }))
+          .sort((a, b) => a.ledger.localeCompare(b.ledger))
+          .filter(d => d.amount > 0);
+        if (!debits.length) { toast.error(`Voucher ${g.submit_voucher_no}: no amounts to import`); return; }
+        const creditLedger = String(g.submitted_by || '').split(',')[0].trim();
+        if (!creditLedger || creditLedger === 'Unknown') { toast.error(`Voucher ${g.submit_voucher_no}: no submitter found`); return; }
+        const from = narrDate(g.period_start);
+        const to = narrDate(g.period_end);
+        const narration = from && to
+          ? `Office expense from ${from} to ${to}`
+          : `Office expense — Voucher ${g.submit_voucher_no}`;
+        vouchers.push({ voucherNo: g.submit_voucher_no, narration, debits, creditLedger });
+      });
+      if (!vouchers.length) return;
+      const label = vouchers.length === 1 ? vouchers[0].voucherNo : `OE_${vouchers.length}_vouchers`;
+      downloadTallyXml(buildTallyVouchersXml(vouchers), label);
+      toast.success(`Tally XML with ${vouchers.length} voucher(s) downloaded`);
+    } finally {
+      setTallyBusy(false);
+    }
+  };
+
+  const tallyKeyOf = (g) => `${g.branch_code}-${g.submit_voucher_no}`;
+
   const visibleGroups = useMemo(() => {
     const out = groups.filter(g => !branchFilter || g.branch_code === branchFilter);
     if (voucherSort) {
@@ -115,6 +164,18 @@ const OfficeExpenseHistoryModal = ({
   }, [groups, branchFilter, voucherSort]);
   const recTotal = useMemo(
     () => records.reduce((s, r) => s + parseFloat(r.amount || 0), 0), [records]);
+
+  const selectedTallyGroups = useMemo(
+    () => visibleGroups.filter(g => tallySelected[tallyKeyOf(g)]),
+    [visibleGroups, tallySelected]
+  );
+  const allVisibleSelected = visibleGroups.length > 0 && visibleGroups.every(g => tallySelected[tallyKeyOf(g)]);
+  const toggleSelectAll = () => {
+    if (allVisibleSelected) { setTallySelected({}); return; }
+    const next = {};
+    visibleGroups.forEach(g => { next[tallyKeyOf(g)] = true; });
+    setTallySelected(next);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 bg-black/50 backdrop-blur-sm">
@@ -146,7 +207,7 @@ const OfficeExpenseHistoryModal = ({
             {!selected ? (
               <>
                 <label className="text-[10px] font-bold text-gray-500 uppercase">Branch:</label>
-                <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}
+                <select value={branchFilter} onChange={e => { setBranchFilter(e.target.value); setTallySelected({}); }}
                   className="px-2 py-1 text-[11px] border border-gray-300 rounded-md bg-white">
                   <option value="">All Branches</option>
                   {branchOrder.map(code => <option key={code} value={code}>{branchMap[code]} ({code})</option>)}
@@ -208,7 +269,18 @@ const OfficeExpenseHistoryModal = ({
                     ])}
                     className="export-btn ml-auto inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg"
                     style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}>
-                    Export Vouchers
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg> Export Vouchers
+                  </button>
+                )}
+                {canExport && selectedTallyGroups.length > 0 && (
+                  <button onClick={() => runTallyImport(selectedTallyGroups)} disabled={tallyBusy}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-bold rounded-lg disabled:opacity-50"
+                    style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}
+                    title="Download one Tally XML containing a Journal Voucher for each selected voucher">
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16l4 4m0 0l4-4m-4 4V8M4 8V7a3 3 0 013-3h10a3 3 0 013 3v1" />
+                    </svg>
+                    {tallyBusy ? 'Building…' : `Tally Import (${selectedTallyGroups.length})`}
                   </button>
                 )}
               </>
@@ -258,7 +330,7 @@ const OfficeExpenseHistoryModal = ({
                     )}
                     className="export-btn ml-auto inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg"
                     style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}>
-                    Export Records
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg> Export Records
                   </button>
                 )}
                 {/* Bulk paid-date for whole voucher */}
@@ -288,13 +360,26 @@ const OfficeExpenseHistoryModal = ({
             ) : (
               <table className="border-collapse w-full max-md:min-w-[950px]">
                 <thead className="sticky top-0 z-10"><tr style={{ backgroundColor: '#f0f1ff' }}>
-                  {['Sr. No.', 'Voucher No.', 'Period (Start → End)', 'Submitted By', 'Verified By', 'Records', 'Total Amount', 'Paid Date', 'Branch Name'].map((c, i) => (
+                  {canExport && (
+                    <th className="px-2 py-2 border-r border-b-2 border-gray-200 text-center" style={{ backgroundColor: '#f0f1ff' }}>
+                      <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll}
+                        title="Select all for Tally Import" className="cursor-pointer accent-purple-700" />
+                    </th>
+                  )}
+                  {['Sr. No.', 'Voucher No.', 'Period (Start → End)', 'Submitted By', 'Verified By', 'Records', 'Total Amount', 'Paid Date', 'Branch Name', ...(canExport ? ['Tally Import'] : [])].map((c, i) => (
                     <th key={i} className="px-3 py-2 text-[10px] font-bold text-gray-700 border-r border-b-2 border-gray-200 last:border-r-0 uppercase text-center" style={{ backgroundColor: '#f0f1ff' }}>{c}</th>
                   ))}
                 </tr></thead>
                 <tbody className="divide-y divide-gray-100">
                   {visibleGroups.map((g, idx) => (
                     <tr key={`${g.branch_code}-${g.submit_voucher_no}`} className="hover:bg-blue-50/40" style={{ height: '38px' }}>
+                      {canExport && (
+                        <td className="px-2 py-1 border-r border-gray-100 text-center">
+                          <input type="checkbox" checked={!!tallySelected[tallyKeyOf(g)]}
+                            onChange={() => setTallySelected(p => ({ ...p, [tallyKeyOf(g)]: !p[tallyKeyOf(g)] }))}
+                            title="Select for Tally Import" className="cursor-pointer accent-purple-700" />
+                        </td>
+                      )}
                       <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center font-medium">{idx + 1}</td>
                       <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center">
                         <button onClick={() => openVoucher(g)} className="text-[#2f3192] underline hover:font-bold bg-transparent border-0 p-0">{g.submit_voucher_no}</button>
@@ -314,6 +399,19 @@ const OfficeExpenseHistoryModal = ({
                         ) : '-'}
                       </td>
                       <td className="px-3 py-1 border-r border-gray-100 text-[12px] text-center">{branchMap[g.branch_code] || g.branch_code}</td>
+                      {canExport && (
+                        <td className="px-2 py-1 border-r border-gray-100 text-center">
+                          <button onClick={() => runTallyImport([g])} disabled={tallyBusy}
+                            title="Download Tally import XML (Journal Voucher) for this voucher"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-white rounded-md whitespace-nowrap disabled:opacity-50"
+                            style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16l4 4m0 0l4-4m-4 4V8M4 8V7a3 3 0 013-3h10a3 3 0 013 3v1" />
+                            </svg>
+                            Tally Import
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>

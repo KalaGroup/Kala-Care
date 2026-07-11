@@ -7,6 +7,7 @@ from typing import List, Optional, Dict, Any
 from app.models.campaign_model import Campaign, CampaignService
 from app.models.customer_model import Customer
 from app.schemas import campaign_schema
+from app.time_utils import now_ist
 
 class CampaignController:
     def __init__(self, db: Session):
@@ -113,7 +114,7 @@ class CampaignController:
         for key, value in service.model_dump(exclude_unset=True).items():
             setattr(db_service, key, value)
         
-        db_service.updated_at = datetime.utcnow()
+        db_service.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_service)
         return db_service
@@ -143,13 +144,13 @@ class CampaignController:
             query = query.filter(Campaign.status == status)
         
         # Auto-update status based on end date
-        today = datetime.utcnow().date()
+        today = now_ist().date()
         campaigns = query.all()
         
         for campaign in campaigns:
             if campaign.end_date and campaign.end_date.date() < today and campaign.status == 'active':
                 campaign.status = 'inactive'
-                campaign.updated_at = datetime.utcnow()
+                campaign.updated_at = now_ist()
         
         self.db.commit()
         
@@ -194,7 +195,7 @@ class CampaignController:
                 if old_valid != new_valid or old_invalid != new_invalid:
                     campaign.asset_numbers = validation_result['valid']
                     campaign.invalid_asset_numbers = validation_result['invalid']
-                    campaign.updated_at = datetime.utcnow()
+                    campaign.updated_at = now_ist()
                     self.db.add(campaign)
                     updated_campaigns.append(campaign)
         
@@ -213,10 +214,10 @@ class CampaignController:
             raise HTTPException(status_code=404, detail="Campaign not found")
         
         # Auto-update status based on end date
-        today = datetime.utcnow().date()
+        today = now_ist().date()
         if campaign.end_date and campaign.end_date.date() < today and campaign.status == 'active':
             campaign.status = 'inactive'
-            campaign.updated_at = datetime.utcnow()
+            campaign.updated_at = now_ist()
             self.db.commit()
             self.db.refresh(campaign)
         
@@ -233,7 +234,7 @@ class CampaignController:
             if old_valid != new_valid or old_invalid != new_invalid:
                 campaign.asset_numbers = validation_result['valid']
                 campaign.invalid_asset_numbers = validation_result['invalid']
-                campaign.updated_at = datetime.utcnow()
+                campaign.updated_at = now_ist()
                 self.db.commit()
                 self.db.refresh(campaign)
         
@@ -282,7 +283,7 @@ class CampaignController:
                 combined_assets.extend(matching)
 
                 src.status = 'inactive'
-                src.updated_at = datetime.utcnow()
+                src.updated_at = now_ist()
                 self.db.add(src)
 
             if source_campaigns:
@@ -292,7 +293,7 @@ class CampaignController:
         combined_assets = list(set(combined_assets))
 
         # Set initial status for NEW campaign based on dates
-        today = datetime.utcnow().date()
+        today = now_ist().date()
         if campaign.start_date and campaign.start_date.date() > today:
             new_status = 'inactive'  # Future campaign
         elif campaign.end_date and campaign.end_date.date() < today:
@@ -416,7 +417,7 @@ class CampaignController:
         if 'status' not in update_data:
             # Auto-update status based on date changes
             if 'start_date' in update_data or 'end_date' in update_data:
-                today = datetime.utcnow().date()
+                today = now_ist().date()
                 start_date = update_data.get('start_date', db_campaign.start_date)
                 end_date = update_data.get('end_date', db_campaign.end_date)
                 
@@ -429,7 +430,7 @@ class CampaignController:
         for key, value in update_data.items():
             setattr(db_campaign, key, value)
         
-        db_campaign.updated_at = datetime.utcnow()
+        db_campaign.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_campaign)
         return db_campaign
@@ -516,7 +517,7 @@ class CampaignController:
         
         db_campaign = self.get_campaign(campaign_id)
         db_campaign.status = status
-        db_campaign.updated_at = datetime.utcnow()
+        db_campaign.updated_at = now_ist()
         self.db.commit()
         return db_campaign
     
@@ -552,7 +553,7 @@ class CampaignController:
                 if old_valid != new_valid or old_invalid != new_invalid:
                     campaign.asset_numbers = validation_result['valid']
                     campaign.invalid_asset_numbers = validation_result['invalid']
-                    campaign.updated_at = datetime.utcnow()
+                    campaign.updated_at = now_ist()
                     self.db.add(campaign)
         
         self.db.commit()
@@ -560,13 +561,13 @@ class CampaignController:
         total_campaigns = self.db.query(Campaign).count()
         
         # Auto-update status based on dates
-        today = datetime.utcnow().date()
+        today = now_ist().date()
         campaigns = self.db.query(Campaign).all()
         
         for campaign in campaigns:
             if campaign.end_date and campaign.end_date.date() < today and campaign.status == 'active':
                 campaign.status = 'inactive'
-                campaign.updated_at = datetime.utcnow()
+                campaign.updated_at = now_ist()
         
         self.db.commit()
         
@@ -634,7 +635,7 @@ class CampaignController:
         if row:
             for key, value in update_data.items():
                 setattr(row, key, value)
-            row.updated_at = datetime.utcnow()
+            row.updated_at = now_ist()
         else:
             row = CampaignDriveMeta(campaign_id=campaign_id, **update_data)
             self.db.add(row)
@@ -685,7 +686,7 @@ class CampaignController:
                 old_branch = customer.branch_id
                 customer.branch_id = branch_id
                 customer.last_updated_by = user_data.get('name') if user_data else None
-                customer.updated_at = datetime.utcnow()
+                customer.updated_at = now_ist()
                 
                 self.db.commit()
                 
@@ -768,7 +769,7 @@ class CampaignController:
             if existing:
                 for key, value in clean_row.items():
                     setattr(existing, key, value)
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = now_ist()
                 results["updated"] += 1
             else:
                 new_row = CampaignCSPInfo(campaign_id=campaign_id, **clean_row)
@@ -951,7 +952,7 @@ class CampaignController:
                 setattr(existing, key, value)
             existing.created_by_id = (user_data or {}).get('user_id') or (user_data or {}).get('id')
             existing.created_by_name = (user_data or {}).get('name')
-            existing.updated_at = datetime.utcnow()
+            existing.updated_at = now_ist()
             action = "updated"
         else:
             new_row = CampaignCSPInfo(
@@ -968,7 +969,7 @@ class CampaignController:
         if instance_id not in assets:
             assets.append(instance_id)
             campaign.asset_numbers = assets
-            campaign.updated_at = datetime.utcnow()
+            campaign.updated_at = now_ist()
 
         # If branch supplied, sync it onto the customer record (best-effort)
         branch_id = clean_row.get('branch_id')
@@ -978,7 +979,7 @@ class CampaignController:
                 customer.branch_id = branch_id
                 if user_data:
                     customer.last_updated_by = user_data.get('name')
-                customer.updated_at = datetime.utcnow()
+                customer.updated_at = now_ist()
 
         self.db.commit()
 
@@ -1020,7 +1021,7 @@ class CampaignController:
         # format stays usable up to AND including its expiry date. Formats with
         # no expiry_date are always kept.
         if not include_expired:
-            today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            today = now_ist().replace(hour=0, minute=0, second=0, microsecond=0)
             kept = []
             for f in formats:
                 if f.expiry_date:
@@ -1164,7 +1165,7 @@ class CampaignController:
         for key, value in update_data.items():
             setattr(db_fmt, key, value)
 
-        db_fmt.updated_at = datetime.utcnow()
+        db_fmt.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_fmt)
         return db_fmt
@@ -1236,7 +1237,7 @@ class CampaignController:
                     existing.emails = emails
                     existing.email = primary_email          # keep single column in sync (backward compat)
                     existing.branch_name = entry.branch_name
-                    existing.updated_at = datetime.utcnow()
+                    existing.updated_at = now_ist()
                 else:
                     row = BranchEmailMaster(
                         branch_code=entry.branch_code,

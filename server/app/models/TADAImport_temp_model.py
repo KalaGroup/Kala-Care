@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text, UniqueConstraint
 from sqlalchemy.sql import func
 from app.database import Base
+from app.time_utils import now_ist
 
 
 class TADAImportTemp(Base):
@@ -67,7 +68,7 @@ class TADAImportTemp(Base):
     # Metadata
     branch_code = Column(String(50), nullable=True)
     uploaded_by = Column(String(100), nullable=True)
-    uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+    uploaded_at = Column(DateTime(timezone=True), default=now_ist)
     file_name = Column(String(500), nullable=True)
 
     # Composite unique: appointment + task_start_date + service_engineer_name + branch_code

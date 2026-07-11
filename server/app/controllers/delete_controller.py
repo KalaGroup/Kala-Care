@@ -6,6 +6,7 @@ from io import BytesIO
 import zipfile
 import logging
 import traceback
+from app.time_utils import now_ist
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class DeleteController:
     def backup_data(db: Session, data_type: str):
         """Create backup of selected data type"""
         try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = now_ist().strftime("%Y%m%d_%H%M%S")
             excel_files = []
             
             if data_type == "customerData":

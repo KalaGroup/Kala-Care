@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from app.database import SessionLocal
 from app.controllers import TADA_controller as controller
 from app.models import TADA_model as models
+from app.time_utils import now_ist
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ async def upload_tada_file(
         # Save file temporarily
         temp_dir = "temp_uploads"
         os.makedirs(temp_dir, exist_ok=True)
-        temp_path = os.path.join(temp_dir, f"{datetime.now().timestamp()}_{file.filename}")
+        temp_path = os.path.join(temp_dir, f"{now_ist().timestamp()}_{file.filename}")
         
         try:
             with open(temp_path, "wb") as buffer:
@@ -158,7 +159,7 @@ async def validate_tada_file(file: UploadFile = File(...)):
     
     temp_dir = "temp_uploads"
     os.makedirs(temp_dir, exist_ok=True)
-    temp_path = os.path.join(temp_dir, f"validate_{datetime.now().timestamp()}_{file.filename}")
+    temp_path = os.path.join(temp_dir, f"validate_{now_ist().timestamp()}_{file.filename}")
     
     try:
         with open(temp_path, "wb") as buffer:
@@ -468,8 +469,11 @@ def get_submitted_records(
     """Get all records from TADAImport (main) for this branch — i.e. records
     already submitted from drafts but not yet moved to history."""
     branch_code = unquote(branch_code)
+    # Column projection (plain Rows, attribute access preserved) instead of
+    # full ORM entities — same data, no per-row instrumentation overhead.
+    cols = [getattr(models.TADAImport, c.name) for c in models.TADAImport.__table__.columns]
     records = (
-        db.query(models.TADAImport)
+        db.query(*cols)
         .filter(models.TADAImport.branch_code == branch_code)
         .order_by(models.TADAImport.uploaded_at.desc())
         .all()

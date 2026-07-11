@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Boolean, Date
 from sqlalchemy.sql import func
 from app.database import Base
+from app.time_utils import now_ist
 
 class OfficeExpenseHistory(Base):
     __tablename__ = "office_expense_history"
@@ -35,7 +36,7 @@ class OfficeExpenseHistory(Base):
     # Submission info (who clicked Submit)
     submitted_by_name = Column(String(100), nullable=True)
     submitted_by_id = Column(String(100), nullable=True)
-    moved_at = Column(DateTime, server_default=func.now())
+    moved_at = Column(DateTime, default=now_ist)
     ho_paid_date = Column(Date, nullable=True)
     submit_voucher_no = Column(String(50), nullable=True)   # carried from main on submit-to-history
 

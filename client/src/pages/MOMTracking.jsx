@@ -6,7 +6,7 @@ import {
   ClipboardList, Building2, Plus, Trash2, CheckCircle2,
   AlertTriangle, CalendarDays, Users, X, CornerUpRight, Flag,
   BarChart3, Check, User, ListChecks, Zap, ChevronRight, ChevronLeft,
-  ChevronDown, FileText, MapPin, UserPlus, Download, Search, RotateCcw,
+  ChevronDown, FileText, MapPin, UserPlus, Download, Upload, Search, RotateCcw,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
@@ -385,7 +385,7 @@ function ExportColorModal({ onExport, onClose }) {
         <div className="flex justify-end gap-2 px-5 py-4 mt-3 border-t border-gray-100" style={{ background: '#fafbfd' }}>
           <button onClick={onClose} className="rounded-lg border border-gray-200 bg-white px-4 py-2 fs-12 font-semibold text-gray-600 hover:bg-gray-50">Cancel</button>
           <button onClick={() => onExport(color)} className="kc-lift inline-flex items-center gap-1.5 rounded-lg px-4 py-2 fs-12 font-bold text-white" style={{ background: `linear-gradient(120deg, ${color}, #${shadeHex(color, -0.25)})` }}>
-            <Download size={14} /> Export Excel
+            <Upload size={14} /> Export Excel
           </button>
         </div>
       </div>
@@ -1451,7 +1451,7 @@ export default function MOMTracking() {
                   <div className="text-sm font-bold uppercase text-white" style={{ letterSpacing: '0.16em' }}>Minutes of Meeting</div>
                 </div>
                 <div className="flex items-center gap-2 max-md:flex-wrap">
-                  {canExport && <button onClick={exportDraft} className="export-btn kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: INK }}><Download size={13} /> Export Excel</button>}
+                  {canExport && <button onClick={exportDraft} className="export-btn kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: INK }}><Upload size={13} /> Export Excel</button>}
                   <button onClick={() => setStep(1)} className="kc-lift inline-flex items-center gap-1 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: '#5b6170' }}><ChevronLeft size={13} /> Setup</button>
                 </div>
               </div>

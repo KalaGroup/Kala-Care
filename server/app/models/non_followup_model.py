@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, Numeric, Index
 from sqlalchemy.sql import func
 from app.database import Base
+from app.time_utils import now_ist
 
 class NonFollowUp(Base):
     __tablename__ = "non_followups"
@@ -17,7 +18,7 @@ class NonFollowUp(Base):
     user_name = Column(String(255), nullable=True)
     
     # Follow-up details
-    followup_date = Column(DateTime, nullable=False, server_default=func.now())
+    followup_date = Column(DateTime, nullable=False, default=now_ist)
     followup_by = Column(String(50), nullable=False)
     followup_remark = Column(Text, nullable=True)
     status = Column(String(50), nullable=False)
@@ -38,8 +39,8 @@ class NonFollowUp(Base):
     rr_id = Column(Integer, ForeignKey("rr.id"), nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, onupdate=func.now())
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, onupdate=now_ist)
     
     def to_dict(self):
         return {

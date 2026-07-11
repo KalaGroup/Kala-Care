@@ -9,6 +9,7 @@ from app.models.TADA_history_model import TADAHistory
 from app.models.OE_model import OfficeExpense
 from app.models.OEH_model import OfficeExpenseHistory
 from app.models.LVB_model import LocalVendorBill, LocalVendorBillHistory
+from app.time_utils import now_ist
 
 BRANCH_MAP = {
     'HO': 'Pune Office',
@@ -44,7 +45,7 @@ def _parse_date_safe(date_str):
     try:
         parsed = date_parser.parse(s, dayfirst=False, fuzzy=False)
         min_valid = datetime(2020, 1, 1)
-        max_valid = datetime.now() + timedelta(days=30)
+        max_valid = now_ist() + timedelta(days=30)
         if parsed < min_valid or parsed > max_valid:
             return None
         return parsed
@@ -369,7 +370,7 @@ def get_available_years(db: Session, branch_code: Optional[str] = None) -> List[
             years.add(d.year)
 
     if not years:
-        years.add(datetime.now().year)
+        years.add(now_ist().year)
 
     return sorted(years, reverse=True)
 
@@ -547,7 +548,7 @@ def get_office_available_years(db: Session, branch_code: Optional[str] = None) -
             years.add(pd_.year)
 
     if not years:
-        years.add(datetime.now().year)
+        years.add(now_ist().year)
 
     return sorted(years, reverse=True)
 
@@ -719,7 +720,7 @@ def get_vendor_available_years(db: Session, branch_code: Optional[str] = None) -
             years.add(idate.year)
 
     if not years:
-        years.add(datetime.now().year)
+        years.add(now_ist().year)
 
     return sorted(years, reverse=True)
 

@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.mysql import INTEGER, VARCHAR, TEXT, DATETIME, BOOLEAN, JSON as MySQLJSON
 from app.database import Base
 import datetime
+from app.time_utils import now_ist
 
 class Campaign(Base):
     __tablename__ = "campaigns"
@@ -27,8 +28,8 @@ class Campaign(Base):
     # Store PDF scripts as JSON array (each script can be text or PDF metadata)
     scripts = Column(JSON, default=[])  # e.g., [{"name": "script1.pdf", "content": "base64..."}, ...]
     
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 
 class CampaignCSPInfo(Base):
@@ -62,8 +63,8 @@ class CampaignCSPInfo(Base):
     created_by_id = Column(String(100), nullable=True, index=True)
     created_by_name = Column(String(255), nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 
 class CampaignService(Base):
@@ -73,8 +74,8 @@ class CampaignService(Base):
     name = Column(String(100), unique=True, nullable=False)
     description = Column(Text)
     
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 class CampaignLetterFormat(Base):
     __tablename__ = "campaign_letter_formats"
@@ -115,8 +116,8 @@ class CampaignLetterFormat(Base):
     created_by_id = Column(String(100), nullable=True)
     created_by_name = Column(String(255), nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 class CampaignDriveMeta(Base):
     """
@@ -133,8 +134,8 @@ class CampaignDriveMeta(Base):
     data_end_date = Column(DateTime, nullable=True)     # Drive Data Duration — end
     drive_remark = Column(Text, nullable=True)          # free-text remark
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 
 class BranchEmailMaster(Base):
@@ -150,5 +151,5 @@ class BranchEmailMaster(Base):
     email = Column(String(255), nullable=True)          # kept for backward compatibility (first email)
     emails = Column(JSON, default=[])                   # list of emails per branch (multi-email)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)        
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)        

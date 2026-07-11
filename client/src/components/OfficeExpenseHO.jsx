@@ -205,9 +205,32 @@ const OfficeExpenseHO = ({
           )}
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button onClick={() => setShowHistory(true)}
-            className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg shadow-sm hover:shadow-md"
-            style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}>History</button>
+          {!selected && canExport && visibleGroups.length > 0 && (
+            <button
+              onClick={() => exportToExcel(
+                visibleGroups.map(g => ({
+                  submit_voucher_no: g.submit_voucher_no,
+                  branch_name: branchMap[g.branch_code] || g.branch_code,
+                  period: `${g.period_start_display} → ${g.period_end_display}`,
+                  submitted_by: g.submitted_by,
+                  record_count: g.record_count,
+                  total_amount: g.total_amount,
+                  verified_amount: g.verified_amount,
+                })),
+                'oe_vouchers.xlsx',
+                [
+                  { key: 'submit_voucher_no', label: 'Voucher No.' },
+                  { key: 'branch_name', label: 'Branch' },
+                  { key: 'period', label: 'Period' },
+                  { key: 'submitted_by', label: 'Submitted By' },
+                  { key: 'record_count', label: 'Records' },
+                  { key: 'total_amount', label: 'Total Amount (₹)' },
+                  { key: 'verified_amount', label: 'Verified Amount (₹)' },
+                ]
+              )}
+              className="export-btn inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg shadow-sm hover:shadow-md"
+              style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}><svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg> Export Vouchers</button>
+          )}
           {onOpenExpenseHead && (
             <button onClick={onOpenExpenseHead}
               className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg shadow-sm hover:shadow-md"
@@ -218,6 +241,9 @@ const OfficeExpenseHO = ({
               className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg shadow-sm hover:shadow-md"
               style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>Imprest</button>
           )}
+          <button onClick={() => setShowHistory(true)}
+            className="inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-semibold rounded-lg shadow-sm hover:shadow-md"
+            style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}><svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>History</button>
         </div>
       </div>
 

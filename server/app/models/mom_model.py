@@ -5,6 +5,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+from app.time_utils import now_ist
 
 class MomCategory(Base):
     """Colour-coded category used to group master discussion points."""
@@ -13,7 +14,7 @@ class MomCategory(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(80), unique=True, nullable=False, index=True)
     color = Column(String(20), nullable=False, default="#64748b")   # hex colour
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, default=now_ist)
 
 
 class MomMasterPoint(Base):
@@ -24,7 +25,7 @@ class MomMasterPoint(Base):
     title = Column(String(255), nullable=False)
     category = Column(String(80), nullable=False, default="Other")
     is_active = Column(Boolean, nullable=False, default=True)       # soft delete
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, default=now_ist)
 
 
 class MomMeeting(Base):
@@ -49,7 +50,7 @@ class MomMeeting(Base):
     type = Column(String(120), nullable=False, default="")          # preset OR custom typed text
     conducted_by = Column(String(120), nullable=False, default="")
     created_by = Column(String(50), ForeignKey("users.user_id"), nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, default=now_ist)
 
     attendees = relationship(
         "MomAttendee", back_populates="meeting",

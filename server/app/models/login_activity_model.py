@@ -23,4 +23,4 @@ class LoginSession(Base):
     duration_seconds = Column(Integer, nullable=True)
     logout_type = Column(String(20), nullable=True)      # 'manual' | 'auto' | 'close'
     session_date = Column(Date, index=True, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), default=now_ist)

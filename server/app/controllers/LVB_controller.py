@@ -7,6 +7,7 @@ from sqlalchemy import or_, func, cast
 from sqlalchemy.types import Date
 from app.models.LVB_temp_model import LocalVendorBillTemp
 from app.controllers.LVB_voucher_controller import LVBVoucherController
+from app.time_utils import now_ist
 
 class LocalVendorController:
 
@@ -122,7 +123,7 @@ class LocalVendorBillController:
             bill.verification_status = 'Verified'
             bill.verified_by_name = verified_by_name
             bill.verified_by_id = verified_by_id
-            bill.verified_at = datetime.utcnow()
+            bill.verified_at = now_ist()
         db.flush()
         return bill
     

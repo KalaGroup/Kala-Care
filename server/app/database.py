@@ -46,6 +46,56 @@ SessionLocal = sessionmaker(
     bind=engine
 )
 
+# ---------------- IST STORAGE STANDARD ---------------- #
+# All timestamps are stored as NAIVE IST. The frontend sends UTC ISO strings
+# ("...Z"), which Pydantic parses into timezone-aware datetimes — this hook
+# converts every aware datetime on any ORM object to naive IST right before
+# it is written, so no controller has to remember the conversion.
+
+import struct
+from datetime import datetime as _datetime
+from sqlalchemy import event as _event
+from sqlalchemy.orm import Session as _Session
+from app.time_utils import IST as _IST
+
+# READ side: DATETIMEOFFSET columns (models using DateTime(timezone=True))
+# hold IST wall-clock but are tagged +00:00 (GETDATE()/now_ist into a
+# tz-aware column). Left as-is, every API response serializes them as
+# "...+00:00" and the frontend shifts the time by +5:30 AGAIN.
+# This pyodbc output converter makes EVERY read — ORM and raw SQL — return
+# the plain wall-clock as a naive datetime, dropping the meaningless offset.
+_SQL_SS_TIMESTAMPOFFSET = -155
+
+
+def _handle_datetimeoffset(dto_value):
+    # year, month, day, hour, minute, second, fraction(ns), tz_hour, tz_minute
+    tup = struct.unpack("<6hI2h", dto_value)
+    return _datetime(tup[0], tup[1], tup[2], tup[3], tup[4], tup[5], tup[6] // 1000)
+
+
+def _register_datetimeoffset_converter(dbapi_conn):
+    try:
+        dbapi_conn.add_output_converter(_SQL_SS_TIMESTAMPOFFSET, _handle_datetimeoffset)
+    except Exception:
+        pass  # older pyodbc without converter support — keep default behavior
+
+
+@_event.listens_for(engine, "connect")
+def _on_engine_connect(dbapi_conn, connection_record):
+    _register_datetimeoffset_converter(dbapi_conn)
+
+
+@_event.listens_for(_Session, "before_flush")
+def _store_datetimes_as_naive_ist(session, flush_context, instances):
+    for obj in list(session.new) + list(session.dirty):
+        mapper = getattr(obj, "__mapper__", None)
+        if mapper is None:
+            continue
+        for attr in mapper.column_attrs:
+            val = getattr(obj, attr.key, None)
+            if isinstance(val, _datetime) and val.tzinfo is not None:
+                setattr(obj, attr.key, val.astimezone(_IST).replace(tzinfo=None))
+
 # ---------------- LOGGING ---------------- #
 
 logging.basicConfig(level=logging.INFO)
@@ -62,7 +112,7 @@ security_logger.addHandler(file_handler)
 # ---------------- CONNECTION FUNCTION (pyodbc) ---------------- #
 
 def get_db_connection():
-    return pyodbc.connect(
+    conn = pyodbc.connect(
         f"DRIVER={{{config.DB_CONFIG['driver']}}};"
         f"SERVER={config.DB_CONFIG['server']};"
         f"DATABASE={config.DB_CONFIG['database']};"
@@ -70,6 +120,9 @@ def get_db_connection():
         f"PWD={config.DB_CONFIG['password']};"
         "TrustServerCertificate=yes;"
     )
+    # Same naive-wall-clock handling as the SQLAlchemy engine (see below)
+    _register_datetimeoffset_converter(conn)
+    return conn
 
 # ---------------- SQL INJECTION PROTECTION ---------------- #
 

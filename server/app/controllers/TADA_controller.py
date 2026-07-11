@@ -14,6 +14,7 @@ from app.models.branch_upload_limit_model import BranchUploadLimit
 from app.models.TADAImport_temp_model import TADAImportTemp
 from app.models.TADA_history_model import TADAHistory
 from app.controllers.voucher_controller import generate_voucher_no
+from app.time_utils import now_ist
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -167,7 +168,7 @@ def is_within_last_30_days(raw_value, days: int = 30) -> bool:
     parsed = parse_sr_closed_date(raw_value)
     if parsed is None:
         return True
-    cutoff = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days)
+    cutoff = now_ist().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days)
     return parsed >= cutoff
 
 def reach_date_key(raw_value) -> Optional[str]:
@@ -451,7 +452,7 @@ def process_tada_file(db: Session, file_path: str, branch_code: str, uploaded_by
             # If Appointment Number is null/empty, allow import without duplicate checks
             if not appointment_number:
                 # Generate a unique placeholder so the record can be stored
-                appointment_number = f"MANUAL_{index}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+                appointment_number = f"MANUAL_{index}_{now_ist().strftime('%Y%m%d%H%M%S%f')}"
                 # Skip all duplicate checks for null-appointment rows — fall through to insert
                 pass
             else:
@@ -648,7 +649,10 @@ def process_tada_file(db: Session, file_path: str, branch_code: str, uploaded_by
 def get_all_tada_records(db: Session, branch_code: Optional[str] = None, skip: int = 0, limit: int = 100):
     """Get all TADA records with optional branch filter"""
     try:
-        query = db.query(models.TADAImport)
+        # Column projection (plain Rows, attribute access preserved) instead of
+        # full ORM entities — same data, no per-row instrumentation overhead.
+        cols = [getattr(models.TADAImport, c.name) for c in models.TADAImport.__table__.columns]
+        query = db.query(*cols)
         if branch_code:
             query = query.filter(models.TADAImport.branch_code == branch_code)
         return query.order_by(desc(models.TADAImport.uploaded_at)).offset(skip).limit(limit).all()
@@ -755,7 +759,10 @@ def get_tada_statistics(db: Session, branch_code: Optional[str] = None):
 def get_all_temp_records(db: Session, branch_code: Optional[str] = None,
                         skip: int = 0, limit: int = 100):
     try:
-        q = db.query(TADAImportTemp)
+        # Column projection (plain Rows, attribute access preserved) instead of
+        # full ORM entities — same data, no per-row instrumentation overhead.
+        cols = [getattr(TADAImportTemp, c.name) for c in TADAImportTemp.__table__.columns]
+        q = db.query(*cols)
         if branch_code:
             q = q.filter(TADAImportTemp.branch_code == branch_code)
         return q.order_by(desc(TADAImportTemp.uploaded_at)).offset(skip).limit(limit).all()

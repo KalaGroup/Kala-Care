@@ -1536,6 +1536,9 @@ const HOExpense = () => {
             record_count: e.records.length,
             verified_count: e.records.filter(r => r.verification_status === 'Verified').length,
             total: calculateTotalForRecords(e.records),
+            verified_total: e.records
+              .filter(r => r.verification_status === 'Verified')
+              .reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0),
             period_start: fmtPeriod(minDate),
             period_end: fmtPeriod(maxDate),
           };
@@ -1559,6 +1562,7 @@ const HOExpense = () => {
           record_count: engineers.reduce((s, e) => s + e.record_count, 0),
           verified_count: engineers.reduce((s, e) => s + e.verified_count, 0),
           total: engineers.reduce((s, e) => s + e.total, 0),
+          verified_total: engineers.reduce((s, e) => s + (e.verified_total || 0), 0),
         };
       }).sort((a, b) => String(a.voucher_no).localeCompare(String(b.voucher_no)));
       setVoucherGroups(builtVoucherGroups);
@@ -2200,6 +2204,9 @@ const HOExpense = () => {
             record_count: en.records.length,
             verified_count: en.records.filter(r => r.verification_status === 'Verified').length,
             total: en.records.reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0),
+            verified_total: en.records
+              .filter(r => r.verification_status === 'Verified')
+              .reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0),
             period_start: fmtP(minD),
             period_end: fmtP(maxD),
           };
@@ -2214,6 +2221,7 @@ const HOExpense = () => {
           record_count: engs.reduce((s, e) => s + e.record_count, 0),
           verified_count: engs.reduce((s, e) => s + e.verified_count, 0),
           total: engs.reduce((s, e) => s + e.total, 0),
+          verified_total: engs.reduce((s, e) => s + (e.verified_total || 0), 0),
         };
       }).sort((a, b) => String(a.voucher_no).localeCompare(String(b.voucher_no)));
 
@@ -2286,6 +2294,9 @@ const HOExpense = () => {
             record_count: en.records.length,
             verified_count: en.records.filter(r => r.verification_status === 'Verified').length,
             total: en.records.reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0),
+            verified_total: en.records
+              .filter(r => r.verification_status === 'Verified')
+              .reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0),
             period_start: fmtP(minD),
             period_end: fmtP(maxD),
           };
@@ -2300,6 +2311,7 @@ const HOExpense = () => {
           record_count: engs.reduce((s, e) => s + e.record_count, 0),
           verified_count: engs.reduce((s, e) => s + e.verified_count, 0),
           total: engs.reduce((s, e) => s + e.total, 0),
+          verified_total: engs.reduce((s, e) => s + (e.verified_total || 0), 0),
         };
       }).sort((a, b) => String(a.voucher_no).localeCompare(String(b.voucher_no)));
 
@@ -4658,6 +4670,7 @@ const HOExpense = () => {
                                   <th className="border border-gray-300 px-2 py-1 text-center text-xs font-semibold text-black">Total SR</th>
                                   <th className="border border-gray-300 px-2 py-1 text-center text-xs font-semibold text-black">Verified SR</th>
                                   <th className="border border-gray-300 px-2 py-1 text-center text-xs font-semibold text-black">Total Amount</th>
+                                  <th className="border border-gray-300 px-2 py-1 text-center text-xs font-semibold text-black">Verified Amount</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -4683,6 +4696,11 @@ const HOExpense = () => {
                                         ? `₹${vg.total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                                         : '-'}
                                     </td>
+                                    <td className="border border-gray-300 px-4 py-0 text-center text-sm font-semibold text-green-700">
+                                      {vg.verified_total && vg.verified_total !== 0
+                                        ? `₹${vg.verified_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                        : '-'}
+                                    </td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -4701,6 +4719,12 @@ const HOExpense = () => {
                                   <td className="border border-gray-300 px-2 py-0.5 text-center text-sm font-bold" style={{ color: themeColor }}>
                                     {(() => {
                                       const sum = voucherGroups.reduce((s, v) => s + (v.total || 0), 0);
+                                      return sum !== 0 ? `₹${sum.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-';
+                                    })()}
+                                  </td>
+                                  <td className="border border-gray-300 px-2 py-0.5 text-center text-sm font-bold text-green-700">
+                                    {(() => {
+                                      const sum = voucherGroups.reduce((s, v) => s + (v.verified_total || 0), 0);
                                       return sum !== 0 ? `₹${sum.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-';
                                     })()}
                                   </td>
@@ -4725,6 +4749,7 @@ const HOExpense = () => {
                                   <th className="border border-gray-300 px-2 py-1 text-center text-xs font-semibold text-black">Total SR</th>
                                   <th className="border border-gray-300 px-2 py-1 text-center text-xs font-semibold text-black">Verified SR</th>
                                   <th className="border border-gray-300 px-2 py-1 text-center text-xs font-semibold text-black">Total Amount</th>
+                                  <th className="border border-gray-300 px-2 py-1 text-center text-xs font-semibold text-black">Verified Amount</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -4754,6 +4779,11 @@ const HOExpense = () => {
                                         ? `₹${engineer.total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                                         : '-'}
                                     </td>
+                                    <td className="border border-gray-300 px-4 py-0 text-center text-sm font-semibold text-green-700">
+                                      {engineer.verified_total && engineer.verified_total !== 0
+                                        ? `₹${engineer.verified_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                        : '-'}
+                                    </td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -4769,6 +4799,12 @@ const HOExpense = () => {
                                   <td className="border border-gray-300 px-2 py-0.5 text-center text-sm font-bold" style={{ color: themeColor }}>
                                     {(() => {
                                       const sum = selectedVoucher.engineers.reduce((s, e) => s + (e.total || 0), 0);
+                                      return sum !== 0 ? `₹${sum.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-';
+                                    })()}
+                                  </td>
+                                  <td className="border border-gray-300 px-2 py-0.5 text-center text-sm font-bold text-green-700">
+                                    {(() => {
+                                      const sum = selectedVoucher.engineers.reduce((s, e) => s + (e.verified_total || 0), 0);
                                       return sum !== 0 ? `₹${sum.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-';
                                     })()}
                                   </td>
@@ -4855,6 +4891,7 @@ const HOExpense = () => {
                                 { key: 'record_count', label: 'Total SR' },
                                 { key: 'verified_count', label: 'Verified SR' },
                                 { key: 'total', label: 'Total Amount' },
+                                { key: 'verified_total', label: 'Verified Amount' },
                               ]
                             )}
                             className="export-btn inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg"
@@ -4879,6 +4916,7 @@ const HOExpense = () => {
                                 { key: 'record_count', label: 'Total SR' },
                                 { key: 'verified_count', label: 'Verified SR' },
                                 { key: 'total', label: 'Total Amount' },
+                                { key: 'verified_total', label: 'Verified Amount' },
                               ]
                             )}
                             className="export-btn inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg shadow-md hover:shadow-lg"
@@ -5021,7 +5059,7 @@ const HOExpense = () => {
                           <div className="overflow-x-auto">
                             <table className="min-w-full border-collapse border border-gray-200 max-md:min-w-[680px]">
                               <thead className="bg-gray-50"><tr>
-                                {['Sr. No.', 'Voucher No.', 'Submitted By', 'Engineers', 'Total SR', 'Verified SR', 'Total Amount'].map(h =>
+                                {['Sr. No.', 'Voucher No.', 'Submitted By', 'Engineers', 'Total SR', 'Verified SR', 'Total Amount', 'Verified Amount'].map(h =>
                                   <th key={h} className="border border-gray-300 px-2 py-1 text-center text-xs font-semibold text-black">{h}</th>)}
                               </tr></thead>
                               <tbody>
@@ -5038,6 +5076,9 @@ const HOExpense = () => {
                                     <td className="border border-gray-300 px-4 py-0 text-center text-sm font-semibold">
                                       {vg.total ? `₹${vg.total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
                                     </td>
+                                    <td className="border border-gray-300 px-4 py-0 text-center text-sm font-semibold text-green-700">
+                                      {vg.verified_total ? `₹${vg.verified_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
+                                    </td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -5049,6 +5090,9 @@ const HOExpense = () => {
                                 <td className="border border-gray-300 px-2 py-0.5 text-center text-sm font-bold" style={{ color: themeColor }}>
                                   {(() => { const sum = salesBMVoucherGroups.reduce((s, v) => s + v.total, 0); return sum ? `₹${sum.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'; })()}
                                 </td>
+                                <td className="border border-gray-300 px-2 py-0.5 text-center text-sm font-bold text-green-700">
+                                  {(() => { const sum = salesBMVoucherGroups.reduce((s, v) => s + (v.verified_total || 0), 0); return sum ? `₹${sum.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'; })()}
+                                </td>
                               </tr></tfoot>
                             </table>
                           </div>
@@ -5058,7 +5102,7 @@ const HOExpense = () => {
                         <div className="overflow-x-auto">
                           <table className="min-w-full border-collapse border border-gray-200 max-md:min-w-[720px]">
                             <thead className="bg-gray-50"><tr>
-                              {['Sr. No.', 'Engineer Name', 'Engineer UID', 'Period', 'Total SR', 'Verified SR', 'Total Amount'].map(h =>
+                              {['Sr. No.', 'Engineer Name', 'Engineer UID', 'Period', 'Total SR', 'Verified SR', 'Total Amount', 'Verified Amount'].map(h =>
                                 <th key={h} className="border border-gray-300 px-2 py-1 text-center text-xs font-semibold text-black">{h}</th>)}
                             </tr></thead>
                             <tbody>
@@ -5076,6 +5120,9 @@ const HOExpense = () => {
                                   <td className="border border-gray-300 px-2 py-0 text-center text-sm">{en.verified_count}</td>
                                   <td className="border border-gray-300 px-4 py-0 text-center text-sm font-semibold">
                                     {en.total ? `₹${en.total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
+                                  </td>
+                                  <td className="border border-gray-300 px-4 py-0 text-center text-sm font-semibold text-green-700">
+                                    {en.verified_total ? `₹${en.verified_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
                                   </td>
                                 </tr>
                               ))}

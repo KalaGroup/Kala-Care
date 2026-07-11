@@ -57,12 +57,20 @@ import {
   InboxIcon,
   PaperAirplaneIcon,
 } from "@heroicons/react/24/outline";
-import { CiExport } from "react-icons/ci";
 import { FaCheck } from "react-icons/fa";
 import { useInView } from "react-intersection-observer";
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
+
+// Date columns selectable in the top date-range filter (Drive & Non-Drive)
+const DATE_FILTER_FIELDS = [
+  { key: 'next_followup_date', label: 'Next Followup Date' },
+  { key: 'last_followup_date', label: 'Last Followup Date' },
+  { key: 'last_oil_change_date', label: 'Last Oil Change Date' },
+  { key: 'warranty_expiry_date', label: 'Warranty Expiry' },
+  { key: 'agreement_end_date', label: 'Agreement End Date' },
+];
 
 const useDebounce = (value, delay) => {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -375,10 +383,11 @@ const CustomerEng2 = () => {
   const [warrantyFilterPosition, setWarrantyFilterPosition] = useState(null);
   const warrantyFilterRef = useRef(null);
 
-  // Last Followup Date range filter (top bar). Doesn't hide records — it
-  // re-orders them: in-range (oldest→newest), then out-of-range (oldest→
-  // newest), then records without a last followup date.
+  // Top-bar date range filter. Doesn't hide records — it re-orders them:
+  // in-range (oldest→newest), then out-of-range (oldest→newest), then
+  // records without a date. The dropdown picks WHICH date column applies.
   const [followupDateRange, setFollowupDateRange] = useState({ from: '', to: '' });
+  const [dateFilterField, setDateFilterField] = useState('next_followup_date');
 
   // Agreement End Date range filter
   const [agreementDateRange, setAgreementDateRange] = useState({ from: '', to: '' });
@@ -1049,9 +1058,9 @@ const CustomerEng2 = () => {
       }
     }
 
-    // Last Followup Date range: keep ALL records but re-order —
-    // in-range (oldest→newest), then other dated records (oldest→newest),
-    // then records with no last followup date.
+    // Top date-range filter: keep ALL records but re-order on the SELECTED
+    // date column — in-range (oldest→newest), then other dated records
+    // (oldest→newest), then records with no date.
     if (followupDateRange.from || followupDateRange.to) {
       const from = followupDateRange.from ? new Date(followupDateRange.from) : null;
       if (from) from.setHours(0, 0, 0, 0);
@@ -1060,7 +1069,7 @@ const CustomerEng2 = () => {
 
       // Decorate once (avoid re-parsing dates inside the comparator on 40k rows)
       const decorated = filtered.map((c, idx) => {
-        const t = c.last_followup_date ? new Date(c.last_followup_date).getTime() : NaN;
+        const t = c[dateFilterField] ? new Date(c[dateFilterField]).getTime() : NaN;
         let group;
         if (Number.isNaN(t)) group = 2; // no date — last
         else if ((!from || t >= from.getTime()) && (!to || t <= to.getTime())) group = 0; // in range — first
@@ -1077,7 +1086,7 @@ const CustomerEng2 = () => {
 
     // 3-tier sort is NOT redone here — already applied in tierSortedCustomers (filter preserves order)
     return filtered;
-  }, [debouncedSearchTerm, searchResults, tierSortedCustomers, selectedFlag, isAdmin, userBranch, selectedBranches, statusColumnFilter, warrantyDateRange, agreementDateRange, followupDateRange]);
+  }, [debouncedSearchTerm, searchResults, tierSortedCustomers, selectedFlag, isAdmin, userBranch, selectedBranches, statusColumnFilter, warrantyDateRange, agreementDateRange, followupDateRange, dateFilterField]);
 
   // R (Rejected) count — loaded customers whose latest status is "rejected"
   // (respects branch restriction + the header branch filter, same as the C-flag counts)
@@ -6230,12 +6239,21 @@ ${f.start_para}`;
             {/* Filters */}
             <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-end gap-2">
 
-              {/* Last Followup Date range — re-orders records, hides none */}
+              {/* Top date-range filter — re-orders records on the selected date column, hides none */}
               <div
                 className="flex items-center gap-1 whitespace-nowrap"
-                title="Order by Last Followup Date — records in this range first (oldest to newest), then other dated records, then records without a date"
+                title="Records in this range first (oldest to newest), then other dated records, then records without a date"
               >
-                <span className="text-xs font-semibold text-gray-600">Last Followup:</span>
+                <select
+                  value={dateFilterField}
+                  onChange={(e) => setDateFilterField(e.target.value)}
+                  title="Choose which date column the range filter applies to"
+                  className="border border-gray-300 rounded-md px-1.5 py-1 text-xs bg-white text-black focus:outline-none focus:border-blue-500"
+                >
+                  {DATE_FILTER_FIELDS.map((f) => (
+                    <option key={f.key} value={f.key}>{f.label}</option>
+                  ))}
+                </select>
                 <input
                   type="date"
                   value={followupDateRange.from}
@@ -6266,7 +6284,7 @@ ${f.start_para}`;
                 <MagnifyingGlassIcon className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Search by Instance ID, Name, Mobile..."
+                  placeholder="Search by Instance ID, Name, Mobile, User..."
                   value={searchTerm}
                   onChange={handleSearchChange}
                   className="w-full pl-7 pr-7 py-1.5 text-xs border-1 border-gray-300 rounded-md bg-white text-black placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
@@ -6306,7 +6324,7 @@ ${f.start_para}`;
                   onClick={exportToXLSX}
                   className="export-btn px-2 py-1 text-xs border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center gap-1 w-full sm:w-auto justify-center"
                 >
-                  <CiExport className="h-3.5 w-3.5" style={{ color: themeColor }} />
+                  <svg className="h-3.5 w-3.5" style={{ color: themeColor }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg>
                   <span>Export</span>
                 </button>
               )}
@@ -8254,27 +8272,35 @@ ${f.start_para}`;
               style={{ scrollbarWidth: "thin" }}
             >
               <div className="flex gap-1.5 min-w-max">
-                {customerCampaigns.map((campaign) => (
-                  <button
-                    key={campaign.id}
-                    type="button"
-                    onClick={() => handleCampaignSelection(campaign.id)}
-                    className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${selectedCampaignsForFollowup.includes(campaign.id)
-                      ? "text-white"
-                      : "bg-gray-100 text-black hover:bg-gray-200"
-                      }`}
-                    style={
-                      selectedCampaignsForFollowup.includes(campaign.id)
-                        ? { backgroundColor: campaign.color || themeColor }
-                        : {}
-                    }
-                  >
-                    <span>{campaign.name}</span>
-                    {selectedCampaignsForFollowup.includes(campaign.id) && (
-                      <CheckCircleIcon className="h-3 w-3" />
-                    )}
-                  </button>
-                ))}
+                {customerCampaigns.map((campaign) => {
+                  // CSP product/service drives are shown but NOT selectable here
+                  const isCspBlocked = (campaign.service || '').toLowerCase().includes('csp');
+                  return (
+                    <button
+                      key={campaign.id}
+                      type="button"
+                      disabled={isCspBlocked}
+                      onClick={() => { if (!isCspBlocked) handleCampaignSelection(campaign.id); }}
+                      title={isCspBlocked ? 'CSP product drives cannot be selected for follow-up here' : undefined}
+                      className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${isCspBlocked
+                        ? "bg-gray-100 text-gray-400 line-through cursor-not-allowed"
+                        : selectedCampaignsForFollowup.includes(campaign.id)
+                          ? "text-white"
+                          : "bg-gray-100 text-black hover:bg-gray-200"
+                        }`}
+                      style={
+                        !isCspBlocked && selectedCampaignsForFollowup.includes(campaign.id)
+                          ? { backgroundColor: campaign.color || themeColor }
+                          : {}
+                      }
+                    >
+                      <span>{campaign.name}</span>
+                      {!isCspBlocked && selectedCampaignsForFollowup.includes(campaign.id) && (
+                        <CheckCircleIcon className="h-3 w-3" />
+                      )}
+                    </button>
+                  );
+                })}
 
                 {/* "Other" button */}
                 <button

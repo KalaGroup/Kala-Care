@@ -7,6 +7,7 @@ from app.controllers.delete_controller import DeleteController
 from datetime import datetime
 import logging
 import traceback
+from app.time_utils import now_ist
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ async def backup_data(request: BackupRequest):
         # Create backup
         zip_buffer = DeleteController.backup_data(db, request.dataType)
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = now_ist().strftime("%Y%m%d_%H%M%S")
         filename = f"backup_{request.dataType}_{timestamp}.zip"
                 
         return StreamingResponse(

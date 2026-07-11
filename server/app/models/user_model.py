@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
 import enum
+from app.time_utils import now_ist
 
 class UserRole(str, enum.Enum):
     MASTER_ADMIN = "master_admin"
@@ -25,8 +26,8 @@ class User(Base):
     can_export = Column(Boolean, default=False)
     can_access_expense = Column(Boolean, default=False)
     theme = Column(String(10), nullable=True, default="light")  # 'light' | 'dark' — UI preference, applied on login
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
 
     branch_accesses = relationship(
         "UserBranchAccess",
@@ -45,7 +46,7 @@ class UserBranchAccess(Base):
     branch = Column(String(20), nullable=False)
     branch_name = Column(String(100), nullable=False)
     is_primary = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), default=now_ist)
 
     user = relationship("User", back_populates="branch_accesses")
 

@@ -4,6 +4,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
+from app.time_utils import now_ist
 
 
 class MaintenanceAppCode(Base):
@@ -22,8 +23,8 @@ class MaintenanceAppCode(Base):
     kva = Column(String(20), nullable=True)
     emission = Column(String(40), nullable=True)
     created_by = Column(String(50), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
 
     parts = relationship(
         "MaintenancePart",
@@ -76,8 +77,8 @@ class MaintenanceService(Base):
     short = Column(String(40), nullable=True)
     hours = Column(String(20), nullable=False)
     note = Column(String(400), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
 
 
 class MaintenanceActivity(Base):
@@ -94,4 +95,4 @@ class MaintenanceActivity(Base):
     user_id = Column(String(50), nullable=True)
     engine_model = Column(String(120), nullable=True)
     segment = Column(String(40), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    created_at = Column(DateTime(timezone=True), default=now_ist, index=True)

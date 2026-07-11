@@ -9,6 +9,7 @@ from app.models.customer_model import (
     AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
     PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, OpenSRData
 )
+from app.time_utils import now_ist
 from app.schemas.customer_schema import (
     CustomerCreate, CustomerUpdate,
     AMCAgreementCreate, AMCAgreementUpdate,
@@ -277,7 +278,7 @@ class CustomerController:
         for field, value in update_data.items():
             setattr(db_customer, field, value)
         
-        db_customer.updated_at = datetime.utcnow()
+        db_customer.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_customer)  # This refreshes with all fields from database
         return db_customer
@@ -337,7 +338,7 @@ class CustomerController:
         for field, value in update_data.items():
             setattr(db_agreement, field, value)
         
-        db_agreement.updated_at = datetime.utcnow()
+        db_agreement.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_agreement)
         return db_agreement
@@ -406,7 +407,7 @@ class CustomerController:
         for field, value in update_data.items():
             setattr(db_asset, field, value)
         
-        db_asset.updated_at = datetime.utcnow()
+        db_asset.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_asset)
         return db_asset
@@ -473,7 +474,7 @@ class CustomerController:
         for field, value in update_data.items():
             setattr(db_service, field, value)
         
-        db_service.updated_at = datetime.utcnow()
+        db_service.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_service)
         return db_service
@@ -540,7 +541,7 @@ class CustomerController:
         for field, value in update_data.items():
             setattr(db_quote, field, value)
         
-        db_quote.updated_at = datetime.utcnow()
+        db_quote.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_quote)
         return db_quote
@@ -607,7 +608,7 @@ class CustomerController:
         for field, value in update_data.items():
             setattr(db_quote, field, value)
         
-        db_quote.updated_at = datetime.utcnow()
+        db_quote.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_quote)
         return db_quote
@@ -674,7 +675,7 @@ class CustomerController:
         for field, value in update_data.items():
             setattr(db_quote, field, value)
         
-        db_quote.updated_at = datetime.utcnow()
+        db_quote.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_quote)
         return db_quote
@@ -740,7 +741,7 @@ class CustomerController:
         for field, value in update_data.items():
             setattr(db_quote, field, value)
         
-        db_quote.updated_at = datetime.utcnow()
+        db_quote.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_quote)
         return db_quote
@@ -807,7 +808,7 @@ class CustomerController:
         for field, value in update_data.items():
             setattr(db_record, field, value)
         
-        db_record.updated_at = datetime.utcnow()
+        db_record.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_record)
         return db_record
@@ -874,7 +875,7 @@ class CustomerController:
         for field, value in update_data.items():
             setattr(db_record, field, value)
         
-        db_record.updated_at = datetime.utcnow()
+        db_record.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_record)
         return db_record
@@ -942,7 +943,7 @@ class CustomerController:
         for field, value in update_data.items():
             setattr(db_report, field, value)
         
-        db_report.updated_at = datetime.utcnow()
+        db_report.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_report)
         return db_report

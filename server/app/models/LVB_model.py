@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Boolean, Date
 from sqlalchemy.sql import func
 from app.database import Base
+from app.time_utils import now_ist
 
 class LocalVendor(Base):
     __tablename__ = "local_vendors"
@@ -13,7 +14,7 @@ class LocalVendor(Base):
     is_registered = Column(Boolean, default=False)
     branch_code = Column(String(50), nullable=True)
     created_by = Column(String(100), nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, default=now_ist)
     is_active = Column(Boolean, default=True)
 
     def to_dict(self):
@@ -55,8 +56,8 @@ class LocalVendorBill(Base):
     branch_code = Column(String(50), nullable=False)
     created_by = Column(String(100), nullable=False)
     created_by_name = Column(String(100), nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, onupdate=func.now())
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, onupdate=now_ist)
     is_deleted = Column(Boolean, default=False)
     verification_status = Column(String(20), default='Pending')
     verified_by_name = Column(String(100), nullable=True)
@@ -123,7 +124,7 @@ class LocalVendorBillHistory(Base):
     verified_at = Column(DateTime, nullable=True)
     submitted_by_name = Column(String(100), nullable=True)
     submitted_by_id = Column(String(100), nullable=True)
-    moved_at = Column(DateTime, server_default=func.now())
+    moved_at = Column(DateTime, default=now_ist)
     ho_paid_date = Column(Date, nullable=True)
     submit_voucher_no = Column(String(50), nullable=True)   # carried from main on submit-to-history
 

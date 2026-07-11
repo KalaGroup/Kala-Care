@@ -12,6 +12,7 @@ from decimal import Decimal
 
 # ---------- adjust this import to match your project ----------
 from app.database import Base   # e.g. from db.session import Base
+from app.time_utils import now_ist
 # --------------------------------------------------------------
 
 
@@ -24,10 +25,10 @@ class ImprestAmount(Base):
     name         = Column(String(255), nullable=False)
     amount       = Column(Numeric(14, 2), nullable=False, default=0)
     created_by   = Column(String(255), nullable=True)
-    created_at   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at   = Column(DateTime(timezone=True), default=now_ist, nullable=False)
     updated_at   = Column(DateTime(timezone=True),
-                          server_default=func.now(),
-                          onupdate=func.now(),
+                          default=now_ist,
+                          onupdate=now_ist,
                           nullable=False)
 
     __table_args__ = (

@@ -195,8 +195,11 @@ class EmployeePerformanceController:
                 daily_performance.append({
                     'date': date_val.strftime('%Y-%m-%d') if hasattr(date_val, 'strftime') else str(date_val),
                     'campaign_name': campaign_name,
-                    'first_followup_time': first_time.isoformat() if first_time else None,
-                    'last_followup_time': last_time.isoformat() if last_time else None,
+                    # created_at holds IST wall-clock but comes back tagged +00:00
+                    # (GETDATE() into a tz-aware column) — strip the fake offset so
+                    # the frontend shows the wall-clock as-is instead of adding +5:30.
+                    'first_followup_time': first_time.replace(tzinfo=None).isoformat() if first_time else None,
+                    'last_followup_time': last_time.replace(tzinfo=None).isoformat() if last_time else None,
                     'total_working_hours': working_hours,
                     'total_followups': total_followups,
                     'completed_count': 0,

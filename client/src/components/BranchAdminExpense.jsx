@@ -8877,7 +8877,7 @@ const BranchAdminExpense = () => {
                                         position: 'sticky',
                                         left: 0,
                                         zIndex: 5,
-                                        backgroundColor: 'white',
+                                        backgroundColor: blockedByBillWise ? '#f3f4f6' : 'white',
                                         boxShadow: '2px 0 4px -2px rgba(0,0,0,0.1)',
                                       } : {}),
                                     }}
@@ -9517,6 +9517,17 @@ const BranchAdminExpense = () => {
         .overflow-auto::-webkit-scrollbar-thumb:hover,
         .overflow-x-auto::-webkit-scrollbar-thumb:hover { background:#6366f1; }
         tbody tr:hover td[style*="sticky"] { background-color:#eff6ff !important; }
+
+        /* Dark theme — the rules above (and inline scrollbarColor / sticky-cell
+           backgrounds) hardcode light colors; remap them to the dark palette. */
+        html.dark .overflow-auto::-webkit-scrollbar-track,
+        html.dark .overflow-x-auto::-webkit-scrollbar-track { background:#12151b; }
+        html.dark .overflow-auto::-webkit-scrollbar-thumb,
+        html.dark .overflow-x-auto::-webkit-scrollbar-thumb { background:#3a4150; }
+        html.dark .overflow-auto::-webkit-scrollbar-thumb:hover,
+        html.dark .overflow-x-auto::-webkit-scrollbar-thumb:hover { background:#4b5563; }
+        html.dark [style*="scrollbar-color"] { scrollbar-color:#3a4150 #12151b !important; }
+        html.dark tbody tr:hover td[style*="sticky"] { background-color:#1a2a36 !important; }
       
         /* Submitted/Drafts tables use tableLayout:fixed — thead widths win.
            Strip any inline width/min-width/max-width on tds so they can't fight back. */

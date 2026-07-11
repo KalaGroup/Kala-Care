@@ -10,6 +10,8 @@ from app.models.OE_model import OfficeExpense
 from app.models.OEH_model import OfficeExpenseHistory
 from app.models.LVB_model import LocalVendorBill, LocalVendorBillHistory
 
+from app.time_utils import now_ist
+
 # Reuse the helpers + branch map already defined for HO dashboard
 from app.controllers.HOExpenseDash_controller import (
     _parse_date_safe, _safe_float,
@@ -276,7 +278,7 @@ def get_engineers_unverified(db: Session, branch_code: str) -> List[Dict[str, An
 # ──────────────────────────────────────────────────────────────────
 def get_branch_available_years(db: Session, branch_code: str) -> List[int]:
     if not _ok(branch_code):
-        return [datetime.now().year]
+        return [now_ist().year]
 
     rows = db.query(TADAHistory.moved_at).filter(
         TADAHistory.verification_status == 'Verified',
@@ -285,7 +287,7 @@ def get_branch_available_years(db: Session, branch_code: str) -> List[int]:
 
     years = {m.year for (m,) in rows if m}
     if not years:
-        years.add(datetime.now().year)
+        years.add(now_ist().year)
     return sorted(years, reverse=True)
 
 def get_branch_office_kpis(db: Session, branch_code: str) -> Dict[str, Any]:
@@ -412,13 +414,13 @@ def get_branch_office_by_category(
 
 def get_branch_office_available_years(db: Session, branch_code: str) -> List[int]:
     if not _ok(branch_code):
-        return [datetime.now().year]
+        return [now_ist().year]
     rows = db.query(OfficeExpenseHistory.moved_at).filter(
         OfficeExpenseHistory.branch_code == branch_code,
     ).all()
     years = {m.year for (m,) in rows if m}
     if not years:
-        years.add(datetime.now().year)
+        years.add(now_ist().year)
     return sorted(years, reverse=True)
 
 
@@ -551,11 +553,11 @@ def get_branch_vendor_by_vendor(
 
 def get_branch_vendor_available_years(db: Session, branch_code: str) -> List[int]:
     if not _ok(branch_code):
-        return [datetime.now().year]
+        return [now_ist().year]
     rows = db.query(LocalVendorBillHistory.moved_at).filter(
         LocalVendorBillHistory.branch_code == branch_code,
     ).all()
     years = {m.year for (m,) in rows if m}
     if not years:
-        years.add(datetime.now().year)
+        years.add(now_ist().year)
     return sorted(years, reverse=True)

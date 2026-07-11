@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, Date
 from sqlalchemy.sql import func
 from app.database import Base
+from app.time_utils import now_ist
 
 
 class TADABillWiseHistory(Base):
@@ -52,5 +53,5 @@ class TADABillWiseHistory(Base):
     # Submission metadata
     submitted_by_name = Column(String(100), nullable=True)
     submitted_by_uid = Column(String(50), nullable=True)
-    moved_at = Column(DateTime(timezone=True), server_default=func.now())
+    moved_at = Column(DateTime(timezone=True), default=now_ist)
     paid_date = Column(Date, nullable=True)

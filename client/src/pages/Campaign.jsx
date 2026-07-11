@@ -19,6 +19,7 @@ import {
   UserGroupIcon,
   ArrowPathIcon,
   DocumentArrowUpIcon,
+  ArrowUpTrayIcon,
   DocumentDuplicateIcon,
   DocumentIcon,
   CloudArrowUpIcon,
@@ -2971,7 +2972,7 @@ const Campaign = () => {
                                       onClick={exportInvalidAssets}
                                       className="export-btn text-xs font-medium flex items-center gap-0.5 px-2 py-0.5 rounded"
                                     >
-                                      <DocumentArrowUpIcon className="h-3 w-3" />
+                                      <ArrowUpTrayIcon className="h-3 w-3" />
                                       Export
                                     </button>
                                   )}
@@ -3547,7 +3548,7 @@ const Campaign = () => {
                                       onClick={exportInvalidAssets}
                                       className="export-btn text-xs font-medium flex items-center gap-0.5 px-2 py-0.5 rounded"
                                     >
-                                      <DocumentArrowUpIcon className="h-3 w-3" />
+                                      <ArrowUpTrayIcon className="h-3 w-3" />
                                       Export
                                     </button>
                                   )}
@@ -5479,7 +5480,11 @@ const Campaign = () => {
                         </td>
                         <td className="px-3 py-2 text-center text-black whitespace-nowrap">{formatDate(campaign.start_date)}</td>
                         <td className="px-3 py-2 text-center text-black whitespace-nowrap">{campaign.end_date ? formatDate(campaign.end_date) : 'Ongoing'}</td>
-                        <td className="px-3 py-2 text-center text-black tabular-nums">{campaign.asset_numbers?.length || 0}</td>
+                        {/* Assets = TOTAL (pending assets + completed) — asset_numbers holds
+                            only the still-pending assets, so add completed back in */}
+                        <td className="px-3 py-2 text-center text-black tabular-nums">
+                          {(campaign.asset_numbers?.length || 0) + (campaignCounts[campaign.id]?.completed || 0)}
+                        </td>
                         <td className="px-3 py-2 text-center text-black tabular-nums">
                           {campaignCounts[campaign.id]?.pending !== undefined
                             ? campaignCounts[campaign.id].pending

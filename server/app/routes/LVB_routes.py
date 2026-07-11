@@ -6,6 +6,7 @@ from app.database import SessionLocal
 from app.controllers.LVB_controller import LocalVendorController, LocalVendorBillController
 from app.controllers.LVB_controller import LocalVendorBillTempController
 from app.models.LVB_model import LocalVendorBill, LocalVendorBillHistory  
+from app.time_utils import now_ist
 
 router = APIRouter(prefix="/lvb", tags=["Local Vendor Bills"])
 
@@ -383,7 +384,7 @@ def set_bill_verification_status(
         if payload.status == 'Verified':
             bill.verified_by_name = updated_by_name or None
             bill.verified_by_id = updated_by_id or None
-            bill.verified_at = datetime.now()
+            bill.verified_at = now_ist()
         else:
             # Leaving Verified (Pending or Unverified) -> clear verifier fields
             bill.verified_by_name = None

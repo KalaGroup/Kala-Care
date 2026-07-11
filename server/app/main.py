@@ -66,6 +66,7 @@ from app.models import login_activity_model
 from app.models.user_model import User, UserBranchAccess
 from app.models import maintenance_model
 from app.models import mom_model
+from app.time_utils import now_ist
 
 # ---------------- CREATE UPLOAD DIRECTORIES ---------------- #
 
@@ -176,7 +177,7 @@ def scheduled_10_day_report_sender():
     """Send the edit-history report on the 10th, 20th and end-of-month at 9:00 AM."""
     while True:
         try:
-            now = datetime.now()
+            now = now_ist()
             if now.hour == 9 and now.minute == 0:
                 window = get_report_window(now)
                 if window:

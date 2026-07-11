@@ -276,16 +276,17 @@ const highlightMatch = (value, term) => {
     );
 };
 
-// LetterSendRecord.created_at is stored UTC (naive). Mark it UTC, render in IST WITH time.
+// LetterSendRecord.created_at is stored as NAIVE IST — render the wall-clock
+// as-is; only strings with an explicit timezone are converted to IST.
 const fmtIstDateTime = (iso) => {
     if (!iso) return '-';
-    const s = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + 'Z';
-    const d = new Date(s);
+    const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso);
+    const d = new Date(iso);
     if (isNaN(d.getTime())) return '-';
     return d.toLocaleString('en-IN', {
         day: '2-digit', month: 'short', year: 'numeric',
         hour: '2-digit', minute: '2-digit', hour12: true,
-        timeZone: 'Asia/Kolkata'
+        ...(hasTz ? { timeZone: 'Asia/Kolkata' } : {})
     });
 };
 
@@ -293,8 +294,8 @@ const fmtIstDateTime = (iso) => {
 // IST shown in "Sent At". String compare on this key is chronological.
 const istDateKey = (iso) => {
     if (!iso) return null;
-    const s = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + 'Z';
-    const d = new Date(s);
+    if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)) return String(iso).slice(0, 10); // naive IST — date part as stored
+    const d = new Date(iso);
     if (isNaN(d.getTime())) return null;
     return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); // YYYY-MM-DD
 };
@@ -613,7 +614,7 @@ const BranchLetterReportModal = ({ isOpen, onClose, branch, branchDisplayName, a
                                     className="export-btn px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-1.5 text-xs whitespace-nowrap disabled:opacity-50"
                                 >
                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
                                     </svg>
                                     Export
                                 </button>

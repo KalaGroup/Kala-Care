@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, UniqueConstraint, LargeBinary
 from sqlalchemy.sql import func
 from app.database import Base
+from app.time_utils import now_ist
 
 
 class KBCategory(Base):
@@ -14,7 +15,7 @@ class KBCategory(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False, unique=True)
     created_by = Column(String(50), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), default=now_ist)
 
 
 class KBFolder(Base):
@@ -33,8 +34,8 @@ class KBFolder(Base):
     is_hidden = Column(Boolean, default=False, nullable=False)
     is_system = Column(Boolean, default=False, nullable=False)   # NEW: Sales / Service
     created_by = Column(String(50), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
 
     __table_args__ = (
         UniqueConstraint("parent_id", "name", name="uq_kb_folder_parent_name"),
@@ -57,4 +58,4 @@ class KBFile(Base):
     is_hidden = Column(Boolean, default=False, nullable=False)  # NEW
     size_bytes = Column(Integer, nullable=True)
     uploaded_by = Column(String(50), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), default=now_ist)

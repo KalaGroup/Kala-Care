@@ -49,10 +49,18 @@ import {
     CubeIcon,
     PaperAirplaneIcon
 } from '@heroicons/react/24/outline';
-import { CiExport } from "react-icons/ci";
 import { FaCheck } from "react-icons/fa";
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
+
+// Date columns selectable in the top date-range filter (Drive & Non-Drive)
+const DATE_FILTER_FIELDS = [
+    { key: 'next_followup_date', label: 'Next Followup Date' },
+    { key: 'last_followup_date', label: 'Last Followup Date' },
+    { key: 'last_oil_change_date', label: 'Last Oil Change Date' },
+    { key: 'warranty_expiry_date', label: 'Warranty Expiry' },
+    { key: 'agreement_end_date', label: 'Agreement End Date' },
+];
 
 // True when a drive is still active. Checks the common flags; if your backend
 // uses a different field name for this, adjust it here.
@@ -149,6 +157,8 @@ const CustomerEng = () => {
     // Date filters
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
+    // Which date column the top range filter categorizes/sorts on
+    const [dateFilterField, setDateFilterField] = useState('next_followup_date');
     // Multi-assets box state
     const [isMultiAssetsExpanded, setIsMultiAssetsExpanded] = useState(false);
 
@@ -977,12 +987,12 @@ const CustomerEng = () => {
 
         if (fromDate || toDate) {
             filtered.forEach(customer => {
-                if (!customer.next_followup_date) {
+                if (!customer[dateFilterField]) {
                     noDateRows.push(customer);
                     return;
                 }
 
-                const followupDate = new Date(customer.next_followup_date);
+                const followupDate = new Date(customer[dateFilterField]);
                 followupDate.setHours(0, 0, 0, 0);
                 let isInRange = false;
 
@@ -1010,14 +1020,14 @@ const CustomerEng = () => {
             });
 
             withinRangeRows.sort((a, b) => {
-                const dateA = a.next_followup_date ? new Date(a.next_followup_date).getTime() : 0;
-                const dateB = b.next_followup_date ? new Date(b.next_followup_date).getTime() : 0;
+                const dateA = a[dateFilterField] ? new Date(a[dateFilterField]).getTime() : 0;
+                const dateB = b[dateFilterField] ? new Date(b[dateFilterField]).getTime() : 0;
                 return dateA - dateB;
             });
 
             outsideRangeRows.sort((a, b) => {
-                const dateA = a.next_followup_date ? new Date(a.next_followup_date).getTime() : 0;
-                const dateB = b.next_followup_date ? new Date(b.next_followup_date).getTime() : 0;
+                const dateA = a[dateFilterField] ? new Date(a[dateFilterField]).getTime() : 0;
+                const dateB = b[dateFilterField] ? new Date(b[dateFilterField]).getTime() : 0;
                 return dateA - dateB;
             });
 
@@ -1413,7 +1423,7 @@ const CustomerEng = () => {
             if (customer.followup_flags?.C7) counts.C7++;
         });
         setFlagCounts(counts);
-    }, [debouncedSearchTerm, customers, selectedCampaigns, selectedFlag, selectedStatus, sortConfig, isAdmin, userBranch, fromDate, toDate, selectedBranches, campaignColumnFilters, warrantyDateRange, agreementDateRange]);
+    }, [debouncedSearchTerm, customers, selectedCampaigns, selectedFlag, selectedStatus, sortConfig, isAdmin, userBranch, fromDate, toDate, dateFilterField, selectedBranches, campaignColumnFilters, warrantyDateRange, agreementDateRange]);
 
     // R (Rejected) count — respects campaign + branch filters
     const rejectedCount = useMemo(() => {
@@ -6894,9 +6904,21 @@ ${f.start_para}`;
                         <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-end gap-2">
                             {/* From and To Date Row - Stack on mobile, row on desktop */}
                             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full sm:w-auto">
+                                {/* Date column selector — which date the range filter applies to */}
+                                <select
+                                    value={dateFilterField}
+                                    onChange={(e) => setDateFilterField(e.target.value)}
+                                    title="Choose which date column the range filter applies to"
+                                    className="border border-gray-300 rounded-md px-2 py-1 text-xs bg-white text-black w-full sm:w-auto"
+                                >
+                                    {DATE_FILTER_FIELDS.map((f) => (
+                                        <option key={f.key} value={f.key}>{f.label}</option>
+                                    ))}
+                                </select>
+
                                 {/* From */}
                                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-2 w-full sm:w-auto">
-                                    <label className="text-xs text-black whitespace-nowrap">Next Call From:</label>
+                                    <label className="text-xs text-black whitespace-nowrap">From:</label>
                                     <input
                                         type="date"
                                         value={fromDate}
@@ -6956,7 +6978,7 @@ ${f.start_para}`;
                                 <MagnifyingGlassIcon className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
                                 <input
                                     type="text"
-                                    placeholder="Search by ID, name, mobile..."
+                                    placeholder="Search by ID, name, mobile, user..."
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                     className="w-full pl-7 pr-7 py-1 text-xs border-1 border-gray-300 rounded-md bg-white text-black placeholder-gray-400"
@@ -6987,7 +7009,7 @@ ${f.start_para}`;
                                     onClick={exportToXLSX}
                                     className="export-btn px-2 py-1 text-xs border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center gap-1 w-full sm:w-auto justify-center"
                                 >
-                                    <CiExport className="h-3.5 w-3.5" style={{ color: themeColor }} />
+                                    <svg className="h-3.5 w-3.5" style={{ color: themeColor }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg>
                                     <span>Export</span>
                                 </button>
                             )}
@@ -9041,23 +9063,31 @@ ${f.start_para}`;
                                 {showOtherCampaigns && (
                                     <div className="px-2 pb-2 pt-1 border-t border-dashed border-gray-300">
                                         <div className="flex gap-1.5 overflow-x-auto pb-1 custom-scrollbar" style={{ scrollbarWidth: 'thin' }}>
-                                            {notEnrolledCampaigns.map(campaign => (
-                                                <button
-                                                    key={campaign.id}
-                                                    type="button"
-                                                    onClick={() => handleCampaignSelection(campaign.id)}
-                                                    className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${selectedCampaignsForFollowup.includes(campaign.id)
-                                                        ? 'text-white'
-                                                        : 'bg-white border border-gray-300 text-black hover:bg-gray-100'
-                                                        }`}
-                                                    style={selectedCampaignsForFollowup.includes(campaign.id) ? { backgroundColor: campaign.color || themeColor } : {}}
-                                                >
-                                                    <span>{campaign.name}</span>
-                                                    {selectedCampaignsForFollowup.includes(campaign.id) && (
-                                                        <CheckCircleIcon className="h-3 w-3" />
-                                                    )}
-                                                </button>
-                                            ))}
+                                            {notEnrolledCampaigns.map(campaign => {
+                                                // CSP product/service drives are shown but NOT selectable here
+                                                const isCspBlocked = (campaign.service || '').toLowerCase().includes('csp');
+                                                return (
+                                                    <button
+                                                        key={campaign.id}
+                                                        type="button"
+                                                        disabled={isCspBlocked}
+                                                        onClick={() => { if (!isCspBlocked) handleCampaignSelection(campaign.id); }}
+                                                        title={isCspBlocked ? 'CSP product drives cannot be selected for follow-up here' : undefined}
+                                                        className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${isCspBlocked
+                                                            ? 'bg-gray-100 border border-gray-200 text-gray-400 line-through cursor-not-allowed'
+                                                            : selectedCampaignsForFollowup.includes(campaign.id)
+                                                                ? 'text-white'
+                                                                : 'bg-white border border-gray-300 text-black hover:bg-gray-100'
+                                                            }`}
+                                                        style={!isCspBlocked && selectedCampaignsForFollowup.includes(campaign.id) ? { backgroundColor: campaign.color || themeColor } : {}}
+                                                    >
+                                                        <span>{campaign.name}</span>
+                                                        {!isCspBlocked && selectedCampaignsForFollowup.includes(campaign.id) && (
+                                                            <CheckCircleIcon className="h-3 w-3" />
+                                                        )}
+                                                    </button>
+                                                );
+                                            })}
 
                                             {/* Other (non-campaign) follow-up — stored in non_followups */}
                                             <button

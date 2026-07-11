@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, JSON, DateTime
 from sqlalchemy.sql import func
 from app.database import Base
+from app.time_utils import now_ist
 
 class BranchSubmitLimit(Base):
     __tablename__ = "branch_submit_limits"
@@ -13,4 +14,4 @@ class BranchSubmitLimit(Base):
     # For 'month_dates': list of ints 1-31. Stored as JSON.
     allowed_values = Column(JSON, nullable=False, default=list)
     updated_by = Column(String(100), nullable=True)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(DateTime(timezone=True), default=now_ist, onupdate=now_ist)

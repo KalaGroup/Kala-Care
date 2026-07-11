@@ -1,0 +1,130 @@
+-- ============================================================================
+-- SAFE ONE-TIME MIGRATION: shift previously-UTC timestamps to IST (+5:30)
+-- ============================================================================
+-- The application now stores ALL timestamps as naive IST (see app/time_utils.py
+-- and the before_flush hook in app/database.py). Rows created BEFORE that
+-- deployment were written with datetime.utcnow() (UTC) and must be shifted
+-- forward by 330 minutes so old and new data agree.
+--
+-- SAFE TO RUN MULTIPLE TIMES: the script records itself in the
+-- app_migrations table on success. If it already ran, it prints a message
+-- and changes NOTHING — no risk of double-shifting.
+-- All updates run in ONE transaction: any error rolls back everything.
+--
+-- HOW TO RUN:
+--   1. STOP the application server.
+--   2. BACKUP the database (still recommended).
+--   3. Select the KalaCare database in SSMS and execute this whole script.
+--   4. Start the new application code.
+--
+-- Columns NOT touched here (already IST): login_sessions, diery entries,
+-- followups.created_at/updated_at (GETDATE()), maintenance activity, and all
+-- date columns imported from Excel files (they carry Indian dates already).
+-- ============================================================================
+
+-- Marker table for one-time migrations
+IF OBJECT_ID('dbo.app_migrations', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.app_migrations (
+        name        VARCHAR(100) NOT NULL PRIMARY KEY,
+        executed_at DATETIME     NOT NULL DEFAULT GETDATE()
+    );
+END;
+
+IF EXISTS (SELECT 1 FROM dbo.app_migrations WHERE name = 'utc_to_ist_shift_330min')
+BEGIN
+    PRINT 'Migration utc_to_ist_shift_330min was ALREADY applied — nothing changed.';
+END
+ELSE
+BEGIN
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- Engagement follow-ups (values came from the frontend as UTC "Z" strings)
+        UPDATE followups      SET followup_date      = DATEADD(MINUTE, 330, followup_date)      WHERE followup_date IS NOT NULL;
+        UPDATE followups      SET next_followup_date = DATEADD(MINUTE, 330, next_followup_date) WHERE next_followup_date IS NOT NULL;
+
+        -- Non-drive ("Other") follow-ups
+        UPDATE non_followups  SET followup_date      = DATEADD(MINUTE, 330, followup_date)      WHERE followup_date IS NOT NULL;
+        UPDATE non_followups  SET next_followup_date = DATEADD(MINUTE, 330, next_followup_date) WHERE next_followup_date IS NOT NULL;
+        UPDATE non_followups  SET created_at         = DATEADD(MINUTE, 330, created_at)         WHERE created_at IS NOT NULL;
+        UPDATE non_followups  SET updated_at         = DATEADD(MINUTE, 330, updated_at)         WHERE updated_at IS NOT NULL;
+
+        -- Letter send history
+        UPDATE letter_send_records SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+
+        -- Campaign master tables
+        UPDATE campaigns               SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE campaigns               SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE campaign_csp_info       SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE campaign_csp_info       SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE campaign_services       SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE campaign_services       SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE campaign_letter_formats SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE campaign_letter_formats SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE campaign_drive_meta     SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE campaign_drive_meta     SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE branch_email_master     SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE branch_email_master     SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+
+        -- Customer / import bookkeeping timestamps (created_at & updated_at only —
+        -- the business date columns inside these tables come from Excel files and
+        -- are already Indian dates)
+        UPDATE customers              SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE customers              SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE amc_agreements         SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE amc_agreements         SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE asset_detailed         SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE asset_detailed         SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE oil_services           SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE oil_services           SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE anubandhan_plus_quotes SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE anubandhan_plus_quotes SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE anubandhan_quotes      SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE anubandhan_quotes      SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE bandhan_plus_quotes    SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE bandhan_plus_quotes    SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE pulse_quotations       SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE pulse_quotations       SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE regular_bandhan        SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE regular_bandhan        SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE lms_data               SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE lms_data               SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE open_sr_load_reports   SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE open_sr_load_reports   SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE open_sr_data           SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE open_sr_data           SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+
+        -- Knowledge Book
+        UPDATE kb_categories SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE kb_folders    SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE kb_folders    SET updated_at = DATEADD(MINUTE, 330, updated_at) WHERE updated_at IS NOT NULL;
+        UPDATE kb_files      SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+
+        -- MOM Tracking
+        UPDATE mom_categories    SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE mom_master_points SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+        UPDATE mom_meetings      SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+
+        -- Users
+        UPDATE users SET created_at = DATEADD(MINUTE, 330, created_at) WHERE created_at IS NOT NULL;
+
+        -- Mark as applied so this script can never double-shift
+        INSERT INTO dbo.app_migrations (name) VALUES ('utc_to_ist_shift_330min');
+
+        COMMIT TRANSACTION;
+        PRINT 'Migration utc_to_ist_shift_330min applied successfully.';
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        PRINT 'Migration FAILED — everything rolled back. Error: ' + ERROR_MESSAGE();
+    END CATCH
+END;
+
+-- ============================================================================
+-- EXPENSE MODULE (TADA / Office Expense / LVB / Imprest / vouchers)
+-- These used datetime.now() = the APP SERVER's local clock. If your app server
+-- machine runs on Indian time, these are ALREADY IST — leave them commented.
+-- Only if that machine was set to UTC/US time, build a second guarded block
+-- like the one above (with its own migration name) for those tables.
+-- ============================================================================

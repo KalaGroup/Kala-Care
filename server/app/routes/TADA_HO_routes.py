@@ -6,6 +6,7 @@ from app.database import SessionLocal
 from app.controllers import TADA_HO_controller
 from app.models.TADA_model import TADAImport
 from pydantic import BaseModel
+from app.time_utils import now_ist
 
 router = APIRouter(prefix="/tada-ho", tags=["TADA HO"])
 
@@ -282,24 +283,45 @@ def get_branch_engineers_summary(
     db: Session = Depends(get_db)
 ):
     """Get summary of all engineers for a branch with their SR counts and total amounts"""
-    from sqlalchemy import cast, Float
-    from sqlalchemy import or_
-    
+    from dateutil import parser as date_parser
+    from datetime import datetime, timedelta
+    from collections import defaultdict
+
     # Get all engineers for this branch
     engineers = TADA_HO_controller.get_engineers_by_branch(db, branch_code)
-    
+
+    # Fetch the 4 needed columns for ALL of this branch's engineers in one
+    # chunked query (was: every column of every record, one query per engineer).
+    # Group under SQL-Server-collation-like keys (case-insensitive, trailing
+    # spaces ignored) so counts match the old per-uid equality queries.
+    def _uid_key(uid):
+        return (uid or '').rstrip().lower()
+
+    uids = [e['service_engineer_uid'] for e in engineers]
+    rows_by_uid = defaultdict(list)
+    for i in range(0, len(uids), 1000):
+        chunk = uids[i:i + 1000]
+        rows = db.query(
+            TADAImport.service_engineer_uid,
+            TADAImport.verification_status,
+            TADAImport.total_amount,
+            TADAImport.sr_reach_at_site_datetime,
+        ).filter(TADAImport.service_engineer_uid.in_(chunk)).all()
+        for r in rows:
+            rows_by_uid[_uid_key(r.service_engineer_uid)].append(r)
+
+    # Reasonable date range — reject garbage like year 2099 or 1900
+    min_valid = datetime(2020, 1, 1)
+    max_valid = now_ist() + timedelta(days=30)
+
     summary = []
     for engineer in engineers:
         engineer_uid = engineer['service_engineer_uid']
-        
-        # Get all records for this engineer
-        records = db.query(TADAImport).filter(
-            TADAImport.service_engineer_uid == engineer_uid
-        ).all()
-        
+        records = rows_by_uid.get(_uid_key(engineer_uid), [])
+
         total_sr_count = len(records)
         verified_sr_count = len([r for r in records if r.verification_status == 'Verified'])
-        
+
         # Calculate total amount from verified records
         total_amount = 0
         for record in records:
@@ -308,14 +330,7 @@ def get_branch_engineers_summary(
                     total_amount += float(record.total_amount)
                 except (ValueError, TypeError):
                     pass
-        
-        from dateutil import parser as date_parser
-        from datetime import datetime, timedelta
-        
-        # Reasonable date range — reject garbage like year 2099 or 1900
-        min_valid = datetime(2020, 1, 1)
-        max_valid = datetime.now() + timedelta(days=30)
-        
+
         date_pairs = []
         for r in records:
             raw = r.sr_reach_at_site_datetime
@@ -325,28 +340,25 @@ def get_branch_engineers_summary(
             if not raw_str or raw_str.lower() in ('null', 'none', '-', 'nan', '0'):
                 continue
             try:
-                # dayfirst=True handles DD/MM/YYYY format (Indian format)
                 # fuzzy=False to avoid mis-parsing strings with extra junk
                 parsed = date_parser.parse(raw_str, dayfirst=False, fuzzy=False)
-                
+
                 # Reject dates outside reasonable range (handles future/garbage data)
                 if parsed < min_valid or parsed > max_valid:
                     continue
-                
+
                 date_pairs.append((parsed, raw_str))
-            except (ValueError, TypeError, OverflowError) as e:
+            except (ValueError, TypeError, OverflowError):
                 continue
-        
+
         if date_pairs:
-            # Sort all dates so we can debug what's happening
             sorted_pairs = sorted(date_pairs, key=lambda x: x[0])
-                        
             start_date = sorted_pairs[0][1]
             end_date = sorted_pairs[-1][1]
         else:
             start_date = None
             end_date = None
-        
+
         summary.append({
             'engineer_name': engineer['service_engineer_name'],
             'engineer_uid': engineer_uid,
@@ -356,7 +368,7 @@ def get_branch_engineers_summary(
             'start_date': start_date,
             'end_date': end_date
         })
-    
+
     return summary
 
 @router.get("/branches-with-managers")
@@ -365,27 +377,44 @@ def get_branches_with_managers(
 ):
     """Get all branches with their branch managers from users table and engineer counts"""
     from app.models.user_model import User
-    
+
+    # Resolve every engineer's correct branch ONCE, then count per branch.
+    # (Previously get_engineers_by_branch re-ran the full distinct-engineer scan
+    # and branch resolution for each of the 15 branches.)
+    all_engineers_data = db.query(
+        TADAImport.service_engineer_name,
+        TADAImport.service_engineer_uid
+    ).filter(
+        TADAImport.service_engineer_uid.isnot(None),
+        TADAImport.service_engineer_uid != '',
+        TADAImport.service_engineer_uid != 'null',
+        TADAImport.service_engineer_name.isnot(None),
+        TADAImport.service_engineer_name != '',
+        TADAImport.service_engineer_name != 'null'
+    ).distinct().all()
+
+    uid_branch_map = TADA_HO_controller._batch_engineer_correct_branches(
+        db, [e.service_engineer_uid for e in all_engineers_data]
+    )
+
+    engineer_counts = {}
+    for uid, correct_branch in uid_branch_map.items():
+        engineer_counts[correct_branch] = engineer_counts.get(correct_branch, 0) + 1
+
+    # One query for all branch admins (was one query per branch)
+    admin_names = {}
+    for u in db.query(User).filter(User.role == 'branch_admin').order_by(User.id).all():
+        admin_names.setdefault(u.branch, u.name)
+
     branches = []
     for branch_code, branch_name in TADA_HO_controller.BRANCH_MAP.items():
-        # Find branch manager from users table
-        branch_manager = db.query(User).filter(
-            User.branch == branch_code,
-            User.role == 'branch_admin'
-        ).first()
-        
-        # Count unique engineers for this branch using the controller's logic
-        engineer_count = 0
-        engineers_data = TADA_HO_controller.get_engineers_by_branch(db, branch_code)
-        engineer_count = len(engineers_data)
-        
         branches.append({
             'branch_code': branch_code,
             'branch_name': branch_name,
-            'branch_manager': branch_manager.name if branch_manager else None,
-            'engineer_count': engineer_count
+            'branch_manager': admin_names.get(branch_code),
+            'engineer_count': engineer_counts.get(branch_code, 0)
         })
-    
+
     return branches
 
 @router.post("/engineer/{engineer_uid}/move-selected-to-history")
@@ -528,7 +557,7 @@ def get_branch_history_grouped(
     ).all()
 
     min_valid = datetime(2020, 1, 1)
-    max_valid = datetime.now() + timedelta(days=30)
+    max_valid = now_ist() + timedelta(days=30)
     parsed = []
     for r in records:
         raw = r.sr_reach_at_site_datetime
@@ -619,7 +648,7 @@ def get_branch_history_vouchers(
     ).all()
 
     min_valid = datetime(2020, 1, 1)
-    max_valid = datetime.now() + timedelta(days=30)
+    max_valid = now_ist() + timedelta(days=30)
 
     vmap = {}
     for r in records:

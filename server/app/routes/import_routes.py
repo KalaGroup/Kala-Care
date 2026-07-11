@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from app.database import SessionLocal
 from app.controllers.import_controller import ImportController
+from app.time_utils import now_ist
 from app.models.customer_model import (
     AMCAgreement, AssetDetailed, AssetService,
     AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
@@ -76,7 +77,7 @@ def run_import_job(job_id: str, file_contents: bytes, filename: str, file_type: 
                 f"Successfully processed {result['total_processed']} records from {file_type} "
                 f"(New: {result['imported']}, Updated: {result['updated']})"
             ),
-            "finished_at": datetime.utcnow().isoformat(),
+            "finished_at": now_ist().isoformat(),
         })
         # New data landed → drop cached last-updated so the next read is fresh
         _last_updated_cache.clear()
@@ -85,7 +86,7 @@ def run_import_job(job_id: str, file_contents: bytes, filename: str, file_type: 
         import_jobs[job_id].update({
             "status": "failed",
             "message": str(e),
-            "finished_at": datetime.utcnow().isoformat(),
+            "finished_at": now_ist().isoformat(),
         })
     finally:
         db.close()
@@ -137,7 +138,7 @@ async def import_excel(
         "status": "queued",
         "file_type": file_type,
         "filename": file.filename,
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": now_ist().isoformat(),
         "message": "Import queued, processing will begin shortly",
         "imported_count": 0,
         "updated_count": 0,
@@ -246,10 +247,10 @@ async def get_last_updated(file_type: str, db: Session = Depends(get_db)):
         func.count(model.id),
     ).one()
 
-    # Stored timestamps are naive UTC (datetime.utcnow). Tag them as UTC so the
-    # browser converts correctly to the user's local time (IST) on display.
+    # Stored timestamps are naive IST (now_ist). Send them naive — tagging a
+    # timezone would make the browser shift the wall-clock again.
     last_updated_iso = (
-        last_updated.replace(tzinfo=timezone.utc).isoformat()
+        last_updated.replace(tzinfo=None).isoformat()
         if last_updated else None
     )
 
@@ -288,7 +289,7 @@ async def import_multiple(
             "status": "queued",
             "file_type": file_type,
             "filename": file.filename,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": now_ist().isoformat(),
             "message": "Import queued",
             "imported_count": 0,
             "updated_count": 0,

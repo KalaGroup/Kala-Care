@@ -5,6 +5,7 @@ from typing import List, Dict, Optional
 from fastapi import HTTPException
 
 from app.models import expenseAddingData_model as models
+from app.time_utils import now_ist
 
 
 # ---------- Branch KM Rate Functions ----------
@@ -40,7 +41,7 @@ def create_or_update_branch_km_rate(db: Session, branch_code: str, branch_name: 
         for k, v in fields.items():
             setattr(existing, k, v)
         existing.updated_by = created_by
-        existing.updated_at = datetime.now()
+        existing.updated_at = now_ist()
         db.commit()
         db.refresh(existing)
         return existing
@@ -141,7 +142,7 @@ def add_subhead(db: Session, head_id: int, subhead_name: str, created_by: str):
     subheads.append({"id": len(subheads) + 1, "name": subhead_name})
     head.subheads = json.dumps(subheads)
     head.updated_by = created_by
-    head.updated_at = datetime.now()
+    head.updated_at = now_ist()
     
     db.commit()
     db.refresh(head)
@@ -162,7 +163,7 @@ def update_subhead(db: Session, head_id: int, subhead_id: int, subhead_name: str
     
     head.subheads = json.dumps(subheads)
     head.updated_by = updated_by
-    head.updated_at = datetime.now()
+    head.updated_at = now_ist()
     
     db.commit()
     db.refresh(head)
@@ -179,7 +180,7 @@ def delete_subhead(db: Session, head_id: int, subhead_id: int, updated_by: str):
     subheads = [sh for sh in subheads if sh.get("id") != subhead_id]
     head.subheads = json.dumps(subheads)
     head.updated_by = updated_by
-    head.updated_at = datetime.now()
+    head.updated_at = now_ist()
     
     db.commit()
     db.refresh(head)
@@ -233,7 +234,7 @@ def update_branch_employee(db: Session, employee_id_pk: int, employee_name: str,
     emp.employee_uid = employee_uid
     emp.designation = designation
     emp.updated_by = updated_by
-    emp.updated_at = datetime.now()
+    emp.updated_at = now_ist()
     db.commit()
     db.refresh(emp)
     return emp
@@ -249,6 +250,6 @@ def delete_branch_employee(db: Session, employee_id_pk: int, updated_by: str):
     
     emp.is_active = False
     emp.updated_by = updated_by
-    emp.updated_at = datetime.now()
+    emp.updated_at = now_ist()
     db.commit()
     return {"message": "Employee deleted successfully"}    

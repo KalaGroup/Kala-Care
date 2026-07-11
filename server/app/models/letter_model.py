@@ -1,6 +1,7 @@
 from sqlalchemy import Column, String, DateTime, Text, Integer, Boolean, JSON
 from app.database import Base
 import datetime
+from app.time_utils import now_ist
 
 
 class LetterSendRecord(Base):
@@ -37,4 +38,4 @@ class LetterSendRecord(Base):
     sent_by_id = Column(String(100), nullable=True)
     sent_by_name = Column(String(255), nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=now_ist)

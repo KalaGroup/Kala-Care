@@ -207,7 +207,7 @@ const BranchOEHistory = ({ branchCode, branchName, themeColor = '#2f3192', canEx
                     )}
                     className="export-btn ml-auto inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg"
                     style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}>
-                    Export Vouchers
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg> Export Vouchers
                   </button>
                 )}
               </>
@@ -260,7 +260,7 @@ const BranchOEHistory = ({ branchCode, branchName, themeColor = '#2f3192', canEx
                     )}
                     className="export-btn ml-auto inline-flex items-center gap-1 px-2 py-1 text-white text-[10px] font-medium rounded-lg"
                     style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}>
-                    Export Records
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg> Export Records
                   </button>
                 )}
               </>

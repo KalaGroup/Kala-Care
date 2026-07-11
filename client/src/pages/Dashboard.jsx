@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
 import 'echarts-gl';
 import {
@@ -923,15 +923,12 @@ const Dashboard = () => {
 
         const updateTopScrollWidth = () => {
             if (tableContainer && topScrollBar) {
-                const scrollWidth = tableContainer.scrollWidth;
-                const clientWidth = tableContainer.clientWidth;
-
-                if (scrollWidth > clientWidth) {
-                    const spacer = topScrollBar.querySelector('div');
-                    if (spacer) {
-                        spacer.style.width = `${scrollWidth}px`;
-                        spacer.style.height = '1px';
-                    }
+                // Always mirror the table's scroll width — when the table fits,
+                // the spacer equals the visible width and no bar shows.
+                const spacer = topScrollBar.querySelector('div');
+                if (spacer) {
+                    spacer.style.width = `${tableContainer.scrollWidth}px`;
+                    spacer.style.height = '1px';
                 }
             }
         };
@@ -944,6 +941,8 @@ const Dashboard = () => {
 
         if (tableContainer) {
             resizeObserver.observe(tableContainer);
+            const tableEl = tableContainer.querySelector('table');
+            if (tableEl) resizeObserver.observe(tableEl); // re-size when columns change width
         }
 
         const handleTableScroll = () => {
@@ -966,7 +965,10 @@ const Dashboard = () => {
             topScrollBar.removeEventListener('scroll', handleTopScroll);
             resizeObserver.disconnect();
         };
-    }, [activeTab, campaignPerformance]);
+        // campaignLoading in deps: the refs only mount AFTER the loading
+        // spinner goes away — without it, the first open of the tab attaches
+        // nothing and the top scrollbar never appears.
+    }, [activeTab, campaignPerformance, campaignLoading]);
 
     // Set up scroll synchronization for Rejected Reasons tab
     useEffect(() => {
@@ -2354,10 +2356,9 @@ const Dashboard = () => {
         const signal = abortControllerRef.current?.signal;
         try {
             const payload = { user_id: userData.user_id || userData.id, name: userData.name, role: userData.role, branch: userData.branch };
-            let url = `${API_BASE_URL}/performance/branch-performance?time_period=${timePeriod}`;
-            if (timePeriod === 'custom' && customStartDate && customEndDate) {
-                url += `&start_date=${formatDateForAPI(customStartDate)}&end_date=${formatDateForAPI(customEndDate)}`;
-            }
+            // Branch-wise Asset Progress + Branch Overview always show ALL-TIME
+            // data — the calendar/time filter must not change these boxes.
+            const url = `${API_BASE_URL}/performance/branch-performance?time_period=all`;
             const response = await axios.post(url, payload, { signal });
             if (isMounted.current) {
                 setBranchPerformance(response.data);
@@ -2376,7 +2377,7 @@ const Dashboard = () => {
             }
             return [];
         }
-    }, [userData, timePeriod, customStartDate, customEndDate, ensureBranchSummaries]);
+    }, [userData, ensureBranchSummaries]);
 
     const fetchBranchPerformanceForBranchAdmin = useCallback(async () => {
         const signal = abortControllerRef.current?.signal; // ADD THIS
@@ -2387,10 +2388,9 @@ const Dashboard = () => {
                 role: userData.role,
                 branch: userData.branch
             };
-            let url = `${API_BASE_URL}/performance/branch-performance?time_period=${timePeriod}`;
-            if (timePeriod === 'custom' && customStartDate && customEndDate) {
-                url += `&start_date=${formatDateForAPI(customStartDate)}&end_date=${formatDateForAPI(customEndDate)}`;
-            }
+            // Branch-wise Asset Progress + Branch Overview always show ALL-TIME
+            // data — the calendar/time filter must not change these boxes.
+            const url = `${API_BASE_URL}/performance/branch-performance?time_period=all`;
             const response = await axios.post(url, payload, { signal }); // ADD signal
             const filteredData = response.data.filter(branch => branch.branch === userData.branch);
             if (isMounted.current) {
@@ -2404,7 +2404,7 @@ const Dashboard = () => {
                 setBranchPerfFetched(true); // fetch finished (failed) — stop showing the loader
             }
         }
-    }, [userData, timePeriod, customStartDate, customEndDate]);
+    }, [userData]);
 
     const fetchAllBranches = useCallback(async () => {
         const signal = abortControllerRef.current?.signal;
@@ -3004,14 +3004,14 @@ const Dashboard = () => {
     // Backwards compat shim
     const getOverallStats = useCallback(() => overallStats, [overallStats]);
 
-    // Format a Date as MM/DD/YYYY (zero-padded) so the calendar filter always
-    // shows dates in US month/day/year order regardless of the browser locale.
-    const formatMMDDYYYY = (date) => {
+    // Format a Date as DD/MM/YYYY (zero-padded) so the calendar filter always
+    // shows dates in Indian day/month/year order regardless of the browser locale.
+    const formatDDMMYYYY = (date) => {
         if (!(date instanceof Date) || isNaN(date)) return '';
-        const mm = String(date.getMonth() + 1).padStart(2, '0');
         const dd = String(date.getDate()).padStart(2, '0');
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
         const yyyy = date.getFullYear();
-        return `${mm}/${dd}/${yyyy}`;
+        return `${dd}/${mm}/${yyyy}`;
     };
 
     const getTimePeriodDisplayText = () => {
@@ -3022,7 +3022,7 @@ const Dashboard = () => {
             case 'year': return 'Last 12 Months';
             case 'custom':
                 if (customStartDate && customEndDate) {
-                    return `${formatMMDDYYYY(customStartDate)} - ${formatMMDDYYYY(customEndDate)}`;
+                    return `${formatDDMMYYYY(customStartDate)} - ${formatDDMMYYYY(customEndDate)}`;
                 }
                 return 'Custom Range';
             default: return 'Calendar';
@@ -3031,25 +3031,25 @@ const Dashboard = () => {
 
     const getDateRangeText = () => {
         if (timePeriod === 'custom' && customStartDate && customEndDate) {
-            return `${formatMMDDYYYY(customStartDate)} to ${formatMMDDYYYY(customEndDate)}`;
+            return `${formatDDMMYYYY(customStartDate)} to ${formatDDMMYYYY(customEndDate)}`;
         }
 
         const now = new Date();
-        const endDate = formatMMDDYYYY(now);
+        const endDate = formatDDMMYYYY(now);
         let startDate;
 
         switch (timePeriod) {
             case 'month':
-                startDate = formatMMDDYYYY(new Date(now.setMonth(now.getMonth() - 1)));
+                startDate = formatDDMMYYYY(new Date(now.setMonth(now.getMonth() - 1)));
                 return `${startDate} - ${endDate}`;
             case '3months':
-                startDate = formatMMDDYYYY(new Date(now.setMonth(now.getMonth() - 3)));
+                startDate = formatDDMMYYYY(new Date(now.setMonth(now.getMonth() - 3)));
                 return `${startDate} - ${endDate}`;
             case '6months':
-                startDate = formatMMDDYYYY(new Date(now.setMonth(now.getMonth() - 6)));
+                startDate = formatDDMMYYYY(new Date(now.setMonth(now.getMonth() - 6)));
                 return `${startDate} - ${endDate}`;
             case 'year':
-                startDate = formatMMDDYYYY(new Date(now.setFullYear(now.getFullYear() - 1)));
+                startDate = formatDDMMYYYY(new Date(now.setFullYear(now.getFullYear() - 1)));
                 return `${startDate} - ${endDate}`;
             default:
                 return 'Calendar';
@@ -3165,7 +3165,14 @@ const Dashboard = () => {
         return 'Employee';
     };
 
-    const getPerformanceTitle = () => {
+    const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+};
+
+const getPerformanceTitle = () => {
         if (isMasterAdmin || isITAdmin) {
             return 'KALA Performance';
         }
@@ -3340,28 +3347,75 @@ const Dashboard = () => {
         <div className="min-h-screen py-0 px-0">
             {/* Header with gradient */}
             <div
-                className="dash-welcome px-2 sm:px-6 lg:px-8 py-2 mb-3 mx-2 sm:mx-4 border border-gray-300 rounded-xl"
+                className="dash-welcome mb-3 mx-2 sm:mx-4 border border-gray-200 rounded-xl max-sm:rounded-2xl shadow-sm"
                 style={{ background: "white" }}
             >
-                <div className="max-w-7xl mx-auto">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
-                        <h1 className="text-xl font-bold text-black text-center sm:text-left">
-                            Welcome, {userData?.name || 'User'}!
-                        </h1>
+                <div>
+                    <div className="flex flex-col sm:flex-row sm:items-stretch gap-2 sm:pr-3 max-sm:pb-2">
+                        {/* Identity pill — name + time-of-day greeting */}
+                        <div
+                            className="flex-shrink-0 flex flex-col justify-center sm:rounded-l-3xl sm:rounded-r-full max-sm:rounded-t-2xl text-white pl-7 pr-12 py-3 max-sm:w-full max-sm:text-center max-sm:px-6 max-sm:py-2.5 shadow-md"
+                            style={{ background: 'linear-gradient(135deg, #3b3fa8 0%, #2f3192 55%, #232566 100%)' }}
+                        >
+                            <p className="text-lg font-bold leading-tight truncate">{userData?.name || 'User'}</p>
+                            <p className="text-xs font-medium text-white/80 leading-tight">{getGreeting()}</p>
+                        </div>
+
+                        {/* Info chips — branch / role / period / viewing scope */}
+                        <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 flex-1 min-w-0 py-1.5 max-sm:justify-center max-sm:px-3">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-100 px-3 py-1.5 text-xs font-bold text-[#2f3192] whitespace-nowrap min-w-0">
+                                <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#2f3192' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                                </svg>
+                                <span className="truncate">{getBranchDisplayName(userData?.branch)}</span>
+                            </span>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-100 px-3 py-1.5 text-xs font-bold text-[#2f3192] whitespace-nowrap min-w-0">
+                                <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#2f3192' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                </svg>
+                                <span className="truncate">{getRoleDisplayName()}</span>
+                            </span>
+                            {!isEmployee && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-100 px-3 py-1.5 text-xs font-bold text-[#2f3192] whitespace-nowrap min-w-0 max-w-[220px]">
+                                    <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#2f3192' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    <span className="truncate">{getDateRangeText()}</span>
+                                </span>
+                            )}
+                            {(isMasterAdmin || isITAdmin) && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-100 px-3 py-1.5 text-xs font-bold text-[#2f3192] whitespace-nowrap min-w-0">
+                                    <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#2f3192' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                    </svg>
+                                    <span className="truncate">Entire Kala Data</span>
+                                </span>
+                            )}
+                            {isBranchAdmin && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-100 px-3 py-1.5 text-xs font-bold text-[#2f3192] whitespace-nowrap min-w-0 max-w-[260px]">
+                                    <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#2f3192' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                    </svg>
+                                    <span className="truncate">{getBranchDisplayName(userData?.branch)} Branch Performance</span>
+                                </span>
+                            )}
+                        </div>
 
                         {/* Consolidated Date Filter Dropdown */}
-                        <div className="relative w-full sm:w-auto">
+                        <div className="relative w-full sm:w-auto self-center max-sm:px-3">
                             {!isEmployee && (
                                 <button
                                     onClick={() => setShowCustomDatePicker(!showCustomDatePicker)}
                                     disabled={isFilterLoading}
-                                    className="w-full sm:w-auto px-2 py-1 bg-[#2f3192] backdrop-blur-sm text-white rounded-lg transition-all duration-200 flex items-center justify-center sm:justify-between gap-2 text-xs sm:text-sm"
+                                    className="w-full sm:w-auto px-3 py-1.5 bg-[#2f3192] hover:bg-[#262a7d] backdrop-blur-sm text-white rounded-full shadow-md transition-all duration-200 flex items-center justify-center sm:justify-between gap-1.5 text-xs font-semibold"
                                 >
-                                    <svg className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                     </svg>
                                     <span className="truncate">{getTimePeriodDisplayText()}</span>
-                                    <svg className={`w-3 h-3 sm:w-4 sm:h-4 transition-transform flex-shrink-0 ${showCustomDatePicker ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg className={`w-3 h-3 transition-transform flex-shrink-0 ${showCustomDatePicker ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                     </svg>
                                 </button>
@@ -3472,13 +3526,13 @@ const Dashboard = () => {
                                                             <div className="flex-1">
                                                                 <label className="block text-[11px] text-gray-500 mb-0.5 text-center">Start Date</label>
                                                                 <div className="px-1.5 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-center truncate">
-                                                                    {customStartDate ? formatMMDDYYYY(customStartDate) : 'Not selected'}
+                                                                    {customStartDate ? formatDDMMYYYY(customStartDate) : 'Not selected'}
                                                                 </div>
                                                             </div>
                                                             <div className="flex-1">
                                                                 <label className="block text-[11px] text-gray-500 mb-0.5 text-center">End Date</label>
                                                                 <div className="px-1.5 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-center truncate">
-                                                                    {customEndDate ? formatMMDDYYYY(customEndDate) : 'Not selected'}
+                                                                    {customEndDate ? formatDDMMYYYY(customEndDate) : 'Not selected'}
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -3497,7 +3551,7 @@ const Dashboard = () => {
                                                                 inline
                                                                 maxDate={new Date()}
                                                                 calendarClassName="custom-calendar"
-                                                                dateFormat="MM/dd/yyyy"
+                                                                dateFormat="dd/MM/yyyy"
                                                             />
                                                         </div>
 
@@ -3590,44 +3644,6 @@ const Dashboard = () => {
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap gap-3 sm:gap-4 text-black text-xs sm:text-sm mt-3">
-                        <span className="flex items-center min-w-0">
-                            <svg className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                            </svg>
-                            <span className="truncate"> <span className="font-bold">Branch:</span> {getBranchDisplayName(userData?.branch)}</span>
-                        </span>
-                        <span className="flex items-center min-w-0">
-                            <svg className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                            </svg>
-                            <span className="truncate"><span className="font-bold">Role:</span> {getRoleDisplayName()}</span>
-                        </span>
-                        {!isEmployee && (
-                            <span className="flex items-center min-w-0">
-                                <svg className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                </svg>
-                                <span className="truncate"><span className="font-bold">Period:</span> {getDateRangeText()}</span>
-                            </span>
-                        )}
-                        {(isMasterAdmin || isITAdmin) && (
-                            <span className="flex items-center min-w-0 col-span-1 sm:col-span-2 lg:col-span-auto">
-                                <svg className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                                </svg>
-                                <span className="truncate"><span className="font-bold">Viewing:</span> Entire Kala Data</span>
-                            </span>
-                        )}
-                        {isBranchAdmin && (
-                            <span className="flex items-center min-w-0 col-span-1 sm:col-span-2 lg:col-span-auto">
-                                <svg className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                                </svg>
-                                <span className="truncate"><span className="font-bold">Viewing:</span> {getBranchDisplayName(userData?.branch)} Branch Performance</span>
-                            </span>
-                        )}
-                    </div>
                 </div>
             </div>
 
@@ -4611,7 +4627,7 @@ const Dashboard = () => {
                                                 className="export-btn px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded font-medium transition-colors flex items-center gap-1.5 max-sm:w-full max-sm:justify-center"
                                             >
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
                                                 </svg>
                                                 Export to Excel
                                             </button>
@@ -4730,12 +4746,12 @@ const Dashboard = () => {
                                                             {totals.totalEmployees} Employees
                                                         </td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">-</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{totals.totalFollowups.toLocaleString()}</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{totals.totalWip.toLocaleString()}</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{totals.totalRescheduled.toLocaleString()}</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{totals.totalRejected.toLocaleString()}</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{totals.totalNotConnected.toLocaleString()}</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{totals.totalCompleted.toLocaleString()}</td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalFollowups.toLocaleString()}</TimeValue></td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalWip.toLocaleString()}</TimeValue></td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalRescheduled.toLocaleString()}</TimeValue></td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalRejected.toLocaleString()}</TimeValue></td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalNotConnected.toLocaleString()}</TimeValue></td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalCompleted.toLocaleString()}</TimeValue></td>
                                                         <td className="px-3 py-2 text-center border border-gray-300">—</td>
                                                     </tr>
                                                 );
@@ -4943,7 +4959,7 @@ const Dashboard = () => {
                                                 className="export-btn w-full sm:w-auto px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap"
                                             >
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
                                                 </svg>
                                                 Export to Excel
                                             </button>
@@ -5144,7 +5160,8 @@ const Dashboard = () => {
                                                                 </span>
                                                             </td>
                                                             <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200">{totalCustomers}</td>
-                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200">{remaining2}</td>
+                                                            {/* Remaining = totalCustomers − attended; attended is time-filtered, so this is too */}
+                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{remaining2}</TimeValue></td>
                                                             <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{attended}</TimeValue></td>
                                                             <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{wip}</TimeValue></td>
                                                             <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{rescheduled}</TimeValue></td>
@@ -5303,7 +5320,7 @@ const Dashboard = () => {
                                             className="export-btn px-2 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap max-sm:w-full"
                                         >
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
                                             </svg>
                                             Export to Excel
                                         </button>
@@ -5882,7 +5899,7 @@ const Dashboard = () => {
                                             className="export-btn px-2 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap max-sm:w-full"
                                         >
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
                                             </svg>
                                             Export to Excel
                                         </button>

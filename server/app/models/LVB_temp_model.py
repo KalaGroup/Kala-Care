@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Boolean
 from sqlalchemy.sql import func
 from app.database import Base
+from app.time_utils import now_ist
 
 
 class LocalVendorBillTemp(Base):
@@ -25,8 +26,8 @@ class LocalVendorBillTemp(Base):
     branch_code = Column(String(50), nullable=False)
     created_by = Column(String(100), nullable=False)
     created_by_name = Column(String(100), nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, onupdate=func.now())
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, onupdate=now_ist)
     is_deleted = Column(Boolean, default=False)
 
     def to_dict(self):

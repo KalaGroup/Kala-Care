@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Boolean
 from sqlalchemy.sql import func
 from app.database import Base
+from app.time_utils import now_ist
 
 class BranchKMRate(Base):
     """Table 1: Store KM rates for each branch (TADA Tab)"""
@@ -26,8 +27,8 @@ class BranchKMRate(Base):
     multi_high_rate  = Column(Float, default=0.0)
     multi_high_da    = Column(Float, default=0.0)
     
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
     created_by = Column(String(100), nullable=True)
     updated_by = Column(String(100), nullable=True)
 
@@ -40,8 +41,8 @@ class ExpenseHead(Base):
     name = Column(String(200), nullable=False)
     subheads = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
     created_by = Column(String(100), nullable=True)
     updated_by = Column(String(100), nullable=True)
 
@@ -57,7 +58,7 @@ class BranchEmployee(Base):
     branch_name = Column(String(200), nullable=False)
     designation = Column(String(200), nullable=False)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
     created_by = Column(String(100), nullable=True)
     updated_by = Column(String(100), nullable=True)        

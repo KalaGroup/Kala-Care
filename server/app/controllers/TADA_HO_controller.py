@@ -220,17 +220,39 @@ def get_engineer_records(db: Session, engineer_uid: str, requested_branch_code: 
     if requested_branch_code != correct_branch:
         print(f"Warning: Engineer {engineer_uid} belongs to {correct_branch} but requested {requested_branch_code}")
     
-    # Get ALL records for this engineer (from any branch in the database)
-    results = db.query(TADAImport).filter(
+    # Get ALL records for this engineer (from any branch in the database).
+    # Project ONLY the columns returned below — the full entity also carries
+    # seven unused NVARCHAR(MAX) columns (remarks/summaries) that dominate the
+    # row width, and this endpoint is called once per engineer by the HO page.
+    _RECORD_COLS = [
+        TADAImport.id, TADAImport.appointment_number,
+        TADAImport.installation_site_address, TADAImport.account,
+        TADAImport.service_request_no, TADAImport.sr_type, TADAImport.sr_sub_type,
+        TADAImport.sr_due_date, TADAImport.task_start_date, TADAImport.task_end_date,
+        TADAImport.task_status, TADAImport.task_assigned_datetime,
+        TADAImport.task_assign_vs_trip_start, TADAImport.sr_trip_start_datetime,
+        TADAImport.sr_reach_at_site_datetime, TADAImport.sr_trip_start_lat_long,
+        TADAImport.sr_reach_at_site_lat_long, TADAImport.kms_travelled,
+        TADAImport.sr_closed_date, TADAImport.sr_status,
+        TADAImport.branch_verified_km, TADAImport.km_verification_remark,
+        TADAImport.two_way_km, TADAImport.ho_corrected_km,
+        TADAImport.km_rate_applied, TADAImport.da_amount,
+        TADAImport.freight_charges, TADAImport.total_amount,
+        TADAImport.ho_remark, TADAImport.verification_status,
+        TADAImport.sd_branch_code, TADAImport.branch_code,
+        TADAImport.service_engineer_uid, TADAImport.service_engineer_name,
+        TADAImport.voucher_no, TADAImport.uploaded_by, TADAImport.file_name,
+    ]
+    results = db.query(*_RECORD_COLS).filter(
         TADAImport.service_engineer_uid == engineer_uid
     ).order_by(
         TADAImport.task_start_date.desc(),
         TADAImport.id.desc()
     ).all()
-    
+
     records = []
     for record in results:
-        # Convert SQLAlchemy object to dict with ALL required columns
+        # Convert row to dict with ALL required columns
         record_dict = {
             'id': record.id,
             'appointment_number': record.appointment_number,

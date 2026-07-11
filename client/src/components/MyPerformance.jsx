@@ -19,17 +19,60 @@ const DEFAULT_PERFORMANCE = {
     top_campaigns: []
 };
 
-// Helper function - Convert UTC to IST
+// Helper function - format a stored timestamp as IST time.
+// Timestamps are stored as NAIVE IST (app-wide standard) — show the wall-clock
+// as-is. Strings with an explicit timezone (Z / +hh:mm) are converted to IST.
 const convertUTCToIST = (dateTimeString) => {
     if (!dateTimeString) return '-';
-    const date = new Date(dateTimeString);
-    const hours = date.getUTCHours();
-    const minutes = date.getUTCMinutes();
+    const s = String(dateTimeString);
+    const date = new Date(s);
+    if (isNaN(date.getTime())) return '-';
+    if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) {
+        return date.toLocaleTimeString('en-IN', {
+            hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
+        }).toUpperCase();
+    }
+    // Naive string = stored IST wall-clock; new Date() parsed it as local time
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
     const period = hours >= 12 ? 'PM' : 'AM';
     let displayHours = hours % 12;
     displayHours = displayHours === 0 ? 12 : displayHours;
     const formattedMinutes = minutes.toString().padStart(2, '0');
     return `${displayHours}:${formattedMinutes} ${period}`;
+};
+
+// Short status labels used across ALL report status columns:
+// wip→WIP, rescheduled→FR, completed→Completed, not_connected→NC, rejected→Rejected
+const statusLabel = (s) => {
+    const map = {
+        wip: 'WIP',
+        rescheduled: 'FR',
+        completed: 'Completed',
+        not_connected: 'NC',
+        rejected: 'Rejected',
+        pending: 'Pending',
+    };
+    return map[(s || '').trim().toLowerCase()] || (s || '-');
+};
+
+// CSP tables — extra columns showing the instance's latest CSP-drive followup
+const CSP_FU_HEADERS = ['Follow-up Date', 'Drive', 'Service', 'Subtype', 'Follow-up By', 'Flag', 'Status', 'Next Follow-up', 'Activity', 'Reject Reason', 'Remark', 'Quote Sent', 'Quote No.', 'Quote Value', 'Last Letter Send Date'];
+
+// CSP modals — date columns selectable for the top date-range filter
+const CSP_DATE_FIELDS = [
+    { key: 'due', label: 'Due Date' },
+    { key: 'sr_open', label: 'SR Open Date' },
+    { key: 'fu_date', label: 'Follow-up Date' },
+    { key: 'fu_next', label: 'Next Follow-up' },
+];
+
+// Short date for the CSP followup columns (naive IST ISO → "09 Jul 2026")
+const fmtFuDate = (iso) => {
+    if (!iso) return '-';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '-';
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
 // Helper function - Convert decimal hours (e.g. 3.75) to "Xh Ym" (e.g. "3h 45m")
@@ -81,24 +124,25 @@ const highlightMatch = (value, term) => {
     );
 };
 
-// LetterSendRecord.created_at is stored UTC (naive). Mark it UTC, render in IST WITH time.
+// LetterSendRecord.created_at is stored as NAIVE IST — render the wall-clock
+// as-is; only strings with an explicit timezone are converted to IST.
 const fmtIstDateTime = (iso) => {
     if (!iso) return '-';
-    const s = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + 'Z';
-    const d = new Date(s);
+    const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso);
+    const d = new Date(iso);
     if (isNaN(d.getTime())) return '-';
     return d.toLocaleString('en-IN', {
         day: '2-digit', month: 'short', year: 'numeric',
         hour: '2-digit', minute: '2-digit', hour12: true,
-        timeZone: 'Asia/Kolkata'
+        ...(hasTz ? { timeZone: 'Asia/Kolkata' } : {})
     });
 };
 
 // IST calendar-date key (YYYY-MM-DD) for the date-range filter — matches the IST in "Sent At".
 const istDateKey = (iso) => {
     if (!iso) return null;
-    const s = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + 'Z';
-    const d = new Date(s);
+    if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)) return String(iso).slice(0, 10); // naive IST — date part as stored
+    const d = new Date(iso);
     if (isNaN(d.getTime())) return null;
     return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); // YYYY-MM-DD
 };
@@ -498,6 +542,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const [cspDueFromDate, setCspDueFromDate] = useState('');
     const [cspDueToDate, setCspDueToDate] = useState('');
     const [cspSegmentFilter, setCspSegmentFilter] = useState('all');
+    const [cspStatusFilter, setCspStatusFilter] = useState('all'); // latest CSP follow-up status
+    const [cspDateField, setCspDateField] = useState('due'); // which date the range filter applies to
 
     // Open CSP modal
     const [showOpenCspModal, setShowOpenCspModal] = useState(false);
@@ -505,6 +551,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const [openCspDueFromDate, setOpenCspDueFromDate] = useState('');
     const [openCspDueToDate, setOpenCspDueToDate] = useState('');
     const [openCspSegmentFilter, setOpenCspSegmentFilter] = useState('all');
+    const [openCspStatusFilter, setOpenCspStatusFilter] = useState('all');
+    const [openCspDateField, setOpenCspDateField] = useState('due');
     const [cspQuotationFilterActive, setCspQuotationFilterActive] = useState(false);
     const [cspDaysSort, setCspDaysSort] = useState('desc'); // 'desc' = overdue first, 'asc' = due last first
     const [openCspDaysSort, setOpenCspDaysSort] = useState('desc');
@@ -1256,6 +1304,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setCspDueFromDate('');
         setCspDueToDate('');
         setCspSegmentFilter('all');
+        setCspStatusFilter('all');
+        setCspDateField('due');
         fetchCspStatus();
     };
 
@@ -1265,6 +1315,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setOpenCspDueFromDate('');
         setOpenCspDueToDate('');
         setOpenCspSegmentFilter('all');
+        setOpenCspStatusFilter('all');
+        setOpenCspDateField('due');
         if (!cspData.rows || cspData.rows.length === 0) {
             fetchCspStatus();
         }
@@ -1322,8 +1374,15 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         return Math.round((todayStartMs - due.getTime()) / (1000 * 60 * 60 * 24));
     }, [todayStartMs, getCspDueDate]);
 
-    // Shared filter: search + segment + due-date range
-    const applyCspFilters = useCallback((rows, search, segment, fromDate, toDate) => {
+    // Shared filter: search + segment + follow-up status + date range on the
+    // SELECTED date column (Due / SR Open / Follow-up / Next Follow-up)
+    const applyCspFilters = useCallback((rows, search, segment, fromDate, toDate, dateField = 'due', statusFilter = 'all') => {
+        const dateOf = (row) => {
+            if (dateField === 'sr_open') return parseAnyDate(row.sr_open_date);
+            if (dateField === 'fu_date') return row.fu_date ? new Date(row.fu_date) : null;
+            if (dateField === 'fu_next') return row.fu_next_date ? new Date(row.fu_next_date) : null;
+            return getCspDueDate(row);
+        };
         return (rows || []).filter(row => {
             if (search.trim()) {
                 const t = search.toLowerCase();
@@ -1340,24 +1399,49 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             if (segment && segment !== 'all') {
                 if ((row.segment || '') !== segment) return false;
             }
+            if (statusFilter && statusFilter !== 'all') {
+                if ((row.fu_status || '').trim().toLowerCase() !== statusFilter) return false;
+            }
             if (fromDate || toDate) {
-                const due = getCspDueDate(row);
-                if (!due) return false;
-                due.setHours(0, 0, 0, 0);
+                const dv = dateOf(row);
+                if (!dv || isNaN(dv.getTime())) return false;
+                dv.setHours(0, 0, 0, 0);
                 if (fromDate) {
                     const from = new Date(fromDate);
                     from.setHours(0, 0, 0, 0);
-                    if (due < from) return false;
+                    if (dv < from) return false;
                 }
                 if (toDate) {
                     const to = new Date(toDate);
                     to.setHours(23, 59, 59, 999);
-                    if (due > to) return false;
+                    if (dv > to) return false;
                 }
             }
             return true;
         });
     }, [getCspDueDate]);
+
+    // ONE row per instance: among duplicate instance_ids (same SR in several
+    // CSP drives, or multiple SRs per asset) keep the row with the NEWEST
+    // SR Open Date. O(n) single pass.
+    const dedupeByInstance = useCallback((rows) => {
+        const best = new Map();
+        (rows || []).forEach((r, idx) => {
+            const key = r.instance_id ? String(r.instance_id) : `__noid_${idx}`;
+            const prev = best.get(key);
+            if (!prev) { best.set(key, r); return; }
+            const dNew = parseAnyDate(r.sr_open_date)?.getTime() ?? -Infinity;
+            const dOld = parseAnyDate(prev.sr_open_date)?.getTime() ?? -Infinity;
+            if (dNew > dOld) best.set(key, r);
+        });
+        return Array.from(best.values());
+    }, []);
+
+    // Total CSP box: unique instances only
+    const uniqueCspRows = useMemo(
+        () => dedupeByInstance(cspData.rows),
+        [cspData.rows, dedupeByInstance]
+    );
 
     // Segment options (shared by both modals) — derived from the already-fetched rows
     const cspSegmentOptions = useMemo(() => {
@@ -1366,10 +1450,13 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         return Array.from(set).sort();
     }, [cspData.rows]);
 
-    // Open-only rows (SR Status === open), from the same fetched cspData
+    // Open-only rows (SR Status === open), one row per instance, and records
+    // whose latest CSP follow-up is Completed/Rejected are removed entirely.
     const openCspRows = useMemo(
-        () => (cspData.rows || []).filter(r => (r.sr_status || '').trim().toLowerCase() === 'open'),
-        [cspData.rows]
+        () => dedupeByInstance(
+            (cspData.rows || []).filter(r => (r.sr_status || '').trim().toLowerCase() === 'open')
+        ).filter(r => !['completed', 'rejected'].includes((r.fu_status || '').trim().toLowerCase())),
+        [cspData.rows, dedupeByInstance]
     );
 
     // Unique open instances (parallels Total CSP = total_instances)
@@ -1378,16 +1465,16 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         [openCspRows]
     );
 
-    // Total CSP modal rows (now also segment-filtered)
+    // Total CSP modal rows (unique instances; segment + status + selectable-date filtered)
     const filteredCspRows = useMemo(
-        () => applyCspFilters(cspData.rows, cspSearchTerm, cspSegmentFilter, cspDueFromDate, cspDueToDate),
-        [cspData.rows, cspSearchTerm, cspSegmentFilter, cspDueFromDate, cspDueToDate, applyCspFilters]
+        () => applyCspFilters(uniqueCspRows, cspSearchTerm, cspSegmentFilter, cspDueFromDate, cspDueToDate, cspDateField, cspStatusFilter),
+        [uniqueCspRows, cspSearchTerm, cspSegmentFilter, cspDueFromDate, cspDueToDate, cspDateField, cspStatusFilter, applyCspFilters]
     );
 
     // Open CSP modal rows
     const filteredOpenCspRows = useMemo(
-        () => applyCspFilters(openCspRows, openCspSearchTerm, openCspSegmentFilter, openCspDueFromDate, openCspDueToDate),
-        [openCspRows, openCspSearchTerm, openCspSegmentFilter, openCspDueFromDate, openCspDueToDate, applyCspFilters]
+        () => applyCspFilters(openCspRows, openCspSearchTerm, openCspSegmentFilter, openCspDueFromDate, openCspDueToDate, openCspDateField, openCspStatusFilter),
+        [openCspRows, openCspSearchTerm, openCspSegmentFilter, openCspDueFromDate, openCspDueToDate, openCspDateField, openCspStatusFilter, applyCspFilters]
     );
     // Sorted CSP rows for Total CSP modal
     const sortedCspRows = useMemo(() => {
@@ -1439,11 +1526,15 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         [allFollowupsData]
     );
 
-    // Quotation Sent box: quotation sent AND still WIP
-    const quotationSentCount = useMemo(
-        () => allFollowupsData.filter(fu => fu.quotation_sent && (fu.status || '').toLowerCase() === 'wip').length,
-        [allFollowupsData]
-    );
+    // Quotation Sent box: LATEST followup per instance+drive with a quotation
+    // sent and still WIP — customers whose quotation later Completed (or moved
+    // to any other status) no longer count, so count == visible records.
+    const quotationSentIds = useMemo(() => new Set(
+        latestUniqueFollowups
+            .filter(fu => fu.quotation_sent && (fu.status || '').toLowerCase() === 'wip')
+            .map(fu => fu.id)
+    ), [latestUniqueFollowups]);
+    const quotationSentCount = quotationSentIds.size;
 
     // True if a follow-up belongs to a CSP campaign / service
     const isCspFollowup = useCallback((fu) =>
@@ -1464,11 +1555,18 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
     const cspQuotationCount = cspQuotationFollowupIds.size;
 
-    // CSP "Quotation Sent" — quotation_sent true AND CSP service
-    const cspQuotationSentCount = useMemo(
-        () => allFollowupsData.filter(fu => fu.quotation_sent && isCspFollowup(fu)).length,
-        [allFollowupsData]
-    );
+    // CSP "Quotation Sent" — LATEST followup per instance+drive with quotation
+    // sent, CSP service, and not Completed/Rejected (those drop out).
+    const cspQuotationSentIds = useMemo(() => new Set(
+        latestUniqueFollowups
+            .filter(fu =>
+                fu.quotation_sent &&
+                isCspFollowup(fu) &&
+                !['completed', 'rejected'].includes((fu.status || '').toLowerCase())
+            )
+            .map(fu => fu.id)
+    ), [latestUniqueFollowups, isCspFollowup]);
+    const cspQuotationSentCount = cspQuotationSentIds.size;
 
     // Non-campaign COMPLETED customers, reshaped as follow-up rows under campaign "other"
     const otherCompletedFollowups = useMemo(() => {
@@ -1524,10 +1622,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const visibleFollowups = useMemo(() => {
         return mergedFollowups.filter(fu => {
             if (quotationFilterActive && !quotationFollowupIds.has(fu.id)) return false;
-            // Quotation Sent view: keep only WIP rows that have a quotation sent
-            if (quotationSentFilterActive && !(fu.quotation_sent && (fu.status || '').toLowerCase() === 'wip')) return false;
+            // Quotation Sent / CSP Quotation Sent views: same latest-unique id
+            // sets as the cards, so the modal shows exactly the counted rows
+            if (quotationSentFilterActive && !quotationSentIds.has(fu.id)) return false;
             if (cspQuotationFilterActive && !cspQuotationFollowupIds.has(fu.id)) return false;
-            if (cspQuotationSentFilterActive && !(fu.quotation_sent && isCspFollowup(fu))) return false;
+            if (cspQuotationSentFilterActive && !cspQuotationSentIds.has(fu.id)) return false;
             if (statusFilter !== 'all') {
                 if (statusFilter === 'not_connected') {
                     const status = (fu.status || '').trim().toLowerCase();
@@ -1572,7 +1671,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     }, [mergedFollowups, quotationFilterActive, quotationSentFilterActive,
         cspQuotationFilterActive, cspQuotationSentFilterActive, statusFilter,
         debouncedSearch, createdFromDate, createdToDate,
-        quotationFollowupIds, cspQuotationFollowupIds, isCspFollowup]);
+        quotationFollowupIds, cspQuotationFollowupIds,
+        quotationSentIds, cspQuotationSentIds]);
 
     const displayedFollowups = useMemo(() => {
         // 'unique'       → latest row per unique Instance ID (drive ignored)
@@ -1987,7 +2087,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             'Reject Reason': c.rr_content || '-',
             'Remark Type': c.remark_type || '-',
             'Follow-up By': c.followup_by || '-',
-            'Status': c.last_status || '-',
+            'Status': statusLabel(c.last_status),
             'Flag': c.latest_flag || '-',
             'Remark': c.latest_remark || '-',
             'Quotation Sent': c.quotation_sent ? 'Yes' : 'No',
@@ -2025,7 +2125,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             'Subtype': fu.csp_subtype || '-',
             'Follow-up By': fu.followup_by || '-',
             'Flag': fu.followup_flag || '-',
-            'Status': fu.status === 'rescheduled' ? 'FR' : (fu.status || '-'),
+            'Status': statusLabel(fu.status),
             'Next Follow-up': fu.next_followup_date
                 ? new Date(fu.next_followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
                 : '-',
@@ -2080,7 +2180,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             'Subtype': fu.csp_subtype || '-',
             'Follow-up By': fu.followup_by || '-',
             'Flag': fu.followup_flag || '-',
-            'Status': fu.status === 'rescheduled' ? 'FR' : (fu.status || '-'),
+            'Status': statusLabel(fu.status),
             'Next Follow-up': fu.next_followup_date
                 ? new Date(fu.next_followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
                 : '-',
@@ -2326,6 +2426,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>
                         Total Calls and Follow-ups
+                        {otherCompletedFollowups.length > 0 && (
+                            <span className="ml-1 text-[10px] text-gray-500 font-semibold whitespace-nowrap">
+                                ({performance.total_followups || 0} + {otherCompletedFollowups.length} other drive)
+                            </span>
+                        )}
                         {branchAssetCount > 0 && (
                             <span className="block text-[10px] text-black font-semibold mt-0.5">
                                 ({branchAssetCount} assets)
@@ -2405,7 +2510,14 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     onClick={() => handleOpenStatusFollowups('completed')}
                     className="group relative bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all text-center cursor-pointer flex flex-col justify-between min-h-[90px]"
                 >
-                    <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Completed</h3>
+                    <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>
+                        Completed
+                        {(nonFollowupCustomerStats?.completed || 0) > 0 && (
+                            <span className="block text-[10px] text-gray-500 font-semibold mt-0.5 whitespace-nowrap">
+                                ({performance.completed_count || 0} + {nonFollowupCustomerStats.completed} other drive)
+                            </span>
+                        )}
+                    </h3>
                     <p className="text-lg sm:text-xl font-bold text-black mt-1">
                         <TimeValue>{(performance.completed_count || 0) + (nonFollowupCustomerStats?.completed || 0)}</TimeValue>
                     </p>
@@ -2794,7 +2906,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                             className="export-btn px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-1.5 text-xs whitespace-nowrap"
                                         >
                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
                                             </svg>
                                             Export
                                         </button>
@@ -3135,18 +3247,30 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2"
                                 style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
                             >
-                                <div>
+                                <div className="max-w-[240px] flex-shrink-0">
                                     <h3 className="text-base font-semibold text-white">
                                         CSP Status {userData?.branch ? `— ${userData.branch}` : ''}
                                     </h3>
                                     <p className="text-[11px] text-white/80 mt-0.5">
-                                        {cspData.total_instances} instance(s) • Showing {filteredCspRows.length} of {cspData.total_rows} SR row(s)
+                                        {cspData.total_instances} instance(s) • Showing {filteredCspRows.length} of {uniqueCspRows.length} row(s) • One row per instance (latest SR)
                                     </p>
                                 </div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    {/* Due Date - From */}
+                                <div className="flex flex-wrap items-center gap-2 justify-end flex-1 min-w-0">
+                                    {/* Date column selector for the range filter */}
+                                    <select
+                                        value={cspDateField}
+                                        onChange={(e) => setCspDateField(e.target.value)}
+                                        title="Choose which date the range filter applies to"
+                                        className="border border-gray-300 rounded-md px-1.5 py-1 text-[11px] bg-white text-black cursor-pointer focus:outline-none"
+                                    >
+                                        {CSP_DATE_FIELDS.map(f => (
+                                            <option key={f.key} value={f.key}>{f.label}</option>
+                                        ))}
+                                    </select>
+
+                                    {/* Date range - From */}
                                     <div className="flex items-center gap-1">
-                                        <label className="text-[11px] text-white whitespace-nowrap">Due From:</label>
+                                        <label className="text-[11px] text-white whitespace-nowrap">From:</label>
                                         <input
                                             type="date"
                                             value={cspDueFromDate}
@@ -3180,13 +3304,15 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         />
                                     </div>
 
-                                    {(cspSearchTerm || cspDueFromDate || cspDueToDate || cspSegmentFilter !== 'all') && (
+                                    {(cspSearchTerm || cspDueFromDate || cspDueToDate || cspSegmentFilter !== 'all' || cspStatusFilter !== 'all' || cspDateField !== 'due') && (
                                         <button
                                             onClick={() => {
                                                 setCspSearchTerm('');
                                                 setCspDueFromDate('');
                                                 setCspDueToDate('');
                                                 setCspSegmentFilter('all');
+                                                setCspStatusFilter('all');
+                                                setCspDateField('due');
                                             }}
                                             className="px-2 py-1 text-[11px] text-white border border-white/40 rounded-md bg-white/10 hover:bg-white/20 flex items-center gap-1"
                                             title="Clear filters"
@@ -3197,6 +3323,28 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                             Clear
                                         </button>
                                     )}
+
+                                    {/* Status filter — latest CSP follow-up status */}
+                                    <div className="flex items-center gap-1">
+                                        <label className="text-[11px] text-white whitespace-nowrap">Status:</label>
+                                        <div className="relative">
+                                            <select
+                                                value={cspStatusFilter}
+                                                onChange={(e) => setCspStatusFilter(e.target.value)}
+                                                className="border border-gray-300 rounded-md pl-2 pr-6 py-1 text-[11px] bg-white text-black appearance-none cursor-pointer focus:outline-none"
+                                            >
+                                                <option value="all">All</option>
+                                                <option value="wip">WIP</option>
+                                                <option value="rescheduled">FR</option>
+                                                <option value="not_connected">NC</option>
+                                                <option value="rejected">Rejected</option>
+                                                <option value="completed">Completed</option>
+                                            </select>
+                                            <svg className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-black pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                            </svg>
+                                        </div>
+                                    </div>
 
                                     {/* Segment filter */}
                                     <div className="flex items-center gap-1">
@@ -3224,7 +3372,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         placeholder="Search instance, customer, SR..."
                                         value={cspSearchTerm}
                                         onChange={(e) => setCspSearchTerm(e.target.value)}
-                                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 max-md:w-full max-md:min-w-0 bg-white focus:outline-none"
+                                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-40 max-md:w-full max-md:min-w-0 bg-white focus:outline-none"
                                     />
 
                                     <button
@@ -3281,6 +3429,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                             </div>
                                                         </div>
                                                     </th>
+                                                    {CSP_FU_HEADERS.map(h => (
+                                                        <th key={h} className="px-2 py-0 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">{h}</th>
+                                                    ))}
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
@@ -3316,7 +3467,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.sr_subtype || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.sr_status || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.segment ? highlightMatch(row.segment, cspSearchTerm) : '-'}</td>
-                                                            <td className="px-2 py-1 border border-gray-200 text-center font-bold" style={{ backgroundColor: dp > 0 ? 'transparent' : (dueDate ? '#ffdb62' : 'transparent') }}>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center font-bold whitespace-nowrap" style={{ backgroundColor: dp > 0 ? 'transparent' : (dueDate ? '#ffdb62' : 'transparent') }}>
                                                                 {fmtCspDueDate(dueDate)}
                                                             </td>
                                                             <td
@@ -3325,6 +3476,31 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                             >
                                                                 {dp === null ? '-' : dp > 0 ? `${dp} overdue` : dp === 0 ? 'Due today' : `${Math.abs(dp)} left`}
                                                             </td>
+                                                            {/* Latest CSP-drive followup — bg-white keeps these cells
+                                                                out of the due-date row coloring */}
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white whitespace-nowrap">{fmtFuDate(row.fu_date)}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white" title={row.fu_drive || ''}>
+                                                                <div className="max-w-[140px] truncate mx-auto">{row.fu_drive || '-'}</div>
+                                                            </td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_service || '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_subtype || '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white capitalize">{row.fu_by || '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_flag || '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_status ? statusLabel(row.fu_status) : '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white whitespace-nowrap">{fmtFuDate(row.fu_next_date)}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-left bg-white" title={row.fu_activity || ''}>
+                                                                <div className="max-w-[150px] truncate">{row.fu_activity || '-'}</div>
+                                                            </td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-left bg-white" title={row.fu_reject_reason || ''}>
+                                                                <div className="max-w-[150px] truncate">{row.fu_reject_reason || '-'}</div>
+                                                            </td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-left bg-white" title={row.fu_remark || ''}>
+                                                                <div className="max-w-[160px] truncate">{row.fu_remark || '-'}</div>
+                                                            </td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_quote_sent ? 'Yes' : '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_quote_no || '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white whitespace-nowrap">{(row.fu_quote_value ?? null) !== null ? row.fu_quote_value.toLocaleString('en-IN') : '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white whitespace-nowrap">{fmtFuDate(row.csp_last_letter_date)}</td>
                                                         </tr>
                                                     );
                                                 })}
@@ -3354,18 +3530,30 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2"
                                 style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
                             >
-                                <div>
+                                <div className="max-w-[240px] flex-shrink-0">
                                     <h3 className="text-base font-semibold text-white">
                                         Open CSP Status {userData?.branch ? `— ${userData.branch}` : ''}
                                     </h3>
                                     <p className="text-[11px] text-white/80 mt-0.5">
-                                        {openCspInstanceCount} open instance(s) • Showing {filteredOpenCspRows.length} of {openCspRows.length} open SR row(s)
+                                        {openCspInstanceCount} open instance(s) • Showing {filteredOpenCspRows.length} of {openCspRows.length} open row(s)
                                     </p>
                                 </div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    {/* Due Date - From */}
+                                <div className="flex flex-wrap items-center gap-2 justify-end flex-1 min-w-0">
+                                    {/* Date column selector for the range filter */}
+                                    <select
+                                        value={openCspDateField}
+                                        onChange={(e) => setOpenCspDateField(e.target.value)}
+                                        title="Choose which date the range filter applies to"
+                                        className="border border-gray-300 rounded-md px-1.5 py-1 text-[11px] bg-white text-black cursor-pointer focus:outline-none"
+                                    >
+                                        {CSP_DATE_FIELDS.map(f => (
+                                            <option key={f.key} value={f.key}>{f.label}</option>
+                                        ))}
+                                    </select>
+
+                                    {/* Date range - From */}
                                     <div className="flex items-center gap-1">
-                                        <label className="text-[11px] text-white whitespace-nowrap">Due From:</label>
+                                        <label className="text-[11px] text-white whitespace-nowrap">From:</label>
                                         <input
                                             type="date"
                                             value={openCspDueFromDate}
@@ -3399,6 +3587,27 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         />
                                     </div>
 
+                                    {/* Status filter — latest CSP follow-up status */}
+                                    <div className="flex items-center gap-1">
+                                        <label className="text-[11px] text-white whitespace-nowrap">Status:</label>
+                                        <div className="relative">
+                                            <select
+                                                value={openCspStatusFilter}
+                                                onChange={(e) => setOpenCspStatusFilter(e.target.value)}
+                                                className="border border-gray-300 rounded-md pl-2 pr-6 py-1 text-[11px] bg-white text-black appearance-none cursor-pointer focus:outline-none"
+                                            >
+                                                {/* Completed/Rejected rows are excluded from this box entirely */}
+                                                <option value="all">All</option>
+                                                <option value="wip">WIP</option>
+                                                <option value="rescheduled">FR</option>
+                                                <option value="not_connected">NC</option>
+                                            </select>
+                                            <svg className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-black pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                            </svg>
+                                        </div>
+                                    </div>
+
                                     {/* Segment filter */}
                                     <div className="flex items-center gap-1">
                                         <label className="text-[11px] text-white whitespace-nowrap">Segment:</label>
@@ -3420,13 +3629,15 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     </div>
 
                                     {/* Clear filters */}
-                                    {(openCspSearchTerm || openCspDueFromDate || openCspDueToDate || openCspSegmentFilter !== 'all') && (
+                                    {(openCspSearchTerm || openCspDueFromDate || openCspDueToDate || openCspSegmentFilter !== 'all' || openCspStatusFilter !== 'all' || openCspDateField !== 'due') && (
                                         <button
                                             onClick={() => {
                                                 setOpenCspSearchTerm('');
                                                 setOpenCspDueFromDate('');
                                                 setOpenCspDueToDate('');
                                                 setOpenCspSegmentFilter('all');
+                                                setOpenCspStatusFilter('all');
+                                                setOpenCspDateField('due');
                                             }}
                                             className="px-2 py-1 text-[11px] text-white border border-white/40 rounded-md bg-white/10 hover:bg-white/20 flex items-center gap-1"
                                             title="Clear filters"
@@ -3444,7 +3655,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         placeholder="Search instance, customer, SR..."
                                         value={openCspSearchTerm}
                                         onChange={(e) => setOpenCspSearchTerm(e.target.value)}
-                                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 max-md:w-full max-md:min-w-0 bg-white focus:outline-none"
+                                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-40 max-md:w-full max-md:min-w-0 bg-white focus:outline-none"
                                     />
 
                                     <button
@@ -3501,6 +3712,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                             </div>
                                                         </div>
                                                     </th>
+                                                    {CSP_FU_HEADERS.map(h => (
+                                                        <th key={h} className="px-2 py-0 border border-gray-300 text-center font-semibold text-black whitespace-nowrap bg-gray-100">{h}</th>
+                                                    ))}
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
@@ -3534,7 +3748,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.sr_subtype || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.sr_status || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center">{row.segment ? highlightMatch(row.segment, openCspSearchTerm) : '-'}</td>
-                                                            <td className="px-2 py-1 border border-gray-200 text-center font-bold" style={{ backgroundColor: dp > 0 ? 'transparent' : (dueDate ? '#ffdb62' : 'transparent') }}>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center font-bold whitespace-nowrap" style={{ backgroundColor: dp > 0 ? 'transparent' : (dueDate ? '#ffdb62' : 'transparent') }}>
                                                                 {fmtCspDueDate(dueDate)}
                                                             </td>
                                                             <td
@@ -3543,6 +3757,31 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                             >
                                                                 {dp === null ? '-' : dp > 0 ? `${dp} overdue` : dp === 0 ? 'Due today' : `${Math.abs(dp)} left`}
                                                             </td>
+                                                            {/* Latest CSP-drive followup — bg-white keeps these cells
+                                                                out of the due-date row coloring */}
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white whitespace-nowrap">{fmtFuDate(row.fu_date)}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white" title={row.fu_drive || ''}>
+                                                                <div className="max-w-[140px] truncate mx-auto">{row.fu_drive || '-'}</div>
+                                                            </td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_service || '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_subtype || '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white capitalize">{row.fu_by || '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_flag || '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_status ? statusLabel(row.fu_status) : '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white whitespace-nowrap">{fmtFuDate(row.fu_next_date)}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-left bg-white" title={row.fu_activity || ''}>
+                                                                <div className="max-w-[150px] truncate">{row.fu_activity || '-'}</div>
+                                                            </td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-left bg-white" title={row.fu_reject_reason || ''}>
+                                                                <div className="max-w-[150px] truncate">{row.fu_reject_reason || '-'}</div>
+                                                            </td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-left bg-white" title={row.fu_remark || ''}>
+                                                                <div className="max-w-[160px] truncate">{row.fu_remark || '-'}</div>
+                                                            </td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_quote_sent ? 'Yes' : '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_quote_no || '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white whitespace-nowrap">{(row.fu_quote_value ?? null) !== null ? row.fu_quote_value.toLocaleString('en-IN') : '-'}</td>
+                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white whitespace-nowrap">{fmtFuDate(row.csp_last_letter_date)}</td>
                                                         </tr>
                                                     );
                                                 })}
@@ -3552,7 +3791,10 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 )}
                             </div>
 
-                            <div className="px-4 py-2 border-t border-gray-200 bg-gray-50 flex justify-end">
+                            <div className="px-4 py-2 border-t border-gray-200 bg-gray-50 flex justify-between items-center gap-2 flex-wrap">
+                                <p className="text-[11px] text-gray-500">
+                                    Note: one row per instance (latest SR) • records whose follow-up status is Completed or Rejected are not shown
+                                </p>
                                 <button
                                     onClick={() => setShowOpenCspModal(false)}
                                     className="px-3 py-1.5 border border-gray-300 rounded-lg text-xs font-medium hover:bg-white text-black"
@@ -3691,7 +3933,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                             className="export-btn px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-1.5 text-xs whitespace-nowrap"
                                         >
                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
                                             </svg>
                                             Export
                                         </button>
@@ -3787,7 +4029,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                                             fu.status === 'rescheduled' ? 'bg-purple-100 text-purple-700' :
                                                                                 'bg-gray-100 text-gray-700'
                                                                     }`}>
-                                                                    {fu.status === 'rescheduled' ? 'FR' : (fu.status || '-')}
+                                                                    {statusLabel(fu.status)}
                                                                 </span>
                                                             </td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center whitespace-nowrap">
@@ -4105,7 +4347,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                             className="export-btn px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-1.5 text-xs whitespace-nowrap disabled:opacity-50"
                                         >
                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
                                             </svg>
                                             Export
                                         </button>
@@ -4437,7 +4679,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                             className="export-btn px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-1.5 text-xs whitespace-nowrap"
                                         >
                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
                                             </svg>
                                             Export
                                         </button>
@@ -4521,7 +4763,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                                         c.last_status === 'rescheduled' ? 'bg-purple-100 text-purple-700' :
                                                                             'bg-gray-100 text-gray-700'
                                                                 }`}>
-                                                                {c.last_status === 'rescheduled' ? 'FR' : (c.last_status || '-')}
+                                                                {statusLabel(c.last_status)}
                                                             </span>
                                                         </td>
                                                         <td className="px-2 py-1 border border-gray-200 text-center whitespace-nowrap">

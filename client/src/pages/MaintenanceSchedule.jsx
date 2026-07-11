@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     ClipboardDocumentCheckIcon, Cog6ToothIcon, PrinterIcon,
-    ArrowDownTrayIcon, CheckIcon, XMarkIcon, ArrowPathIcon,
+    ArrowUpTrayIcon, CheckIcon, XMarkIcon, ArrowPathIcon,
 } from '@heroicons/react/24/outline';
 import MaintenanceScheduleMaster from '../components/MaintenanceScheduleMaster';
 import {
@@ -98,9 +98,9 @@ const PrintSheet = ({ app, services, parts, onClose }) => {
                         <table className="w-full border-collapse">
                             <thead>
                                 <tr>
-                                    <th className={`${th} text-center`}>Sr.</th><th className={`${th} text-left`}>Part Number</th><th className={`${th} text-left`}>Description</th>
-                                    <th className={`${th} text-center`}>Qty</th><th className={`${th} text-center`}>Action</th><th className={`${th} text-left`}>Part No</th>
-                                    <th className={`${th} text-left`}>Description</th><th className={`${th} text-center`}>Qty</th><th className={`${th} text-center`}>Action</th>
+                                    <th className={`${th} text-center`}>Sr.</th><th className={`${th} text-center`}>Part Number</th><th className={`${th} text-center`}>Description</th>
+                                    <th className={`${th} text-center`}>Qty</th><th className={`${th} text-center`}>Action</th><th className={`${th} text-center`}>Part No</th>
+                                    <th className={`${th} text-center`}>Description</th><th className={`${th} text-center`}>Qty</th><th className={`${th} text-center`}>Action</th>
                                     <th className={`${th} text-center`}>Svc Hrs</th><th className={`${th} text-center`}>Consumable</th>
                                 </tr>
                             </thead>
@@ -252,7 +252,7 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
                                 </div>
                                 <button onClick={() => setShowPrint(true)}
                                     className="inline-flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-[12px] font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: themeColor }}>
-                                    <PrinterIcon className="h-4 w-4" /> Export PDF
+                                    <ArrowUpTrayIcon className="h-4 w-4" /> Export PDF
                                 </button>
                             </div>
 
@@ -307,7 +307,7 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
                                     <thead>
                                         <tr className="bg-gray-50 text-[10px] sm:text-[11px] font-semibold text-black uppercase tracking-wider">
                                             {['Sr.', 'Part Number', 'Description', 'Qty', 'Act', 'Alt Part No', 'Alt Description', 'Qty', 'Act', 'Svc Hrs', 'Consumable'].map((h, i) => (
-                                                <th key={i} className={`px-3 py-2 border border-gray-200 ${[1, 2, 3, 4, 7, 8, 9, 10].includes(i) ? 'text-center' : 'text-left'}`}>{h}</th>
+                                                <th key={i} className="px-3 py-2 border border-gray-200 text-center">{h}</th>
                                             ))}
                                         </tr>
                                     </thead>

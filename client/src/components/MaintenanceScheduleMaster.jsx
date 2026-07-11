@@ -4,7 +4,7 @@ import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
 import {
     Cog6ToothIcon, ArrowLeftIcon, MagnifyingGlassIcon, PlusIcon,
-    PencilSquareIcon, TrashIcon, ArrowDownTrayIcon, ChevronRightIcon, ChevronDownIcon, ArrowPathIcon,
+    PencilSquareIcon, TrashIcon, ChevronRightIcon, ChevronDownIcon, ArrowPathIcon,
     CircleStackIcon, WrenchScrewdriverIcon, ArrowUpTrayIcon, CheckIcon, XMarkIcon,
 } from '@heroicons/react/24/outline';
 import {
@@ -249,7 +249,7 @@ const MasterData = () => {
                                     onClick={() => exportXlsx(selCodes)}
                                     className="export-btn inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-2 text-[12px] font-semibold text-white transition"
                                 >
-                                    <ArrowDownTrayIcon className="h-4 w-4" /> Export selected
+                                    <ArrowUpTrayIcon className="h-4 w-4" /> Export selected
                                 </button>
                             )}
                         </>
@@ -260,7 +260,7 @@ const MasterData = () => {
                             onClick={() => exportXlsx(null)}
                             className="export-btn inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-2 text-[12px] font-semibold text-white transition"
                         >
-                            <ArrowDownTrayIcon className="h-4 w-4" /> Export all
+                            <ArrowUpTrayIcon className="h-4 w-4" /> Export all
                         </button>
                     )}
 
@@ -356,7 +356,7 @@ const MasterData = () => {
                                                             <thead>
                                                                 <tr className="bg-gray-100/70 text-[10px] font-semibold text-black uppercase tracking-wider">
                                                                     {['Sr.', 'Part Number', 'Description', 'Qty', 'Act', 'Svc Hrs', 'Service Type', 'Consumable'].map((h, i) => (
-                                                                        <th key={i} className={`px-3 py-1.5 border border-gray-200 ${[1, 2, 3, 4, 5, 7].includes(i) ? 'text-center' : 'text-left'}`}>{h}</th>
+                                                                        <th key={i} className="px-3 py-1.5 border border-gray-200 text-center">{h}</th>
                                                                     ))}
                                                                 </tr>
                                                             </thead>
@@ -617,9 +617,9 @@ const AppFormModal = ({ initial, opts, existing, onClose, onSave }) => {
                         <table className="min-w-[660px] w-full border-collapse">
                             <thead>
                                 <tr className="bg-gray-50 text-[9.5px] font-semibold text-gray-500 uppercase tracking-wide">
-                                    <th className="px-2 py-1.5 text-left">Part Number</th><th className="px-2 py-1.5 text-left">Description</th>
-                                    <th className="px-2 py-1.5 text-left w-14">Qty</th><th className="px-2 py-1.5 text-left w-16">Action</th>
-                                    <th className="px-2 py-1.5 text-left w-20">Svc Hrs</th><th className="px-2 py-1.5 text-left w-24">Consumable</th><th className="w-9" />
+                                    <th className="px-2 py-1.5 text-center">Part Number</th><th className="px-2 py-1.5 text-center">Description</th>
+                                    <th className="px-2 py-1.5 text-center w-14">Qty</th><th className="px-2 py-1.5 text-center w-16">Action</th>
+                                    <th className="px-2 py-1.5 text-center w-20">Svc Hrs</th><th className="px-2 py-1.5 text-center w-24">Consumable</th><th className="w-9" />
                                 </tr>
                             </thead>
                             <tbody>
@@ -844,7 +844,7 @@ const ImportData = () => {
                             <table className="min-w-[560px] w-full border-collapse text-[12px]">
                                 <thead><tr className="bg-gray-50 text-[10px] font-semibold text-black uppercase tracking-wider">
                                     <th className="px-2 py-2 w-8 border-b border-gray-200" />
-                                    <th className="px-3 py-2 text-left border-b border-gray-200">App Code</th><th className="px-3 py-2 text-left border-b border-gray-200">Engine Model</th>
+                                    <th className="px-3 py-2 text-center border-b border-gray-200">App Code</th><th className="px-3 py-2 text-center border-b border-gray-200">Engine Model</th>
                                     <th className="px-3 py-2 text-center border-b border-gray-200">KVA</th><th className="px-3 py-2 text-center border-b border-gray-200">Parts</th><th className="px-3 py-2 text-center border-b border-gray-200">Action</th>
                                 </tr></thead>
                                 <tbody>
@@ -876,9 +876,9 @@ const ImportData = () => {
                                                                     <table className="min-w-[520px] w-full border-collapse text-[11.5px]">
                                                                         <thead>
                                                                             <tr className="text-[9.5px] font-semibold text-gray-500 uppercase tracking-wide">
-                                                                                <th className="px-2 py-1 text-left">Sr.</th>
-                                                                                <th className="px-2 py-1 text-left">Part Number</th>
-                                                                                <th className="px-2 py-1 text-left">Description</th>
+                                                                                <th className="px-2 py-1 text-center">Sr.</th>
+                                                                                <th className="px-2 py-1 text-center">Part Number</th>
+                                                                                <th className="px-2 py-1 text-center">Description</th>
                                                                                 <th className="px-2 py-1 text-center">Qty</th>
                                                                                 <th className="px-2 py-1 text-center">Act</th>
                                                                                 <th className="px-2 py-1 text-center">Svc Hrs</th>
