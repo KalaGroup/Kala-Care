@@ -6689,8 +6689,8 @@ ${f.start_para}`;
                         </div>
 
                         {/* Open SR Report — every Open SR file record of this instance, latest first */}
-                        <div>
-                            <p className="text-[11px] font-bold text-black uppercase tracking-wide mb-1.5">Open SR Report</p>
+                        <div className="border border-gray-300 rounded-md overflow-hidden">
+                            <p className="text-[11px] font-bold text-black uppercase tracking-wide text-center px-2 py-1">Open SR Report</p>
                             <div className="overflow-x-auto">
                                 <table className="w-full border-collapse min-w-[520px]">
                                     <thead>
@@ -6726,8 +6726,8 @@ ${f.start_para}`;
                         </div>
 
                         {/* Close SR Report — every Close SR file record of this instance, latest first */}
-                        <div>
-                            <p className="text-[11px] font-bold text-black uppercase tracking-wide mb-1.5">Close SR Report</p>
+                        <div className="border border-gray-300 rounded-md overflow-hidden">
+                            <p className="text-[11px] font-bold text-black uppercase tracking-wide text-center px-2 py-1">Close SR Report</p>
                             <div className="overflow-x-auto">
                                 <table className="w-full border-collapse min-w-[520px]">
                                     <thead>

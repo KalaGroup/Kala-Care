@@ -12,7 +12,6 @@ class FollowUp(Base):
         Index('IX_followups_campaign_date', 'campaign_id', 'followup_date'),
     )
 
-
     id = Column(Integer, primary_key=True, index=True)
     customer_id = Column(Integer, ForeignKey("customers.id"))
     customer_instance_id = Column(String(100), index=True, nullable=True)

@@ -4,8 +4,8 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import {
   ClipboardList, Building2, Plus, Trash2, CheckCircle2,
-  AlertTriangle, CalendarDays, Users, X, CornerUpRight, Flag,
-  BarChart3, Check, User, ListChecks, Zap, ChevronRight, ChevronLeft,
+  AlertTriangle, CalendarDays, Users, X, CornerUpRight,
+  BarChart3, Check, User, ListChecks, Zap,
   ChevronDown, FileText, MapPin, UserPlus, Download, Upload, Search, RotateCcw,
 } from 'lucide-react';
 import {
@@ -189,7 +189,7 @@ async function exportMeetingExcel(m, brandColor = BRAND) {
      merged column) · legend G:H */
   const info = [
     ['Date:', fmtDDMMYY(m.date)], ['Location:', m.location || ''],
-    ['Branch(es):', branchNames], ['Meeting Type:', m.type || ''],
+    ['Branches:', branchNames], ['Meeting Type:', m.type || ''],
     ['Conducted By:', m.conductedBy || ''],
   ];
   const present = m.attendees.filter((a) => a.present);
@@ -312,16 +312,37 @@ const SegStatus = ({ value, onChange }) => (
     ))}
   </div>
 );
-/* legend card — mirrors the "Action Flag" box on the sheet */
-const FlagLegend = React.memo(() => (
-  <div className="rounded-xl border border-gray-200 bg-white p-3">
-    <div className="fs-10 font-bold text-black uppercase tracking-wide mb-1.5 flex items-center gap-1"><Flag size={11} /> Action Flag</div>
-    <div className="space-y-1">
-      <div className="flex items-center gap-2 fs-11"><FlagChip f="T" small /><span className="text-black">Task — owner(s), due date &amp; status</span></div>
-      <div className="flex items-center gap-2 fs-11"><FlagChip f="I" small /><span className="text-black">Information — can be assigned to people, no due date</span></div>
+/* generic dropdown shell — trigger render-prop + panel that closes on
+   outside click. Children can be a function receiving close() so list
+   items can dismiss the panel after acting. */
+function Dropdown({ trigger, children, panelClass = '', panelStyle }) {
+  const [open, setOpen] = useState(false);
+  const [alignRight, setAlignRight] = useState(false);
+  const ref = useRef(null);
+  const panelRef = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    /* flip the panel to right-aligned when its left-anchored position would
+       run past the viewport edge (and right-aligning actually fits) */
+    const pw = panelRef.current?.offsetWidth || 0;
+    const r = ref.current?.getBoundingClientRect();
+    if (r && pw) setAlignRight(r.left + pw > window.innerWidth - 8 && r.right - pw >= 8);
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+  return (
+    <div className="relative" ref={ref}>
+      {trigger({ open, toggle: () => setOpen((o) => !o) })}
+      {open && (
+        <div ref={panelRef} className={`absolute z-[60] mt-1 rounded-xl border border-gray-200 bg-white shadow-2xl overflow-hidden ${panelClass}`}
+          style={{ ...(alignRight ? { right: 0 } : { left: 0 }), ...panelStyle }}>
+          {typeof children === 'function' ? children(() => setOpen(false)) : children}
+        </div>
+      )}
     </div>
-  </div>
-));
+  );
+}
 /* previous remarks chips (the accumulating "Remarks - date" columns) */
 const RemarkHistory = React.memo(({ list }) => !list?.length ? <span className="fs-10 text-gray-300">—</span> : (
   <div className="space-y-1">
@@ -615,8 +636,7 @@ export default function MOMTracking() {
     return [];
   }, [empSource, employees]);
 
-  /* ---- meeting setup (Step 1 — "set all this before starting") ---- */
-  const [step, setStep] = useState(1);                // 1 setup · 2 meeting sheet
+  /* ---- meeting setup (merged into the one-tab sheet screen) ---- */
   const [branches, setBranches] = useState([]);       // MULTI-select — one or more branches per meeting
   const [manualBranches, setManualBranches] = useState([]);  // branches typed in by the admin
   const [manualBranch, setManualBranch] = useState('');
@@ -625,8 +645,7 @@ export default function MOMTracking() {
   const [mType, setMType] = useState('');
   const [attendees, setAttendees] = useState([]);
   const [manualName, setManualName] = useState('');
-  const [pickBr, setPickBr] = useState('all');        // "Add from employees" picker
-  const [pickEmp, setPickEmp] = useState('');
+  const [pickBr, setPickBr] = useState('all');        // "Employee joined?" picker — branch filter
   const [picked, setPicked] = useState(new Set());    // which master points to discuss
 
   const branchLabel = useMemo(() => branches.map((b) => b.name).join(' + '), [branches]);
@@ -709,7 +728,6 @@ export default function MOMTracking() {
         const d = JSON.parse(raw);
         const fresh = d && (!d.savedAt || Date.now() - d.savedAt < 7 * 86400000);   // drafts expire after 7 days
         if (fresh && (d.branches?.length || d.rows?.length || d.mLocation || d.mType)) {
-          setStep(d.step === 2 ? 2 : 1);
           setBranches(d.branches || []);
           setManualBranches(d.manualBranches || []);
           if (d.mDate) setMDate(d.mDate);
@@ -736,14 +754,14 @@ export default function MOMTracking() {
           || picked.size || mLocation.trim() || mType.trim();
         if (!hasData) { localStorage.removeItem(DRAFT_KEY); return; }
         localStorage.setItem(DRAFT_KEY, JSON.stringify({
-          step, branches, manualBranches, mDate, mLocation, mType,
+          branches, manualBranches, mDate, mLocation, mType,
           attendees, picked: [...picked], rows, carry, savedAt: Date.now(),
         }));
       } catch { /* storage full / unavailable — draft simply not kept */ }
     }, 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMaster, step, branches, manualBranches, mDate, mLocation, mType, attendees, picked, rows, carry]);
+  }, [isMaster, branches, manualBranches, mDate, mLocation, mType, attendees, picked, rows, carry]);
 
   /* header pills — latest state per tracked task, meetings counted once
      even when they cover several branches */
@@ -768,8 +786,8 @@ export default function MOMTracking() {
     return [];
   };
 
-  /* every employee of every branch — feeds the "Add from employees"
-     picker (step 1) and the "Employee joined? Select…" control (step 2) */
+  /* every employee of every branch — feeds the "Employee joined?
+     Select…" two-step picker on the sheet */
   const allEmployees = useMemo(() => {
     if (empSource === 'api') return employees.map((e) => ({ name: e.name, user_id: e.user_id, branch: e.branch, branchName: e.branch_name || e.branch }));
     return [];
@@ -795,6 +813,12 @@ export default function MOMTracking() {
 
   /* what will carry forward from the selected branches */
   const carryPreview = useMemo(() => (branches.length ? collectCarry(history, branches.map((b) => b.code)).length : 0), [branches, history]);
+  /* open tasks per branch — shown inside the branch dropdown */
+  const branchCarryCounts = useMemo(() => {
+    const out = {};
+    Object.keys(history).forEach((code) => { out[code] = collectCarry(history, [code]).length; });
+    return out;
+  }, [history]);
   const lastAcross = useMemo(() => {
     const ds = branches.map((b) => (history[b.code] || [])[0]?.date).filter(Boolean).sort();
     return ds[ds.length - 1];
@@ -899,12 +923,6 @@ export default function MOMTracking() {
     setAttendees((p) => [...p, { id: uid('a'), name: e.name, user_id: e.user_id, source: 'employee', present: true, branch: e.branchName, extra: true }]);
     ping(`${e.name} added to attendees`);
   };
-  const addPicked = () => {
-    const emp = pickable.find((e) => e.key === pickEmp);
-    if (!emp) return;
-    addEmployeeAttendee(emp);
-    setPickEmp('');
-  };
   const addManual = () => {
     const n = manualName.trim();
     if (!n) return;
@@ -915,33 +933,38 @@ export default function MOMTracking() {
   const togglePresent = (id) => setAttendees((p) => p.map((a) => a.id === id ? { ...a, present: !a.present } : a));
   const removeAttendee = (id) => setAttendees((p) => p.filter((a) => a.id !== id));
 
-  const openSheet = () => {
-    if (!branches.length) return ping('Select at least one branch', 'err');
-    if (!mDate) return ping('Meeting date is mandatory', 'err');
-    if (!mLocation.trim()) return ping('Please set the meeting location', 'err');
-    if (!mType.trim()) return ping('Set the meeting type (pick one or type your own)', 'err');
-    if (!attendees.some((a) => a.present)) return ping('Mark at least one attendee as present', 'err');
-    const pickedPoints = master.filter((p) => picked.has(p.id));
-    /* points are optional — the meeting can start with none selected;
-       extra points can still be added live during the meeting */
-    /* only the SELECTED master points pre-fill the sheet; anything already
-       typed against a still-selected point survives a trip back to setup */
+  /* one-tab mode: ticking a master point adds its row to the sheet
+     instantly, unticking removes it (togglePick / pickNone warn first when
+     the row is filled). Rows already typed against a still-ticked point are
+     kept untouched; custom rows always survive. Skips the very first run so
+     a restored draft's rows aren't wiped before its picked-set lands. */
+  const rowSyncReady = useRef(false);
+  useEffect(() => {
+    if (!rowSyncReady.current) { rowSyncReady.current = true; return; }
     setRows((prev) => {
       const byMaster = new Map(prev.filter((r) => r.masterId).map((r) => [r.masterId, r]));
       const custom = prev.filter((r) => !r.masterId);   // rows added live during the meeting
-      const fromMaster = pickedPoints.map((p) => byMaster.get(p.id) || ({
+      const fromMaster = master.filter((p) => picked.has(p.id)).map((p) => byMaster.get(p.id) || ({
         id: uid(), trackId: uid('t'), masterId: p.id, area: p.title, category: p.category,
         point: '', resp: [], due: '', flag: 'I', status: 'pending', remark: '',
         originDate: mDate, prevRemarks: [],
       }));
       return [...fromMaster, ...custom];
     });
-    setCarry((prev) => prev.length ? prev : collectCarry(history, branches.map((b) => b.code)));
-    setStep(2);
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picked, master]);
+
+  /* carried tasks follow the branch selection live; when the meeting
+     history arrives after branches were already chosen (e.g. a restored
+     draft), rebuild the carry list — edits are kept per trackId */
+  useEffect(() => {
+    if (branches.length) rebuildCarry(branches);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history]);
+
   const resetWizard = () => {
-    setStep(1); setBranches([]); setAttendees([]); setManualName(''); setPicked(new Set()); setShowAllAtt(false);
-    setManualBranch(''); setPickBr('all'); setPickEmp('');
+    setBranches([]); setAttendees([]); setManualName(''); setPicked(new Set()); setShowAllAtt(false);
+    setManualBranch(''); setPickBr('all');
     setMDate(iso(new Date())); setMLocation(''); setMType('');
     setRows([]); setCarry([]);
     try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ }
@@ -974,7 +997,13 @@ export default function MOMTracking() {
     if (patch.flag === 'I') { next.due = ''; next.status = 'pending'; }
     return next;
   }));
-  const delRow = (id) => setRows((p) => p.filter((r) => r.id !== id));
+  /* removing a master-point row also unticks its point — otherwise the
+     live points↔rows sync would put the row straight back */
+  const delRow = (id) => {
+    const r = rows.find((x) => x.id === id);
+    if (r?.masterId) setPicked((s) => { const n = new Set(s); n.delete(r.masterId); return n; });
+    setRows((p) => p.filter((x) => x.id !== id));
+  };
   const askDelRow = (r) => setConfirm({
     title: 'Remove this row?',
     meta: r.area,
@@ -986,7 +1015,30 @@ export default function MOMTracking() {
     const defCat = newCat || Object.keys(categories)[0] || '';
     setRows((p) => [...p, { id: uid(), trackId: uid('t'), masterId: null, area: '', category: defCat, point: '', resp: [], due: '', flag: 'I', status: 'pending', remark: '', originDate: mDate, prevRemarks: [] }]);
   };
+  /* a blank row's Discussion Area is picked from the master points (no
+     free typing) — selecting one converts the row in place, keeping
+     anything already typed in it, and ticks the point so the live
+     points↔rows sync owns it from here on */
+  const assignMasterToRow = (rowId, pid) => {
+    const p = master.find((x) => x.id === pid);
+    if (!p) return;
+    setRows((prev) => prev.map((r) => r.id === rowId ? { ...r, masterId: p.id, area: p.title, category: p.category } : r));
+    setPicked((s) => { const n = new Set(s); n.add(p.id); return n; });
+  };
   const updCarry = (id, patch) => setCarry((p) => p.map((c) => c.id === id ? { ...c, ...patch } : c));
+
+  /* carried-tasks table filters — status & category (display only; edits
+     still land on the full carry list by id) */
+  const [carryStatusF, setCarryStatusF] = useState('all');
+  const [carryCatF, setCarryCatF] = useState('all');
+  const carryCats = useMemo(() => [...new Set(carry.map((c) => c.category).filter(Boolean))].sort(), [carry]);
+  const shownCarry = useMemo(() => carry.filter((c) =>
+    (carryCatF === 'all' || c.category === carryCatF)
+    && (carryStatusF === 'all'
+      || (carryStatusF === 'overdue'
+        ? (c.status !== 'completed' && c.due && daysFromDue(c.due) > 0)
+        : c.status === carryStatusF))
+  ), [carry, carryStatusF, carryCatF]);
 
   const { taskCount, infoCount, blankCount, unassigned } = useMemo(() => ({
     taskCount: rows.filter((r) => r.flag === 'T').length + carry.filter((c) => c.status !== 'completed').length,
@@ -997,7 +1049,11 @@ export default function MOMTracking() {
   }), [rows, carry]);
 
   const finalize = () => {
-    if (!branches.length || !mDate) return ping('Meeting setup is incomplete — go back and check branch & date', 'err');
+    if (!branches.length) return ping('Select at least one branch', 'err');
+    if (!mDate) return ping('Meeting date is mandatory', 'err');
+    if (!mLocation.trim()) return ping('Please set the meeting location', 'err');
+    if (!mType.trim()) return ping('Set the meeting type (pick one or type your own)', 'err');
+    if (!attendees.some((a) => a.present)) return ping('Mark at least one attendee as present', 'err');
     if (unassigned) return ping(`${unassigned} Task row(s) have no Responsibility — assign someone or switch them to "I"`, 'err');
     if (taskCount === 0 && infoCount === 0 && carry.length === 0)
       return ping('Nothing recorded yet — note at least one point or assign a task', 'err');
@@ -1112,15 +1168,6 @@ export default function MOMTracking() {
               <span className="inline-flex items-center gap-1 rounded-full bg-white/15 text-white px-2.5 py-1 text-[11px] font-medium">Meetings: <b className="font-bold">{stats.meetings}</b></span>
               <span className="inline-flex items-center gap-1 rounded-full bg-white/15 text-white px-2.5 py-1 text-[11px] font-medium">Open tasks: <b className="font-bold">{stats.open}</b></span>
               <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium text-white" style={stats.overdue > 0 ? { background: 'rgba(248,113,113,0.3)' } : { background: 'rgba(255,255,255,0.15)' }}>Overdue: <b className="font-bold">{stats.overdue}</b></span>
-              {isMaster && view === 'new' && (
-                <button onClick={askReset} title="Clear the whole meeting and start over"
-                  className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition text-white"
-                  style={{ background: 'rgba(248,113,113,0.30)' }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(248,113,113,0.45)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(248,113,113,0.30)'; }}>
-                  <RotateCcw className="h-3.5 w-3.5" /> Reset
-                </button>
-              )}
               {isMaster && (
                 <button onClick={() => setMasterOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1.5 text-[12px] font-medium transition">
                   <ListChecks className="h-3.5 w-3.5" /> Master setup
@@ -1130,338 +1177,166 @@ export default function MOMTracking() {
           </div>
         </div>
 
-        {/* ===== VIEW TABS + STEP INDICATOR ===== */}
+        {/* ===== VIEW TABS ===== */}
         <div className="kc-in flex items-center justify-between gap-2 mb-4 flex-wrap">
           <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm w-fit max-sm:max-w-full max-sm:overflow-x-auto">
             {(isMaster
               ? [{ k: 'new', label: 'New meeting', icon: Zap }, { k: 'history', label: 'History', icon: FileText }, { k: 'reports', label: 'Reports', icon: BarChart3 }, { k: 'mine', label: 'Employee report', icon: Users }]
               : [{ k: 'mine', label: 'My MOM', icon: Users }]
             ).map((t) => (
-              <button key={t.k} onClick={() => setView(t.k)} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 fs-12 font-semibold transition ${view === t.k ? 'mom-tab-active' : ''}`} style={view === t.k ? { background: BRAND_SOFT, color: INK } : { color: '#6b7280' }}>
-                <t.icon size={14} /> {t.label}
+              <button key={t.k} onClick={() => setView(t.k)} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 fs-13 font-semibold transition ${view === t.k ? 'mom-tab-active' : ''}`} style={view === t.k ? { background: BRAND_SOFT, color: INK } : { color: '#6b7280' }}>
+                <t.icon size={15} /> {t.label}
               </button>
             ))}
           </div>
-          {view === 'new' && (
-            <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm max-md:flex-wrap max-md:gap-2">
-              {/* Back */}
-              <button onClick={() => setStep(1)} disabled={step === 1}
-                className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 fs-11 font-semibold transition disabled:opacity-35 text-gray-600 hover:bg-gray-50">
-                <ChevronLeft size={14} /> Back
-              </button>
-              <span className="h-6 w-px bg-gray-100" />
-              {[{ n: 1, label: 'Meeting setup', sub: branches.length ? `${branches.length} branch${branches.length > 1 ? 'es' : ''} · ${picked.size} points` : 'branches · attendees · points' },
-                { n: 2, label: 'Meeting sheet', sub: step === 2 ? 'live' : 'discussion table' }].map((s, i) => (
-                <React.Fragment key={s.n}>
-                  {i > 0 && <ChevronRight size={14} className="text-gray-300" />}
-                  <div className="flex items-center gap-2 px-2 py-1 rounded-md" style={step === s.n ? { background: BRAND_SOFT } : {}}>
-                    <span className="h-5 w-5 rounded-full flex items-center justify-center fs-10 font-bold" style={step >= s.n ? { background: BRAND, color: '#fff' } : { background: '#eef0f3', color: '#9ca3af' }}>
-                      {step > s.n ? <Check size={11} /> : s.n}
-                    </span>
-                    <div className="leading-tight">
-                      <div className="fs-11 font-bold" style={{ color: step === s.n ? INK : '#6b7280' }}>{s.label}</div>
-                      <div className="fs-9 text-gray-400 truncate" style={{ maxWidth: '9rem' }}>{s.sub}</div>
-                    </div>
-                  </div>
-                </React.Fragment>
-              ))}
-              <span className="h-6 w-px bg-gray-100" />
-              {/* Next / Finalize */}
-              <button onClick={() => (step === 1 ? openSheet() : finalize())}
-                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 fs-11 font-bold text-white transition hover:opacity-90"
-                style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})` }}>
-                {step === 1 ? <>Next <ChevronRight size={14} /></> : <><CheckCircle2 size={14} /> Finalize</>}
-              </button>
-            </div>
+          {isMaster && view === 'new' && (
+            <button onClick={askReset} title="Clear the whole meeting and start over"
+              className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 fs-12 font-semibold transition shadow-sm"
+              style={{ background: 'rgba(248,113,113,0.10)', borderColor: 'rgba(248,113,113,0.35)', color: '#ef4444' }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(248,113,113,0.20)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(248,113,113,0.10)'; }}>
+              <RotateCcw size={14} /> Reset
+            </button>
           )}
         </div>
 
         {/* ================================================
-            STEP 1 — MEETING SETUP (before starting)
+            NEW MEETING — ONE TAB (setup & live sheet merged,
+            everything editable in place — Excel format)
             ================================================ */}
-        {view === 'new' && step === 1 && (
-          <div className="kc-in grid grid-cols-1 lg:grid-cols-3 gap-3">
-
-            {/* ---- meeting details ---- */}
-            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: BRAND_SOFT }}><CalendarDays size={15} style={{ color: INK }} /></span>
-                <h2 className="text-[13px] font-bold text-gray-800">Meeting details</h2>
-              </div>
-
-              <label className="block">
-                <span className="fs-11 font-semibold text-gray-500">Date <span className="text-red-300">*</span></span>
-                <div className="kc-input mt-1 flex items-center gap-2 px-3 py-2" style={!mDate ? { borderColor: '#f87171' } : {}}>
-                  <CalendarDays size={14} className="text-gray-400" />
-                  <input type="date" required value={mDate} onChange={(e) => setMDate(e.target.value)} className="w-full fs-12 text-gray-700 outline-none bg-transparent" />
-                </div>
-                {!mDate && <div className="fs-9 mt-1 font-semibold" style={{ color: '#f87171' }}>Meeting date is required to start the sheet.</div>}
-              </label>
-
-              <label className="block">
-                <span className="fs-11 font-semibold text-gray-500">Location <span className="text-red-300">*</span></span>
-                <div className="kc-input mt-1 flex items-center gap-2 px-3 py-2">
-                  <input value={mLocation} onChange={(e) => setMLocation(e.target.value)} placeholder="e.g. Branch Office — Conference Room" className="w-full fs-12 text-black outline-none bg-transparent" />
-                </div>
-              </label>
-
-              <div className="block relative" ref={typeDdRef}>
-                <span className="fs-11 font-semibold text-gray-500">Meeting type <span className="text-red-300">*</span></span>
-                <div className="kc-input mt-1 flex items-center px-3 py-2 relative">
-                  <input value={mType} onChange={(e) => setMType(e.target.value)}
-                    placeholder="Type the meeting type (e.g. Monthly Branch Review)…"
-                    className="w-full fs-12 text-black outline-none bg-transparent pr-6" />
-                  <button type="button" onClick={() => setTypeDdOpen((o) => !o)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-gray-100"
-                    title="Show previously used meeting types">
-                    <ChevronDown size={14} className={`text-gray-500 transition-transform ${typeDdOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                </div>
-                {typeDdOpen && (
-                  <div className="absolute z-20 mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden">
-                    <div className="fs-9 font-bold uppercase tracking-wide text-gray-400 px-3 pt-2 pb-1">Previously used meeting types</div>
-                    <div className="max-h-44 overflow-y-auto kc-scroll">
-                      {usedMeetingTypes.length === 0 && (
-                        <div className="px-3 py-2 fs-11 text-gray-400">No meeting types in history yet — type one in the box above.</div>
-                      )}
-                      {usedMeetingTypes.map((t) => (
-                        <button key={t} type="button" onClick={() => { setMType(t); setTypeDdOpen(false); }}
-                          className="w-full text-left px-3 py-1.5 fs-12 text-black hover:bg-gray-50 flex items-center gap-2">
-                          {mType.trim().toLowerCase() === t.toLowerCase() ? <Check size={12} style={{ color: BRAND }} /> : <span className="w-3 flex-shrink-0" />}
-                          <span className="truncate">{t}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <FlagLegend />
-            </div>
-
-            {/* ---- branches (multi-select + manual add) ---- */}
-            <div className="lg:col-span-2 rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: BRAND_SOFT }}><Building2 size={15} style={{ color: INK }} /></span>
-                  <h2 className="text-[13px] font-bold text-gray-800">Branches <span className="text-red-300">*</span></h2>
-                  <span className="fs-11 text-gray-400">select one or more — a joint review can cover multiple branches</span>
-                </div>
-                <span className="fs-10 rounded-full px-2 py-0.5 font-bold" style={{ background: BRAND_SOFT, color: INK }}>{branches.length} selected</span>
-              </div>
-
-              <div className="p-3 flex-1">
-                {branches.length > 0 && (
-                  <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
-                    {branches.map((b) => (
-                      <span key={b.code} className="inline-flex items-center gap-1 rounded-full pl-2 pr-1 py-1 fs-10 font-bold" style={{ background: BRAND_SOFT, color: INK }}>
-                        <Building2 size={10} /> {b.name}
-                        {b.manual && <span className="rounded-full px-1 fs-9 font-bold" style={{ background: 'rgba(217,119,6,0.18)', color: '#b45309' }} title="Manually added branch">M</span>}
-                        <button onClick={() => toggleBranch(b)} className="rounded-full p-0.5 hover:bg-white/70" title="Remove branch"><X size={10} /></button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 overflow-y-auto kc-scroll pr-1" style={{ maxHeight: '13rem' }}>
-                  {allBranchOptions.map((b) => {
-                    const on = branches.some((x) => x.code === b.code);
-                    return (
-                      <div key={b.code} role="button" tabIndex={0} onClick={() => toggleBranch(b)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleBranch(b); } }}
-                        className="kc-lift flex items-center gap-2.5 rounded-xl px-3 py-2 text-left transition cursor-pointer"
-                        style={on
-                          ? { border: `1.5px solid ${BRAND}`, background: 'rgba(47,49,146,0.06)' }
-                          : { border: '1.5px solid #e6e9f0', background: '#fff' }}>
-                        <span className="h-4 w-4 rounded border flex items-center justify-center flex-shrink-0" style={on ? { background: BRAND, borderColor: BRAND } : { borderColor: '#cfcfe0' }}>
-                          {on && <Check size={11} color="#fff" className="kc-pop" />}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className={`fs-12 block truncate text-black ${on ? 'font-semibold' : ''}`} title={b.name}>{b.name}</span>
-                          <span className="fs-9 text-gray-400 block truncate">{b.manual ? '\u00A0' : (b.region || '\u00A0')}</span>
-                        </span>
-                        {b.manual && (
-                          <button type="button" onClick={(e) => { e.stopPropagation(); deleteManualBranch(b); }}
-                            className="flex-shrink-0 rounded-lg p-1 text-gray-300 hover:text-red-400 hover:bg-red-50" title="Delete this manual branch">
-                            <Trash2 size={13} />
-                          </button>)}
-                      </div>
-                    );
-                  })}
-                </div>
-                {branches.length > 0 && (
-                  <div className="mt-2.5 fs-10 text-gray-400 flex items-center gap-2 flex-wrap">
-                    <span>last meeting across selected: <b className="text-gray-600">{fmt(lastAcross)}</b></span>
-                    {carryPreview > 0 && <span className="rounded-full px-1.5 py-0.5 font-bold" style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171' }}>{carryPreview} open task{carryPreview > 1 ? 's' : ''} will carry forward</span>}
-                  </div>
-                )}
-              </div>
-
-              {/* add a branch manually — it has no employees on file, so its
-                  attendees come from the pickers in the Attendees card below */}
-              <div className="mt-auto flex items-center gap-2 px-3 py-2.5 border-t border-gray-100 flex-wrap" style={{ background: '#fafafc' }}>
-                <Building2 size={14} className="text-gray-400 flex-shrink-0" />
-                <input value={manualBranch} onChange={(e) => setManualBranch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addManualBranch()}
-                  placeholder="Branch not on the list? Add it manually — then pick its attendees below…" className="flex-1 fs-12 bg-transparent outline-none text-gray-700" style={{ minWidth: '12rem' }} />
-                <button onClick={addManualBranch} className="rounded-lg px-3 py-1.5 fs-11 font-semibold text-white" style={{ background: BRAND }}>Add Location manually</button>
-              </div>
-            </div>
-
-            {/* ---- attendees ---- */}
-            <div className="lg:col-span-3 rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-wrap gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: BRAND_SOFT }}><Users size={15} style={{ color: INK }} /></span>
-                  <h2 className="text-[13px] font-bold text-gray-800 flex-shrink-0">Attendees</h2>
-                  {branches.length
-                    ? <span className="fs-11 text-gray-400 truncate">employees of <b className="text-gray-600">{branchLabel}</b> auto-loaded{empSource === 'error' && ' (employees API not reachable)'}</span>
-                    : <span className="fs-11 text-gray-400">select branches to auto-load their employees</span>}
-                </div>
-                <span className="fs-10 rounded-full px-2 py-0.5 font-bold flex-shrink-0" style={{ background: BRAND_SOFT, color: INK }}>
-                  {attendees.filter((a) => a.present).length} present / {attendees.length}
-                </span>
-              </div>
-
-              {/* attendee table — mirrors the "Sr. No. | Attendees" block of the sheet */}
-              <div className="flex-1 overflow-y-auto kc-scroll max-lg:overflow-x-auto" style={{ maxHeight: '21rem' }}>
-                {attendees.length === 0 ? (
-                  <div className="p-8 text-center fs-12 text-gray-400">No attendees yet — pick branches (their employees load automatically) or use the pickers below.</div>
-                ) : (
-                  <table className="w-full fs-12 max-md:min-w-[520px]">
-                    <thead>
-                      <tr className="text-left text-gray-500">
-                        <th className="sticky top-0 z-10 px-4 py-2 font-semibold border-b border-gray-100" style={{ width: '4rem', background: '#f7f8fc' }}>Sr. No.</th>
-                        <th className="sticky top-0 z-10 px-3 py-2 font-semibold border-b border-gray-100" style={{ background: '#f7f8fc' }}>Attendee</th>
-                        <th className="sticky top-0 z-10 px-3 py-2 font-semibold border-b border-gray-100" style={{ background: '#f7f8fc' }}>Source / Branch</th>
-                        <th className="sticky top-0 z-10 px-3 py-2 font-semibold text-center border-b border-gray-100" style={{ width: '7rem', background: '#f7f8fc' }}>Present</th>
-                        <th className="sticky top-0 z-10 border-b border-gray-100" style={{ width: '3rem', background: '#f7f8fc' }} />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {attendees.map((a, i) => (
-                        <tr key={a.id} className={`border-t border-gray-50 ${!a.present ? 'opacity-50' : ''}`}>
-                          <td className="px-4 py-2 text-gray-500">{i + 1}</td>
-                          <td className="px-3 py-2"><div className="flex items-center gap-2"><Avatar name={a.name} size={24} /><span className="font-medium text-gray-800">{a.name}</span></div></td>
-                          <td className="px-3 py-2">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <SourceBadge source={a.source} />
-                              {a.branch && <span className="fs-9 text-gray-400">{a.branch}</span>}
-                              {a.extra && <span className="fs-9 font-bold rounded-full px-1.5 py-0.5" style={{ background: BRAND_SOFT, color: INK }} title="Explicitly added from the employee list">added</span>}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 text-center">
-                            <button onClick={() => togglePresent(a.id)} className="inline-flex items-center gap-1.5 fs-10 font-semibold" style={{ color: a.present ? '#059669' : '#9ca3af' }} title={a.present ? 'Mark absent' : 'Mark present'}>
-                              <span className="relative rounded-full transition-colors" style={{ width: 30, height: 17, background: a.present ? '#059669' : '#d7dbe4' }}>
-                                <span className="absolute rounded-full bg-white shadow transition-all" style={{ width: 13, height: 13, top: 2, left: a.present ? 15 : 2 }} />
-                              </span>
-                              {a.present ? 'Present' : 'Absent'}
-                            </button>
-                          </td>
-                          <td className="px-2 py-2 text-center">
-                            {(a.source === 'manual' || a.extra) && <button onClick={() => removeAttendee(a.id)} className="text-gray-300 hover:text-red-400" title="Remove"><Trash2 size={14} /></button>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-
-              {/* add from employees (any branch) — staffs manually-added branches too */}
-              <div className="border-t border-gray-100" style={{ background: '#fafafc' }}>
-                <div className="flex items-center gap-2 px-4 py-2 flex-wrap border-b border-gray-100">
-                  <Users size={14} className="text-gray-400 flex-shrink-0" />
-                  <span className="fs-10 font-semibold text-gray-400">Add from employees</span>
-                  <select value={pickBr} onChange={(e) => { setPickBr(e.target.value); setPickEmp(''); }} disabled={!branches.length}
-                    className="rounded-lg border border-gray-200 bg-white px-2 py-1 fs-11 text-gray-700 outline-none disabled:opacity-40">
-                    <option value="all">All branches</option>
-                    {branchOptions.map((b) => <option key={b.code} value={b.code}>{b.name}</option>)}
-                  </select>
-                  <select value={pickEmp} onChange={(e) => setPickEmp(e.target.value)} disabled={!branches.length || !pickable.length}
-                    className="rounded-lg border border-gray-200 bg-white px-2 py-1 fs-11 text-gray-700 outline-none disabled:opacity-40" style={{ minWidth: '11rem' }}>
-                    <option value="">{pickable.length ? 'Select employee…' : 'No more employees'}</option>
-                    {pickable.map((e) => <option key={e.key} value={e.key}>{e.name}{e.branchName ? ` — ${e.branchName}` : ''}</option>)}
-                  </select>
-                  <button onClick={addPicked} disabled={!pickEmp} className="rounded-lg px-3 py-1 fs-11 font-semibold text-white disabled:opacity-40" style={{ background: BRAND }}>Add</button>
-                  <span className="fs-9 text-gray-400">staff a manually-added branch, or invite people from other branches</span>
-                </div>
-                {/* add manually (guests / non-employees) */}
-                <div className="flex items-center gap-2 px-4 py-2.5 flex-wrap">
-                  <UserPlus size={14} className="text-gray-400 flex-shrink-0" />
-                  <input value={manualName} onChange={(e) => setManualName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addManual()}
-                    placeholder="Add an attendee manually (guest, HO visitor, area manager…)" className="flex-1 fs-12 bg-transparent outline-none text-gray-700" disabled={!branches.length} />
-                  <button onClick={addManual} disabled={!branches.length} className="rounded-lg px-3 py-1.5 fs-11 font-semibold text-white disabled:opacity-40" style={{ background: BRAND }}>Add manually</button>
-                </div>
-              </div>
-            </div>
-
-            {/* ---- points to discuss (select the agenda for THIS meeting) ---- */}
-            <div className="lg:col-span-3 rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: BRAND_SOFT }}><ListChecks size={15} style={{ color: INK }} /></span>
-                  <h2 className="text-[13px] font-bold text-gray-800">Points to discuss</h2>
-                  <span className="fs-11 text-gray-400">tick the master points for this meeting's agenda — only ticked points appear on the sheet</span>
-                </div>
-                <div className="flex items-center gap-2 max-md:flex-wrap">
-                  <span className="fs-10 rounded-full px-2 py-0.5 font-bold" style={{ background: BRAND_SOFT, color: INK }}>{picked.size} of {master.length} selected</span>
-                  <button onClick={pickAll} className="fs-11 font-semibold rounded-md border border-gray-200 px-2 py-1 text-gray-600 hover:bg-gray-50">Select all</button>
-                  <button onClick={pickNone} className="fs-11 font-semibold rounded-md border border-gray-200 px-2 py-1 text-gray-600 hover:bg-gray-50">Clear</button>
-                </div>
-              </div>
-              <div className="p-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
-                {master.map((p) => {
-                  const on = picked.has(p.id);
-                  return (
-                    <button key={p.id} onClick={() => togglePick(p)} className="kc-lift flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition"
-                      style={on
-                        ? { border: `1.5px solid ${BRAND}`, background: 'rgba(47,49,146,0.06)', boxShadow: '0 4px 12px -8px rgba(47,49,146,.4)' }
-                        : { border: '1.5px solid #e6e9f0', background: '#fff' }}>
-                      <span className="h-4 w-4 rounded border flex items-center justify-center flex-shrink-0" style={on ? { background: BRAND, borderColor: BRAND } : { borderColor: '#cfcfe0' }}>
-                        {on && <Check size={11} color="#fff" className="kc-pop" />}
-                      </span>
-                      <span className={`fs-12 flex-1 min-w-0 truncate text-black ${on ? 'font-semibold' : ''}`} title={p.title}>{p.title}</span>
-                      <span className="fs-9 font-medium px-1.5 py-0.5 rounded flex-shrink-0" style={{ color: 'var(--mom-chip-fg)', background: 'var(--mom-chip-bg)' }}>{p.category}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 flex-wrap gap-2" style={{ background: '#fafafc' }}>
-                <span className="fs-11 text-gray-400">Set everything above first — the meeting sheet opens with these details locked in. Extra points, employees and guests can still be added live during the meeting.</span>
-                <button onClick={openSheet} className="kc-lift inline-flex items-center gap-2 rounded-xl px-5 py-2.5 fs-12 font-bold text-white max-sm:w-full max-sm:justify-center" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})`, boxShadow: '0 6px 16px -6px rgba(47,49,146,.55)' }}>
-                  Start meeting — open sheet <ChevronRight size={15} />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ================================================
-            STEP 2 — MEETING SHEET (Excel format)
-            ================================================ */}
-        {view === 'new' && step === 2 && (
+        {view === 'new' && (
           <div className="kc-fade space-y-3">
 
-            {/* ---- sheet header block (like the top of the Excel) ---- */}
-            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-              <div className="mom-view-head px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #4b5563, #1f2937)' }}>
+            {/* ---- sheet header block — chrome + editable meta + attendees + points ---- */}
+            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm" style={{ overflow: 'visible' }}>
+              <div className="mom-view-head mom-live-head rounded-t-2xl px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 border-b" style={{ background: 'linear-gradient(120deg, #fcd34d, #fbbf24)', borderColor: '#fde68a' }}>
                 <div className="flex items-center gap-2.5">
-                  <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 fs-10 font-bold bg-white" style={{ color: '#1f2937' }}>
-                    <span className="h-2 w-2 rounded-full" style={{ background: '#1f2937', animation: 'livedot 1.4s infinite' }} /> LIVE
+                  <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 fs-10 font-bold bg-white" style={{ color: '#b45309' }}>
+                    <span className="h-2 w-2 rounded-full" style={{ background: '#d97706', animation: 'livedot 1.4s infinite' }} /> LIVE
                   </span>
-                  <div className="text-sm font-bold uppercase text-white" style={{ letterSpacing: '0.16em' }}>Minutes of Meeting</div>
+                  <div className="text-sm font-bold uppercase" style={{ letterSpacing: '0.16em', color: '#92400e' }}>Minutes of Meeting</div>
                 </div>
                 <div className="flex items-center gap-2 max-md:flex-wrap">
                   {canExport && <button onClick={exportDraft} className="export-btn kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: INK }}><Upload size={13} /> Export Excel</button>}
-                  <button onClick={() => setStep(1)} className="kc-lift inline-flex items-center gap-1 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: '#5b6170' }}><ChevronLeft size={13} /> Setup</button>
                 </div>
               </div>
-              <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-gray-100 border-b border-gray-100 max-sm:grid-cols-1">
-                {[['Date', fmt(mDate), CalendarDays], ['Location', mLocation, MapPin], [branches.length > 1 ? 'Branches' : 'Branch', branchLabel, Building2], ['Meeting type', mType, FileText]].map(([l, v, Icon]) => (
-                  <div key={l} className="px-3 py-2 flex items-center gap-2 min-w-0">
-                    <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: SHEET_SOFT }}><Icon size={14} style={{ color: SHEET_DARK }} /></span>
-                    <div className="min-w-0"><div className="fs-9 uppercase tracking-wide text-gray-400">{l}</div><div className="fs-12 font-semibold text-gray-800 truncate" title={v}>{v}</div></div>
+              {/* meta grid — narrow Date, wider Location / Branch(es) / Type, all editable in place */}
+              <div className="grid grid-cols-2 lg:grid-cols-[0.6fr_1.3fr_1.1fr_1.1fr] divide-x divide-gray-100 border-b border-gray-100 max-sm:grid-cols-1">
+                {/* Date */}
+                <div className="px-3 py-2 flex items-center gap-2 min-w-0">
+                  <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: SHEET_SOFT }}><CalendarDays size={14} style={{ color: SHEET_DARK }} /></span>
+                  <div className="min-w-0 flex-1">
+                    <div className="fs-9 uppercase tracking-wide text-gray-400">Date <span className="text-red-300">*</span></div>
+                    <input type="date" required value={mDate} onChange={(e) => setMDate(e.target.value)}
+                      className="kc-input mt-0.5 w-full fs-12 font-semibold text-gray-800 outline-none px-2 py-1"
+                      style={!mDate ? { borderColor: '#f87171' } : {}} />
                   </div>
-                ))}
+                </div>
+                {/* Location */}
+                <div className="px-3 py-2 flex items-center gap-2 min-w-0">
+                  <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: SHEET_SOFT }}><MapPin size={14} style={{ color: SHEET_DARK }} /></span>
+                  <div className="min-w-0 flex-1">
+                    <div className="fs-9 uppercase tracking-wide text-gray-400">Location <span className="text-red-300">*</span></div>
+                    <input value={mLocation} onChange={(e) => setMLocation(e.target.value)} placeholder="e.g. Branch Office — Conference Room"
+                      className="kc-input mt-0.5 w-full fs-12 font-semibold text-gray-800 outline-none px-2 py-1" />
+                  </div>
+                </div>
+                {/* Branch(es) — multi-select dropdown; employees auto-load as attendees */}
+                <div className="px-3 py-2 flex items-center gap-2 min-w-0">
+                  <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: SHEET_SOFT }}><Building2 size={14} style={{ color: SHEET_DARK }} /></span>
+                  <div className="min-w-0 flex-1">
+                    <div className="fs-9 uppercase tracking-wide text-gray-400">Branches <span className="text-red-300">*</span></div>
+                    <Dropdown panelClass="w-72 max-w-[90vw]"
+                      trigger={({ open, toggle }) => (
+                        <button type="button" onClick={toggle}
+                          className="kc-input mt-0.5 w-full flex items-center justify-between gap-1.5 px-2 py-1 fs-12 font-semibold text-gray-800 text-left"
+                          title={branches.length ? branchLabel : 'Select one or more branches'}
+                          style={open ? { borderColor: BRAND, background: '#fff', boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}}>
+                          <span className="truncate flex-1 min-w-0" style={!branches.length ? { color: '#9ca3af', fontWeight: 500 } : {}}>{branches.length ? branchLabel : 'Select branches…'}</span>
+                          <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
+                        </button>
+                      )}>
+                      <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-gray-400 border-b border-gray-100 flex items-center justify-between gap-2">
+                        <span>Branches — one or more</span>
+                        <span className="rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: INK }}>{branches.length}</span>
+                      </div>
+                      <div className="max-h-56 overflow-y-auto kc-scroll py-1">
+                        {allBranchOptions.length === 0 && (
+                          <div className="px-3 py-2 fs-11 text-gray-400">No branches on file{empSource === 'error' ? ' — employees API not reachable' : ''}. Add one manually below.</div>
+                        )}
+                        {allBranchOptions.map((b) => {
+                          const on = branches.some((x) => x.code === b.code);
+                          const emps = branchEmployees(b).length;
+                          const pend = branchCarryCounts[b.code] || 0;
+                          const sub = [b.manual ? 'manual' : (b.region || ''), emps ? `${emps} employee${emps > 1 ? 's' : ''}` : '', pend ? `${pend} pending task${pend > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
+                          return (
+                            <div key={b.code} role="button" tabIndex={0} onClick={() => toggleBranch(b)}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleBranch(b); } }}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50 cursor-pointer">
+                              <span className="h-4 w-4 rounded border flex items-center justify-center flex-shrink-0" style={on ? { background: BRAND, borderColor: BRAND } : { borderColor: '#cfcfe0' }}>
+                                {on && <Check size={11} color="#fff" className="kc-pop" />}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className={`fs-12 block truncate text-gray-800 ${on ? 'font-semibold' : ''}`} title={b.name}>{b.name}</span>
+                                {sub && <span className="fs-9 text-gray-400 block truncate">{sub}</span>}
+                              </span>
+                              {b.manual && (
+                                <button type="button" onClick={(e) => { e.stopPropagation(); deleteManualBranch(b); }}
+                                  className="flex-shrink-0 rounded-lg p-1 text-gray-300 hover:text-red-400 hover:bg-red-50" title="Delete this manual branch">
+                                  <Trash2 size={12} />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="px-3 py-1.5 border-t border-gray-100 fs-10 text-gray-400" style={{ background: '#fafbfd' }}>
+                        {branches.length
+                          ? <>last meeting across selected: <b className="text-gray-600">{fmt(lastAcross)}</b>{carryPreview > 0 && <span className="ml-1.5 rounded-full px-1.5 py-0.5 font-bold" style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171' }}>{carryPreview} open task{carryPreview > 1 ? 's' : ''} carry forward</span>}</>
+                          : 'employees of selected branches auto-load as attendees'}
+                      </div>
+                      <div className="flex items-center gap-1.5 px-2.5 py-2 border-t border-gray-100" style={{ background: '#fafafc' }}>
+                        <Building2 size={12} className="text-gray-400 flex-shrink-0" />
+                        <input value={manualBranch} onChange={(e) => setManualBranch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addManualBranch()}
+                          placeholder="Branch not on the list? Add manually…" className="kc-input flex-1 fs-11 text-gray-700 outline-none min-w-0 px-2 py-1" />
+                        <button onClick={addManualBranch} className="rounded-lg px-2.5 py-1 fs-10 font-bold text-white flex-shrink-0" style={{ background: BRAND }}>Add</button>
+                      </div>
+                    </Dropdown>
+                  </div>
+                </div>
+                {/* Meeting type — free text + previously used types */}
+                <div className="px-3 py-2 flex items-center gap-2 min-w-0">
+                  <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: SHEET_SOFT }}><FileText size={14} style={{ color: SHEET_DARK }} /></span>
+                  <div className="min-w-0 flex-1 relative" ref={typeDdRef}>
+                    <div className="fs-9 uppercase tracking-wide text-gray-400">Meeting type <span className="text-red-300">*</span></div>
+                    <div className="kc-input mt-0.5 flex items-center px-2 py-1 relative">
+                      <input value={mType} onChange={(e) => setMType(e.target.value)} placeholder="Type or pick…"
+                        className="w-full fs-12 font-semibold text-gray-800 outline-none bg-transparent pr-5" />
+                      <button type="button" onClick={() => setTypeDdOpen((o) => !o)}
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-gray-100"
+                        title="Show previously used meeting types">
+                        <ChevronDown size={13} className={`text-gray-500 transition-transform ${typeDdOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                    </div>
+                    {typeDdOpen && (
+                      <div className="absolute z-[60] mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden" style={{ minWidth: '15rem' }}>
+                        <div className="fs-9 font-bold uppercase tracking-wide text-gray-400 px-3 pt-2 pb-1">Previously used meeting types</div>
+                        <div className="max-h-44 overflow-y-auto kc-scroll">
+                          {usedMeetingTypes.length === 0 && (
+                            <div className="px-3 py-2 fs-11 text-gray-400">No meeting types in history yet — type one in the box above.</div>
+                          )}
+                          {usedMeetingTypes.map((t) => (
+                            <button key={t} type="button" onClick={() => { setMType(t); setTypeDdOpen(false); }}
+                              className="w-full text-left px-3 py-1.5 fs-12 text-black hover:bg-gray-50 flex items-center gap-2">
+                              {mType.trim().toLowerCase() === t.toLowerCase() ? <Check size={12} style={{ color: BRAND }} /> : <span className="w-3 flex-shrink-0" />}
+                              <span className="truncate">{t}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
               <div className="px-3 py-2 flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-2 flex-wrap fs-11">
@@ -1488,15 +1363,89 @@ export default function MOMTracking() {
                   {showAllAtt && attendees.length > ATT_PREVIEW && (
                     <button onClick={() => setShowAllAtt(false)} className="inline-flex items-center rounded-full px-2.5 py-1 fs-10 font-bold transition hover:opacity-80" style={{ background: '#f1f3f9', color: '#5b6170' }}>Show less</button>
                   )}
-                  {/* an EMPLOYEE joined mid-meeting → select them (no need to type manually) */}
-                  <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 pl-2 pr-1.5 py-1" title="An employee joined the meeting? Select them here — they're added as an Employee, not a manual entry">
-                    <Users size={11} className="text-gray-400" />
-                    <select value="" onChange={(e) => { const emp = remainingEmployees.find((x) => x.key === e.target.value); if (emp) addEmployeeAttendee(emp); }}
-                      className="fs-10 bg-transparent outline-none text-gray-700" style={{ maxWidth: '10.5rem' }}>
-                      <option value="">Employee joined? Select…</option>
-                      {remainingEmployees.map((e) => <option key={e.key} value={e.key}>{e.name}{e.branchName ? ` — ${e.branchName}` : ''}</option>)}
-                    </select>
-                  </span>
+                  {/* an EMPLOYEE joined mid-meeting → pick their branch, then the employee */}
+                  <Dropdown panelClass="w-72 max-w-[90vw]"
+                    trigger={({ toggle }) => (
+                      <button type="button" onClick={toggle}
+                        className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 px-2.5 py-1 fs-10 text-gray-600 hover:bg-gray-50"
+                        title="An employee joined the meeting? First pick their branch, then the employee — they're added as an Employee, not a manual entry">
+                        <Users size={11} className="text-gray-400" /> Employee joined? Select… <ChevronDown size={10} className="text-gray-400" />
+                      </button>
+                    )}>
+                    {(close) => (
+                      <>
+                        <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-gray-400 border-b border-gray-100">Add employee as attendee</div>
+                        <div className="px-3 pt-2 pb-1.5">
+                          <div className="fs-9 font-bold uppercase tracking-wide text-gray-400 mb-1">Step 1 — select branch</div>
+                          <select value={pickBr} onChange={(e) => setPickBr(e.target.value)}
+                            className="kc-input w-full fs-11 text-gray-700 outline-none px-2 py-1.5">
+                            <option value="all">All branches</option>
+                            {branchOptions.map((b) => <option key={b.code} value={b.code}>{b.name}</option>)}
+                          </select>
+                        </div>
+                        <div className="fs-9 font-bold uppercase tracking-wide text-gray-400 px-3 pt-0.5">Step 2 — select employee</div>
+                        <div className="max-h-48 overflow-y-auto kc-scroll py-1">
+                          {pickable.length === 0 && (
+                            <div className="px-3 py-2 fs-10 text-gray-400">No more employees{pickBr !== 'all' ? ' in this branch' : ''} — all are already attendees.</div>
+                          )}
+                          {pickable.map((e) => (
+                            <button key={e.key} type="button" onClick={() => { addEmployeeAttendee(e); close(); }}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50">
+                              <span className="h-4 w-4 rounded border flex-shrink-0" style={{ borderColor: '#cfcfe0' }} />
+                              <span className="fs-11 text-gray-700 flex-1 truncate">{e.name}</span>
+                              {e.branchName && <span className="fs-9 font-medium px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: '#eef0fa', color: '#4b4e9e' }}>{e.branchName}</span>}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </Dropdown>
+                </div>
+              </div>
+
+              {/* ---- points to discuss — ticking a point adds its row to the sheet instantly ---- */}
+              <div className="px-3 py-2 border-t border-gray-100 flex items-center gap-2.5 flex-wrap">
+                <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: SHEET_SOFT }}><ListChecks size={15} style={{ color: SHEET_DARK }} /></span>
+                <span className="fs-13 font-bold text-gray-800">Points to discuss</span>
+                <Dropdown panelClass="w-80 max-w-[90vw]"
+                  trigger={({ open, toggle }) => (
+                    <button type="button" onClick={toggle}
+                      className="kc-input flex items-center justify-between gap-1.5 px-2.5 py-1.5 fs-12 font-semibold text-gray-800 text-left"
+                      style={{ minWidth: '15rem', ...(open ? { borderColor: BRAND, background: '#fff', boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}) }}>
+                      <span className="truncate flex-1" style={!picked.size ? { color: '#9ca3af', fontWeight: 500 } : {}}>
+                        {picked.size ? `${picked.size} point${picked.size > 1 ? 's' : ''} on the sheet` : 'Select master points…'}
+                      </span>
+                      <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
+                    </button>
+                  )}>
+                  <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-gray-400 border-b border-gray-100 flex items-center justify-between gap-2">
+                    <span>Master discussion areas</span>
+                    <span className="flex items-center gap-1 normal-case tracking-normal">
+                      <button type="button" onClick={pickAll} className="fs-10 font-bold hover:underline" style={{ color: BRAND }}>Select all</button>
+                      <span className="text-gray-300">·</span>
+                      <button type="button" onClick={pickNone} className="fs-10 font-bold hover:underline" style={{ color: BRAND }}>Clear</button>
+                    </span>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto kc-scroll py-1">
+                    {master.map((p) => {
+                      const on = picked.has(p.id);
+                      return (
+                        <button key={p.id} type="button" onClick={() => togglePick(p)} className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50">
+                          <span className="h-4 w-4 rounded border flex items-center justify-center flex-shrink-0" style={on ? { background: BRAND, borderColor: BRAND } : { borderColor: '#cfcfe0' }}>
+                            {on && <Check size={11} color="#fff" className="kc-pop" />}
+                          </span>
+                          <span className={`fs-11 flex-1 min-w-0 truncate text-gray-700 ${on ? 'font-semibold' : ''}`} title={p.title}>{p.title}</span>
+                          <span className="fs-9 font-medium px-1.5 py-0.5 rounded flex-shrink-0" style={{ color: 'var(--mom-chip-fg)', background: 'var(--mom-chip-bg)' }}>{p.category}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="px-3 py-1.5 border-t border-gray-100 fs-10 text-gray-400" style={{ background: '#fafbfd' }}>
+                    ticked points appear as rows on the sheet below — untick removes the row (warns if filled)
+                  </div>
+                </Dropdown>
+                <span className="fs-10 rounded-full px-2 py-0.5 font-bold" style={{ background: BRAND_SOFT, color: INK }}>{picked.size} of {master.length} selected</span>
+                <div className="ml-auto flex items-center gap-2.5 flex-wrap">
                   {/* guests / non-employees can still be typed in */}
                   <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 pl-2 pr-1 py-1">
                     <UserPlus size={11} className="text-gray-400" />
@@ -1504,10 +1453,10 @@ export default function MOMTracking() {
                       placeholder="Add guest…" className="fs-10 bg-transparent outline-none text-gray-700" style={{ width: '6.5rem' }} />
                     <button onClick={addManual} className="rounded-full px-1.5 py-0.5 fs-9 font-bold text-white" style={{ background: SHEET }}>Add</button>
                   </span>
-                </div>
-                <div className="flex items-center gap-3 fs-10 text-gray-500">
-                  <span className="inline-flex items-center gap-1"><FlagChip f="T" small /> Task</span>
-                  <span className="inline-flex items-center gap-1"><FlagChip f="I" small /> Information</span>
+                  <div className="flex items-center gap-3 fs-10 text-gray-500">
+                    <span className="inline-flex items-center gap-1"><FlagChip f="T" small /> Task</span>
+                    <span className="inline-flex items-center gap-1"><FlagChip f="I" small /> Information</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1519,9 +1468,24 @@ export default function MOMTracking() {
                   <div className="flex items-center gap-2">
                     <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: 'rgba(47,49,146,0.14)' }}><CornerUpRight size={14} style={{ color: BRAND }} /></span>
                     <span className="fs-13 font-bold" style={{ color: BRAND }}>Previous meeting — pending tasks</span>
-                    <span className="rounded-full px-2 py-0.5 fs-10 font-bold bg-white" style={{ color: BRAND }}>{carry.length}</span>
+                    <span className="rounded-full px-2 py-0.5 fs-10 font-bold bg-white" style={{ color: BRAND }}>{shownCarry.length !== carry.length ? `${shownCarry.length} / ${carry.length}` : carry.length}</span>
                   </div>
-                  <span className="fs-10 font-medium" style={{ color: BRAND }}>update status &amp; add this meeting's remark for each</span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <select value={carryStatusF} onChange={(e) => setCarryStatusF(e.target.value)} title="Filter carried tasks by status"
+                      className="rounded-lg border bg-white px-2 py-1 fs-11 font-semibold outline-none" style={{ borderColor: 'rgba(47,49,146,0.25)', color: BRAND }}>
+                      <option value="all">All status</option>
+                      <option value="pending">Pending</option>
+                      <option value="in_progress">WIP</option>
+                      <option value="completed">Completed</option>
+                      <option value="overdue">Overdue</option>
+                    </select>
+                    <select value={carryCatF} onChange={(e) => setCarryCatF(e.target.value)} title="Filter carried tasks by category"
+                      className="rounded-lg border bg-white px-2 py-1 fs-11 font-semibold outline-none" style={{ borderColor: 'rgba(47,49,146,0.25)', color: BRAND }}>
+                      <option value="all">All categories</option>
+                      {carryCats.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <span className="fs-10 font-medium" style={{ color: BRAND }}>update status &amp; add this meeting's remark for each</span>
+                  </div>
                 </div>
                 <div className="overflow-x-auto kc-scroll">
                   <table className="mom-sheet w-full fs-12" style={{ borderCollapse: 'collapse', minWidth: CARRY_MINW }}>
@@ -1538,7 +1502,10 @@ export default function MOMTracking() {
                       </tr>
                     </thead>
                     <tbody>
-                      {carry.map((c, i) => {
+                      {shownCarry.length === 0 && (
+                        <tr><td colSpan={8} className="px-3 py-5 text-center fs-12 text-gray-400">No carried tasks match the current status / category filter.</td></tr>
+                      )}
+                      {shownCarry.map((c, i) => {
                         const od = c.due ? daysFromDue(c.due) : 0;
                         const isOd = c.status !== 'completed' && c.due && od > 0;
                         return (
@@ -1606,17 +1573,24 @@ export default function MOMTracking() {
                           <td className="px-2 py-2 align-top">
                             {r.masterId === null ? (
                               <>
-                                <input value={r.area} onChange={(e) => updRow(r.id, { area: e.target.value })} placeholder="Discussion area…"
-                                  className="no-ring w-full font-semibold text-gray-800 outline-none px-1 py-0.5 rounded border-b border-transparent focus:border-gray-200" />
-                                <select value={r.category} onChange={(e) => updRow(r.id, { category: e.target.value })}
-                                  className="mt-0.5 fs-9 font-medium text-gray-500 bg-transparent outline-none">{Object.keys(categories).map((c) => <option key={c}>{c}</option>)}</select>
+                                <select value="" onChange={(e) => assignMasterToRow(r.id, e.target.value)}
+                                  className="no-ring w-full fs-12 font-semibold text-gray-800 outline-none px-1 py-1 rounded cursor-pointer"
+                                  title="Pick a master discussion area — only points not already on the sheet are listed">
+                                  <option value="">
+                                    {master.some((p) => !picked.has(p.id)) ? 'Select discussion area…' : 'All master points are already on the sheet'}
+                                  </option>
+                                  {master.filter((p) => !picked.has(p.id)).map((p) => (
+                                    <option key={p.id} value={p.id}>{p.title} — {p.category}</option>
+                                  ))}
+                                </select>
+                                <div className="fs-9 mt-0.5 font-medium text-gray-400">from master points only</div>
                               </>
                             ) : (
                               <>
                                 <div className="flex items-center gap-1.5">
                                   <span className="font-semibold text-gray-800">{r.area}</span>
                                 </div>
-                                <div className="fs-9 mt-0.5 font-medium text-gray-500">{r.category}</div>
+                                <div className="fs-11 mt-0.5 font-bold text-gray-600">{r.category}</div>
                               </>
                             )}
                           </td>
@@ -1655,13 +1629,13 @@ export default function MOMTracking() {
               {/* add custom row */}
               <div className="flex items-center gap-2 px-3 py-2.5 border-t border-gray-100 flex-wrap" style={{ background: '#fafafc' }}>
                 <button onClick={addRow} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 fs-11 font-semibold text-white" style={{ background: SHEET }}><Plus size={14} /> Add row</button>
-                <span className="fs-10 text-gray-400">Adds a blank row — type the discussion area, category and point directly in the table.</span>
+                <span className="fs-10 text-gray-400">Adds a row — pick its Discussion Area from the master points (only points not already on the sheet are listed).</span>
               </div>
             </div>
 
             {/* ---- finalize bar ---- */}
             <div className="flex items-center justify-between gap-2 rounded-2xl border border-gray-200 bg-white shadow-sm px-3 py-2.5 flex-wrap">
-              <button onClick={() => setStep(1)} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 fs-12 font-semibold text-gray-600 hover:bg-gray-50"><ChevronLeft size={15} /> Back to setup</button>
+              <span className="fs-10 text-gray-400">Everything above is live — no separate setup step. Fill, assign &amp; finalize from this one screen.</span>
               <div className="flex items-center gap-3 flex-wrap">
                 {unassigned > 0 && <span className="fs-11 font-semibold inline-flex items-center gap-1" style={{ color: '#f87171' }}><AlertTriangle size={13} /> {unassigned} task{unassigned > 1 ? 's' : ''} without responsibility</span>}
                 <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 fs-11 font-semibold" style={{ background: FLAG.T.bg, color: FLAG.T.color }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: FLAG.T.color }} /><b className="tabular-nums">{taskCount}</b> tasks</span>
@@ -2635,7 +2609,7 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
               {master.map((p) => (
                 <div key={p.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50">
                   <input value={p.title} onChange={(e) => rename(p.id, e.target.value)} onBlur={() => commitTitle(p.id)} className="flex-1 fs-12 text-gray-800 bg-transparent outline-none border-b border-transparent focus:border-gray-200 py-0.5" />
-                  <select value={p.category} onChange={(e) => recat(p.id, e.target.value)} className="rounded-md border border-gray-200 px-1.5 py-1 fs-10 bg-white outline-none">{catKeys.map((c) => <option key={c}>{c}</option>)}</select>
+                  <select value={p.category} onChange={(e) => recat(p.id, e.target.value)} className="rounded-md border border-gray-200 px-1.5 py-1 fs-11 font-bold text-gray-600 bg-white outline-none">{catKeys.map((c) => <option key={c}>{c}</option>)}</select>
                   <button onClick={() => remove(p.id)} className="text-gray-300 hover:text-red-400 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               ))}

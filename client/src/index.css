@@ -1218,6 +1218,27 @@ html.dark .mom-sheet thead th { background: transparent !important; }
    earlier have higher specificity, so striping and hover keep working. */
 html.dark .mom-sheet tbody tr { background-color: #171a20 !important; }
 html.dark .mom-sheet tbody td { background-color: transparent !important; }
+
+/* ============================================================
+   DARK THEME — MOM one-tab sheet header polish.
+   ============================================================ */
+/* Icon tiles across the MOM page use inline color #23255f (BRAND_DARK) —
+   invisible navy-on-dark. Lift to sky, same as the modal-header rule. */
+html.dark .mom-anim [style*="color: rgb(35, 37, 95)"] { color: #7dd3fc !important; }
+/* The LIVE strip: keep its amber identity on a dark surface instead of
+   the generic navy .mom-view-head override. */
+html.dark .mom-view-head.mom-live-head {
+  background: linear-gradient(120deg, rgba(251, 191, 36, 0.16), rgba(217, 119, 6, 0.06)), #14171e !important;
+  border-color: rgba(251, 191, 36, 0.28) !important;
+}
+/* LIVE badge — amber-tinted pill instead of a flat dark chip */
+html.dark .mom-live-head .bg-white {
+  background: rgba(251, 191, 36, 0.16) !important;
+  border: 1px solid rgba(251, 191, 36, 0.35) !important;
+}
+/* Dropdown-panel list items use hover:bg-gray-50 (no generic dark net) —
+   keep the hover visible but dark on the MOM page. */
+html.dark .mom-anim .hover\:bg-gray-50:hover { background-color: #1f242e !important; }
 /* ============================================================
    DARK THEME — Dashboard polish (welcome header + tab pills).
    Placed last so these win over the generic inline-style nets.

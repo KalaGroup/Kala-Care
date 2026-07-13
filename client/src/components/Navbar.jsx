@@ -2198,7 +2198,7 @@ function Navbar({ children }) {
                 onClick={() => setShowTerminologyModal(true)}
                 onMouseEnter={() => setHoveredItem('terminology')}
                 onMouseLeave={() => setHoveredItem(null)}
-                className={`group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md w-full transition-all duration-200 
+                className={`group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md w-full transition-all duration-200
 hover:bg-gray-100 active:scale-[0.98]
 ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
               >
@@ -2239,8 +2239,8 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
               <button
                 type="button"
                 onClick={toggleAutoHide}
-                className={`flex-1 flex items-center justify-center h-6 rounded-full border transition-all duration-200 active:scale-95 ${autoHide ? 'border-transparent shadow-sm' : 'bg-gray-100 border-gray-200 hover:bg-gray-200'}`}
-                style={autoHide ? { backgroundColor: themeColor } : undefined}
+                className={`flex-1 flex items-center justify-center h-6 rounded-full border transition-all duration-200 active:scale-95 ${autoHide ? 'shadow-sm' : 'bg-gray-100 hover:bg-gray-200'}`}
+                style={autoHide ? { backgroundColor: themeColor, borderColor: 'rgba(146, 64, 14, 0.4)' } : { borderColor: 'rgba(146, 64, 14, 0.4)' }}
                 title={autoHide ? 'Auto-Hide is ON — menu opens on hover, tucks away after. Click to pin the menu open.' : 'Auto-Hide the menu — it will open on hover and minimize when you move away. Click to turn on.'}
               >
                 <svg className={`h-3.5 w-3.5 transition-colors ${autoHide ? 'text-white' : 'text-gray-500'}`}
@@ -2255,8 +2255,8 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
                 className="w-full group relative flex items-center justify-center py-0.5 rounded-lg transition-all duration-200"
                 title={autoHide ? 'Pin menu open' : 'Auto-hide menu (open on hover)'}
               >
-                <span className={`flex items-center justify-center h-5 w-5 rounded-full transition-colors ${autoHide ? 'shadow-sm' : ''}`}
-                  style={autoHide ? { backgroundColor: themeColor } : undefined}>
+                <span className={`flex items-center justify-center h-5 w-5 rounded-full border transition-colors ${autoHide ? 'shadow-sm' : ''}`}
+                  style={autoHide ? { backgroundColor: themeColor, borderColor: 'rgba(146, 64, 14, 0.4)' } : { borderColor: 'rgba(146, 64, 14, 0.4)' }}>
                   <svg className={`h-3.5 w-3.5 ${autoHide ? 'text-white' : 'text-gray-500'}`}
                     fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59" />
@@ -2274,14 +2274,14 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
               <button
                 type="button"
                 onClick={toggleTheme}
-                className={`flex-1 flex items-center justify-center h-6 rounded-full border transition-all duration-200 active:scale-95 ${darkMode ? 'border-transparent shadow-sm' : 'bg-gray-100 border-gray-200 hover:bg-gray-200'}`}
-                style={darkMode ? { backgroundColor: themeColor } : undefined}
+                className={`flex-1 flex items-center justify-center h-6 rounded-full border transition-all duration-200 active:scale-95 ${darkMode ? 'shadow-sm' : 'bg-gray-100 hover:bg-gray-200'}`}
+                style={darkMode ? { backgroundColor: themeColor, borderColor: 'rgba(146, 64, 14, 0.4)' } : { borderColor: 'rgba(146, 64, 14, 0.4)' }}
                 title={darkMode ? 'Night Mode is ON — click to switch to light mode' : 'Switch to Night Mode (dark theme)'}
               >
                 {darkMode ? (
                   <MoonIcon className="h-3.5 w-3.5 text-white" />
                 ) : (
-                  <SunIcon className="h-3.5 w-3.5 text-amber-500" />
+                  <SunIcon className="h-3.5 w-3.5" style={{ color: '#92400e' }} />
                 )}
               </button>
             ) : (
@@ -2291,11 +2291,13 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
                 className="w-full group relative flex items-center justify-center py-0.5 rounded-lg transition-all duration-200"
                 title={darkMode ? 'Switch to light mode' : 'Switch to night mode'}
               >
-                {darkMode ? (
-                  <MoonIcon className="h-4 w-4 text-sky-400" />
-                ) : (
-                  <SunIcon className="h-4 w-4 text-amber-500" />
-                )}
+                <span className="flex items-center justify-center h-5 w-5 rounded-full border" style={{ borderColor: 'rgba(146, 64, 14, 0.4)' }}>
+                  {darkMode ? (
+                    <MoonIcon className="h-4 w-4 text-sky-400" />
+                  ) : (
+                    <SunIcon className="h-4 w-4" style={{ color: '#92400e' }} />
+                  )}
+                </span>
                 <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
                   {darkMode ? 'Switch to Light Mode' : 'Switch to Night Mode'}
                   <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
