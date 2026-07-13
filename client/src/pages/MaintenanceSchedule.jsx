@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     ClipboardDocumentCheckIcon, Cog6ToothIcon, PrinterIcon,
-    ArrowUpTrayIcon, CheckIcon, XMarkIcon, ArrowPathIcon,
+    ArrowUpTrayIcon, CheckIcon, XMarkIcon, ArrowPathIcon, ChevronDownIcon,
 } from '@heroicons/react/24/outline';
 import MaintenanceScheduleMaster from '../components/MaintenanceScheduleMaster';
 import {
@@ -24,6 +24,81 @@ const Chip = React.memo(({ a }) => {
     if (!ACTION[k]) return null;
     return <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold font-mono ${chipCls[k]}`}>{k}</span>;
 });
+
+/* ----------------------------- Application Code picker (tabular dropdown) ----------------------------- */
+const AppCodePicker = ({ master, value, onChange }) => {
+    const [open, setOpen] = useState(false);
+    const [q, setQ] = useState('');
+    const wrapRef = useRef(null);
+
+    useEffect(() => {
+        if (!open) return;
+        const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', onDown);
+        return () => document.removeEventListener('mousedown', onDown);
+    }, [open]);
+
+    const sel = master.find((a) => a.appCode === value);
+    const list = useMemo(() => {
+        const t = q.trim().toLowerCase();
+        if (!t) return master;
+        return master.filter((a) =>
+            [a.appCode, a.kva, a.emission].some((v) => String(v || '').toLowerCase().includes(t)));
+    }, [master, q]);
+
+    const th = 'px-3 py-1.5 text-left text-[10px] font-bold uppercase tracking-wider text-gray-400 bg-gray-50 border-b border-gray-200 sticky top-0 whitespace-nowrap';
+    const td = 'px-3 py-1.5 text-[12px] border-b border-gray-100';
+
+    return (
+        <div className="relative" ref={wrapRef}>
+            <button type="button" onClick={() => { setOpen((o) => !o); setQ(''); }}
+                className="w-full flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-[13px] text-black outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition">
+                {sel ? (
+                    <span className="flex items-center gap-2 min-w-0">
+                        <span className="font-mono">{sel.appCode}</span>
+                        <span className="text-gray-500 font-bold text-[20px] leading-none">·</span>
+                        <span className="text-gray-600 whitespace-nowrap">{sel.kva || '—'} KVA</span>
+                        <span className="text-gray-500 font-bold text-[20px] leading-none">·</span>
+                        <span className="text-gray-600 whitespace-nowrap">{sel.emission || 'CPCB IV+'}</span>
+                    </span>
+                ) : <span className="text-gray-400">Select application code</span>}
+                <ChevronDownIcon className={`h-4 w-4 flex-shrink-0 text-gray-400 transition ${open ? 'rotate-180' : ''}`} />
+            </button>
+            {open && (
+                <div className="absolute z-50 mt-1 w-full min-w-[420px] max-w-[calc(100vw-24px)] rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden">
+                    <div className="p-2 border-b border-gray-100">
+                        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)}
+                            placeholder="Search code, KVA, emission…"
+                            className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-[12px] outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100" />
+                    </div>
+                    <div className="max-h-64 overflow-auto q-scroll">
+                        <table className="w-full border-collapse">
+                            <thead>
+                                <tr>
+                                    <th className={th}>App Code</th>
+                                    <th className={th}>KVA Rating</th>
+                                    <th className={th}>Emission Norm</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {list.length === 0 ? (
+                                    <tr><td colSpan={3} className="px-3 py-5 text-center text-[12px] text-gray-400">No matching application codes.</td></tr>
+                                ) : list.map((a) => (
+                                    <tr key={a.appCode} onClick={() => { onChange(a.appCode); setOpen(false); }}
+                                        className={`cursor-pointer transition ${a.appCode === value ? 'bg-indigo-50/70' : 'hover:bg-indigo-50/40'}`}>
+                                        <td className={`${td} font-mono text-gray-800 whitespace-nowrap`}>{a.appCode}</td>
+                                        <td className={`${td} text-gray-600 whitespace-nowrap`}>{a.kva || '—'} KVA</td>
+                                        <td className={`${td} text-gray-600 whitespace-nowrap`}>{a.emission || 'CPCB IV+'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
 
 /* ----------------------------- Watermarked print sheet ----------------------------- */
 const PrintSheet = ({ app, services, parts, onClose }) => {
@@ -245,10 +320,7 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
                             <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_auto] gap-3 items-end">
                                 <div>
                                     <label className="block text-[12px] font-semibold text-gray-700 mb-1">Application Code</label>
-                                    <select value={appCode} onChange={(e) => changeApp(e.target.value)}
-                                        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-[13px] font-mono text-black outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition">
-                                        {master.map((a) => <option key={a.appCode} value={a.appCode}>{a.appCode} — {a.engineModel || ''}</option>)}
-                                    </select>
+                                    <AppCodePicker master={master} value={appCode} onChange={changeApp} />
                                 </div>
                                 <button onClick={() => setShowPrint(true)}
                                     className="inline-flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-[12px] font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: themeColor }}>

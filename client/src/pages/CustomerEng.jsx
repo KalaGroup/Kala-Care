@@ -1642,6 +1642,23 @@ const CustomerEng = () => {
         [activeCampaigns, campaignShortNameMap]
     );
 
+    // Campaign-chip scroll arrows: bold ↑ only when there are chips hidden above,
+    // bold ↓ only when there are chips hidden below. Re-checked on scroll/resize
+    // and whenever the chip list changes.
+    const [chipArrows, setChipArrows] = useState({ up: false, down: false });
+    const updateChipArrows = useCallback(() => {
+        const el = document.getElementById('campaign-chips-scroll');
+        if (!el) return;
+        const up = el.scrollTop > 2;
+        const down = el.scrollTop + el.clientHeight < el.scrollHeight - 2;
+        setChipArrows((s) => (s.up === up && s.down === down ? s : { up, down }));
+    }, []);
+    useEffect(() => {
+        updateChipArrows();
+        window.addEventListener('resize', updateChipArrows);
+        return () => window.removeEventListener('resize', updateChipArrows);
+    }, [updateChipArrows, orderedActiveCampaigns]);
+
     // "Customers - N" header count — the branch-visible customer count. Memoized
     // so the full-list filter doesn't rerun on every render (e.g. each keystroke).
     const visibleCustomerCount = useMemo(() => customers.filter(c => {
@@ -7051,6 +7068,7 @@ ${f.start_para}`;
                                 <div className="flex items-center gap-1 flex-1 min-w-0">
                                     <div
                                         id="campaign-chips-scroll"
+                                        onScroll={updateChipArrows}
                                         className="flex flex-wrap gap-1.5 flex-1 min-w-0 overflow-y-auto"
                                         style={{ maxHeight: '56px', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                                     >
@@ -7098,20 +7116,20 @@ ${f.start_para}`;
                                                 const el = document.getElementById('campaign-chips-scroll');
                                                 if (el) el.scrollBy({ top: -56, behavior: 'smooth' });
                                             }}
-                                            className="p-0.5 rounded hover:bg-gray-100 text-gray-400"
+                                            className={`p-0.5 rounded hover:bg-gray-100 ${chipArrows.up ? 'text-gray-800' : 'text-gray-300'}`}
                                             title="Scroll up"
                                         >
-                                            <ChevronUpIcon className="h-3.5 w-3.5" />
+                                            <ChevronUpIcon className="h-3.5 w-3.5" style={chipArrows.up ? { strokeWidth: 3.5 } : {}} />
                                         </button>
                                         <button
                                             onClick={() => {
                                                 const el = document.getElementById('campaign-chips-scroll');
                                                 if (el) el.scrollBy({ top: 56, behavior: 'smooth' });
                                             }}
-                                            className="p-0.5 rounded hover:bg-gray-100 text-gray-400"
+                                            className={`p-0.5 rounded hover:bg-gray-100 ${chipArrows.down ? 'text-gray-800' : 'text-gray-300'}`}
                                             title="Scroll down"
                                         >
-                                            <ChevronDownIcon className="h-3.5 w-3.5" />
+                                            <ChevronDownIcon className="h-3.5 w-3.5" style={chipArrows.down ? { strokeWidth: 3.5 } : {}} />
                                         </button>
                                     </div>
                                 </div>
