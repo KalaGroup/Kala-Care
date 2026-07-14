@@ -1593,11 +1593,13 @@ const CustomerEng = () => {
         return isCspCampaign(campaign);
     });
 
-    // Services available for "Other" (non-campaign) follow-ups — the FULL
-    // master product/service list (campaign_services table), minus the
-    // services of drives this customer is already enrolled in (those are
-    // handled through the drive itself, not "Other").
+    // Services available for "Post Warranty" (non-campaign) follow-ups — the FULL
+    // master product/service list (campaign_services table), minus:
+    //   - CSP and AMC products (never offered as Post Warranty)
+    //   - services of drives this customer is already enrolled in (those are
+    //     handled through the drive itself, not "Post Warranty").
     const campaignServices = useMemo(() => {
+        const cspAmcRegex = /\b(csp|amc)\b/i;
         const enrolledServices = new Set(
             (enrolledCampaigns || [])
                 .map(c => (c.service || '').trim().toLowerCase())
@@ -1612,7 +1614,7 @@ const CustomerEng = () => {
         const list = [];
         source.forEach(({ id, name }) => {
             const key = name.toLowerCase();
-            if (!name || seen.has(key) || enrolledServices.has(key)) return;
+            if (!name || cspAmcRegex.test(name) || seen.has(key) || enrolledServices.has(key)) return;
             seen.add(key);
             list.push({ id, name });
         });
@@ -1656,7 +1658,20 @@ const CustomerEng = () => {
     useEffect(() => {
         updateChipArrows();
         window.addEventListener('resize', updateChipArrows);
-        return () => window.removeEventListener('resize', updateChipArrows);
+        // The chip area also resizes WITHOUT a window resize — e.g. collapsing
+        // the sidebar widens the container and the chips re-wrap into fewer
+        // bands. Observe the element itself so the bold ↑↓ always reflect
+        // whether anything is actually hidden above/below.
+        const el = document.getElementById('campaign-chips-scroll');
+        let resizeObserver;
+        if (el && typeof ResizeObserver !== 'undefined') {
+            resizeObserver = new ResizeObserver(updateChipArrows);
+            resizeObserver.observe(el);
+        }
+        return () => {
+            window.removeEventListener('resize', updateChipArrows);
+            if (resizeObserver) resizeObserver.disconnect();
+        };
     }, [updateChipArrows, orderedActiveCampaigns]);
 
     // "Customers - N" header count — the branch-visible customer count. Memoized
@@ -1687,7 +1702,8 @@ const CustomerEng = () => {
     // "Assets - N" header count — sum of the per-drive counts (identical to the
     // previous inline reduce, just not recomputed on every render).
     const totalAssetsCount = useMemo(
-        () => activeCampaigns.reduce((sum, campaign) => sum + (campaignCustomerCounts[campaign] || 0), 0),
+        // "Post Warranty" is a pseudo-drive (no assets behind it) — not counted here.
+        () => activeCampaigns.reduce((sum, campaign) => campaign === 'Post Warranty' ? sum : sum + (campaignCustomerCounts[campaign] || 0), 0),
         [activeCampaigns, campaignCustomerCounts]
     );
 
@@ -1859,6 +1875,9 @@ const CustomerEng = () => {
             campaigns.forEach(campaign => {
                 colors[campaign.name] = campaign.color || '#406093';
             });
+            // Synthetic pseudo-drive backed by non_followups (campaign_id NULL) —
+            // gray, matching the Post Warranty chip in the follow-up form.
+            colors['Post Warranty'] = '#9CA3AF';
             setCampaignColors(colors);
             // Only ACTIVE drives feed the short "Product (N)" names — keeps the
             // numbering identical to the navbar Drive List (which is active-only too).
@@ -2960,9 +2979,15 @@ const CustomerEng = () => {
                 return;
             }
 
+            // Product/Service is mandatory for Post Warranty follow-ups
+            if (isOtherType && (!campaignData.service || campaignData.service.trim() === '')) {
+                toast.error(`Please select a Product/Service for Post Warranty follow-up`);
+                return;
+            }
+
             if (!campaignData.activity_id) {
                 if (isOtherType) {
-                    toast.error(`Please select an activity for Other follow-up`);
+                    toast.error(`Please select an activity for Post Warranty follow-up`);
                 } else {
                     const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
                     toast.error(`Please select an activity for drive: ${campaign?.name}`);
@@ -2973,7 +2998,7 @@ const CustomerEng = () => {
             // Remark is mandatory for ALL statuses
             if (!campaignData.remark || campaignData.remark.trim() === '') {
                 if (isOtherType) {
-                    toast.error(`Please enter a remark for Other follow-up`);
+                    toast.error(`Please enter a remark for Post Warranty follow-up`);
                 } else {
                     const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
                     toast.error(`Please enter a remark for drive: ${campaign?.name}`);
@@ -2993,7 +3018,7 @@ const CustomerEng = () => {
 
                 if (!nextDate) {
                     if (isOtherType) {
-                        toast.error(`Please select Next Follow-up Date for "${statusLabel}" status in Other follow-up`);
+                        toast.error(`Please select Next Follow-up Date for "${statusLabel}" status in Post Warranty follow-up`);
                     } else {
                         const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
                         toast.error(`Please select Next Follow-up Date for "${statusLabel}" status in drive: ${campaign?.name}`);
@@ -3003,7 +3028,7 @@ const CustomerEng = () => {
 
                 if (!flag && campaignData.status !== 'not_connected') {
                     if (isOtherType) {
-                        toast.error(`Please select Follow-up Flag for "${statusLabel}" status in Other follow-up`);
+                        toast.error(`Please select Follow-up Flag for "${statusLabel}" status in Post Warranty follow-up`);
                     } else {
                         const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
                         toast.error(`Please select Follow-up Flag for "${statusLabel}" status in drive: ${campaign?.name}`);
@@ -3015,7 +3040,7 @@ const CustomerEng = () => {
             // NEW: Reject reason is mandatory when status is rejected
             if (campaignData.status === 'rejected' && !campaignData.rr_id) {
                 if (isOtherType) {
-                    toast.error(`Please select a reject reason for Other follow-up`);
+                    toast.error(`Please select a reject reason for Post Warranty follow-up`);
                 } else {
                     const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
                     toast.error(`Please select a reject reason for drive: ${campaign?.name}`);
@@ -3069,7 +3094,7 @@ const CustomerEng = () => {
                 const statusLabel = campaignData.status === 'not_connected' ? 'Not Connected' : 'Follow-up Reschedule';
                 if (campaignData.quotation_sent) {
                     if (isOtherType) {
-                        toast.error(`Cannot save: Status is "${statusLabel}" but quotation is sent for Other follow-up. Please uncheck "Quote Sent" or change status.`);
+                        toast.error(`Cannot save: Status is "${statusLabel}" but quotation is sent for Post Warranty follow-up. Please uncheck "Quote Sent" or change status.`);
                     } else {
                         const campaign = selectableCampaigns.find(c => c.id === parseInt(campaignId));
                         toast.error(`Cannot save: Status is "${statusLabel}" but quotation is sent for drive "${campaign?.name}". Please uncheck "Quote Sent" or change status.`);
@@ -9117,7 +9142,7 @@ ${f.start_para}`;
                                                     }`}
                                                 style={selectedCampaignsForFollowup.includes('other') ? { backgroundColor: '#9CA3AF' } : {}}
                                             >
-                                                <span>Other</span>
+                                                <span>Post Warranty</span>
                                                 {selectedCampaignsForFollowup.includes('other') && (
                                                     <CheckCircleIcon className="h-3 w-3" />
                                                 )}
@@ -9219,7 +9244,10 @@ ${f.start_para}`;
                                 <thead className="bg-gradient-to-r from-gray-100 to-gray-50 sticky top-0">
                                     <tr className="border-b border-gray-300">
                                         <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border border-gray-300 whitespace-nowrap w-[120px] bg-gray-100">Drive Name & Script</th>
-                                        <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border border-gray-300 whitespace-nowrap w-[120px] bg-gray-100">Service or Product</th>
+                                        <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border border-gray-300 whitespace-nowrap w-[120px] bg-gray-100">
+                                            Service or Product
+                                            {selectedCampaignsForFollowup.includes('other') && <span className="text-red-500"> *</span>}
+                                        </th>
                                         {showCspSubtypeGlobal && (
                                             <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border border-gray-300 whitespace-nowrap w-[140px] bg-gray-100">Subtype</th>
                                         )}
@@ -9264,7 +9292,7 @@ ${f.start_para}`;
                                                 <td className="px-2 py-1.5 border border-gray-300 text-left align-middle">
                                                     {isOther ? (
                                                         <span className="font-semibold text-[11px]" style={{ color: "black" }}>
-                                                            Other
+                                                            Post Warranty
                                                         </span>
                                                     ) : campaign ? (
                                                         <div className="flex items-center gap-2">
@@ -9289,10 +9317,11 @@ ${f.start_para}`;
                                                         <select
                                                             value={campaignData.service || ''}
                                                             onChange={(e) => updateCampaignFollowupData(campaignId, 'service', e.target.value)}
-                                                            className="w-full border border-gray-300 rounded-lg px-2 py-1 text-[11px] text-black"
+                                                            className={`w-full border rounded-lg px-2 py-1 text-[11px] text-black ${campaignData.service ? 'border-green-500 bg-green-50' : 'border-red-500 bg-red-50'}`}
                                                             style={{ '--tw-ring-color': themeColor }}
+                                                            required
                                                         >
-                                                            <option value="">-- Optional --</option>
+                                                            <option value="">-- Select Product/Service * --</option>
                                                             {campaignServices.map((cs) => (
                                                                 <option key={cs.id} value={cs.name}>
                                                                     {cs.name}

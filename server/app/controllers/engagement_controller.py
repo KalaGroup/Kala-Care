@@ -41,6 +41,10 @@ def invalidate_non_campaign_cache():
 # Load environment variables
 load_dotenv()
 
+# Display name of the synthetic "pseudo-drive" backed by non_followups rows
+# with campaign_id NULL (Post Warranty follow-ups).
+POST_WARRANTY_NAME = "Post Warranty"
+
 class EngagementController:
     def __init__(self, db: Session):
         self.db = db
@@ -565,12 +569,48 @@ class EngagementController:
                         FollowUp.user_name,
                     ).filter(FollowUp.customer_id.in_(chunk)).all()
                 )
+        # ========== Post Warranty (non-campaign) follow-ups ==========
+        # non_followups rows with campaign_id NULL are "Post Warranty" follow-ups.
+        # They feed the synthetic "Post Warranty" column/chip AND are merged into
+        # the same sorted list so the customer-level rollups (last followup date,
+        # next followup date, flag, last remark) reflect them when they are the
+        # latest save. Rows have campaign_id None, so the per-campaign status map
+        # below skips them automatically.
+        latest_pw_by_customer: Dict[int, Any] = {}
+        if relevant_customer_ids:
+            CHUNK = 1000
+            pw_rows = []
+            for i in range(0, len(relevant_customer_ids), CHUNK):
+                chunk = relevant_customer_ids[i:i + CHUNK]
+                pw_rows.extend(
+                    self.db.query(
+                        NonFollowUp.id,
+                        NonFollowUp.customer_id,
+                        NonFollowUp.campaign_id,
+                        NonFollowUp.status,
+                        NonFollowUp.followup_date,
+                        NonFollowUp.next_followup_date,
+                        NonFollowUp.followup_flag,
+                        NonFollowUp.followup_remark,
+                        NonFollowUp.user_name,
+                    ).filter(
+                        NonFollowUp.customer_id.in_(chunk),
+                        NonFollowUp.campaign_id.is_(None)
+                    ).all()
+                )
+            pw_rows.sort(key=lambda f: f.followup_date or datetime.min, reverse=True)
+            for row in pw_rows:
+                if row.customer_id not in latest_pw_by_customer:
+                    latest_pw_by_customer[row.customer_id] = row
+            all_followups_for_customers.extend(pw_rows)
+
+        if all_followups_for_customers:
             # Sort across all chunks (per-chunk order isn't a global order)
             all_followups_for_customers.sort(
                 key=lambda f: f.followup_date or datetime.min,
                 reverse=True
             )
-        
+
         # Group followups by customer_id (already sorted desc by date, so first = latest)
         followups_by_customer: Dict[int, List[FollowUp]] = {}
         for f in all_followups_for_customers:
@@ -665,7 +705,10 @@ class EngagementController:
 
         for customer in relevant_customers:
             normalized_customer_id = self._normalize_id(customer.instance_id)
-            customer_campaign_names = campaign_asset_map[normalized_customer_id]
+            # Copy — "Post Warranty" may be appended below and campaign_asset_map
+            # entries are shared across customers with the same instance_id.
+            customer_campaign_names = list(campaign_asset_map[normalized_customer_id])
+            latest_pw = latest_pw_by_customer.get(customer.id)
             
             # Get followups from in-memory dict instead of DB query
             customer_followups = followups_by_customer.get(customer.id, [])
@@ -755,7 +798,18 @@ class EngagementController:
                 campaign_status[campaign_name] = status
                 campaign_transferred[campaign_name] = is_transferred
                 campaign_old_status[campaign_name] = old_campaign_status
-            
+
+            # Synthetic "Post Warranty" pseudo-drive: checkmark + status come from
+            # the customer's latest non-campaign (campaign_id NULL) follow-up.
+            campaign_checkmarks = {name: name in customer_campaign_names for name in campaign_names}
+            if latest_pw is not None:
+                customer_campaign_names.append(POST_WARRANTY_NAME)
+                campaign_checkmarks[POST_WARRANTY_NAME] = True
+                campaign_status[POST_WARRANTY_NAME] = latest_pw.status
+                campaign_transferred[POST_WARRANTY_NAME] = False
+            else:
+                campaign_checkmarks[POST_WARRANTY_NAME] = False
+
             result.append({
                 "customer_id": customer.id,
                 "instance_id": customer.instance_id,
@@ -768,7 +822,7 @@ class EngagementController:
                 "last_oil_change_sr_type": oil_type_map.get(normalized_customer_id),
                 "last_oil_change_date": oil_date_map.get(normalized_customer_id),
                 "campaigns": customer_campaign_names,
-                "campaign_checkmarks": {name: name in customer_campaign_names for name in campaign_names},
+                "campaign_checkmarks": campaign_checkmarks,
                 "campaign_status": campaign_status,
                 "campaign_transferred": campaign_transferred,
                 "campaign_old_status": campaign_old_status,
@@ -785,7 +839,9 @@ class EngagementController:
         return {
             "from_date": from_date,
             "to_date": to_date,
-            "active_campaigns": campaign_names,
+            # "Post Warranty" rides along as a pseudo-drive so the drive page
+            # renders its column/filter chip exactly like a campaign column.
+            "active_campaigns": campaign_names + [POST_WARRANTY_NAME],
             "customers": result,
             "total_count": total_count
         }
@@ -2186,7 +2242,7 @@ class EngagementController:
                 "customer_id": nf.customer_id,
                 "customer_instance_id": nf.customer_instance_id,
                 "campaign_id": nf.campaign_id,
-                "campaign_name": campaign_name if nf.campaign_id else "Other",
+                "campaign_name": campaign_name if nf.campaign_id else "Post Warranty",
                 "campaign_color": campaign_color,
                 "user_id": nf.user_id,
                 "user_name": nf.user_name,
@@ -2305,14 +2361,14 @@ class EngagementController:
         self.db.refresh(db_non_followup)
         invalidate_non_campaign_cache()
         
-        # Return response with campaign_name as "Other"
+        # Return response with campaign_name as "Post Warranty"
         return {
             "id": db_non_followup.id,
             "customer_id": db_non_followup.customer_id,
             "customer_instance_id": db_non_followup.customer_instance_id,
             "campaign_id": None,  # No campaign associated
-            "campaign_name": "Other",  # Display name
-            "campaign_color": "#9CA3AF",  # Gray color for Other
+            "campaign_name": "Post Warranty",  # Display name
+            "campaign_color": "#9CA3AF",  # Gray color for Post Warranty
             "user_id": db_non_followup.user_id,
             "user_name": db_non_followup.user_name,
             "followup_date": db_non_followup.followup_date,

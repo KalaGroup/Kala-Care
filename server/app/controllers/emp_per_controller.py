@@ -3281,8 +3281,10 @@ class EmployeePerformanceController:
     @staticmethod
     async def get_my_non_campaign_customers(db: Session, user_id: str):
         """
-        Get all non-campaign customers for a SPECIFIC user with their latest follow-up
-        details. Returns unique customers based on customer_instance_id (latest per customer).
+        Get ALL non-campaign follow-up records for a SPECIFIC user, one row per
+        record. Each row carries is_latest (True on the newest record of that
+        customer_instance_id) so the frontend can offer an All / Unique toggle —
+        "Unique" being the old latest-record-per-customer view.
         """
         try:
             from app.models.non_followup_model import NonFollowUp
@@ -3293,7 +3295,7 @@ class EmployeePerformanceController:
             ).all()
 
             if not all_non_followups:
-                return {"total_customers": 0, "customers": []}
+                return {"total_customers": 0, "total_records": 0, "customers": []}
 
             # Latest non-followup per customer_instance_id
             latest_map = {}
@@ -3319,29 +3321,36 @@ class EmployeePerformanceController:
             ).all() if instance_ids else []
             customer_map = {c.instance_id: c for c in customers_db}
 
-            # Bulk-fetch Activity content for the latest non-followups so the
+            # Rows returned = EVERY record with an instance_id (the All view);
+            # is_latest marks the one per customer the Unique view keeps.
+            rows = [nfu for nfu in all_non_followups if nfu.customer_instance_id]
+
+            # Bulk-fetch Activity content for all returned rows so the
             # All-Follow-ups modal can show an Activity for the "other" rows.
             from app.models.engagement_model import Activity, RR
-            activity_ids = list({nfu.activity_id for nfu in latest_map.values() if nfu.activity_id})
+            activity_ids = list({nfu.activity_id for nfu in rows if nfu.activity_id})
             activity_map = {}
             if activity_ids:
                 for a in db.query(Activity).filter(Activity.id.in_(activity_ids)).all():
                     activity_map[a.id] = a
 
             # Bulk-fetch rejection reasons the same way
-            rr_ids = list({nfu.rr_id for nfu in latest_map.values() if nfu.rr_id})
+            rr_ids = list({nfu.rr_id for nfu in rows if nfu.rr_id})
             rr_map = {}
             if rr_ids:
                 for r in db.query(RR).filter(RR.id.in_(rr_ids)).all():
                     rr_map[r.id] = r
 
             customers_list = []
-            for instance_id, nfu in latest_map.items():
+            for nfu in rows:
+                instance_id = nfu.customer_instance_id
                 customer = customer_map.get(instance_id)
                 activity = activity_map.get(nfu.activity_id) if nfu.activity_id else None
                 rr = rr_map.get(nfu.rr_id) if nfu.rr_id else None
                 customers_list.append({
                     "s_no": 0,
+                    "record_id": nfu.id,
+                    "is_latest": latest_map.get(instance_id) is nfu,
                     "instance_id": instance_id,
                     "customer_name": customer.customer_name if customer else "Not Found",
                     "phone_number": customer.phone_number if customer else "N/A",
@@ -3371,13 +3380,17 @@ class EmployeePerformanceController:
             for idx, c in enumerate(customers_list, 1):
                 c["s_no"] = idx
 
-            return {"total_customers": len(customers_list), "customers": customers_list}
+            return {
+                "total_customers": len(latest_map),      # unique customers
+                "total_records": len(customers_list),    # every taken record
+                "customers": customers_list
+            }
 
         except Exception as e:
             print(f"Error in get_my_non_campaign_customers: {str(e)}")
             import traceback
             traceback.print_exc()
-            return {"total_customers": 0, "customers": []}       
+            return {"total_customers": 0, "total_records": 0, "customers": []}       
             
     @staticmethod
     async def get_employee_time_report(db: Session, target_date: str = None,

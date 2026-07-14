@@ -533,6 +533,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const [nonCampaignSearchTerm, setNonCampaignSearchTerm] = useState('');
     const [nonCampaignStatusFilter, setNonCampaignStatusFilter] = useState('all');
     const [nonCampaignServiceFilter, setNonCampaignServiceFilter] = useState('all');
+    // 'all' = every taken record; 'unique' = latest record per customer (old behavior)
+    const [nonCampaignViewMode, setNonCampaignViewMode] = useState('all');
 
     const [showCspModal, setShowCspModal] = useState(false);
     const [cspData, setCspData] = useState({ total_instances: 0, total_rows: 0, rows: [] });
@@ -1571,7 +1573,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     // Non-campaign COMPLETED customers, reshaped as follow-up rows under campaign "other"
     const otherCompletedFollowups = useMemo(() => {
         return (nonCampaignData.customers || [])
-            .filter(c => (c.last_status || '').toLowerCase() === 'completed')
+            // Endpoint now returns EVERY record — keep only the latest per customer
+            // here (is_latest), matching the old one-row-per-customer behavior.
+            .filter(c => c.is_latest !== false && (c.last_status || '').toLowerCase() === 'completed')
             .map((c, i) => ({
                 id: `other_${c.instance_id || i}`,
                 followup_date: c.last_followup_date || null,
@@ -1856,7 +1860,15 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     }, [performance?.followup_type_breakdown]);
 
     const fetchExportPermission = useCallback(async () => {
-        const uid = userData?.user_id || userData?.id;
+        // Check the LOGGED-IN user's permission, not the viewed profile's —
+        // when a master admin opens an employee's dashboard through Employee
+        // Progress, userData is the EMPLOYEE, but export rights must follow
+        // the person actually logged in (from sessionStorage).
+        let loggedInUser = null;
+        try {
+            loggedInUser = JSON.parse(sessionStorage.getItem('user') || 'null');
+        } catch (e) { /* corrupted session entry — fall back to userData */ }
+        const uid = loggedInUser?.user_id || loggedInUser?.id || userData?.user_id || userData?.id;
         if (!uid) return;
         try {
             // Use the SAME endpoint the Customer Engagement pages use — a simple
@@ -2017,6 +2029,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setNonCampaignSearchTerm('');
         setNonCampaignStatusFilter('all');
         setNonCampaignServiceFilter('all');
+        setNonCampaignViewMode('all');
         // Rows are prefetched on mount — show them instantly, refresh silently
         fetchNonCampaignCustomers(nonCampaignData.customers.length > 0);
     };
@@ -2029,14 +2042,22 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setNonCampaignSearchTerm('');
         setNonCampaignStatusFilter(status);
         setNonCampaignServiceFilter('all');
+        // Status pills count ALL records — open in All so counts match
+        setNonCampaignViewMode('all');
         fetchNonCampaignCustomers(nonCampaignData.customers.length > 0);
     };
 
     // Base list for the Non-Campaign modal — completed is hidden here (it now
     // appears in the All-Follow-ups modal under campaign name "other")
     const nonCampaignBase = useMemo(
-        () => (nonCampaignData.customers || []).filter(c => (c.last_status || '').toLowerCase() !== 'completed'),
-        [nonCampaignData.customers]
+        () => (nonCampaignData.customers || []).filter(c => {
+            // Completed is never shown here (it rolls into the Completed card)
+            if ((c.last_status || '').toLowerCase() === 'completed') return false;
+            // 'unique' keeps only the latest record per customer; 'all' keeps every record
+            if (nonCampaignViewMode === 'unique' && c.is_latest === false) return false;
+            return true;
+        }),
+        [nonCampaignData.customers, nonCampaignViewMode]
     );
 
     // Service/product dropdown options
@@ -2350,11 +2371,28 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         }
     }), []);
 
-    // Non-Drive "reached" total with completed removed (completed now rolls into the top Completed card)
-    const nonDriveReachedTotal = Math.max(
-        0,
-        (nonFollowupCustomerStats?.total_unique_customers || 0) - (nonFollowupCustomerStats?.completed || 0)
-    );
+    // Non-Drive Reached card counts — ALL taken records (not unique customers),
+    // completed records excluded (completed rolls into the top Completed card).
+    // Computed from the same all-records list the modal shows, prefetched on mount.
+    const nonDriveRecordStats = useMemo(() => {
+        const rows = (nonCampaignData.customers || []).filter(
+            c => (c.last_status || '').toLowerCase() !== 'completed'
+        );
+        const count = (s) => rows.filter(c => (c.last_status || '').toLowerCase() === s).length;
+        const wip = count('wip');
+        const rejected = count('rejected');
+        const rescheduled = count('rescheduled');
+        const not_connected = count('not_connected');
+        return {
+            total: rows.length,
+            wip,
+            rejected,
+            rescheduled,
+            not_connected,
+            pending: rows.length - wip - rejected - rescheduled - not_connected,
+        };
+    }, [nonCampaignData.customers]);
+    const nonDriveReachedTotal = nonDriveRecordStats.total;
 
     // Loading state — show skeleton cards instead of full-page spinner
     if (loading) {
@@ -2428,7 +2466,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                         Total Calls and Follow-ups
                         {otherCompletedFollowups.length > 0 && (
                             <span className="ml-1 text-[10px] text-gray-500 font-semibold whitespace-nowrap">
-                                ({performance.total_followups || 0} + {otherCompletedFollowups.length} other drive)
+                                ({performance.total_followups || 0} + {otherCompletedFollowups.length} Non-Drive)
                             </span>
                         )}
                         {branchAssetCount > 0 && (
@@ -2514,7 +2552,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                         Completed
                         {(nonFollowupCustomerStats?.completed || 0) > 0 && (
                             <span className="block text-[10px] text-gray-500 font-semibold mt-0.5 whitespace-nowrap">
-                                ({performance.completed_count || 0} + {nonFollowupCustomerStats.completed} other drive)
+                                ({performance.completed_count || 0} + {nonFollowupCustomerStats.completed} Non-Drive)
                             </span>
                         )}
                     </h3>
@@ -2754,11 +2792,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 inline-block"></span>
                                     <span className="text-[10px] sm:text-[11px] font-medium text-yellow-700">W</span>
                                     <span className="text-[10px] sm:text-[11px] font-bold text-yellow-800">
-                                        {nonFollowupCustomerStats.wip}
+                                        {nonDriveRecordStats.wip}
                                     </span>
                                     {nonDriveReachedTotal > 0 && (
                                         <span className="text-[9px] text-yellow-600">
-                                            ({((nonFollowupCustomerStats.wip / nonDriveReachedTotal) * 100).toFixed(0)}%)
+                                            ({((nonDriveRecordStats.wip / nonDriveReachedTotal) * 100).toFixed(0)}%)
                                         </span>
                                     )}
                                 </div>
@@ -2772,11 +2810,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block"></span>
                                     <span className="text-[10px] sm:text-[11px] font-medium text-red-700">R</span>
                                     <span className="text-[10px] sm:text-[11px] font-bold text-red-800">
-                                        {nonFollowupCustomerStats.rejected}
+                                        {nonDriveRecordStats.rejected}
                                     </span>
                                     {nonDriveReachedTotal > 0 && (
                                         <span className="text-[9px] text-red-600">
-                                            ({((nonFollowupCustomerStats.rejected / nonDriveReachedTotal) * 100).toFixed(0)}%)
+                                            ({((nonDriveRecordStats.rejected / nonDriveReachedTotal) * 100).toFixed(0)}%)
                                         </span>
                                     )}
                                 </div>
@@ -2790,11 +2828,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     <span className="w-1.5 h-1.5 rounded-full bg-purple-500 inline-block"></span>
                                     <span className="text-[10px] sm:text-[11px] font-medium text-purple-700">FR</span>
                                     <span className="text-[10px] sm:text-[11px] font-bold text-purple-800">
-                                        {nonFollowupCustomerStats.rescheduled}
+                                        {nonDriveRecordStats.rescheduled}
                                     </span>
                                     {nonDriveReachedTotal > 0 && (
                                         <span className="text-[9px] text-purple-600">
-                                            ({((nonFollowupCustomerStats.rescheduled / nonDriveReachedTotal) * 100).toFixed(0)}%)
+                                            ({((nonDriveRecordStats.rescheduled / nonDriveReachedTotal) * 100).toFixed(0)}%)
                                         </span>
                                     )}
                                 </div>
@@ -2808,22 +2846,22 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     <span className="w-1.5 h-1.5 rounded-full bg-gray-500 inline-block"></span>
                                     <span className="text-[10px] sm:text-[11px] font-medium text-gray-700">NC</span>
                                     <span className="text-[10px] sm:text-[11px] font-bold text-gray-800">
-                                        {nonFollowupCustomerStats.not_connected || 0}
+                                        {nonDriveRecordStats.not_connected}
                                     </span>
                                     {nonDriveReachedTotal > 0 && (
                                         <span className="text-[9px] text-gray-600">
-                                            ({(((nonFollowupCustomerStats.not_connected || 0) / nonDriveReachedTotal) * 100).toFixed(0)}%)
+                                            ({((nonDriveRecordStats.not_connected / nonDriveReachedTotal) * 100).toFixed(0)}%)
                                         </span>
                                     )}
                                 </div>
 
                                 {/* Pending - only show if > 0 */}
-                                {nonFollowupCustomerStats.pending > 0 && (
+                                {nonDriveRecordStats.pending > 0 && (
                                     <div className="col-span-2 flex items-center justify-center gap-1 bg-gray-50 border border-gray-200 rounded-full px-2.5 py-0.5">
                                         <span className="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block"></span>
                                         <span className="text-[10px] sm:text-[11px] font-medium text-gray-600">P</span>
                                         <span className="text-[10px] sm:text-[11px] font-bold text-gray-700">
-                                            {nonFollowupCustomerStats.pending}
+                                            {nonDriveRecordStats.pending}
                                         </span>
                                     </div>
                                 )}
@@ -4600,10 +4638,31 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         Non-Drive Customers by {userData?.name || 'User'}
                                     </h3>
                                     <p className="text-[11px] text-white/80 mt-0.5">
-                                        Showing {filteredNonCampaignCustomers.length} of {nonCampaignBase.length} customer(s)
+                                        Showing {filteredNonCampaignCustomers.length} of {nonCampaignBase.length} {nonCampaignViewMode === 'all' ? 'record(s)' : 'customer(s)'}
                                     </p>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
+                                    {/* All records vs latest-per-customer toggle */}
+                                    <div className="flex items-center gap-1">
+                                        <label className="text-[11px] text-white whitespace-nowrap">View:</label>
+                                        <div className="flex rounded-md overflow-hidden border border-white/40">
+                                            <button
+                                                onClick={() => setNonCampaignViewMode('all')}
+                                                className={`px-2.5 py-1 text-[11px] font-medium transition-colors ${nonCampaignViewMode === 'all' ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                                                title="Every follow-up record taken (customers repeat)"
+                                            >
+                                                All
+                                            </button>
+                                            <button
+                                                onClick={() => setNonCampaignViewMode('unique')}
+                                                className={`px-2.5 py-1 text-[11px] font-medium transition-colors ${nonCampaignViewMode === 'unique' ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                                                title="Latest record per customer"
+                                            >
+                                                Unique
+                                            </button>
+                                        </div>
+                                    </div>
+
                                     {/* Service / Product filter */}
                                     <div className="flex items-center gap-1">
                                         <label className="text-[11px] text-white whitespace-nowrap">Service:</label>
@@ -4736,7 +4795,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                             <tbody className="divide-y divide-gray-100">
                                                 {filteredNonCampaignCustomers.map((c, idx) => (
                                                     <tr
-                                                        key={c.instance_id || idx}
+                                                        key={c.record_id || c.instance_id || idx}
                                                         className="hover:bg-gray-50 cursor-pointer transition-colors"
                                                         onDoubleClick={() => handleOpenCustomerFromNonDrive(c)}
                                                         title="Double-click to open customer details"

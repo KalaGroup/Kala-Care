@@ -720,6 +720,27 @@ const CustomerEng2 = () => {
     return fromService || '';
   };
 
+  // Services available for the "Post Warranty" (non-campaign) follow-up dropdown:
+  // the master product/service list minus CSP/AMC products and minus the
+  // services of campaigns this customer already has (those go through the
+  // campaign itself, not Post Warranty).
+  const postWarrantyServices = useMemo(() => {
+    const cspAmcRegex = /\b(csp|amc)\b/i;
+    const customerServiceSet = new Set(
+      (customerCampaigns || [])
+        .map(c => (c.service || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const seen = new Set();
+    return (campaignServices || []).filter(cs => {
+      const name = (cs.name || '').trim();
+      const key = name.toLowerCase();
+      if (!name || cspAmcRegex.test(name) || customerServiceSet.has(key) || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [campaignServices, customerCampaigns]);
+
   const showQuoteColumnsGlobal = selectedCampaignsForFollowup.some(campaignId => {
     const data = campaignFollowupData[campaignId] || {};
     return data.quotation_sent === true;
@@ -2511,9 +2532,15 @@ const CustomerEng2 = () => {
         return;
       }
 
+      // Product/Service is mandatory for Post Warranty follow-ups
+      if (campaignId === 'other' && (!campaignData.service || campaignData.service.trim() === '')) {
+        toast.error(`Please select a Product/Service for Post Warranty follow-up`);
+        return;
+      }
+
       if (!campaignData.activity_id) {
         if (campaignId === 'other') {
-          toast.error(`Please select an activity for Other follow-up`);
+          toast.error(`Please select an activity for Post Warranty follow-up`);
         } else {
           const campaign = customerCampaigns.find(
             (c) => c.id === parseInt(campaignId),
@@ -2528,7 +2555,7 @@ const CustomerEng2 = () => {
       // Remark is mandatory for ALL statuses (all campaigns including "other")
       if (!campaignData.remark || campaignData.remark.trim() === '') {
         if (campaignId === 'other') {
-          toast.error(`Please enter a remark for Other follow-up`);
+          toast.error(`Please enter a remark for Post Warranty follow-up`);
         } else {
           const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
           toast.error(`Please enter a remark for drive: ${campaign?.name}`);
@@ -2543,7 +2570,7 @@ const CustomerEng2 = () => {
 
         if (!nextDate) {
           if (campaignId === 'other') {
-            toast.error(`Please select Next Follow-up Date for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in Other follow-up`);
+            toast.error(`Please select Next Follow-up Date for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in Post Warranty follow-up`);
           } else {
             const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
             toast.error(`Please select Next Follow-up Date for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in drive: ${campaign?.name}`);
@@ -2553,7 +2580,7 @@ const CustomerEng2 = () => {
 
         if (!flag && campaignData.status !== 'not_connected') {
           if (campaignId === 'other') {
-            toast.error(`Please select Follow-up Flag for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in Other follow-up`);
+            toast.error(`Please select Follow-up Flag for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in Post Warranty follow-up`);
           } else {
             const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
             toast.error(`Please select Follow-up Flag for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in drive: ${campaign?.name}`);
@@ -2565,7 +2592,7 @@ const CustomerEng2 = () => {
       // NEW: Reject reason is mandatory when status is rejected
       if (campaignData.status === 'rejected' && !campaignData.rr_id) {
         if (campaignId === 'other') {
-          toast.error(`Please select a reject reason for Other follow-up`);
+          toast.error(`Please select a reject reason for Post Warranty follow-up`);
         } else {
           const campaign = customerCampaigns.find(
             (c) => c.id === parseInt(campaignId),
@@ -2660,13 +2687,13 @@ const CustomerEng2 = () => {
       if (onlyOtherSelected) {
         const result = await Swal.fire({
           title: 'Continue without a drive?',
-          html: `You selected only <strong>"Other"</strong> and no drive.<br/><br/>Are you sure you don't want to select a drive?`,
+          html: `You selected only <strong>"Post Warranty"</strong> and no drive.<br/><br/>Are you sure you don't want to select a drive?`,
           icon: 'question',
           showCancelButton: true,
           showCloseButton: true,
           confirmButtonColor: '#406093',
           cancelButtonColor: '#d33',
-          confirmButtonText: 'Yes, continue with Other',
+          confirmButtonText: 'Yes, continue with Post Warranty',
           cancelButtonText: 'No, let me select a drive',
           reverseButtons: true,
           allowOutsideClick: false,
@@ -8316,7 +8343,7 @@ ${f.start_para}`;
                       : {}
                   }
                 >
-                  <span>Other</span>
+                  <span>Post Warranty</span>
                   {selectedCampaignsForFollowup.includes('other') && (
                     <CheckCircleIcon className="h-3 w-3" />
                   )}
@@ -8420,6 +8447,7 @@ ${f.start_para}`;
                     </th>
                     <th className="px-2 py-2 text-center text-[11px] font-bold text-black border border-gray-300 whitespace-nowrap w-[60px] bg-gray-100">
                       Service or Product
+                      {selectedCampaignsForFollowup.includes('other') && <span className="text-red-500"> *</span>}
                     </th>
                     {showCspSubtypeGlobal && (
                       <th className="px-2 py-2 text-center text-[11px] font-bold text-black border border-gray-300 whitespace-nowrap w-[140px] bg-gray-100">
@@ -8511,7 +8539,7 @@ ${f.start_para}`;
                                 color: "black",
                               }}
                             >
-                              {isOther ? 'Other' : (campaign?.name || 'Other followup cannot be edited')}
+                              {isOther ? 'Post Warranty' : (campaign?.name || 'Post Warranty followup cannot be edited')}
                             </span>
                           </div>
                         </td>
@@ -8527,11 +8555,12 @@ ${f.start_para}`;
                               onChange={(e) =>
                                 updateCampaignFollowupData(campaignId, "service", e.target.value)
                               }
-                              className="w-full border border-gray-300 rounded-lg px-2 py-1 text-[11px] text-black"
+                              className={`w-full border rounded-lg px-2 py-1 text-[11px] text-black ${campaignData.service ? 'border-green-500 bg-green-50' : 'border-red-500 bg-red-50'}`}
                               style={{ "--tw-ring-color": themeColor }}
+                              required
                             >
-                              <option value="">-- Optional --</option>
-                              {campaignServices.map((cs) => (
+                              <option value="">-- Select Product/Service * --</option>
+                              {postWarrantyServices.map((cs) => (
                                 <option key={cs.id} value={cs.name}>
                                   {cs.name}
                                 </option>

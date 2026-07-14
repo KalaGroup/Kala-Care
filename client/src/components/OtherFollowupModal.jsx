@@ -8,6 +8,12 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
     const [exportLoading, setExportLoading] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [totalCustomers, setTotalCustomers] = useState(0);
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [flagFilter, setFlagFilter] = useState('all');
+    const [userFilter, setUserFilter] = useState('all');
+    const [serviceFilter, setServiceFilter] = useState('all');
+    const [dateFrom, setDateFrom] = useState('');
+    const [dateTo, setDateTo] = useState('');
 
     const tableContainerRef = useRef(null);
     const topScrollBarRef = useRef(null);
@@ -53,6 +59,9 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
         const wsData = [];
         wsData.push(['NON-DRIVE FOLLOWUP DATA']);
         wsData.push(['Total Unique Customers:', totalCustomers]);
+        if (isFiltered) {
+            wsData.push(['Rows Exported (after filters):', filteredCustomers.length]);
+        }
         wsData.push([]);
         wsData.push([
             'S.No', 'Instance ID', 'Customer Name', 'Phone Number', 'Email',
@@ -103,15 +112,63 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
         setExportLoading(false);
     };
 
-    // Memoized: re-filter only when the data or the search term changes,
+    // Unique dropdown options — recompute only when data changes
+    const uniqueFlags = useMemo(
+        () => [...new Set(customers.map(c => c.latest_flag).filter(Boolean))],
+        [customers]
+    );
+    const uniqueUsers = useMemo(
+        () => [...new Set(customers.map(c => c.last_followup_user_name).filter(Boolean))].sort(),
+        [customers]
+    );
+    const uniqueServices = useMemo(
+        () => [...new Set(customers.map(c => c.service).filter(Boolean))].sort(),
+        [customers]
+    );
+
+    // Memoized: re-filter only when the data or a filter changes,
     // not on every unrelated re-render.
-    const filteredCustomers = useMemo(() => customers.filter(customer =>
-        customer.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        customer.instance_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        customer.phone_number?.includes(searchTerm) ||
-        customer.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        customer.service?.toLowerCase().includes(searchTerm.toLowerCase())
-    ), [customers, searchTerm]);
+    const filteredCustomers = useMemo(() => {
+        const term = searchTerm.toLowerCase();
+        return customers.filter(customer => {
+            const matchesSearch =
+                customer.customer_name?.toLowerCase().includes(term) ||
+                customer.instance_id?.toLowerCase().includes(term) ||
+                customer.phone_number?.includes(searchTerm) ||
+                customer.email?.toLowerCase().includes(term) ||
+                customer.service?.toLowerCase().includes(term);
+
+            const status = (customer.last_status || 'pending').toLowerCase();
+            const matchesStatus = statusFilter === 'all' || status === statusFilter;
+            const matchesFlag = flagFilter === 'all' || customer.latest_flag === flagFilter;
+            const matchesUser = userFilter === 'all' || customer.last_followup_user_name === userFilter;
+            const matchesService = serviceFilter === 'all' || customer.service === serviceFilter;
+
+            // Last Follow-up date range filter (compared on local calendar date)
+            let matchesDate = true;
+            if (dateFrom || dateTo) {
+                if (!customer.last_followup_date) {
+                    matchesDate = false;
+                } else {
+                    const followup = new Date(customer.last_followup_date);
+                    followup.setHours(0, 0, 0, 0);
+                    if (dateFrom) {
+                        const [fy, fm, fd] = dateFrom.split('-').map(Number);
+                        if (followup < new Date(fy, fm - 1, fd)) matchesDate = false;
+                    }
+                    if (dateTo) {
+                        const [ty, tm, td] = dateTo.split('-').map(Number);
+                        if (followup > new Date(ty, tm - 1, td)) matchesDate = false;
+                    }
+                }
+            }
+
+            return matchesSearch && matchesStatus && matchesFlag && matchesUser && matchesService && matchesDate;
+        });
+    }, [customers, searchTerm, statusFilter, flagFilter, userFilter, serviceFilter, dateFrom, dateTo]);
+
+    // Header count follows the applied filters
+    const isFiltered = filteredCustomers.length !== customers.length;
 
     // Scroll sync
     useEffect(() => {
@@ -204,7 +261,7 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                                         <svg className="w-2 h-2 sm:w-2.5 sm:h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
                                         </svg>
-                                        {totalCustomers} Customers
+                                        {isFiltered ? `${filteredCustomers.length} of ${customers.length} Customers` : `${totalCustomers} Customers`}
                                     </span>
                                 </div>
                             </div>
@@ -220,8 +277,8 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                     </div>
 
                     {/* Search and Export Bar */}
-                    <div className="px-3 sm:px-5 py-2 border-b border-gray-200 bg-white flex flex-col sm:flex-row justify-between items-center gap-2 max-md:px-2 max-md:flex-wrap">
-                        <div className="relative w-full sm:w-72 md:w-80">
+                    <div className="px-3 sm:px-5 py-2 border-b border-gray-200 bg-white flex flex-col sm:flex-row sm:flex-wrap items-center gap-2 max-md:px-2">
+                        <div className="relative w-full sm:w-56 md:w-64">
                             <input
                                 type="text"
                                 placeholder="Search by name, ID, phone, email, service..."
@@ -245,11 +302,103 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                             )}
                         </div>
 
+                        {/* Status filter */}
+                        <select
+                            value={statusFilter}
+                            onChange={(e) => setStatusFilter(e.target.value)}
+                            className="w-full sm:w-24 py-1 px-2 text-xs border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#2f3192]/20 focus:border-[#2f3192] transition-all text-black cursor-pointer"
+                        >
+                            <option value="all">All Status</option>
+                            <option value="wip">WIP</option>
+                            <option value="rescheduled">FR</option>
+                            <option value="not_connected">NC</option>
+                            <option value="rejected">Rejected</option>
+                            <option value="completed">Completed</option>
+                            <option value="pending">Pending</option>
+                        </select>
+
+                        {/* Flag filter */}
+                        <select
+                            value={flagFilter}
+                            onChange={(e) => setFlagFilter(e.target.value)}
+                            className="w-full sm:w-24 py-1 px-2 text-xs border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#2f3192]/20 focus:border-[#2f3192] transition-all text-black cursor-pointer"
+                        >
+                            <option value="all">All Flags</option>
+                            {uniqueFlags.map(flag => (
+                                <option key={flag} value={flag}>{flag}</option>
+                            ))}
+                        </select>
+
+                        {/* Last User filter */}
+                        <select
+                            value={userFilter}
+                            onChange={(e) => setUserFilter(e.target.value)}
+                            className="w-full sm:w-28 py-1 px-2 text-xs border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#2f3192]/20 focus:border-[#2f3192] transition-all text-black cursor-pointer"
+                            title="Filter by last follow-up user"
+                        >
+                            <option value="all">All Users</option>
+                            {uniqueUsers.map(name => (
+                                <option key={name} value={name}>{name}</option>
+                            ))}
+                        </select>
+
+                        {/* Service filter */}
+                        <select
+                            value={serviceFilter}
+                            onChange={(e) => setServiceFilter(e.target.value)}
+                            className="w-full sm:w-28 py-1 px-2 text-xs border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#2f3192]/20 focus:border-[#2f3192] transition-all text-black cursor-pointer"
+                            title="Filter by service"
+                        >
+                            <option value="all">All Services</option>
+                            {uniqueServices.map(name => (
+                                <option key={name} value={name}>{name}</option>
+                            ))}
+                        </select>
+
+                        {/* Last Follow-up date range filter */}
+                        <div className="flex items-center gap-1.5 w-full sm:w-auto max-sm:flex-wrap">
+                            <span className="text-gray-600 text-[11px] sm:text-xs flex-shrink-0 whitespace-nowrap">Last F/U:</span>
+                            <input
+                                type="date"
+                                value={dateFrom}
+                                onChange={(e) => setDateFrom(e.target.value)}
+                                className="w-full sm:w-28 py-1 px-2 text-xs border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#2f3192]/20 focus:border-[#2f3192] transition-all text-black cursor-pointer"
+                                title="Last Follow-up from date"
+                            />
+                            <span className="text-gray-600 text-[11px] sm:text-xs flex-shrink-0">to</span>
+                            <input
+                                type="date"
+                                value={dateTo}
+                                onChange={(e) => setDateTo(e.target.value)}
+                                className="w-full sm:w-28 py-1 px-2 text-xs border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#2f3192]/20 focus:border-[#2f3192] transition-all text-black cursor-pointer"
+                                title="Last Follow-up to date"
+                            />
+                            {(dateFrom || dateTo) && (
+                                <button
+                                    onClick={() => { setDateFrom(''); setDateTo(''); }}
+                                    className="text-gray-500 hover:text-black focus:outline-none flex-shrink-0"
+                                    type="button"
+                                    title="Clear date range"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Filtered count badge */}
+                        {isFiltered && (
+                            <span className="flex-shrink-0 px-2 py-1 text-[11px] sm:text-xs font-semibold text-[#2f3192] bg-[#2f3192]/10 rounded-lg whitespace-nowrap">
+                                {filteredCustomers.length} of {customers.length}
+                            </span>
+                        )}
+
                         {canExportExcel() && (
                         <button
                             onClick={exportToExcel}
                             disabled={exportLoading || customers.length === 0}
-                            className="export-btn px-2.5 sm:px-3 py-1 bg-gradient-to-r from-green-600 to-green-700 text-white text-[11px] sm:text-xs font-medium rounded-lg hover:from-green-700 hover:to-green-800 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-full sm:w-auto"
+                            className="export-btn px-2.5 sm:px-3 py-1 bg-gradient-to-r from-green-600 to-green-700 text-white text-[11px] sm:text-xs font-medium rounded-lg hover:from-green-700 hover:to-green-800 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-full sm:w-auto sm:ml-auto"
                         >
                             {exportLoading ? (
                                 <>
