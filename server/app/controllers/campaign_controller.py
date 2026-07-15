@@ -322,6 +322,17 @@ class CampaignController:
             campaign_data['asset_numbers'] = []
             campaign_data['invalid_asset_numbers'] = []
 
+        # Admin-added tracking: only the VALID assets the admin typed/uploaded
+        # on the Drive Creation form. Assets pulled in via campaign transfer
+        # are NOT counted as admin-added.
+        admin_entered = {
+            str(a).strip() for a in (campaign.asset_numbers or [])
+            if a and str(a).strip()
+        }
+        campaign_data['admin_asset_numbers'] = [
+            a for a in campaign_data['asset_numbers'] if a in admin_entered
+        ]
+
         # Create new campaign
         db_campaign = Campaign(**campaign_data)
         self.db.add(db_campaign)
@@ -380,7 +391,17 @@ class CampaignController:
                 ).delete(synchronize_session=False)
         
         update_data = campaign.model_dump(exclude_unset=True)
-        
+
+        # Assets the admin uploaded during THIS edit session (not a Campaign
+        # column — pop it so the setattr loop below never sees it). Re-uploads
+        # of assets already on the drive dedupe out of `newly_added`, so this
+        # is the only way they can still be tagged admin-added.
+        admin_entered_now = {
+            str(a).strip()
+            for a in (update_data.pop('admin_entered_assets', None) or [])
+            if a and str(a).strip()
+        }
+
         # Handle asset_numbers - ALWAYS REVALIDATE ALL ASSETS
         if 'asset_numbers' in update_data:
             # Get ALL asset numbers from the request (these are the ones the user wants to keep)
@@ -394,10 +415,29 @@ class CampaignController:
             
             # Validate ALL assets against current customer table
             validation_result = self.validate_asset_numbers(all_assets_to_validate)
-            
+
             # Update with validated results
             update_data['asset_numbers'] = validation_result['valid']
             update_data['invalid_asset_numbers'] = validation_result['invalid']
+
+            # Admin-added tracking: any asset in this edit that was NOT already
+            # on the drive was added by the admin now; any previously-known
+            # asset the admin removed in this edit leaves the admin list too.
+            # Completed assets (already removed from asset_numbers) are not in
+            # the edit form, so they stay on the admin list untouched.
+            prev_known = (
+                {str(a) for a in (db_campaign.asset_numbers or [])} |
+                {str(a) for a in existing_invalid}
+            )
+            requested_set = set(requested_assets)
+            newly_added = requested_set - prev_known
+            removed_now = prev_known - requested_set
+            admin_assets = {str(a) for a in (db_campaign.admin_asset_numbers or [])}
+            admin_assets = (admin_assets - removed_now) | {
+                a for a in validation_result['valid']
+                if a in newly_added or a in admin_entered_now
+            }
+            update_data['admin_asset_numbers'] = sorted(admin_assets)
         else:
             # If asset_numbers not in update, revalidate existing assets
             # This ensures that even when only editing name/description, assets are revalidated
@@ -779,7 +819,7 @@ class CampaignController:
         self.db.commit()
         return results
 
-    def get_campaign_customers_with_followups(self, campaign_id: int) -> Dict[str, Any]:
+    def get_campaign_customers_with_followups(self, campaign_id: int, admin_only: bool = False) -> Dict[str, Any]:
         """Get all customers for a campaign with their last follow-up data (batched)"""
         from app.models.engagement_model import FollowUp, RR
 
@@ -787,7 +827,11 @@ class CampaignController:
         if not campaign:
             raise HTTPException(status_code=404, detail="Campaign not found")
 
-        asset_numbers = campaign.asset_numbers or []
+        # admin_only → Admin-Added view: only assets the admin pushed via Drive
+        # Creation (create + edit). Completed ones are only ever removed from
+        # asset_numbers, never from admin_asset_numbers, so they still show
+        # here in the completed section with their latest follow-up.
+        asset_numbers = (campaign.admin_asset_numbers if admin_only else campaign.asset_numbers) or []
 
         # ---- 1. Pull EVERY follow-up for this campaign in ONE query (date desc) ----
         all_followups = (
@@ -817,10 +861,12 @@ class CampaignController:
         remaining_asset_numbers = [a for a in asset_numbers if a not in completed_instance_ids]
         completed_asset_numbers = [a for a in asset_numbers if a in completed_instance_ids]
 
-        # Completed follow-ups whose asset wasn't in the original list (edge case)
-        for cid in completed_instance_ids:
-            if cid not in completed_asset_numbers:
-                completed_asset_numbers.append(cid)
+        # Completed follow-ups whose asset wasn't in the original list (edge case).
+        # Skipped in admin-only mode — those extras may be employee-pushed.
+        if not admin_only:
+            for cid in completed_instance_ids:
+                if cid not in completed_asset_numbers:
+                    completed_asset_numbers.append(cid)
 
         # ---- 3. Fetch ALL needed customers in ONE query (chunked) ----
         needed_ids = list(set(remaining_asset_numbers + completed_asset_numbers))

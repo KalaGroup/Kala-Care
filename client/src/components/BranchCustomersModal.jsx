@@ -35,6 +35,10 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
     const [branchData, setBranchData] = useState(null);
     const [totalCustomersData, setTotalCustomersData] = useState(null);
     const [loading, setLoading] = useState(false);
+    // True while the FULL per-customer data is being fetched (incl. the silent
+    // background fetch after a summary preload) — the details modal shows a
+    // spinner instead of "No customers found" until it lands.
+    const [fullListLoading, setFullListLoading] = useState(false);
     const [remainingCustomersLoading, setRemainingCustomersLoading] = useState(false);
     const [exportLoading, setExportLoading] = useState(false);
     const [selectedCampaign, setSelectedCampaign] = useState(null);
@@ -58,8 +62,17 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
     useEffect(() => {
         if (!isOpen || !branch) return;
 
-        if (preloadedEngaged) setBranchData(preloadedEngaged);
-        else fetchBranchCampaignCustomers();
+        // The dashboard's preloaded data is the AGGREGATE summary — its campaigns
+        // have the numbers but NOT the per-customer lists (campaign.customers),
+        // so clicking a drive would show no records. Paint the summary instantly,
+        // then always fetch the full per-branch data silently and swap it in.
+        if (preloadedEngaged) {
+            setBranchData(preloadedEngaged);
+            const hasCustomerLists = (preloadedEngaged.campaigns || []).some(c => Array.isArray(c.customers));
+            if (!hasCustomerLists) fetchBranchCampaignCustomers(true);
+        } else {
+            fetchBranchCampaignCustomers();
+        }
 
         if (preloadedRemaining) setTotalCustomersData(preloadedRemaining);
         else fetchBranchTotalCustomers();
@@ -71,9 +84,21 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
         else fetchExportPermission();
     }, [isOpen, branch]);
 
-    const fetchBranchCampaignCustomers = async () => {
+    // When the full data replaces the summary, re-point the opened drive at the
+    // fresh campaign object so its customer records appear without reopening.
+    useEffect(() => {
+        if (!selectedCampaign || !branchData?.campaigns) return;
+        const fresh = branchData.campaigns.find(
+            c => Number(c.campaign_id) === Number(selectedCampaign.campaign_id)
+        );
+        if (fresh && fresh !== selectedCampaign) setSelectedCampaign(fresh);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [branchData]);
+
+    const fetchBranchCampaignCustomers = async (silent = false) => {
         try {
-            setLoading(true);
+            if (!silent) setLoading(true);
+            setFullListLoading(true);
             const response = await fetch(`${apiBaseUrl}/performance/branch-campaign-customers/${branch.branch}`, {
                 method: 'POST',
                 headers: {
@@ -97,6 +122,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
             console.error('Error fetching branch campaign customers:', error);
         } finally {
             setLoading(false);
+            setFullListLoading(false);
         }
     };
 
@@ -230,7 +256,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
             'Total Attended Assets',
             'Completed',
             'WIP',
-            'Follow-up Reschedule',
+            'Followups',
             'Rejected',
             'Not Connected',
             'Completion Rate %'
@@ -391,7 +417,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                     categoryPercentage: 0.8
                 },
                 {
-                    label: 'FR',
+                    label: 'Followups',
                     data: sortedCampaigns.map(c => c.rescheduled_followups || 0),
                     backgroundColor: 'rgba(168, 85, 247, 0.85)',
                     borderColor: '#a855f7',
@@ -530,7 +556,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
     const getAssetStatusData = () => {
         const ncTotal = Object.values(ncCountByCampaign).reduce((a, b) => a + b, 0);
         return {
-            labels: ['Completed', 'WIP', 'FR', 'Rejected', 'NC'],
+            labels: ['Completed', 'WIP', 'Followups', 'Rejected', 'NC'],
             datasets: [
                 {
                     data: [
@@ -766,7 +792,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                             <span className="font-bold text-base text-black whitespace-nowrap">{totalWip.toLocaleString()}</span>
                                         </div>
                                         <div className="flex items-baseline gap-1 min-w-0">
-                                            <span className="w-8 shrink-0">FR:</span>
+                                            <span className="w-8 shrink-0">F:</span>
                                             <span className="font-bold text-base text-black whitespace-nowrap">{totalFR.toLocaleString()}</span>
                                         </div>
                                         <div className="flex items-baseline gap-1 min-w-0">
@@ -823,7 +849,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                     <h3 className="text-base font-semibold text-gray-800">
                                         Drive-wise Customer Breakdown
                                     </h3>
-                                    <p className="text-[10px] text-gray-500 mt-0.5">Remaining vs WIP vs FR vs Rejected vs NC vs Completed</p>
+                                    <p className="text-[10px] text-gray-500 mt-0.5">Remaining vs WIP vs Followups vs Rejected vs NC vs Completed</p>
                                 </div>
                                 <div className="flex gap-1.5 max-md:flex-wrap max-md:gap-2">
                                     <button
@@ -936,7 +962,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                             <th className="border border-gray-300 px-0 py-2 text-center text-[11px] font-semibold text-black">Total Allocated Assets</th>
                                             <th className="border border-gray-300 px-0 py-2 text-center text-[11px] font-semibold text-black">Total Attended Assets</th>
                                             <th className="border border-gray-300 px-5 py-2 text-center text-[11px] font-semibold text-black">WIP</th>
-                                            <th className="border border-gray-300 px-0 py-2 text-center text-[11px] font-semibold text-black">Follow-up Reschedule</th>
+                                            <th className="border border-gray-300 px-0 py-2 text-center text-[11px] font-semibold text-black">Followups</th>
                                             <th className="border border-gray-300 px-5 py-2 text-center text-[11px] font-semibold text-black">Rejected</th>
                                             <th className="border border-gray-300 px-3 py-2 text-center text-[11px] font-semibold text-black">Not Connected</th>
                                             <th className="border border-gray-300 px-5 py-2 text-center text-[11px] font-semibold text-black">Completed</th>
@@ -1056,7 +1082,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                             onClick={() => setStatusFilter('rescheduled')}
                                             className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${statusFilter === 'rescheduled' ? 'bg-purple-500 text-white' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}`}
                                         >
-                                            Follow-up Reschedule ({selectedCampaign.rescheduled_followups || 0})
+                                            Followups ({selectedCampaign.rescheduled_followups || 0})
                                         </button>
                                         <button
                                             onClick={() => setStatusFilter('rejected')}
@@ -1113,10 +1139,19 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                                 const sortedCustomers = detailSortedCustomers;
 
                                                 if (sortedCustomers.length === 0) {
+                                                    // Customer lists still on their way (summary preload → full fetch)
+                                                    const listPending = fullListLoading && !Array.isArray(selectedCampaign.customers);
                                                     return (
                                                         <tr>
                                                             <td colSpan="15" className="text-center py-8 text-gray-500 text-xs">
-                                                                No customers found.
+                                                                {listPending ? (
+                                                                    <div className="flex items-center justify-center gap-2">
+                                                                        <div className="w-5 h-5 border-2 border-t-2 border-t-[#2f3192] border-gray-200 rounded-full animate-spin"></div>
+                                                                        <span>Loading customers...</span>
+                                                                    </div>
+                                                                ) : (
+                                                                    'No customers found.'
+                                                                )}
                                                             </td>
                                                         </tr>
                                                     );

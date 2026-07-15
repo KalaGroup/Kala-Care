@@ -4,11 +4,11 @@ import * as XLSX from 'xlsx';
 import { canExportExcel } from '../utils/exportPermission';
 
 // Short status labels used in the Last Status column and export:
-// wip→WIP, rescheduled→FR, completed→Completed, not_connected→NC, rejected→Rejected
+// wip→WIP, rescheduled→Followups, completed→Completed, not_connected→NC, rejected→Rejected
 const statusLabel = (s) => {
     const map = {
         wip: 'WIP',
-        rescheduled: 'FR',
+        rescheduled: 'Followups',
         completed: 'Completed',
         not_connected: 'NC',
         rejected: 'Rejected',
@@ -17,7 +17,9 @@ const statusLabel = (s) => {
     return map[(s || '').trim().toLowerCase()] || (s || '-');
 };
 
-const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl, allReportCampaigns = null }) => {
+// adminOnly: show ONLY the assets the admin added via Drive Creation (create + edit),
+// excluding employee-pushed assets — used by the "Admin Added" button on each drive box.
+const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl, allReportCampaigns = null, adminOnly = false }) => {
     const [customers, setCustomers] = useState([]);
     const [campaignInfo, setCampaignInfo] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -72,7 +74,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
         // Stop any in-flight all-report loop when the modal closes/reopens
         return () => { loadRunRef.current++; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isOpen, campaign]);
+    }, [isOpen, campaign, adminOnly]);
 
     // Close the drive-filter dropdown when clicking outside it
     useEffect(() => {
@@ -169,13 +171,26 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
     );
     const isFiltered = filteredCustomers.length !== customers.length;
 
+    // Any filter away from its default → show the Clear Filters button
+    const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all' || flagFilter !== 'all'
+        || userFilter !== 'all' || campaignFilter.length > 0 || dateFrom !== '' || dateTo !== '';
+    const clearAllFilters = () => {
+        setSearchTerm('');
+        setStatusFilter('all');
+        setFlagFilter('all');
+        setUserFilter('all');
+        setCampaignFilter([]);
+        setDateFrom('');
+        setDateTo('');
+    };
+
     const fetchCampaignCustomers = async () => {
         try {
             setLoading(true);
 
             // Dashboard passes campaign_id; Campaign page passes id — accept either
             const campaignId = campaign.id ?? campaign.campaign_id;
-            const response = await fetch(`${apiBaseUrl}/v1/campaigns/${campaignId}/customers-with-followups`, {
+            const response = await fetch(`${apiBaseUrl}/v1/campaigns/${campaignId}/customers-with-followups${adminOnly ? '?admin_only=true' : ''}`, {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
@@ -314,7 +329,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
             wsData.push(['ALL CUSTOMERS WITH LAST FOLLOW-UP']);
             wsData.push([]);
         } else {
-            wsData.push(['DRIVE SUMMARY']);
+            wsData.push([adminOnly ? 'DRIVE SUMMARY (ADMIN ADDED ONLY)' : 'DRIVE SUMMARY']);
             wsData.push(['Drive Name:', campaignInfo?.name || 'N/A']);
             wsData.push(['Service:', campaignInfo?.service || 'N/A']);
             wsData.push(['Status:', campaignInfo?.status || 'N/A']);
@@ -367,7 +382,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
             { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 30 }, { wch: 40 }, { wch: 15 }, { wch: 15 }, { wch: 30 }
         ];
 
-        const baseName = isAllReport ? 'all_campaigns' : (campaignInfo?.name?.replace(/\s/g, '_') || 'drive');
+        const baseName = (isAllReport ? 'all_campaigns' : (campaignInfo?.name?.replace(/\s/g, '_') || 'drive')) + (adminOnly ? '_admin_added' : '');
         const filename = `${baseName}_customers_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
         XLSX.writeFile(wb, filename);
         setExportLoading(false);
@@ -505,6 +520,11 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                                         </svg>
                                     </div>
                                     <h2 className="text-base sm:text-lg font-bold text-white tracking-tight truncate">{isAllReport ? 'All Drives Report' : campaignInfo?.name}</h2>
+                                    {!isAllReport && adminOnly && (
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-white text-[#2f3192] whitespace-nowrap flex-shrink-0">
+                                            Admin Added
+                                        </span>
+                                    )}
                                 </div>
                                 <div className="flex flex-wrap gap-1.5 sm:gap-2 text-white/80 text-[10px] sm:text-xs">
                                     {isAllReport ? (
@@ -586,7 +606,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                             >
                                 <option value="all">All Status</option>
                                 <option value="wip">WIP</option>
-                                <option value="rescheduled">FR</option>
+                                <option value="rescheduled">Followups</option>
                                 <option value="not_connected">NC</option>
                                 <option value="rejected">Rejected</option>
                                 <option value="completed">Completed</option>
@@ -700,6 +720,21 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                                     </button>
                                 )}
                             </div>
+
+                            {/* Clear all filters — visible only when something is filtered */}
+                            {hasActiveFilters && (
+                                <button
+                                    onClick={clearAllFilters}
+                                    type="button"
+                                    title="Reset search, status, flag, user, drive and date filters"
+                                    className="px-3 py-1.5 bg-white/15 border border-white/40 text-white text-[11px] sm:text-xs font-semibold rounded-lg hover:bg-white/25 transition-all flex items-center justify-center gap-1.5 w-full sm:w-auto whitespace-nowrap"
+                                >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                    Clear Filters
+                                </button>
+                            )}
 
                             {/* Export button — only for users with the can_export permission */}
                             {canExportExcel() && (

@@ -7,6 +7,7 @@ import {
   AlertTriangle, CalendarDays, Users, X, CornerUpRight,
   BarChart3, Check, User, ListChecks, Zap,
   ChevronDown, FileText, MapPin, UserPlus, Download, Upload, Search, RotateCcw,
+  Crown,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
@@ -63,8 +64,8 @@ const NEW_CAT_COLORS = ['#0ea5e9', '#e11d48', '#16a34a', '#9333ea', '#f59e0b', '
 
 /* Column widths of the two sheet tables (kept in sync with the
    top scrollbar strip above the main table) */
-const SHEET_MINW = '80rem';
-const CARRY_MINW = '78rem';
+const SHEET_MINW = '96rem';
+const CARRY_MINW = '96rem';
 
 /* ============================================================
    MASTER DISCUSSION AREAS (editable via "Master setup")
@@ -145,7 +146,7 @@ const shadeHex = (hex, pct) => {
   }).join('').toUpperCase();
 };
 
-async function exportMeetingExcel(m, brandColor = BRAND) {
+async function exportMeetingExcel(m, brandColor = '#000080') {
   const thin = { style: 'thin', color: { rgb: 'FFD3D8E6' } };
   const BORDER = { top: thin, bottom: thin, left: thin, right: thin };
   const C = {
@@ -169,10 +170,11 @@ async function exportMeetingExcel(m, brandColor = BRAND) {
   const txt = (v, s) => ({ v: v ?? '', t: 's', s });
 
   const branchNames = m.branches?.length ? m.branches.map((b) => b.name || b.code).join(' + ') : (m.branchName || '');
+  const heads = (m.heads || []).map((h) => String(h).trim()).filter(Boolean);
 
   /* remark-history columns: one per unique past review date */
   const histDates = [...new Set(m.rows.flatMap((r) => (r.prevRemarks || []).map((p) => p.date)))].sort();
-  const FIXED = 5; // Discussion Area … Due Date
+  const FIXED = 6; // Discussion Area … Due Date (incl. the head column)
   const totalCols = Math.max(FIXED + histDates.length + 2, 8); // + current remark + Status (info block needs ≥ 8)
 
   const aoa = []; const merges = [];
@@ -191,6 +193,7 @@ async function exportMeetingExcel(m, brandColor = BRAND) {
     ['Date:', fmtDDMMYY(m.date)], ['Location:', m.location || ''],
     ['Branches:', branchNames], ['Meeting Type:', m.type || ''],
     ['Conducted By:', m.conductedBy || ''],
+    ['Meeting Head(s):', heads.join(', ')],
   ];
   const present = m.attendees.filter((a) => a.present);
   const blockRows = Math.max(info.length, present.length + 1, 3);
@@ -217,8 +220,8 @@ async function exportMeetingExcel(m, brandColor = BRAND) {
   push(pad([]));                                                                  // spacer
 
   /* Table header — requested column sequence, Status last */
-  const head = ['Discussion Area', 'Discussion points', 'Responsibility', 'Action flag', 'Due Date',
-    ...histDates.map((d) => `Remarks - ${fmtDDMMYY(d)}`), `Remarks - ${fmtDDMMYY(m.date)}`, 'Status'];
+  const head = ['Discussion Area', 'Discussion points', 'Responsibility', 'Task Assigned By (Head)', 'Action flag', 'Due Date',
+    ...histDates.map((d) => `Remark/Observation/Action - ${fmtDDMMYY(d)}`), `Remark/Observation/Action - ${fmtDDMMYY(m.date)}`, 'Status'];
   const headRow = head.map((h) => txt(h, S.head));
   while (headRow.length < totalCols) headRow.push(txt('', S.head));
   push(headRow);
@@ -234,6 +237,7 @@ async function exportMeetingExcel(m, brandColor = BRAND) {
       txt(r.area + (r.carried ? '  (C/F)' : ''), r.carried ? { ...cell(alt), font: { ...cell(alt).font, bold: true, color: { rgb: 'B45309' } } } : cell(alt)),
       txt(r.point, cell(alt)),
       txt(respArr(r.resp).join(', ') || (isT ? '' : '-'), cell(alt)),
+      txt(r.assignedBy || '-', cellC(alt)),
       txt(r.flag, cellC(alt, { bold: true })),
       txt(isT ? fmtDDMMYY(r.due) : '-', cellC(alt)),
     ];
@@ -251,7 +255,7 @@ async function exportMeetingExcel(m, brandColor = BRAND) {
   const XLSX = _xlsx.utils ? _xlsx : (_xlsx.default || _xlsx);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   ws['!merges'] = merges;
-  ws['!cols'] = [{ wch: 26 }, { wch: 40 }, { wch: 24 }, { wch: 9 }, { wch: 12 },
+  ws['!cols'] = [{ wch: 26 }, { wch: 40 }, { wch: 24 }, { wch: 20 }, { wch: 9 }, { wch: 12 },
     ...histDates.map(() => ({ wch: 26 })), { wch: 28 }, { wch: 12 }];
   ws['!rows'] = [{ hpt: 26 }, { hpt: 16 }];
 
@@ -345,74 +349,41 @@ function Dropdown({ trigger, children, panelClass = '', panelStyle }) {
 }
 /* previous remarks chips (the accumulating "Remarks - date" columns) */
 const RemarkHistory = React.memo(({ list }) => !list?.length ? <span className="fs-10 text-gray-300">—</span> : (
-  <div className="space-y-1">
-    {list.map((p, i) => (
-      <div key={i} className="fs-10 leading-snug">
-        <span className="inline-block rounded px-1.5 py-0.5 font-bold mr-1.5" style={{ background: '#f1f5f9', color: '#475569' }}>{fmtDDMMYY(p.date)}</span>
-        <span className="text-black">{p.text || <i className="text-gray-400">status: {STATUS[p.status]?.label}</i>}</span>
-      </div>
-    ))}
+  <div className="space-y-1.5">
+    {list.map((p, i) => {
+      const st = STATUS[p.status];
+      return (
+        <div key={i} className="mom-remark-card rounded-lg px-2 py-1" style={{ background: '#f7f8fc', border: '1px solid #eceef6' }}>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="fs-10 font-bold" style={{ color: '#475569' }}>{fmtDDMMYY(p.date)}</span>
+            {st && <span className="rounded-full px-1.5 py-0.5 fs-10 font-bold" style={{ background: st.soft, color: st.color }}>{st.label}</span>}
+            {p.by && <span className="fs-10 text-gray-400">by {p.by}</span>}
+          </div>
+          {p.text
+            ? <div className="fs-12 text-black mt-0.5 leading-snug" style={{ wordBreak: 'break-word' }}>{p.text}</div>
+            : <div className="fs-10 text-gray-400 mt-0.5 italic">no remark noted</div>}
+        </div>
+      );
+    })}
   </div>
 ));
 
-/* ============================================================
-   EXPORT COLOUR MODAL — pick the Excel theme colour just before
-   the file is generated (presets + free colour picker).
-   ============================================================ */
-const EXPORT_PRESETS = [
-  ['#2f3192', 'Kala indigo'], ['#0d9488', 'Teal'], ['#059669', 'Green'],
-  ['#d97706', 'Amber'], ['#f59e0b', 'Amber gold'], ['#7c3aed', 'Purple'],
-  ['#1d4ed8', 'Blue'], ['#475569', 'Slate'],
-];
-function ExportColorModal({ onExport, onClose }) {
-  const [color, setColor] = useState(BRAND);
+/* per-row head picker — the meeting head who assigns the task is also the
+   one responsible for it, so ONE choice covers both (headResp is kept
+   mirrored for the saved data). Values already saved on the row stay
+   selectable even if the head list changed since. */
+const HeadCell = ({ row, heads = [], onChange }) => {
+  const opts = [...new Set([...heads, row.assignedBy].filter(Boolean))];
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 pt-5 pb-3 flex items-start gap-3">
-          <span className="h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${color}1a` }}>
-            <Download size={18} style={{ color }} />
-          </span>
-          <div className="min-w-0">
-            <h3 className="text-base font-bold text-gray-800 leading-tight">Export to Excel</h3>
-            <p className="fs-11 text-gray-400 mt-0.5">Pick the colour used for the title band &amp; table header</p>
-          </div>
-          <button onClick={onClose} className="ml-auto -mr-1 -mt-1 rounded-lg p-1.5 text-gray-300 hover:text-gray-500 hover:bg-gray-50"><X size={16} /></button>
-        </div>
-        <div className="px-5 pb-1">
-          <div className="grid grid-cols-4 gap-2">
-            {EXPORT_PRESETS.map(([c, label]) => (
-              <button key={c} type="button" onClick={() => setColor(c)} title={label}
-                className="rounded-xl p-1.5 flex flex-col items-center gap-1 transition"
-                style={color.toLowerCase() === c ? { border: `1.5px solid ${c}`, background: `${c}0d` } : { border: '1.5px solid #e6e9f0' }}>
-                <span className="h-6 w-full rounded-lg flex items-center justify-center" style={{ background: c }}>
-                  {color.toLowerCase() === c && <Check size={12} color="#fff" />}
-                </span>
-                <span className="fs-9 text-gray-500 truncate w-full text-center">{label}</span>
-              </button>
-            ))}
-          </div>
-          <label className="mt-3 flex items-center gap-2.5 rounded-xl border border-gray-200 px-3 py-2 cursor-pointer hover:bg-gray-50">
-            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-7 w-9 rounded cursor-pointer border-0 bg-transparent p-0" />
-            <span className="fs-11 text-gray-600 font-semibold">Custom colour…</span>
-            <span className="ml-auto fs-10 font-mono text-gray-400 uppercase">{color}</span>
-          </label>
-          {/* mini preview of the sheet band */}
-          <div className="mt-3 rounded-lg overflow-hidden border border-gray-100">
-            <div className="py-1.5 text-center fs-10 font-bold text-white" style={{ background: color }}>Minutes of Meeting</div>
-            <div className="py-1 text-center fs-9 text-white/80" style={{ background: `#${shadeHex(color, -0.25)}` }}>Branch · Date · Type</div>
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 px-5 py-4 mt-3 border-t border-gray-100" style={{ background: '#fafbfd' }}>
-          <button onClick={onClose} className="rounded-lg border border-gray-200 bg-white px-4 py-2 fs-12 font-semibold text-gray-600 hover:bg-gray-50">Cancel</button>
-          <button onClick={() => onExport(color)} className="kc-lift inline-flex items-center gap-1.5 rounded-lg px-4 py-2 fs-12 font-bold text-white" style={{ background: `linear-gradient(120deg, ${color}, #${shadeHex(color, -0.25)})` }}>
-            <Upload size={14} /> Export Excel
-          </button>
-        </div>
-      </div>
-    </div>
+    <select value={row.assignedBy || ''}
+      onChange={(e) => onChange({ assignedBy: e.target.value, headResp: e.target.value })}
+      title="Which meeting head assigned (and is responsible for) this task"
+      className="w-full fs-11 text-gray-700 outline-none px-1 py-1 rounded cursor-pointer">
+      <option value="">— Select head —</option>
+      {opts.map((h) => <option key={h} value={h}>{h}</option>)}
+    </select>
   );
-}
+};
 
 /* ============================================================
    RESPONSIBILITY PICKER — multi-select of present attendees.
@@ -476,7 +447,7 @@ const RespPicker = ({ value = [], options = [], onChange, disabled }) => {
       {open && pos && (
         <div ref={popRef} className="fixed z-[80] rounded-xl border border-gray-200 bg-white shadow-2xl overflow-hidden"
           style={{ left: pos.left, top: pos.top, width: pos.width, ...(pos.up ? { transform: 'translateY(-100%)' } : {}) }}>
-          <div className="px-2.5 py-1.5 fs-9 font-bold uppercase tracking-wide text-gray-400 border-b border-gray-100 flex items-center justify-between">
+          <div className="px-2.5 py-1.5 fs-9 font-bold uppercase tracking-wide text-black border-b border-gray-100 flex items-center justify-between">
             <span>Assign responsibility</span>
             <span className="rounded-full px-1.5 py-0.5" style={{ background: BRAND_SOFT, color: INK }}>{value.length}</span>
           </div>
@@ -562,6 +533,7 @@ export default function MOMTracking() {
   const [masterOpen, setMasterOpen] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [viewMtg, setViewMtg] = useState(null);
+  const [histBranch, setHistBranch] = useState(null);   // branch pre-selected when Reports jumps to History
   const [histSource, setHistSource] = useState('loading'); // loading | api | error
   const [saving, setSaving] = useState(false);
   const [showAllAtt, setShowAllAtt] = useState(false);   // attendee strip: collapsed by default
@@ -647,6 +619,34 @@ export default function MOMTracking() {
   const [manualName, setManualName] = useState('');
   const [pickBr, setPickBr] = useState('all');        // "Employee joined?" picker — branch filter
   const [picked, setPicked] = useState(new Set());    // which master points to discuss
+  /* meeting heads — the logged-in conductor is the first head by default;
+     more heads can be picked from the attendees or typed in manually */
+  const [heads, setHeads] = useState(me?.name ? [me.name] : []);
+  const [manualHead, setManualHead] = useState('');
+  const toggleHead = (n) => {
+    /* the logged-in conductor is always a meeting head — can't be removed */
+    if (n === me?.name) return ping('You conduct this meeting — you always stay a meeting head', 'err');
+    setHeads((p) => p.includes(n) ? p.filter((x) => x !== n) : [...p, n]);
+  };
+  const removeHead = (n) => {
+    if (n === me?.name) return;
+    setHeads((p) => p.filter((x) => x !== n));
+  };
+  const addManualHead = () => {
+    const n = manualHead.trim();
+    if (!n) return;
+    if (heads.some((h) => h.toLowerCase() === n.toLowerCase())) return ping('Already a meeting head', 'err');
+    setHeads((p) => [...p, n]); setManualHead('');
+  };
+  /* head-picker options: the logged-in user + every listed attendee */
+  const headOptions = useMemo(() => {
+    const seen = new Set(); const out = [];
+    [me?.name, ...attendees.map((a) => a.name)].forEach((n) => {
+      if (!n || seen.has(n.toLowerCase())) return;
+      seen.add(n.toLowerCase()); out.push(n);
+    });
+    return out;
+  }, [me, attendees]);
 
   const branchLabel = useMemo(() => branches.map((b) => b.name).join(' + '), [branches]);
 
@@ -709,6 +709,28 @@ export default function MOMTracking() {
   const [rows, setRows] = useState([]);               // current discussion rows
   const [carry, setCarry] = useState([]);             // pending tasks from previous meetings
   const [newCat] = useState('Other');
+  const rowsRef = useRef(rows);                       // fresh rows inside rebuildCarry
+  useEffect(() => { rowsRef.current = rows; }, [rows]);
+
+  /* ---- shift a previous-meeting task into the current discussion table
+     (via the "Discuss" checkbox on its row) ---- */
+  /* masterId is cleared so the points↔rows sync treats the moved task as a
+     custom row and never drops it; `carried` stays true so the C/F badge,
+     remark history and Excel keep working */
+  const moveCarryToRows = (id) => {
+    const c = carry.find((x) => x.id === id);
+    if (!c) return;
+    setCarry((p) => p.filter((x) => x.id !== id));
+    setRows((p) => [...p, { ...c, masterId: null }]);
+    ping(`"${c.area}" moved into the current-meeting discussion`);
+  };
+  const returnRowToCarry = (id) => {
+    const r = rows.find((x) => x.id === id);
+    if (!r) return;
+    setRows((p) => p.filter((x) => x.id !== id));
+    setCarry((p) => [...p, r]);
+    ping('Task moved back to the previous-meeting pending list');
+  };
 
   const ping = (msg, type = 'ok') => (type === 'err' ? toast.error(msg) : toast.success(msg));
   const catColor = (n) => categories[n] || '#94a3b8';
@@ -735,6 +757,7 @@ export default function MOMTracking() {
           setMType(d.mType || '');
           setAttendees(d.attendees || []);
           setPicked(new Set(d.picked || []));
+          if (d.heads?.length) setHeads(d.heads);
           setRows(d.rows || []);
           setCarry(d.carry || []);
           ping('Restored your unsaved meeting draft');
@@ -754,14 +777,14 @@ export default function MOMTracking() {
           || picked.size || mLocation.trim() || mType.trim();
         if (!hasData) { localStorage.removeItem(DRAFT_KEY); return; }
         localStorage.setItem(DRAFT_KEY, JSON.stringify({
-          branches, manualBranches, mDate, mLocation, mType,
+          branches, manualBranches, mDate, mLocation, mType, heads,
           attendees, picked: [...picked], rows, carry, savedAt: Date.now(),
         }));
       } catch { /* storage full / unavailable — draft simply not kept */ }
     }, 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMaster, branches, manualBranches, mDate, mLocation, mType, attendees, picked, rows, carry]);
+  }, [isMaster, branches, manualBranches, mDate, mLocation, mType, heads, attendees, picked, rows, carry]);
 
   /* header pills — latest state per tracked task, meetings counted once
      even when they cover several branches */
@@ -845,7 +868,12 @@ export default function MOMTracking() {
      edits (remark / status / due / owners) already made to tasks still carried */
   const rebuildCarry = (bs) => setCarry((prev) => {
     const prevBy = new Map(prev.map((c) => [c.trackId, c]));
-    return collectCarry(history, bs.map((b) => b.code)).map((c) => prevBy.get(c.trackId) || c);
+    /* tasks already dragged onto the current-meeting sheet stay there —
+       don't resurrect them in the carry list */
+    const onSheet = new Set(rowsRef.current.filter((r) => r.carried).map((r) => r.trackId));
+    return collectCarry(history, bs.map((b) => b.code))
+      .filter((c) => !onSheet.has(c.trackId))
+      .map((c) => prevBy.get(c.trackId) || c);
   });
   /* apply a branch-selection change WITHOUT losing the meeting sheet:
      discussion rows survive untouched, attendees & carried tasks re-sync */
@@ -965,6 +993,7 @@ export default function MOMTracking() {
   const resetWizard = () => {
     setBranches([]); setAttendees([]); setManualName(''); setPicked(new Set()); setShowAllAtt(false);
     setManualBranch(''); setPickBr('all');
+    setHeads(me?.name ? [me.name] : []); setManualHead('');
     setMDate(iso(new Date())); setMLocation(''); setMType('');
     setRows([]); setCarry([]);
     try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ }
@@ -985,6 +1014,9 @@ export default function MOMTracking() {
 
   /* ---------- Step-2 (sheet) actions ---------- */
   const presentNames = useMemo(() => attendees.filter((a) => a.present).map((a) => a.name), [attendees]);
+  /* Responsibility options — present attendees EXCLUDING the meeting heads
+     (heads assign & supervise; they aren't task owners) */
+  const respOptions = useMemo(() => presentNames.filter((n) => !heads.includes(n)), [presentNames, heads]);
   const ATT_PREVIEW = 6;                                   // chips shown before "+N more"
   const attPreview = showAllAtt ? attendees : attendees.slice(0, ATT_PREVIEW);
   const attHidden = Math.max(0, attendees.length - ATT_PREVIEW);
@@ -1004,13 +1036,18 @@ export default function MOMTracking() {
     if (r?.masterId) setPicked((s) => { const n = new Set(s); n.delete(r.masterId); return n; });
     setRows((p) => p.filter((x) => x.id !== id));
   };
-  const askDelRow = (r) => setConfirm({
-    title: 'Remove this row?',
-    meta: r.area,
-    note: (r.point?.trim() || r.remark?.trim()) ? 'Anything typed in it will be lost.' : '',
-    yesLabel: 'Yes, remove',
-    onYes: () => { delRow(r.id); setConfirm(null); },
-  });
+  const askDelRow = (r) => {
+    /* a carried task dragged onto the sheet isn't deleted — it goes back
+       to the previous-meeting pending list with all its data intact */
+    if (r.carried) { returnRowToCarry(r.id); return; }
+    setConfirm({
+      title: 'Remove this row?',
+      meta: r.area,
+      note: (r.point?.trim() || r.remark?.trim()) ? 'Anything typed in it will be lost.' : '',
+      yesLabel: 'Yes, remove',
+      onYes: () => { delRow(r.id); setConfirm(null); },
+    });
+  };
   const addRow = () => {
     const defCat = newCat || Object.keys(categories)[0] || '';
     setRows((p) => [...p, { id: uid(), trackId: uid('t'), masterId: null, area: '', category: defCat, point: '', resp: [], due: '', flag: 'I', status: 'pending', remark: '', originDate: mDate, prevRemarks: [] }]);
@@ -1027,18 +1064,22 @@ export default function MOMTracking() {
   };
   const updCarry = (id, patch) => setCarry((p) => p.map((c) => c.id === id ? { ...c, ...patch } : c));
 
-  /* carried-tasks table filters — status & category (display only; edits
-     still land on the full carry list by id) */
-  const [carryStatusF, setCarryStatusF] = useState('all');
-  const [carryCatF, setCarryCatF] = useState('all');
+  /* carried-tasks table filters — multi-select status & category via
+     checkboxes; an empty selection = show all (display only; edits still
+     land on the full carry list by id) */
+  const [carryStatusF, setCarryStatusF] = useState([]);   // ['pending','overdue',…]
+  const [carryCatF, setCarryCatF] = useState([]);         // category names
+  const toggleIn = (setter) => (v) => setter((p) => p.includes(v) ? p.filter((x) => x !== v) : [...p, v]);
+  const toggleCarryStatus = toggleIn(setCarryStatusF);
+  const toggleCarryCat = toggleIn(setCarryCatF);
   const carryCats = useMemo(() => [...new Set(carry.map((c) => c.category).filter(Boolean))].sort(), [carry]);
-  const shownCarry = useMemo(() => carry.filter((c) =>
-    (carryCatF === 'all' || c.category === carryCatF)
-    && (carryStatusF === 'all'
-      || (carryStatusF === 'overdue'
-        ? (c.status !== 'completed' && c.due && daysFromDue(c.due) > 0)
-        : c.status === carryStatusF))
-  ), [carry, carryStatusF, carryCatF]);
+  const shownCarry = useMemo(() => carry.filter((c) => {
+    const isOd = c.status !== 'completed' && c.due && daysFromDue(c.due) > 0;
+    const okStatus = !carryStatusF.length
+      || carryStatusF.some((f) => f === 'overdue' ? isOd : c.status === f);
+    const okCat = !carryCatF.length || carryCatF.includes(c.category);
+    return okStatus && okCat;
+  }), [carry, carryStatusF, carryCatF]);
 
   const { taskCount, infoCount, blankCount, unassigned } = useMemo(() => ({
     taskCount: rows.filter((r) => r.flag === 'T').length + carry.filter((c) => c.status !== 'completed').length,
@@ -1074,10 +1115,13 @@ export default function MOMTracking() {
           branchCode: branches[0].code, branchName: branchLabel,
           branches: branches.map(({ code, name }) => ({ code, name })),
           date: mDate, location: mLocation.trim(), type: mType.trim(),
+          heads: heads.map((h) => h.trim()).filter(Boolean),
           attendees: attendees.map((a) => ({ name: a.name, source: a.source, present: a.present, user_id: a.user_id || null, branch: a.branch || null })),
           rows: allRows.map((r) => ({
             trackId: r.trackId, masterId: r.masterId ?? null, area: r.area, category: r.category,
-            point: r.point || '', resp: respArr(r.resp), due: r.due || '', flag: r.flag,
+            point: r.point || '', resp: respArr(r.resp),
+            assignedBy: r.assignedBy || '', headResp: r.headResp || '',
+            due: r.due || '', flag: r.flag,
             status: r.status, remark: r.remark || '', originDate: r.originDate || r.srcDate || '',
             carried: !!r.carried, prevRemarks: r.prevRemarks || [],
           })),
@@ -1135,13 +1179,13 @@ export default function MOMTracking() {
     deleteCategory: (name) => axios.delete(`${MOM_API}/categories/${encodeURIComponent(name)}`, { headers: authHeaders }),
   } : null;
 
-  /* export flow: any export button opens the colour picker first;
-     the file is generated with the colour the user chooses */
-  const [exportReq, setExportReq] = useState(null);       // meeting object waiting for a colour
-  const exportDraft = () => setExportReq({
+  /* export flow: one fixed navy theme — the file downloads straight away,
+     no colour picker. Every export button is gated by canExport. */
+  const doExport = (m) => exportMeetingExcel(m).catch(() => toast.error('Could not generate the Excel file'));
+  const exportDraft = () => doExport({
     branchName: branchLabel, branches: branches.map(({ code, name }) => ({ code, name })),
     date: mDate, location: mLocation, type: mType,
-    conductedBy: me?.name || 'Master Admin', attendees, rows: [...carry, ...rows],
+    conductedBy: me?.name || 'Master Admin', heads, attendees, rows: [...carry, ...rows],
   });
 
   /* ========================================================
@@ -1209,24 +1253,23 @@ export default function MOMTracking() {
 
             {/* ---- sheet header block — chrome + editable meta + attendees + points ---- */}
             <div className="rounded-2xl border border-gray-200 bg-white shadow-sm" style={{ overflow: 'visible' }}>
-              <div className="mom-view-head mom-live-head rounded-t-2xl px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 border-b" style={{ background: 'linear-gradient(120deg, #fcd34d, #fbbf24)', borderColor: '#fde68a' }}>
+              <div className="mom-view-head mom-live-head rounded-t-2xl px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 border-b" style={{ background: '#ffda6e' }}>
                 <div className="flex items-center gap-2.5">
                   <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 fs-10 font-bold bg-white" style={{ color: '#b45309' }}>
                     <span className="h-2 w-2 rounded-full" style={{ background: '#d97706', animation: 'livedot 1.4s infinite' }} /> LIVE
                   </span>
-                  <div className="text-sm font-bold uppercase" style={{ letterSpacing: '0.16em', color: '#92400e' }}>Minutes of Meeting</div>
+                  <div className="text-sm font-bold uppercase" style={{ letterSpacing: '0.16em', color: '#000000' }}>Minutes of Meeting</div>
                 </div>
                 <div className="flex items-center gap-2 max-md:flex-wrap">
                   {canExport && <button onClick={exportDraft} className="export-btn kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: INK }}><Upload size={13} /> Export Excel</button>}
                 </div>
               </div>
               {/* meta grid — narrow Date, wider Location / Branch(es) / Type, all editable in place */}
-              <div className="grid grid-cols-2 lg:grid-cols-[0.6fr_1.3fr_1.1fr_1.1fr] divide-x divide-gray-100 border-b border-gray-100 max-sm:grid-cols-1">
+              <div className="grid grid-cols-2 lg:grid-cols-[0.6fr_1.1fr_1fr_1fr_1.2fr] divide-x divide-gray-100 border-b border-gray-100 max-sm:grid-cols-1">
                 {/* Date */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
-                  <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: SHEET_SOFT }}><CalendarDays size={14} style={{ color: SHEET_DARK }} /></span>
                   <div className="min-w-0 flex-1">
-                    <div className="fs-9 uppercase tracking-wide text-gray-400">Date <span className="text-red-300">*</span></div>
+                    <div className="fs-9 uppercase tracking-wide text-black">Date <span className="text-red-300">*</span></div>
                     <input type="date" required value={mDate} onChange={(e) => setMDate(e.target.value)}
                       className="kc-input mt-0.5 w-full fs-12 font-semibold text-gray-800 outline-none px-2 py-1"
                       style={!mDate ? { borderColor: '#f87171' } : {}} />
@@ -1234,18 +1277,16 @@ export default function MOMTracking() {
                 </div>
                 {/* Location */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
-                  <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: SHEET_SOFT }}><MapPin size={14} style={{ color: SHEET_DARK }} /></span>
                   <div className="min-w-0 flex-1">
-                    <div className="fs-9 uppercase tracking-wide text-gray-400">Location <span className="text-red-300">*</span></div>
-                    <input value={mLocation} onChange={(e) => setMLocation(e.target.value)} placeholder="e.g. Branch Office — Conference Room"
+                    <div className="fs-9 uppercase tracking-wide text-black">Location <span className="text-red-300">*</span></div>
+                    <input value={mLocation} onChange={(e) => setMLocation(e.target.value)} placeholder="e.g. Branch Office"
                       className="kc-input mt-0.5 w-full fs-12 font-semibold text-gray-800 outline-none px-2 py-1" />
                   </div>
                 </div>
                 {/* Branch(es) — multi-select dropdown; employees auto-load as attendees */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
-                  <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: SHEET_SOFT }}><Building2 size={14} style={{ color: SHEET_DARK }} /></span>
                   <div className="min-w-0 flex-1">
-                    <div className="fs-9 uppercase tracking-wide text-gray-400">Branches <span className="text-red-300">*</span></div>
+                    <div className="fs-9 uppercase tracking-wide text-black">Branches <span className="text-red-300">*</span></div>
                     <Dropdown panelClass="w-72 max-w-[90vw]"
                       trigger={({ open, toggle }) => (
                         <button type="button" onClick={toggle}
@@ -1256,7 +1297,7 @@ export default function MOMTracking() {
                           <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
                         </button>
                       )}>
-                      <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-gray-400 border-b border-gray-100 flex items-center justify-between gap-2">
+                      <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-black border-b border-gray-100 flex items-center justify-between gap-2">
                         <span>Branches — one or more</span>
                         <span className="rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: INK }}>{branches.length}</span>
                       </div>
@@ -1306,9 +1347,8 @@ export default function MOMTracking() {
                 </div>
                 {/* Meeting type — free text + previously used types */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
-                  <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: SHEET_SOFT }}><FileText size={14} style={{ color: SHEET_DARK }} /></span>
                   <div className="min-w-0 flex-1 relative" ref={typeDdRef}>
-                    <div className="fs-9 uppercase tracking-wide text-gray-400">Meeting type <span className="text-red-300">*</span></div>
+                    <div className="fs-9 uppercase tracking-wide text-black">Meeting type <span className="text-red-300">*</span></div>
                     <div className="kc-input mt-0.5 flex items-center px-2 py-1 relative">
                       <input value={mType} onChange={(e) => setMType(e.target.value)} placeholder="Type or pick…"
                         className="w-full fs-12 font-semibold text-gray-800 outline-none bg-transparent pr-5" />
@@ -1320,7 +1360,7 @@ export default function MOMTracking() {
                     </div>
                     {typeDdOpen && (
                       <div className="absolute z-[60] mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden" style={{ minWidth: '15rem' }}>
-                        <div className="fs-9 font-bold uppercase tracking-wide text-gray-400 px-3 pt-2 pb-1">Previously used meeting types</div>
+                        <div className="fs-9 font-bold uppercase tracking-wide text-black px-3 pt-2 pb-1">Previously used meeting types</div>
                         <div className="max-h-44 overflow-y-auto kc-scroll">
                           {usedMeetingTypes.length === 0 && (
                             <div className="px-3 py-2 fs-11 text-gray-400">No meeting types in history yet — type one in the box above.</div>
@@ -1337,53 +1377,139 @@ export default function MOMTracking() {
                     )}
                   </div>
                 </div>
+                {/* Meeting heads — the logged-in conductor plus any other head(s) */}
+                <div className="px-3 py-2 flex items-center gap-2 min-w-0">
+                  <div className="min-w-0 flex-1">
+                    <div className="fs-9 uppercase tracking-wide text-black">Meeting heads</div>
+                    <Dropdown panelClass="w-72 max-w-[90vw]"
+                      trigger={({ open, toggle }) => (
+                        <button type="button" onClick={toggle}
+                          className="kc-input mt-0.5 w-full flex items-center justify-between gap-1.5 px-2 py-1 fs-12 font-semibold text-gray-800 text-left"
+                          title={heads.length ? heads.join(', ') : 'Select one or more meeting heads'}
+                          style={open ? { borderColor: BRAND, background: '#fff', boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}}>
+                          <span className="truncate flex-1 min-w-0" style={!heads.length ? { color: '#9ca3af', fontWeight: 500 } : {}}>
+                            {heads.length ? heads.join(', ') : 'Select heads…'}
+                          </span>
+                          <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
+                        </button>
+                      )}>
+                      <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-black border-b border-gray-100 flex items-center justify-between gap-2">
+                        <span>Meeting heads — one or more</span>
+                        <span className="rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: INK }}>{heads.length}</span>
+                      </div>
+                      <div className="max-h-52 overflow-y-auto kc-scroll py-1">
+                        {[...new Set([...headOptions, ...heads])].map((n) => {
+                          const on = heads.includes(n);
+                          const isSelf = n === me?.name;
+                          return (
+                            <div key={n} role="button" tabIndex={0} onClick={() => toggleHead(n)}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleHead(n); } }}
+                              className={`w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50 ${isSelf ? 'cursor-default' : 'cursor-pointer'}`}
+                              title={isSelf ? 'You conduct this meeting — always a meeting head' : (on ? 'Untick to remove as head' : 'Tick to make a meeting head')}>
+                              <span className="h-4 w-4 rounded border flex items-center justify-center flex-shrink-0" style={on ? { background: isSelf ? '#9ca3af' : BRAND, borderColor: isSelf ? '#9ca3af' : BRAND } : { borderColor: '#cfcfe0' }}>
+                                {on && <Check size={11} color="#fff" className="kc-pop" />}
+                              </span>
+                              <span className={`fs-11 flex-1 min-w-0 truncate text-gray-700 ${on ? 'font-semibold' : ''}`}>{n}</span>
+                              {isSelf
+                                ? <span className="fs-9 font-bold rounded-full px-1.5 py-0.5 flex-shrink-0" style={{ background: BRAND_SOFT, color: INK }}>you</span>
+                                : on && (
+                                  <button type="button" onClick={(e) => { e.stopPropagation(); removeHead(n); }}
+                                    className="flex-shrink-0 rounded-lg p-1 text-gray-300 hover:text-red-400 hover:bg-red-50" title="Remove this meeting head">
+                                    <Trash2 size={12} />
+                                  </button>
+                                )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="flex items-center gap-1.5 px-2.5 py-2 border-t border-gray-100" style={{ background: '#fafafc' }}>
+                        <Crown size={12} className="text-gray-400 flex-shrink-0" />
+                        <input value={manualHead} onChange={(e) => setManualHead(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addManualHead()}
+                          placeholder="Head not on the list? Add manually…" className="kc-input flex-1 fs-11 text-gray-700 outline-none min-w-0 px-2 py-1" />
+                        <button onClick={addManualHead} className="rounded-lg px-2.5 py-1 fs-10 font-bold text-white flex-shrink-0" style={{ background: BRAND }}>Add</button>
+                      </div>
+                    </Dropdown>
+                  </div>
+                </div>
               </div>
-              <div className="px-3 py-2 flex items-center justify-between gap-3 flex-wrap">
-                <div className="flex items-center gap-2 flex-wrap fs-11">
-                  <Users size={13} className="text-gray-400 flex-shrink-0" />
-                  <span className="fs-10 font-semibold text-gray-400 flex-shrink-0">{presentNames.length}/{attendees.length} present</span>
-                  {attPreview.map((a) => (
-                    <span key={a.id}
-                      className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 fs-10 font-medium border transition cursor-pointer select-none"
-                      style={a.present
-                        ? { background: SHEET_SOFT, borderColor: 'transparent', color: INK }
-                        : { borderColor: '#e5e7eb', color: '#b7bcc6', textDecoration: 'line-through' }}
-                      onClick={() => togglePresent(a.id)}
-                      title={a.present ? 'Click to mark absent' : 'Click to mark present'}>
-                      {a.name}
-                      {a.source === 'manual' && <span className="rounded-full px-1 fs-9 font-bold" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Manually added">M</span>}
-                      {(a.source === 'manual' || a.extra) && (
-                        <button onClick={(e) => { e.stopPropagation(); removeAttendee(a.id); }} className="rounded-full p-0.5 text-gray-300 hover:text-red-400" title="Remove"><Trash2 size={10} /></button>
-                      )}
-                    </span>
-                  ))}
-                  {attHidden > 0 && !showAllAtt && (
-                    <button onClick={() => setShowAllAtt(true)} className="inline-flex items-center rounded-full px-2.5 py-1 fs-10 font-bold transition hover:opacity-80" style={{ background: BRAND_SOFT, color: INK }}>+{attHidden} more</button>
-                  )}
-                  {showAllAtt && attendees.length > ATT_PREVIEW && (
-                    <button onClick={() => setShowAllAtt(false)} className="inline-flex items-center rounded-full px-2.5 py-1 fs-10 font-bold transition hover:opacity-80" style={{ background: '#f1f3f9', color: '#5b6170' }}>Show less</button>
-                  )}
-                  {/* an EMPLOYEE joined mid-meeting → pick their branch, then the employee */}
-                  <Dropdown panelClass="w-72 max-w-[90vw]"
-                    trigger={({ toggle }) => (
-                      <button type="button" onClick={toggle}
-                        className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 px-2.5 py-1 fs-10 text-gray-600 hover:bg-gray-50"
-                        title="An employee joined the meeting? First pick their branch, then the employee — they're added as an Employee, not a manual entry">
-                        <Users size={11} className="text-gray-400" /> Employee joined? Select… <ChevronDown size={10} className="text-gray-400" />
-                      </button>
-                    )}>
+              {/* ---- row 2: attendees · add employee / guest · points to discuss · legend ---- */}
+              <div className="grid grid-cols-2 lg:grid-cols-[1fr_1.3fr_1.2fr_0.8fr] divide-x divide-gray-100 max-sm:grid-cols-1">
+                {/* Attendees — count in the box, full list (present toggles) in the dropdown */}
+                <div className="px-3 py-2 flex items-center gap-2 min-w-0">
+                  <div className="min-w-0 flex-1">
+                    <div className="fs-9 uppercase tracking-wide text-black">Attendees <span className="text-red-300">*</span></div>
+                    <Dropdown panelClass="w-80 max-w-[90vw]"
+                      trigger={({ open, toggle }) => (
+                        <button type="button" onClick={toggle}
+                          className="kc-input mt-0.5 w-full flex items-center justify-between gap-1.5 px-2 py-1 fs-12 font-semibold text-gray-800 text-left"
+                          title="See the attendee list & mark who is present"
+                          style={open ? { borderColor: BRAND, background: '#fff', boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}}>
+                          <span className="truncate flex-1 min-w-0" style={!attendees.length ? { color: '#9ca3af', fontWeight: 500 } : {}}>
+                            {attendees.length ? `${presentNames.length}/${attendees.length} present` : 'No attendees yet…'}
+                          </span>
+                          <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
+                        </button>
+                      )}>
+                      <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-black border-b border-gray-100 flex items-center justify-between gap-2">
+                        <span>Attendees — tick = present</span>
+                        <span className="rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: INK }}>{presentNames.length}/{attendees.length}</span>
+                      </div>
+                      <div className="max-h-64 overflow-y-auto kc-scroll py-1">
+                        {attendees.length === 0 && (
+                          <div className="px-3 py-2 fs-11 text-gray-400">No attendees yet — select branches (their employees auto-load), or add an employee / guest in the next box.</div>
+                        )}
+                        {attendees.map((a) => (
+                          <div key={a.id} role="button" tabIndex={0} onClick={() => togglePresent(a.id)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePresent(a.id); } }}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50 cursor-pointer"
+                            title={a.present ? 'Click to mark absent' : 'Click to mark present'}>
+                            <span className="h-4 w-4 rounded border flex items-center justify-center flex-shrink-0" style={a.present ? { background: BRAND, borderColor: BRAND } : { borderColor: '#cfcfe0' }}>
+                              {a.present && <Check size={11} color="#fff" className="kc-pop" />}
+                            </span>
+                            <span className={`fs-11 flex-1 min-w-0 truncate ${a.present ? 'text-gray-800' : 'text-gray-400 line-through'}`}>{a.name}</span>
+                            {a.branch && <span className="fs-9 font-medium px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: '#eef0fa', color: '#4b4e9e' }}>{a.branch}</span>}
+                            {a.source === 'manual' && <span className="rounded-full px-1 fs-9 font-bold flex-shrink-0" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Manually added guest">M</span>}
+                            {(a.source === 'manual' || a.extra) && (
+                              <button type="button" onClick={(e) => { e.stopPropagation(); removeAttendee(a.id); }} className="flex-shrink-0 rounded-lg p-1 text-gray-300 hover:text-red-400 hover:bg-red-50" title="Remove"><Trash2 size={12} /></button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="px-3 py-1.5 border-t border-gray-100 fs-10 text-gray-400" style={{ background: '#fafbfd' }}>
+                        employees of the selected branches auto-load as attendees
+                      </div>
+                    </Dropdown>
+                  </div>
+                </div>
+                {/* Add employee / guest — type & Add = guest (M); the arrow opens the
+                     branch → employee picker so real employees are added as Employee */}
+                <div className="px-3 py-2 flex items-center gap-2 min-w-0">
+                  <div className="min-w-0 flex-1">
+                    <div className="fs-9 uppercase tracking-wide text-black">Add employee / guest</div>
+                    <Dropdown panelClass="w-72 max-w-[90vw]"
+                      trigger={({ open, toggle }) => (
+                        <div className="kc-input mt-0.5 w-full flex items-center gap-1 px-2 py-1"
+                          style={open ? { borderColor: BRAND, background: '#fff', boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}}>
+                          <input value={manualName} onChange={(e) => setManualName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addManual()}
+                            placeholder="Type Guest Name/Dropdown For Employee" className="flex-1 min-w-0 fs-12 font-semibold text-gray-800 outline-none bg-transparent" />
+                          <button type="button" onClick={addManual} className="rounded px-2 py-0.5 fs-10 font-bold text-white flex-shrink-0" style={{ background: BRAND }} title="Add the typed name as a guest (manually added)">Add</button>
+                          <button type="button" onClick={toggle} className="p-0.5 rounded hover:bg-gray-100 flex-shrink-0" title="An employee joined? Pick their branch, then the employee — added as an Employee, not a guest">
+                            <ChevronDown size={13} className={`text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+                          </button>
+                        </div>
+                      )}>
                     {(close) => (
                       <>
-                        <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-gray-400 border-b border-gray-100">Add employee as attendee</div>
+                        <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-black border-b border-gray-100">Add employee as attendee</div>
                         <div className="px-3 pt-2 pb-1.5">
-                          <div className="fs-9 font-bold uppercase tracking-wide text-gray-400 mb-1">Step 1 — select branch</div>
+                          <div className="fs-9 font-bold uppercase tracking-wide text-black mb-1">Step 1 — select branch</div>
                           <select value={pickBr} onChange={(e) => setPickBr(e.target.value)}
                             className="kc-input w-full fs-11 text-gray-700 outline-none px-2 py-1.5">
                             <option value="all">All branches</option>
                             {branchOptions.map((b) => <option key={b.code} value={b.code}>{b.name}</option>)}
                           </select>
                         </div>
-                        <div className="fs-9 font-bold uppercase tracking-wide text-gray-400 px-3 pt-0.5">Step 2 — select employee</div>
+                        <div className="fs-9 font-bold uppercase tracking-wide text-black px-3 pt-0.5">Step 2 — select employee</div>
                         <div className="max-h-48 overflow-y-auto kc-scroll py-1">
                           {pickable.length === 0 && (
                             <div className="px-3 py-2 fs-10 text-gray-400">No more employees{pickBr !== 'all' ? ' in this branch' : ''} — all are already attendees.</div>
@@ -1399,26 +1525,25 @@ export default function MOMTracking() {
                         </div>
                       </>
                     )}
-                  </Dropdown>
+                    </Dropdown>
+                  </div>
                 </div>
-              </div>
-
-              {/* ---- points to discuss — ticking a point adds its row to the sheet instantly ---- */}
-              <div className="px-3 py-2 border-t border-gray-100 flex items-center gap-2.5 flex-wrap">
-                <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: SHEET_SOFT }}><ListChecks size={15} style={{ color: SHEET_DARK }} /></span>
-                <span className="fs-13 font-bold text-gray-800">Points to discuss</span>
-                <Dropdown panelClass="w-80 max-w-[90vw]"
-                  trigger={({ open, toggle }) => (
-                    <button type="button" onClick={toggle}
-                      className="kc-input flex items-center justify-between gap-1.5 px-2.5 py-1.5 fs-12 font-semibold text-gray-800 text-left"
-                      style={{ minWidth: '15rem', ...(open ? { borderColor: BRAND, background: '#fff', boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}) }}>
-                      <span className="truncate flex-1" style={!picked.size ? { color: '#9ca3af', fontWeight: 500 } : {}}>
-                        {picked.size ? `${picked.size} point${picked.size > 1 ? 's' : ''} on the sheet` : 'Select master points…'}
-                      </span>
-                      <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
-                    </button>
-                  )}>
-                  <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-gray-400 border-b border-gray-100 flex items-center justify-between gap-2">
+                {/* Points to discuss — ticking a point adds its row to the sheet instantly */}
+                <div className="px-3 py-2 flex items-center gap-2 min-w-0">
+                  <div className="min-w-0 flex-1">
+                    <div className="fs-9 uppercase tracking-wide text-black">Points to discuss</div>
+                    <Dropdown panelClass="w-80 max-w-[90vw]"
+                      trigger={({ open, toggle }) => (
+                        <button type="button" onClick={toggle}
+                          className="kc-input mt-0.5 w-full flex items-center justify-between gap-1.5 px-2 py-1 fs-12 font-semibold text-gray-800 text-left"
+                          style={open ? { borderColor: BRAND, background: '#fff', boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}}>
+                          <span className="truncate flex-1" style={!picked.size ? { color: '#9ca3af', fontWeight: 500 } : {}}>
+                            {picked.size ? `${picked.size} of ${master.length} selected` : 'Select master points…'}
+                          </span>
+                          <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
+                        </button>
+                      )}>
+                  <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-black border-b border-gray-100 flex items-center justify-between gap-2">
                     <span>Master discussion areas</span>
                     <span className="flex items-center gap-1 normal-case tracking-normal">
                       <button type="button" onClick={pickAll} className="fs-10 font-bold hover:underline" style={{ color: BRAND }}>Select all</button>
@@ -1443,19 +1568,17 @@ export default function MOMTracking() {
                   <div className="px-3 py-1.5 border-t border-gray-100 fs-10 text-gray-400" style={{ background: '#fafbfd' }}>
                     ticked points appear as rows on the sheet below — untick removes the row (warns if filled)
                   </div>
-                </Dropdown>
-                <span className="fs-10 rounded-full px-2 py-0.5 font-bold" style={{ background: BRAND_SOFT, color: INK }}>{picked.size} of {master.length} selected</span>
-                <div className="ml-auto flex items-center gap-2.5 flex-wrap">
-                  {/* guests / non-employees can still be typed in */}
-                  <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 pl-2 pr-1 py-1">
-                    <UserPlus size={11} className="text-gray-400" />
-                    <input value={manualName} onChange={(e) => setManualName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addManual()}
-                      placeholder="Add guest…" className="fs-10 bg-transparent outline-none text-gray-700" style={{ width: '6.5rem' }} />
-                    <button onClick={addManual} className="rounded-full px-1.5 py-0.5 fs-9 font-bold text-white" style={{ background: SHEET }}>Add</button>
-                  </span>
-                  <div className="flex items-center gap-3 fs-10 text-gray-500">
-                    <span className="inline-flex items-center gap-1"><FlagChip f="T" small /> Task</span>
-                    <span className="inline-flex items-center gap-1"><FlagChip f="I" small /> Information</span>
+                    </Dropdown>
+                  </div>
+                </div>
+                {/* Action-flag legend */}
+                <div className="px-3 py-2 flex items-center gap-2 min-w-0">
+                  <div className="min-w-0 flex-1">
+                    <div className="fs-9 uppercase tracking-wide text-black">Action flag</div>
+                    <div className="mt-1.5 flex items-center gap-3 fs-10 text-gray-500 flex-wrap">
+                      <span className="inline-flex items-center gap-1"><FlagChip f="T" small /> Task</span>
+                      <span className="inline-flex items-center gap-1"><FlagChip f="I" small /> Information</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1463,54 +1586,91 @@ export default function MOMTracking() {
 
             {/* ---- SECTION A · review of previous meetings ---- */}
             {carry.length > 0 && (
-              <div className="rounded-2xl border overflow-hidden bg-white shadow-sm" style={{ borderColor: 'rgba(47,49,146,0.35)' }}>
-                <div className="flex items-center justify-between gap-2 px-3 py-2 flex-wrap" style={{ background: 'rgba(47,49,146,0.08)' }}>
+              // overflow stays visible so the filter dropdown panels can open
+              // past the box edge — the table wrapper clips its own corners
+              <div className="rounded-2xl border bg-white shadow-sm" style={{ borderColor: 'rgba(47,49,146,0.35)' }}>
+                <div className="rounded-t-2xl flex items-center justify-between gap-2 px-3 py-2 flex-wrap" style={{ background: 'rgba(47,49,146,0.08)' }}>
                   <div className="flex items-center gap-2">
                     <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: 'rgba(47,49,146,0.14)' }}><CornerUpRight size={14} style={{ color: BRAND }} /></span>
                     <span className="fs-13 font-bold" style={{ color: BRAND }}>Previous meeting — pending tasks</span>
                     <span className="rounded-full px-2 py-0.5 fs-10 font-bold bg-white" style={{ color: BRAND }}>{shownCarry.length !== carry.length ? `${shownCarry.length} / ${carry.length}` : carry.length}</span>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <select value={carryStatusF} onChange={(e) => setCarryStatusF(e.target.value)} title="Filter carried tasks by status"
-                      className="rounded-lg border bg-white px-2 py-1 fs-11 font-semibold outline-none" style={{ borderColor: 'rgba(47,49,146,0.25)', color: BRAND }}>
-                      <option value="all">All status</option>
-                      <option value="pending">Pending</option>
-                      <option value="in_progress">WIP</option>
-                      <option value="completed">Completed</option>
-                      <option value="overdue">Overdue</option>
-                    </select>
-                    <select value={carryCatF} onChange={(e) => setCarryCatF(e.target.value)} title="Filter carried tasks by category"
-                      className="rounded-lg border bg-white px-2 py-1 fs-11 font-semibold outline-none" style={{ borderColor: 'rgba(47,49,146,0.25)', color: BRAND }}>
-                      <option value="all">All categories</option>
-                      {carryCats.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    <span className="fs-10 font-medium" style={{ color: BRAND }}>update status &amp; add this meeting's remark for each</span>
+                    {[
+                      {
+                        label: 'status', selected: carryStatusF, toggle: toggleCarryStatus, clear: () => setCarryStatusF([]),
+                        items: [['pending', 'Pending'], ['in_progress', 'WIP'], ['completed', 'Completed'], ['overdue', 'Overdue']],
+                      },
+                      {
+                        label: 'categories', selected: carryCatF, toggle: toggleCarryCat, clear: () => setCarryCatF([]),
+                        items: carryCats.map((c) => [c, c]),
+                      },
+                    ].map((f) => (
+                      <Dropdown key={f.label} panelClass="w-52" panelStyle={{ left: 'auto', right: 0 }}
+                        trigger={({ open, toggle }) => (
+                          <button type="button" onClick={toggle} title={`Filter carried tasks by ${f.label} — tick one or more`}
+                            className="inline-flex items-center gap-1.5 rounded-lg border bg-white px-2 py-1 fs-11 font-semibold"
+                            style={{ borderColor: 'rgba(47,49,146,0.25)', color: BRAND, ...(open ? { boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}) }}>
+                            {f.selected.length ? `${f.selected.length} ${f.label}` : `All ${f.label}`}
+                            <ChevronDown size={11} className="flex-shrink-0" />
+                          </button>
+                        )}>
+                        <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-black border-b border-gray-100 flex items-center justify-between gap-2">
+                          <span>Filter {f.label}</span>
+                          {f.selected.length > 0 && <button type="button" onClick={f.clear} className="fs-10 font-bold normal-case tracking-normal hover:underline" style={{ color: BRAND }}>Clear</button>}
+                        </div>
+                        <div className="max-h-56 overflow-y-auto kc-scroll py-1">
+                          {f.items.length === 0 && <div className="px-3 py-2 fs-10 text-gray-400">Nothing to filter.</div>}
+                          {f.items.map(([val, lbl]) => {
+                            const on = f.selected.includes(val);
+                            return (
+                              <button key={val} type="button" onClick={() => f.toggle(val)} className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50">
+                                <span className="h-4 w-4 rounded border flex items-center justify-center flex-shrink-0" style={on ? { background: BRAND, borderColor: BRAND } : { borderColor: '#cfcfe0' }}>
+                                  {on && <Check size={11} color="#fff" className="kc-pop" />}
+                                </span>
+                                <span className={`fs-11 flex-1 truncate text-gray-700 ${on ? 'font-semibold' : ''}`}>{lbl}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="px-3 py-1.5 border-t border-gray-100 fs-10 text-gray-400" style={{ background: '#fafbfd' }}>
+                          nothing ticked = show all
+                        </div>
+                      </Dropdown>
+                    ))}
                   </div>
                 </div>
-                <div className="overflow-x-auto kc-scroll">
+                <div className="overflow-x-auto kc-scroll rounded-b-2xl">
                   <table className="mom-sheet w-full fs-12" style={{ borderCollapse: 'collapse', minWidth: CARRY_MINW }}>
                     <thead>
                       <tr style={{ background: '#f1f3fb', color: INK }}>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '2.5rem' }}>Sr</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '14rem' }}>Discussion Area / Point</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '12.5rem' }}>Responsibility</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '5rem' }}>Action flag</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8.5rem' }}>Due Date</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '12rem' }}>Previous remarks</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '12rem' }}>Remark — this meeting</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '11rem' }}>Status</th>
+                        <th className="px-1 py-2 fs-10 font-bold" style={{ width: '2.6rem' }} title="Tick to move the task into the current-meeting discussion">Discuss</th>
+                        <th className="px-1 py-2 fs-11 font-bold" style={{ width: '2rem' }}>Sr</th>
+                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '13rem' }}>Discussion Area / Point</th>
+                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '9.5rem' }}>Responsibility</th>
+                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8.5rem' }}>Assigned by (Head)</th>
+                        <th className="px-1 py-2 fs-10 font-bold" style={{ width: '3rem' }}>Flag</th>
+                        <th className="px-1 py-2 fs-11 font-bold" style={{ width: '6rem' }}>Due Date</th>
+                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '18rem' }}>Previous remarks</th>
+                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '16rem' }}>Remark/Observation/Action — this meeting</th>
+                        <th className="px-1 py-2 fs-11 font-bold" style={{ width: '6.5rem' }}>Status</th>
                       </tr>
                     </thead>
                     <tbody>
                       {shownCarry.length === 0 && (
-                        <tr><td colSpan={8} className="px-3 py-5 text-center fs-12 text-gray-400">No carried tasks match the current status / category filter.</td></tr>
+                        <tr><td colSpan={10} className="px-3 py-5 text-center fs-12 text-gray-400">No carried tasks match the current status / category filter.</td></tr>
                       )}
                       {shownCarry.map((c, i) => {
                         const od = c.due ? daysFromDue(c.due) : 0;
                         const isOd = c.status !== 'completed' && c.due && od > 0;
                         return (
                           <tr key={c.id} className={c.status === 'completed' ? 'opacity-60' : ''}>
-                            <td className="px-2 py-2 text-center text-black">{i + 1}</td>
+                            <td className="px-1 py-2 text-center">
+                              <input type="checkbox" checked={false} onChange={() => moveCarryToRows(c.id)}
+                                className="h-4 w-4 cursor-pointer align-middle" style={{ accentColor: BRAND }}
+                                title="Tick to move this task into the current-meeting discussion table below" />
+                            </td>
+                            <td className="px-1 py-2 text-center text-black">{i + 1}</td>
                             <td className="px-2 py-2">
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className={`font-semibold text-black ${c.status === 'completed' ? 'line-through' : ''}`}>{c.area}</span>
@@ -1519,14 +1679,28 @@ export default function MOMTracking() {
                               {c.point && <div className="fs-11 text-black mt-0.5">{c.point}</div>}
                               <div className="fs-9 text-black mt-0.5">raised {fmt(c.originDate || c.srcDate)}</div>
                             </td>
-                            <td className="px-1 py-1">
-                              <RespPicker value={respArr(c.resp)} options={presentNames} onChange={(v) => updCarry(c.id, { resp: v })} />
+                            {/* read-only here — tick "Discuss" to move the task below and edit everything */}
+                            <td className="px-2 py-2" title='Read-only — tick "Discuss" to edit this on the current-meeting sheet'>
+                              {respArr(c.resp).length ? (
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  {respArr(c.resp).map((n) => (
+                                    <span key={n} className="inline-flex items-center justify-center rounded-full px-2 py-0.5 fs-10 font-semibold" style={{ background: BRAND_SOFT, color: INK }}>{n.split(' ')[0]}</span>
+                                  ))}
+                                </div>
+                              ) : <span className="fs-11 text-gray-300">—</span>}
                             </td>
+                            <td className="px-2 py-2 text-center fs-11 text-black" title='Read-only — tick "Discuss" to edit this on the current-meeting sheet'>{c.assignedBy || <span className="text-gray-300">—</span>}</td>
                             <td className="px-2 py-2 text-center"><FlagChip f={c.flag} small /></td>
-                            <td className="px-1 py-1"><input type="date" value={c.due} onChange={(e) => updCarry(c.id, { due: e.target.value })} className="w-full fs-11 text-gray-700 outline-none px-1 py-1 rounded" title="Extend / change due date" /></td>
+                            <td className="px-2 py-2 text-center fs-11 text-black" title='Read-only — tick "Discuss" to edit this on the current-meeting sheet'>{c.due ? fmt(c.due) : <span className="text-gray-300">—</span>}</td>
                             <td className="px-2 py-2"><RemarkHistory list={c.prevRemarks} /></td>
                             <td className="px-1 py-1 mom-fill"><input value={c.remark} onChange={(e) => updCarry(c.id, { remark: e.target.value })} placeholder="Remark for this meeting…" className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded" /></td>
-                            <td className="px-2 py-2"><SegStatus value={c.status} onChange={(v) => updCarry(c.id, { status: v })} /></td>
+                            <td className="px-1 py-1">
+                              <select value={c.status} onChange={(e) => updCarry(c.id, { status: e.target.value })}
+                                className="w-full fs-11 font-semibold outline-none px-1 py-1.5 rounded-lg cursor-pointer"
+                                style={{ color: STATUS[c.status].color, background: STATUS[c.status].soft }}>
+                                <option value="pending">Pending</option><option value="in_progress">WIP</option><option value="completed">Completed</option>
+                              </select>
+                            </td>
                           </tr>
                         );
                       })}
@@ -1536,13 +1710,16 @@ export default function MOMTracking() {
               </div>
             )}
 
-            {/* ---- SECTION B · current discussion table ---- */}
+            {/* ---- SECTION B · current discussion table (carried tasks arrive
+                 here via the "Discuss" checkbox on the pending list above) ---- */}
             <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
               <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 flex-wrap gap-2">
                 <div className="flex items-center gap-2">
                   <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: SHEET_SOFT }}><ListChecks size={15} style={{ color: SHEET_DARK }} /></span>
                   <span className="fs-13 font-bold text-gray-800">Discussion — current meeting</span>
-                  <span className="fs-10 text-gray-400">assign one or more owners · T needs a due date, Information doesn't</span>
+                  <span className="fs-10 text-gray-400">
+                    assign one or more owners · T needs a due date, Information doesn't{carry.length > 0 && ' · tick "Discuss" on a pending task above to bring it here'}
+                  </span>
                 </div>
                 <span className="fs-10 text-gray-400">{rows.filter((r) => r.flag === 'T').length} tasks · {infoCount} info</span>
               </div>
@@ -1557,10 +1734,11 @@ export default function MOMTracking() {
                       <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '12rem' }}>Discussion Area</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '15rem' }}>Discussion points</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '13rem' }}>Responsibility</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '10rem' }}>Assigned by (Head)</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '5rem' }}>Action flag</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8.5rem' }}>Due Date</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '12rem' }}>Remarks</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8.5rem' }}>Status</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '16rem' }}>Remark/Observation/Action</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '6.5rem' }}>Status</th>
                       <th style={{ width: '2.5rem' }} />
                     </tr>
                   </thead>
@@ -1571,7 +1749,15 @@ export default function MOMTracking() {
                         <tr key={r.id}>
                           <td className="px-2 py-2 text-center text-gray-500">{i + 1}</td>
                           <td className="px-2 py-2 align-top">
-                            {r.masterId === null ? (
+                            {r.carried ? (
+                              <>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-semibold text-gray-800">{r.area}</span>
+                                  <span className="fs-9 font-bold rounded px-1 py-0.5" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Carried forward from a previous meeting">C/F</span>
+                                </div>
+                                <div className="fs-9 mt-0.5 font-medium text-gray-400">carried · raised {fmt(r.originDate || r.srcDate)}</div>
+                              </>
+                            ) : r.masterId === null ? (
                               <>
                                 <select value="" onChange={(e) => assignMasterToRow(r.id, e.target.value)}
                                   className="no-ring w-full fs-12 font-semibold text-gray-800 outline-none px-1 py-1 rounded cursor-pointer"
@@ -1602,15 +1788,19 @@ export default function MOMTracking() {
                               className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded resize-none overflow-hidden" style={{ minHeight: '2rem' }} />
                           </td>
                           <td className="px-1 py-1">
-                            <RespPicker value={respArr(r.resp)} options={presentNames} onChange={(v) => updRow(r.id, { resp: v })} />
+                            <RespPicker value={respArr(r.resp)} options={respOptions} onChange={(v) => updRow(r.id, { resp: v })} />
                           </td>
+                          <td className="px-1 py-1"><HeadCell row={r} heads={heads} onChange={(patch) => updRow(r.id, patch)} /></td>
                           <td className="px-2 py-2 text-center"><FlagToggle value={r.flag} onChange={(f) => updRow(r.id, { flag: f })} /></td>
                           <td className="px-1 py-1">
                             {isT
                               ? <input type="date" value={r.due} onChange={(e) => updRow(r.id, { due: e.target.value })} className="w-full fs-11 text-gray-700 outline-none px-1 py-1 rounded" />
                               : <div className="text-center fs-11 text-gray-300" title="Information rows don't need a due date">—</div>}
                           </td>
-                          <td className="px-1 py-1 mom-fill"><input value={r.remark} onChange={(e) => updRow(r.id, { remark: e.target.value })} placeholder="Remark…" className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded" /></td>
+                          <td className="px-1 py-1 mom-fill">
+                            {r.carried && r.prevRemarks?.length > 0 && <div className="px-1.5 pt-1"><RemarkHistory list={r.prevRemarks} /></div>}
+                            <input value={r.remark} onChange={(e) => updRow(r.id, { remark: e.target.value })} placeholder="Remark…" className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded" />
+                          </td>
                           <td className="px-1 py-1">
                             {isT ? (
                               <select value={r.status} onChange={(e) => updRow(r.id, { status: e.target.value })} className="w-full fs-11 font-semibold outline-none px-1.5 py-1.5 rounded-lg" style={{ color: STATUS[r.status].color, background: STATUS[r.status].soft }}>
@@ -1618,18 +1808,25 @@ export default function MOMTracking() {
                               </select>
                             ) : <div className="text-center fs-11 text-gray-300">—</div>}
                           </td>
-                          <td className="px-1 py-2 text-center"><button onClick={() => askDelRow(r)} className="text-gray-300 hover:text-red-400" title="Remove row"><Trash2 size={14} /></button></td>
+                          <td className="px-1 py-2 text-center"><button onClick={() => askDelRow(r)} className="text-gray-300 hover:text-red-400" title={r.carried ? 'Send back to the previous-meeting pending list' : 'Remove row'}>{r.carried ? <CornerUpRight size={14} /> : <Trash2 size={14} />}</button></td>
                         </tr>
                       );
                     })}
-                    {rows.length === 0 && <tr><td colSpan={9} className="px-3 py-6 text-center fs-12 text-gray-400">No rows — add a discussion area below.</td></tr>}
+                    {rows.length === 0 && <tr><td colSpan={10} className="px-3 py-6 text-center fs-12 text-gray-400">No rows — add a discussion area below{carry.length > 0 ? ', or tick "Discuss" on a pending task above' : ''}.</td></tr>}
+                    {/* add custom row — full-width clickable strip as the sheet's last row */}
+                    <tr>
+                      <td colSpan={10} className="p-0">
+                        <button onClick={addRow} type="button"
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 fs-11 font-bold transition hover:bg-[#eef2ff]"
+                          style={{ color: BRAND, background: '#fafbfd' }}
+                          title="Pick the new row's Discussion Area from the master points (only points not already on the sheet are listed)">
+                          <Plus size={14} /> Add row
+                          <span className="fs-10 font-normal text-gray-400 max-sm:hidden">— pick its Discussion Area from the master points</span>
+                        </button>
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
-              </div>
-              {/* add custom row */}
-              <div className="flex items-center gap-2 px-3 py-2.5 border-t border-gray-100 flex-wrap" style={{ background: '#fafafc' }}>
-                <button onClick={addRow} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 fs-11 font-semibold text-white" style={{ background: SHEET }}><Plus size={14} /> Add row</button>
-                <span className="fs-10 text-gray-400">Adds a row — pick its Discussion Area from the master points (only points not already on the sheet are listed).</span>
               </div>
             </div>
 
@@ -1648,10 +1845,10 @@ export default function MOMTracking() {
         )}
 
         {/* ===== HISTORY ===== */}
-        {view === 'history' && <HistoryView history={history} branches={branchOptions} onView={setViewMtg} onDelete={deleteMeeting} canDelete={histSource === 'api' && me?.role === 'master_admin'} canExport={canExport} onExport={setExportReq} source={histSource} />}
+        {view === 'history' && <HistoryView history={history} branches={branchOptions} onView={setViewMtg} onDelete={deleteMeeting} canDelete={histSource === 'api' && me?.role === 'master_admin'} canExport={canExport} onExport={doExport} source={histSource} initialCode={histBranch} />}
 
         {/* ===== REPORTS ===== */}
-        {view === 'reports' && <ReportsView history={history} branches={branchOptions} />}
+        {view === 'reports' && <ReportsView history={history} branches={branchOptions} onView={setViewMtg} onOpenBranch={(code) => { setHistBranch(code); setView('history'); }} />}
 
         {/* ===== MY MOM / EMPLOYEE REPORT ===== */}
         {view === 'mine' && (
@@ -1669,7 +1866,7 @@ export default function MOMTracking() {
                 {pickedEmp && <button onClick={() => setPickedEmp(null)} className="fs-11 font-semibold text-gray-500 hover:text-gray-700">Reset to myself</button>}
               </div>
             )}
-            <PersonReport meetings={allMeetings} person={reportPerson} canExport={canExport} onExport={setExportReq} onView={setViewMtg} />
+            <PersonReport meetings={allMeetings} person={reportPerson} canExport={canExport} onExport={doExport} onView={setViewMtg} />
           </div>
         )}
       </div>
@@ -1678,10 +1875,7 @@ export default function MOMTracking() {
       {masterOpen && <MasterModal master={master} setMaster={setMaster} categories={categories} setCategories={setCategories} persist={persist} onClose={() => setMasterOpen(false)} ping={ping} />}
 
       {/* ===== VIEW MEETING (sheet replica) ===== */}
-      {viewMtg && <MeetingSheetModal data={viewMtg} categories={categories} canExport={canExport} onExport={setExportReq} onClose={() => setViewMtg(null)} />}
-
-      {/* ===== EXPORT COLOUR PICKER ===== */}
-      {exportReq && <ExportColorModal onExport={(c) => { exportMeetingExcel(exportReq, c).catch(() => toast.error('Could not generate the Excel file')); setExportReq(null); }} onClose={() => setExportReq(null)} />}
+      {viewMtg && <MeetingSheetModal data={viewMtg} categories={categories} canExport={canExport} onExport={doExport} onClose={() => setViewMtg(null)} />}
 
       {/* ===== CONFIRM (finalize) ===== */}
       {confirm && (
@@ -1736,7 +1930,6 @@ export default function MOMTracking() {
    MEETING SHEET MODAL — read-only replica + Excel download
    ============================================================ */
 function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
-  const [showAll, setShowAll] = useState(false);
   const catColor = (n) => (categories && categories[n]) || '#94a3b8';
   const present = useMemo(() => data.attendees.filter((a) => a.present), [data]);
   const ordered = useMemo(
@@ -1745,21 +1938,51 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
   );
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col" style={{ maxHeight: '92vh' }} onClick={(e) => e.stopPropagation()}>
+      <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-7xl flex flex-col" style={{ maxHeight: '96vh' }} onClick={(e) => e.stopPropagation()}>
         {/* header */}
         <div className="mom-view-head px-4 py-3 flex items-start justify-between rounded-t-2xl border-b border-gray-100 max-md:flex-wrap max-md:gap-2" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
           <div className="min-w-0">
-            <div className="fs-9 uppercase tracking-wide text-gray-400" style={{ letterSpacing: '0.14em' }}>Minutes of Meeting</div>
-            <div className="text-base font-bold text-gray-800">{data.branchName}</div>
-            {data.branches?.length > 1 && (
-              <div className="mt-1 flex items-center gap-1 flex-wrap">
-                {data.branches.map((b) => <span key={b.code} className="rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: INK }}>{b.name}</span>)}
-              </div>
-            )}
-            <div className="fs-10 mt-0.5 text-black flex items-center gap-3 flex-wrap">
-              <span className="inline-flex items-center gap-1"><CalendarDays size={11} /> {fmt(data.date)}</span>
-              {data.location && <span className="inline-flex items-center gap-1"><MapPin size={11} /> {data.location}</span>}
+            {/* row 1 — label + branch title inline */}
+            <div className="flex items-baseline gap-2.5 flex-wrap min-w-0">
+              <span className="fs-10 uppercase tracking-wide text-black font-semibold flex-shrink-0" style={{ letterSpacing: '0.14em' }}>Minutes of Meeting</span>
+              <span className="text-l font-bold text-gray-800 leading-tight truncate min-w-0">{data.branchName}</span>
+            </div>
+            {/* row 2 — meta + attendees dropdown + action-flag legend, all in one line */}
+            <div className="fs-12 mt-1 text-black flex items-center gap-3 flex-wrap">
+              <span className="inline-flex items-center gap-1"><CalendarDays size={13} /> {fmt(data.date)}</span>
+              {data.location && <span className="inline-flex items-center gap-1"><MapPin size={13} /> {data.location}</span>}
               <span>{data.type}</span><span>by {data.conductedBy}</span>
+              {data.heads?.length > 0 && (
+                <span className="inline-flex items-center gap-1"><Crown size={13} /> Head{data.heads.length > 1 ? 's' : ''}: <b>{data.heads.join(', ')}</b></span>
+              )}
+              <Dropdown panelClass="w-80 max-w-[90vw]"
+                trigger={({ open, toggle }) => (
+                  <button type="button" onClick={toggle}
+                    className="inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1 fs-12 font-bold"
+                    style={{ borderColor: '#dfe3f2', color: INK }} title="See the attendee list">
+                    <Users size={13} /> Attendees: {present.length} present
+                    <ChevronDown size={12} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+                  </button>
+                )}>
+                <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-black border-b border-gray-100 flex items-center justify-between gap-2">
+                  <span>Attendees — present</span>
+                  <span className="rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: INK }}>{present.length}</span>
+                </div>
+                <div className="max-h-64 overflow-y-auto kc-scroll py-1">
+                  {present.map((a, i) => (
+                    <div key={a.id} className="flex items-center gap-2 px-3 py-1.5">
+                      <span className="fs-10 text-gray-400 flex-shrink-0" style={{ width: '1.4rem', textAlign: 'right' }}>{i + 1}.</span>
+                      <span className="fs-11 text-gray-700 flex-1 truncate">{a.name}</span>
+                      {a.branch && <span className="fs-9 font-medium px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: '#eef0fa', color: '#4b4e9e' }}>{a.branch}</span>}
+                      {a.source === 'manual' && <span className="rounded-full px-1 fs-9 font-bold flex-shrink-0" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Manually added">M</span>}
+                    </div>
+                  ))}
+                </div>
+              </Dropdown>
+              <div className="flex items-center gap-3 fs-11 text-black">
+                <span className="inline-flex items-center gap-1"><FlagChip f="T" small /> Task</span>
+                <span className="inline-flex items-center gap-1"><FlagChip f="I" small /> Information</span>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2 max-md:flex-wrap">
@@ -1768,45 +1991,22 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {/* attendees + legend */}
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2 flex-wrap fs-12 text-black">
-              <Users size={13} className="text-gray-400" /> Attendees:
-              <span className="fs-10 font-semibold text-black">{present.length} present</span>
-              {(showAll ? present : present.slice(0, 8)).map((a) => (
-                <span key={a.id} className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-2.5 py-1 fs-10 font-medium text-black">
-                  {a.name}
-                  {a.branch && <span className="fs-9 text-black">· {a.branch}</span>}
-                  {a.source === 'manual' && <span className="rounded-full px-1 fs-9 font-bold" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Manually added">M</span>}
-                </span>
-              ))}
-              {present.length > 8 && (
-                <button onClick={() => setShowAll((v) => !v)} className="inline-flex items-center rounded-full px-2.5 py-1 fs-10 font-bold transition hover:opacity-80" style={{ background: BRAND_SOFT, color: INK }}>
-                  {showAll ? 'Show less' : `+${present.length - 8} more`}
-                </button>
-              )}
-            </div>
-            <div className="flex items-center gap-3 fs-10 text-black">
-              <span className="inline-flex items-center gap-1"><FlagChip f="T" small /> Task</span>
-              <span className="inline-flex items-center gap-1"><FlagChip f="I" small /> Information</span>
-            </div>
-          </div>
-
+        <div className="flex-1 overflow-y-auto p-4">
           {/* the sheet — same column order as the live table & the Excel */}
           <div className="overflow-x-auto rounded-xl border border-gray-200">
-            <table className="mom-sheet w-full fs-11" style={{ borderCollapse: 'collapse', minWidth: '66rem' }}>
+            <table className="mom-sheet w-full fs-11" style={{ borderCollapse: 'collapse', minWidth: '96rem' }}>
               <thead>
                 <tr style={{ background: '#f1f3fb', color: INK }}>
-                  <th className="px-2 py-2 fs-11 font-bold" style={{ width: '2.8rem' }}>Sr.no</th>
-                  <th className="px-2 py-2 fs-11 font-bold">Discussion Area</th>
-                  <th className="px-2 py-2 fs-11 font-bold">Discussion points</th>
-                  <th className="px-2 py-2 fs-11 font-bold">Responsibility</th>
-                  <th className="px-2 py-2 fs-11 font-bold">Action flag</th>
-                  <th className="px-2 py-2 fs-11 font-bold">Due Date</th>
-                  <th className="px-2 py-2 fs-11 font-bold">Remarks (history)</th>
-                  <th className="px-2 py-2 fs-11 font-bold">Remark — {fmtDDMMYY(data.date)}</th>
-                  <th className="px-2 py-2 fs-11 font-bold">Status</th>
+                  <th className="px-1 py-2 fs-11 font-bold" style={{ width: '2.4rem' }}>Sr.no</th>
+                  <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '10rem' }}>Discussion Area</th>
+                  <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '11rem' }}>Discussion points</th>
+                  <th className="px-2 py-2 fs-11 font-bold" style={{ width: '9rem' }}>Responsibility</th>
+                  <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8rem' }}>Assigned by (Head)</th>
+                  <th className="px-1 py-2 fs-10 font-bold" style={{ width: '3rem' }}>Flag</th>
+                  <th className="px-1 py-2 fs-11 font-bold" style={{ width: '6rem' }}>Due Date</th>
+                  <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '19rem' }}>Remarks (history)</th>
+                  <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '17rem' }}>Remark/Observation/Action — {fmtDDMMYY(data.date)}</th>
+                  <th className="px-1 py-2 fs-11 font-bold" style={{ width: '6rem' }}>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -1826,6 +2026,7 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
                         </div>
                       ) : <span className="text-gray-300">—</span>}
                     </td>
+                    <td className="px-2 py-2 text-center text-black">{r.assignedBy || <span className="text-gray-300">—</span>}</td>
                     <td className="px-2 py-2 text-center"><FlagChip f={r.flag} small /></td>
                     <td className="px-2 py-2 text-center text-black">{r.flag === 'T' ? fmt(r.due) : '—'}</td>
                     <td className="px-2 py-2"><RemarkHistory list={r.prevRemarks} /></td>
@@ -1845,7 +2046,7 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
 /* ============================================================
    HISTORY VIEW — branch sidebar + searchable, sortable table
    ============================================================ */
-function HistoryView({ history, branches, onView, onDelete, canDelete, canExport, onExport, source }) {
+function HistoryView({ history, branches, onView, onDelete, canDelete, canExport, onExport, source, initialCode }) {
   /* the sidebar also lists branches that ONLY exist in history
      (e.g. manually added ones) */
   const allBranches = useMemo(() => {
@@ -1860,7 +2061,8 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
     return [...map.values()];
   }, [branches, history]);
 
-  const [code, setCode] = useState(allBranches[0]?.code);
+  const [code, setCode] = useState(initialCode || allBranches[0]?.code);
+  useEffect(() => { if (initialCode) setCode(initialCode); }, [initialCode]);
   useEffect(() => { if (allBranches.length && !allBranches.some((b) => b.code === code)) setCode(allBranches[0].code); }, [allBranches, code]);
   const [q, setQ] = useState('');
   const [typeF, setTypeF] = useState('all');
@@ -1887,9 +2089,38 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
   };
   const selBranch = allBranches.find((b) => b.code === code);
 
+  /* resizable branches panel — drag the divider; width is remembered.
+     Double-click the divider to reset to the default width. */
+  const SIDE_DEF = 200, SIDE_MIN = 144, SIDE_MAX = 420;
+  const [sideW, setSideW] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem('mom_hist_sidew') || '', 10);
+      return Number.isFinite(v) && v >= SIDE_MIN && v <= SIDE_MAX ? v : SIDE_DEF;
+    } catch { return SIDE_DEF; }
+  });
+  const saveSideW = (w) => { try { localStorage.setItem('mom_hist_sidew', String(w)); } catch { /* storage unavailable */ } };
+  const startDrag = (e) => {
+    e.preventDefault();
+    const startX = e.clientX; const startW = sideW;
+    let latest = startW;
+    const move = (ev) => {
+      latest = Math.min(SIDE_MAX, Math.max(SIDE_MIN, startW + (ev.clientX - startX)));
+      setSideW(latest);
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.body.style.cursor = '';
+      saveSideW(latest);
+    };
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  };
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
-      <aside className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden h-fit">
+    <div className="flex flex-col lg:flex-row gap-2 items-stretch">
+      <aside className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden h-fit lg:flex-shrink-0 max-lg:!w-full" style={{ width: sideW }}>
         <div className="px-3 py-2.5 border-b border-gray-100 fs-12 font-bold text-gray-700 flex items-center gap-2"><Building2 size={14} style={{ color: INK }} /> Branches{source === 'error' && <span className="ml-auto fs-9 font-bold rounded-full px-1.5 py-0.5" style={{ background: 'rgba(248,113,113,0.12)', color: '#f87171' }} title="MOM API not reachable">offline</span>}</div>
         <div className="overflow-y-auto kc-scroll" style={{ maxHeight: '26rem' }}>
           {allBranches.map((b) => {
@@ -1907,7 +2138,14 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
         </div>
       </aside>
 
-      <div className="lg:col-span-3 rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col">
+      {/* drag handle — resize the branches panel */}
+      <div onMouseDown={startDrag} onDoubleClick={() => { setSideW(SIDE_DEF); saveSideW(SIDE_DEF); }}
+        className="hidden lg:flex items-center justify-center cursor-col-resize select-none flex-shrink-0 group"
+        style={{ width: 10 }} title="Drag to resize the branches panel · double-click to reset">
+        <div className="rounded-full transition group-hover:bg-[#a9aed3]" style={{ width: 3, height: '3.5rem', background: '#dfe2ee' }} />
+      </div>
+
+      <div className="min-w-0 flex-1 rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col">
         {/* toolbar: search · type filter · sort */}
         <div className="px-3 py-2.5 border-b border-gray-100 flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2 min-w-0">
@@ -1926,9 +2164,11 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
               <option value="all">All types</option>
               {types.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
-            <button onClick={() => setAsc((a) => !a)} className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 fs-11 font-semibold text-gray-600 hover:bg-gray-50" title="Toggle sort order">
-              <CalendarDays size={12} /> {asc ? 'Oldest first' : 'Newest first'}
-            </button>
+            <select value={asc ? 'asc' : 'desc'} onChange={(e) => setAsc(e.target.value === 'asc')}
+              className="kc-input px-2 py-1.5 fs-11 font-semibold text-gray-700 outline-none" title="Sort meetings by date">
+              <option value="desc">Newest first</option>
+              <option value="asc">Oldest first</option>
+            </select>
           </div>
         </div>
 
@@ -2242,7 +2482,7 @@ function PersonReport({ meetings, person, canExport, onExport, onView }) {
    status pie · completion by branch · category split · monthly
    trend · overdue ageing · owner workload · branch summary
    ============================================================ */
-function ReportsView({ history, branches }) {
+function ReportsView({ history, branches, onView, onOpenBranch }) {
   const allBranches = useMemo(() => {
     const map = new Map(branches.map((b) => [b.code, { ...b }]));
     Object.keys(history).forEach((code) => {
@@ -2264,9 +2504,8 @@ function ReportsView({ history, branches }) {
     const all = [...uniq.values()].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
     const seen = new Set(); const latest = [];
-    let info = 0, attP = 0, attT = 0;
+    let info = 0;
     all.forEach((m) => {
-      attP += m.attendees.filter((a) => a.present).length; attT += m.attendees.length;
       m.rows.forEach((r) => {
         if (r.flag !== 'T') { info++; return; }
         if (seen.has(r.trackId)) return;
@@ -2309,9 +2548,8 @@ function ReportsView({ history, branches }) {
     /* branch-wise summary */
     const branchRows = (scope === 'all' ? allBranches : allBranches.filter((b) => b.code === scope)).map((b) => {
       const ms = history[b.code] || [];
-      const s2 = new Set(); let done = 0, tot = 0, open = 0, od = 0, inf = 0, p2 = 0, t2 = 0;
+      const s2 = new Set(); let done = 0, tot = 0, open = 0, od = 0, inf = 0;
       ms.forEach((m) => {
-        p2 += m.attendees.filter((a) => a.present).length; t2 += m.attendees.length;
         m.rows.forEach((r) => {
           if (r.flag !== 'T') { inf++; return; }
           if (s2.has(r.trackId)) return;
@@ -2320,7 +2558,7 @@ function ReportsView({ history, branches }) {
           else { open++; if (isOverdue(r)) od++; }
         });
       });
-      return { name: b.name, last: ms[0]?.date, meetings: ms.length, tasks: tot, done, open, overdue: od, info: inf, att: t2 ? Math.round(p2 / t2 * 100) : 0, completion: tot ? Math.round(done / tot * 100) : 0 };
+      return { code: b.code, name: b.name, last: ms[0]?.date, lastMeeting: ms[0] || null, meetings: ms.length, tasks: tot, done, open, overdue: od, info: inf, completion: tot ? Math.round(done / tot * 100) : 0 };
     }).sort((a, b) => b.meetings - a.meetings || a.name.localeCompare(b.name));
 
     return {
@@ -2330,8 +2568,6 @@ function ReportsView({ history, branches }) {
       overdue: overRows.length,
       info,
       avg: all.length ? (latest.length / all.length).toFixed(1) : '0',
-      att: attT ? Math.round(attP / attT * 100) : 0,
-      covered: scope === 'all' ? branchRows.filter((b) => b.meetings > 0).length : 1,
       pie: [
         { name: 'Completed', value: completed, color: '#059669' },
         { name: 'WIP', value: inProg, color: '#d97706' },
@@ -2343,6 +2579,25 @@ function ReportsView({ history, branches }) {
       compBar: branchRows.map((b) => ({ name: b.name, completion: b.completion })),
     };
   }, [history, allBranches, scope]);
+
+  /* task drill-down modal — opened by clicking a count in the branch summary.
+     Latest state per tracked task of that branch, filtered by the clicked column. */
+  const [drill, setDrill] = useState(null);   // { code, name, filter: tasks|done|open|overdue }
+  const DRILL_LABEL = { tasks: 'All tasks', done: 'Completed tasks', open: 'Open tasks', overdue: 'Overdue tasks' };
+  const drillTasks = useMemo(() => {
+    if (!drill) return [];
+    const seen = new Set(); const out = [];
+    (history[drill.code] || []).forEach((m) => m.rows.forEach((r) => {
+      if (r.flag !== 'T' || seen.has(r.trackId)) return;
+      seen.add(r.trackId);
+      out.push({ ...r, meeting: m });
+    }));
+    return out.filter((t) =>
+      drill.filter === 'done' ? t.status === 'completed'
+        : drill.filter === 'open' ? t.status !== 'completed'
+          : drill.filter === 'overdue' ? isOverdue(t)
+            : true);
+  }, [drill, history]);
 
   const KPI = ({ icon: Icon, label, value, color, hint }) => (
     <div className="kc-lift flex items-center gap-3 rounded-2xl border border-gray-200 bg-white shadow-sm px-3.5 py-3" title={hint || ''}>
@@ -2364,16 +2619,14 @@ function ReportsView({ history, branches }) {
         </select>
       </div>
 
-      {/* KPI grid — two rows */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+      {/* KPI grid — one row of six */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2.5">
         <KPI icon={CalendarDays} label="Total meetings" value={d.meetings} color={BRAND} />
         <KPI icon={CheckCircle2} label="Task completion" value={`${d.completion}%`} color="#059669" />
         <KPI icon={ListChecks} label="Open tasks" value={d.open} color="#d97706" />
         <KPI icon={AlertTriangle} label="Overdue tasks" value={d.overdue} color="#f87171" />
         <KPI icon={FileText} label="Information shared" value={d.info} color="#2563eb" hint="Information rows across all meetings" />
         <KPI icon={Zap} label="Avg tasks / meeting" value={d.avg} color="#b45309" />
-        <KPI icon={Users} label="Attendance rate" value={`${d.att}%`} color="#7c3aed" hint="Present / listed attendees across meetings" />
-        <KPI icon={Building2} label="Branches covered" value={d.covered} color="#0d9488" />
       </div>
 
       {/* charts — row 1 */}
@@ -2491,27 +2744,113 @@ function ReportsView({ history, branches }) {
               <th className="px-3 py-1.5 font-semibold text-center">Meetings</th><th className="px-3 py-1.5 font-semibold text-center">Tasks</th>
               <th className="px-3 py-1.5 font-semibold text-center">Done</th><th className="px-3 py-1.5 font-semibold text-center">Open</th>
               <th className="px-3 py-1.5 font-semibold text-center">Overdue</th><th className="px-3 py-1.5 font-semibold text-center">Info</th>
-              <th className="px-3 py-1.5 font-semibold text-center">Attendance</th><th className="px-3 py-1.5 font-semibold" style={{ width: '8rem' }}>Completion</th>
+              <th className="px-3 py-1.5 font-semibold" style={{ width: '8rem' }}>Completion</th>
             </tr></thead>
             <tbody>
-              {d.branchRows.map((b) => (
-                <tr key={b.name} style={{ borderTop: '1px solid #f6f6f9' }}>
-                  <td className="px-3 py-1.5 font-medium text-gray-800">{b.name}</td>
-                  <td className="px-3 py-1.5 text-gray-500">{fmt(b.last)}</td>
-                  <td className="px-3 py-1.5 text-center text-gray-700">{b.meetings}</td>
-                  <td className="px-3 py-1.5 text-center text-gray-700">{b.tasks}</td>
-                  <td className="px-3 py-1.5 text-center text-gray-600">{b.done}</td>
-                  <td className="px-3 py-1.5 text-center">{b.open > 0 ? <span className="font-semibold" style={{ color: '#b45309' }}>{b.open}</span> : <span className="text-gray-300">0</span>}</td>
-                  <td className="px-3 py-1.5 text-center">{b.overdue > 0 ? <span className="font-semibold text-red-400">{b.overdue}</span> : <span className="text-gray-300">0</span>}</td>
-                  <td className="px-3 py-1.5 text-center text-gray-600">{b.info}</td>
-                  <td className="px-3 py-1.5 text-center text-gray-600">{b.meetings ? `${b.att}%` : '—'}</td>
-                  <td className="px-3 py-1.5"><div className="flex items-center gap-2"><div className="flex-1"><Bar2 v={b.completion} /></div><span className="fs-10 text-gray-500" style={{ width: '2rem', textAlign: 'right' }}>{b.completion}%</span></div></td>
-                </tr>
-              ))}
+              {d.branchRows.map((b) => {
+                const countBtn = (n, filter, colorStyle) => n > 0
+                  ? <button type="button" onClick={() => setDrill({ code: b.code, name: b.name, filter })}
+                      className="font-semibold hover:underline cursor-pointer" style={colorStyle}
+                      title={`See these ${DRILL_LABEL[filter].toLowerCase()} in detail`}>{n}</button>
+                  : <span className="text-gray-300">0</span>;
+                return (
+                  <tr key={b.code} style={{ borderTop: '1px solid #f6f6f9' }}>
+                    <td className="px-3 py-1.5">
+                      <button type="button" onClick={() => onOpenBranch?.(b.code)} className="font-medium text-left hover:underline" style={{ color: BRAND }}
+                        title="Open this branch in the History tab">{b.name}</button>
+                    </td>
+                    <td className="px-3 py-1.5">
+                      {b.lastMeeting
+                        ? <button type="button" onClick={() => onView?.(b.lastMeeting)} className="hover:underline" style={{ color: BRAND }}
+                            title="Open this meeting's sheet">{fmt(b.last)}</button>
+                        : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-3 py-1.5 text-center text-gray-700">{b.meetings}</td>
+                    <td className="px-3 py-1.5 text-center">{countBtn(b.tasks, 'tasks', { color: BRAND })}</td>
+                    <td className="px-3 py-1.5 text-center">{countBtn(b.done, 'done', { color: '#059669' })}</td>
+                    <td className="px-3 py-1.5 text-center">{countBtn(b.open, 'open', { color: '#b45309' })}</td>
+                    <td className="px-3 py-1.5 text-center">{countBtn(b.overdue, 'overdue', { color: '#f87171' })}</td>
+                    <td className="px-3 py-1.5 text-center text-gray-600">{b.info}</td>
+                    <td className="px-3 py-1.5"><div className="flex items-center gap-2"><div className="flex-1"><Bar2 v={b.completion} /></div><span className="fs-10 text-gray-500" style={{ width: '2rem', textAlign: 'right' }}>{b.completion}%</span></div></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* ===== TASK DRILL-DOWN — details of the clicked count ===== */}
+      {drill && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setDrill(null)}>
+          <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-6xl flex flex-col" style={{ maxHeight: '92vh' }} onClick={(e) => e.stopPropagation()}>
+            <div className="mom-view-head px-4 py-3 flex items-center justify-between rounded-t-2xl border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
+              <div className="min-w-0">
+                <div className="text-base font-bold text-gray-800 truncate">{drill.name} — {DRILL_LABEL[drill.filter]}</div>
+                <div className="fs-10 text-black">{drillTasks.length} task{drillTasks.length === 1 ? '' : 's'} · latest state per tracked task · click View to open the meeting sheet</div>
+              </div>
+              <button onClick={() => setDrill(null)} className="rounded-lg p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3">
+              <div className="overflow-x-auto rounded-xl border border-gray-200">
+                <table className="mom-sheet w-full fs-11" style={{ borderCollapse: 'collapse', minWidth: '68rem' }}>
+                  <thead>
+                    <tr style={{ background: '#f1f3fb', color: INK }}>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '2.6rem' }}>Sr</th>
+                      <th className="px-2 py-2 fs-11 font-bold">Discussion Area / Point</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7rem' }}>Category</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '10rem' }}>Assigned by (Head)</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '12rem' }}>Assigned to</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '12rem' }}>Meeting</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7.5rem' }}>Due Date</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7rem' }}>Status</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '10rem' }}>Latest remark</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {drillTasks.length === 0 && <tr><td colSpan={9} className="px-3 py-6 text-center fs-12 text-gray-400">No tasks in this bucket.</td></tr>}
+                    {drillTasks.map((t, i) => {
+                      const lastPrev = (t.prevRemarks || [])[t.prevRemarks?.length - 1];
+                      return (
+                        <tr key={t.trackId}>
+                          <td className="px-2 py-2 text-center text-black">{i + 1}</td>
+                          <td className="px-2 py-2">
+                            <div className="font-semibold text-black">{t.area}{t.carried && <span className="ml-1.5 fs-9 font-bold rounded px-1 py-0.5" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }}>C/F</span>}</div>
+                            {t.point && <div className="fs-10 text-black mt-0.5">{t.point}</div>}
+                            <div className="fs-9 text-gray-400 mt-0.5">raised {fmt(t.originDate)}</div>
+                          </td>
+                          <td className="px-2 py-2 text-center text-black">{t.category || '—'}</td>
+                          <td className="px-2 py-2 text-center text-black">{t.assignedBy || <span className="text-gray-300">—</span>}</td>
+                          <td className="px-2 py-2">
+                            {respArr(t.resp).length ? (
+                              <div className="flex items-center gap-1 flex-wrap">
+                                {respArr(t.resp).map((n) => (
+                                  <span key={n} className="inline-flex items-center rounded-full px-2 py-0.5 fs-10 font-semibold" style={{ background: BRAND_SOFT, color: INK }}>{n}</span>
+                                ))}
+                              </div>
+                            ) : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className="fs-11 font-semibold text-black">{t.meeting.type || 'Meeting'}</div>
+                            <div className="fs-9 text-gray-400">{fmt(t.meeting.date)}{t.meeting.location ? ` · ${t.meeting.location}` : ''}</div>
+                            {onView && <button type="button" onClick={() => onView(t.meeting)} className="mt-1 fs-9 font-bold rounded px-1.5 py-0.5 text-white" style={{ background: BRAND }}>View</button>}
+                          </td>
+                          <td className="px-2 py-2 text-center text-black">
+                            {t.due ? fmt(t.due) : '—'}
+                            {isOverdue(t) && <div className="fs-9 font-bold" style={{ color: STATUS.overdue.color }}>{daysFromDue(t.due)}d overdue</div>}
+                          </td>
+                          <td className="px-2 py-2 text-center"><StatusBadge r={t} /></td>
+                          <td className="px-2 py-2 text-black">{t.remark || lastPrev?.text || <span className="text-gray-300">—</span>}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

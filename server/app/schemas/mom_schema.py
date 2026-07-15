@@ -32,6 +32,8 @@ class RowIn(BaseModel):
     # multi-person responsibility — a list of names; a plain string is still
     # accepted for backward compatibility and treated as a one-person list
     resp: Optional[Union[List[str], str]] = []
+    assignedBy: Optional[str] = ""           # meeting head who assigned the task
+    headResp: Optional[str] = ""             # meeting head responsible for the task
     due: Optional[str] = ""                  # 'YYYY-MM-DD' (Tasks only)
     flag: Optional[str] = "I"                # T | I  (I may have resp, never a due date)
     status: Optional[str] = "pending"
@@ -50,6 +52,7 @@ class MeetingIn(BaseModel):
     date: str                                # 'YYYY-MM-DD' — mandatory
     location: Optional[str] = ""
     type: Optional[str] = ""                 # preset OR custom typed text
+    heads: Optional[List[str]] = []          # meeting-head names (multiple allowed)
     attendees: List[AttendeeIn] = []
     rows: List[RowIn] = []
 

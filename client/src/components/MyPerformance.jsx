@@ -43,11 +43,11 @@ const convertUTCToIST = (dateTimeString) => {
 };
 
 // Short status labels used across ALL report status columns:
-// wip→WIP, rescheduled→FR, completed→Completed, not_connected→NC, rejected→Rejected
+// wip→WIP, rescheduled→Followups, completed→Completed, not_connected→NC, rejected→Rejected
 const statusLabel = (s) => {
     const map = {
         wip: 'WIP',
-        rescheduled: 'FR',
+        rescheduled: 'Followups',
         completed: 'Completed',
         not_connected: 'NC',
         rejected: 'Rejected',
@@ -57,13 +57,13 @@ const statusLabel = (s) => {
 };
 
 // CSP tables — extra columns showing the instance's latest CSP-drive followup
-const CSP_FU_HEADERS = ['Follow-up Date', 'Drive', 'Service', 'Subtype', 'Follow-up By', 'Flag', 'Status', 'Next Follow-up', 'Activity', 'Reject Reason', 'Remark', 'Quote Sent', 'Quote No.', 'Quote Value', 'Last Letter Send Date'];
+const CSP_FU_HEADERS = ['Last Follow-up Date', 'Drive', 'SR Subtype', 'Follow-up Mode', 'Flag', 'Status', 'Next Follow-up', 'Activity', 'Reject Reason', 'Remark', 'Quote Sent', 'Quote No.', 'Quote Value', 'Last Letter Sent Date'];
 
 // CSP modals — date columns selectable for the top date-range filter
 const CSP_DATE_FIELDS = [
     { key: 'due', label: 'Due Date' },
     { key: 'sr_open', label: 'SR Open Date' },
-    { key: 'fu_date', label: 'Follow-up Date' },
+    { key: 'fu_date', label: 'Last Follow-up Date' },
     { key: 'fu_next', label: 'Next Follow-up' },
 ];
 
@@ -862,7 +862,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         fetchAllFollowups(allFollowupsData.length > 0);
     };
 
-    // Open the All-Follow-ups modal filtered to ONE status (C / WIP / R / FR / NC).
+    // Open the All-Follow-ups modal filtered to ONE status (C / WIP / R / F / NC).
     // status must be: 'completed' | 'wip' | 'rejected' | 'rescheduled' | 'not_connected'
     // The Status dropdown is hidden because the status is fixed by the clicked card.
     const handleOpenStatusFollowups = (status) => {
@@ -1613,7 +1613,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         completed: 'Completed',
         wip: 'WIP',
         rejected: 'Rejected',
-        rescheduled: 'FR (Rescheduled)',
+        rescheduled: 'Followups',
         not_connected: 'NC (Not Connected)',
     }[statusFilter] || 'Follow-ups';
 
@@ -1755,7 +1755,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     }, [userData]);
 
     const statusBarData = useMemo(() => ({
-        labels: ['Completed', 'WIP', 'Rejected', 'Rescheduled', 'NC'],
+        labels: ['Completed', 'WIP', 'Rejected', 'Followups', 'NC'],
         datasets: [{
             label: 'Status Count',
             data: [
@@ -1932,25 +1932,25 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             'Call Completed': day.call_completed || 0,
             'Call WIP': day.call_wip || 0,
             'Call Rejected': day.call_rejected || 0,
-            'Call Rescheduled': day.call_rescheduled || 0,
+            'Call Followups': day.call_rescheduled || 0,
             'Call Not Connected': day.call_not_connected || 0,
             'By WhatsApp': day.followup_by_whatsapp || 0,
             'WhatsApp Completed': day.whatsapp_completed || 0,
             'WhatsApp WIP': day.whatsapp_wip || 0,
             'WhatsApp Rejected': day.whatsapp_rejected || 0,
-            'WhatsApp Rescheduled': day.whatsapp_rescheduled || 0,
+            'WhatsApp Followups': day.whatsapp_rescheduled || 0,
             'WhatsApp Not Connected': day.whatsapp_not_connected || 0,
             'By Email': day.followup_by_email || 0,
             'Email Completed': day.email_completed || 0,
             'Email WIP': day.email_wip || 0,
             'Email Rejected': day.email_rejected || 0,
-            'Email Rescheduled': day.email_rescheduled || 0,
+            'Email Followups': day.email_rescheduled || 0,
             'Email Not Connected': day.email_not_connected || 0,
             'By Visit': day.followup_by_visit || 0,
             'Visit Completed': day.visit_completed || 0,
             'Visit WIP': day.visit_wip || 0,
             'Visit Rejected': day.visit_rejected || 0,
-            'Visit Rescheduled': day.visit_rescheduled || 0,
+            'Visit Followups': day.visit_rescheduled || 0,
             'Visit Not Connected': day.visit_not_connected || 0,
             'Quotation Sent': getQuotationSentForDay(day.date)
         }));
@@ -1968,25 +1968,25 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             'Call Completed': dailyTotals.call_completed,
             'Call WIP': dailyTotals.call_wip,
             'Call Rejected': dailyTotals.call_rejected,
-            'Call Rescheduled': dailyTotals.call_rescheduled,
+            'Call Followups': dailyTotals.call_rescheduled,
             'Call Not Connected': dailyTotals.call_not_connected,
             'By WhatsApp': dailyTotals.by_whatsapp,
             'WhatsApp Completed': dailyTotals.whatsapp_completed,
             'WhatsApp WIP': dailyTotals.whatsapp_wip,
             'WhatsApp Rejected': dailyTotals.whatsapp_rejected,
-            'WhatsApp Rescheduled': dailyTotals.whatsapp_rescheduled,
+            'WhatsApp Followups': dailyTotals.whatsapp_rescheduled,
             'WhatsApp Not Connected': dailyTotals.whatsapp_not_connected,
             'By Email': dailyTotals.by_email,
             'Email Completed': dailyTotals.email_completed,
             'Email WIP': dailyTotals.email_wip,
             'Email Rejected': dailyTotals.email_rejected,
-            'Email Rescheduled': dailyTotals.email_rescheduled,
+            'Email Followups': dailyTotals.email_rescheduled,
             'Email Not Connected': dailyTotals.email_not_connected,
             'By Visit': dailyTotals.by_visit,
             'Visit Completed': dailyTotals.visit_completed,
             'Visit WIP': dailyTotals.visit_wip,
             'Visit Rejected': dailyTotals.visit_rejected,
-            'Visit Rescheduled': dailyTotals.visit_rescheduled,
+            'Visit Followups': dailyTotals.visit_rescheduled,
             'Visit Not Connected': dailyTotals.visit_not_connected,
             'Quotation Sent': dailyTotals.quotation_sent
         };
@@ -2506,11 +2506,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     onClick={() => handleOpenStatusFollowups('rescheduled')}
                     className="group relative bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all text-center cursor-pointer flex flex-col justify-between min-h-[90px]"
                 >
-                    <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Rescheduled</h3>
+                    <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Followups</h3>
                     <p className="text-lg sm:text-xl font-bold text-black mt-1"><TimeValue>{performance.rescheduled_count || 0}</TimeValue></p>
                     <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
                         <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
-                            Click to view rescheduled (FR) follow-ups
+                            Click to view Followups
                             <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-black"></div>
                         </div>
                     </div>
@@ -2769,8 +2769,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
                             {/* Title + Total (completed excluded — it now rolls into the top Completed card) */}
                             <div className="flex items-center gap-2 shrink-0">
-                                <h3 className="text-[11px] sm:text-sm font-semibold whitespace-nowrap group-hover:font-bold transition-all" style={{ color: themeColor }}>
-                                    Non-Drive Customers Reached Count
+                                <h3 className="text-[11px] sm:text-sm font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>
+                                    Non-Drive/PW Customers<br />Reached Count
                                 </h3>
                                 <span
                                     className="text-sm sm:text-base font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
@@ -2819,14 +2819,14 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     )}
                                 </div>
 
-                                {/* Rescheduled / FR */}
+                                {/* Followups */}
                                 <div
                                     onClick={(e) => handleOpenNonCampaignStatus(e, 'rescheduled')}
                                     title="Click to view rescheduled non-drive customers"
                                     className="flex items-center justify-center gap-1 bg-purple-50 border border-purple-200 rounded-full px-2.5 py-0.5 cursor-pointer hover:bg-purple-100"
                                 >
                                     <span className="w-1.5 h-1.5 rounded-full bg-purple-500 inline-block"></span>
-                                    <span className="text-[10px] sm:text-[11px] font-medium text-purple-700">FR</span>
+                                    <span className="text-[10px] sm:text-[11px] font-medium text-purple-700">Followups</span>
                                     <span className="text-[10px] sm:text-[11px] font-bold text-purple-800">
                                         {nonDriveRecordStats.rescheduled}
                                     </span>
@@ -2995,19 +2995,19 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[60px]">Total Calls</th>
                                     <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[150px]">
                                         <div>By Call</div>
-                                        <div>(C/W/R/FR/NC)</div>
+                                        <div>(C/W/R/F/NC)</div>
                                     </th>
                                     <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[170px]">
                                         <div>By WhatsApp</div>
-                                        <div>(C/W/R/FR/NC)</div>
+                                        <div>(C/W/R/F/NC)</div>
                                     </th>
                                     <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[150px]">
                                         <div>By Email</div>
-                                        <div>(C/W/R/FR/NC)</div>
+                                        <div>(C/W/R/F/NC)</div>
                                     </th>
                                     <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[150px]">
                                         <div>By Visit</div>
-                                        <div>(C/W/R/FR/NC)</div>
+                                        <div>(C/W/R/F/NC)</div>
                                     </th>
                                     <th className="px-2 py-1 text-center text-[11px] font-semibold text-black uppercase tracking-wider border border-gray-300 bg-gray-50 w-[90px]">
                                         <div>QT</div>
@@ -3061,7 +3061,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                         (C-{(day.call_completed || 0) + (day.whatsapp_completed || 0) + (day.email_completed || 0) + (day.visit_completed || 0)},
                                                         W-{(day.call_wip || 0) + (day.whatsapp_wip || 0) + (day.email_wip || 0) + (day.visit_wip || 0)},
                                                         R-{(day.call_rejected || 0) + (day.whatsapp_rejected || 0) + (day.email_rejected || 0) + (day.visit_rejected || 0)},
-                                                        FR-{(day.call_rescheduled || 0) + (day.whatsapp_rescheduled || 0) + (day.email_rescheduled || 0) + (day.visit_rescheduled || 0)},
+                                                        F-{(day.call_rescheduled || 0) + (day.whatsapp_rescheduled || 0) + (day.email_rescheduled || 0) + (day.visit_rescheduled || 0)},
                                                         NC-{(day.call_not_connected || 0) + (day.whatsapp_not_connected || 0) + (day.email_not_connected || 0) + (day.visit_not_connected || 0)})
                                                     </span>
                                                 </div>
@@ -3070,7 +3070,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 <div className="flex flex-col items-center">
                                                     <span className="font-medium text-black">{day.followup_by_call || 0}</span>
                                                     <span className="text-[10px] text-black hidden sm:inline">
-                                                        (C-{day.call_completed || 0}, W-{day.call_wip || 0}, R-{day.call_rejected || 0}, FR-{day.call_rescheduled || 0}, NC-{day.call_not_connected || 0})
+                                                        (C-{day.call_completed || 0}, W-{day.call_wip || 0}, R-{day.call_rejected || 0}, F-{day.call_rescheduled || 0}, NC-{day.call_not_connected || 0})
                                                     </span>
                                                 </div>
                                             </td>
@@ -3078,7 +3078,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 <div className="flex flex-col items-center">
                                                     <span className="font-medium text-black">{day.followup_by_whatsapp || 0}</span>
                                                     <span className="text-[10px] text-black hidden sm:inline">
-                                                        (C-{day.whatsapp_completed || 0}, W-{day.whatsapp_wip || 0}, R-{day.whatsapp_rejected || 0}, FR-{day.whatsapp_rescheduled || 0}, NC-{day.whatsapp_not_connected || 0})
+                                                        (C-{day.whatsapp_completed || 0}, W-{day.whatsapp_wip || 0}, R-{day.whatsapp_rejected || 0}, F-{day.whatsapp_rescheduled || 0}, NC-{day.whatsapp_not_connected || 0})
                                                     </span>
                                                 </div>
                                             </td>
@@ -3086,7 +3086,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 <div className="flex flex-col items-center">
                                                     <span className="font-medium text-black">{day.followup_by_email || 0}</span>
                                                     <span className="text-[10px] text-black hidden sm:inline">
-                                                        (C-{day.email_completed || 0}, W-{day.email_wip || 0}, R-{day.email_rejected || 0}, FR-{day.email_rescheduled || 0}, NC-{day.email_not_connected || 0})
+                                                        (C-{day.email_completed || 0}, W-{day.email_wip || 0}, R-{day.email_rejected || 0}, F-{day.email_rescheduled || 0}, NC-{day.email_not_connected || 0})
                                                     </span>
                                                 </div>
                                             </td>
@@ -3094,7 +3094,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 <div className="flex flex-col items-center">
                                                     <span className="font-medium text-black">{day.followup_by_visit || 0}</span>
                                                     <span className="text-[10px] text-black hidden sm:inline">
-                                                        (C-{day.visit_completed || 0}, W-{day.visit_wip || 0}, R-{day.visit_rejected || 0}, FR-{day.visit_rescheduled || 0}, NC-{day.visit_not_connected || 0})
+                                                        (C-{day.visit_completed || 0}, W-{day.visit_wip || 0}, R-{day.visit_rejected || 0}, F-{day.visit_rescheduled || 0}, NC-{day.visit_not_connected || 0})
                                                     </span>
                                                 </div>
                                             </td>
@@ -3134,7 +3134,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                     (C-{dailyTotals.completed_all},
                                                     W-{dailyTotals.wip_all},
                                                     R-{dailyTotals.rejected_all},
-                                                    FR-{dailyTotals.rescheduled_all},
+                                                    F-{dailyTotals.rescheduled_all},
                                                     NC-{dailyTotals.not_connected_all})
                                                 </span>
                                             </div>
@@ -3148,7 +3148,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                     (C-{dailyTotals.call_completed},
                                                     W-{dailyTotals.call_wip},
                                                     R-{dailyTotals.call_rejected},
-                                                    FR-{dailyTotals.call_rescheduled},
+                                                    F-{dailyTotals.call_rescheduled},
                                                     NC-{dailyTotals.call_not_connected})
                                                 </span>
                                             </div>
@@ -3162,7 +3162,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                     (C-{dailyTotals.whatsapp_completed},
                                                     W-{dailyTotals.whatsapp_wip},
                                                     R-{dailyTotals.whatsapp_rejected},
-                                                    FR-{dailyTotals.whatsapp_rescheduled},
+                                                    F-{dailyTotals.whatsapp_rescheduled},
                                                     NC-{dailyTotals.whatsapp_not_connected})
                                                 </span>
                                             </div>
@@ -3176,7 +3176,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                     (C-{dailyTotals.email_completed},
                                                     W-{dailyTotals.email_wip},
                                                     R-{dailyTotals.email_rejected},
-                                                    FR-{dailyTotals.email_rescheduled},
+                                                    F-{dailyTotals.email_rescheduled},
                                                     NC-{dailyTotals.email_not_connected})
                                                 </span>
                                             </div>
@@ -3190,7 +3190,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                     (C-{dailyTotals.visit_completed},
                                                     W-{dailyTotals.visit_wip},
                                                     R-{dailyTotals.visit_rejected},
-                                                    FR-{dailyTotals.visit_rescheduled},
+                                                    F-{dailyTotals.visit_rescheduled},
                                                     NC-{dailyTotals.visit_not_connected})
                                                 </span>
                                             </div>
@@ -3229,7 +3229,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: themeColor }}></span>
                                 <span className="text-[11px]">Visit</span>
                             </span>
-                            <span className="text-[10px] text-black hidden sm:inline">C=Completed, W=In Progress, R=Rejected, FR=Follow-up Rescheduled, NC=Not Connected</span>
+                            <span className="text-[10px] text-black hidden sm:inline">C=Completed, W=In Progress, R=Rejected, F=Followup, NC=Not Connected</span>
                         </span>
                         <span className="text-[10px] text-black text-center">
                             Showing {filteredDailyPerformance.length} of {dailyPerformance.length} total days
@@ -3373,7 +3373,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                             >
                                                 <option value="all">All</option>
                                                 <option value="wip">WIP</option>
-                                                <option value="rescheduled">FR</option>
+                                                <option value="rescheduled">Followups</option>
                                                 <option value="not_connected">NC</option>
                                                 <option value="rejected">Rejected</option>
                                                 <option value="completed">Completed</option>
@@ -3520,7 +3520,6 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                             <td className="px-2 py-1 border border-gray-200 text-center bg-white" title={row.fu_drive || ''}>
                                                                 <div className="max-w-[140px] truncate mx-auto">{row.fu_drive || '-'}</div>
                                                             </td>
-                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_service || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_subtype || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center bg-white capitalize">{row.fu_by || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_flag || '-'}</td>
@@ -3637,7 +3636,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 {/* Completed/Rejected rows are excluded from this box entirely */}
                                                 <option value="all">All</option>
                                                 <option value="wip">WIP</option>
-                                                <option value="rescheduled">FR</option>
+                                                <option value="rescheduled">Followups</option>
                                                 <option value="not_connected">NC</option>
                                             </select>
                                             <svg className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-black pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3801,7 +3800,6 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                             <td className="px-2 py-1 border border-gray-200 text-center bg-white" title={row.fu_drive || ''}>
                                                                 <div className="max-w-[140px] truncate mx-auto">{row.fu_drive || '-'}</div>
                                                             </td>
-                                                            <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_service || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_subtype || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center bg-white capitalize">{row.fu_by || '-'}</td>
                                                             <td className="px-2 py-1 border border-gray-200 text-center bg-white">{row.fu_flag || '-'}</td>
@@ -3920,7 +3918,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                     <option value="completed">Completed</option>
                                                     <option value="wip">WIP</option>
                                                     <option value="rejected">Rejected</option>
-                                                    <option value="rescheduled">FR (Rescheduled)</option>
+                                                    <option value="rescheduled">Followups</option>
                                                     <option value="not_connected">NC (Not Connected)</option>
                                                 </select>
                                                 <svg
@@ -3963,6 +3961,27 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         onChange={(e) => setFollowupSearchTerm(e.target.value)}
                                         className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-64 max-md:w-full max-md:min-w-0 bg-white focus:outline-none"
                                     />
+
+                                    {/* Clear filters — status resets only when its dropdown is
+                                        visible (a status card locks it as the report's subject) */}
+                                    {(followupSearchTerm || createdFromDate || createdToDate
+                                        || (!quotationSentFilterActive && !statusLocked && statusFilter !== 'all')) && (
+                                        <button
+                                            onClick={() => {
+                                                setFollowupSearchTerm('');
+                                                setCreatedFromDate('');
+                                                setCreatedToDate('');
+                                                if (!quotationSentFilterActive && !statusLocked) setStatusFilter('all');
+                                            }}
+                                            className="px-2 py-1 text-[11px] text-white border border-white/40 rounded-md bg-white/10 hover:bg-white/20 flex items-center gap-1"
+                                            title="Clear filters"
+                                        >
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                            Clear
+                                        </button>
+                                    )}
 
                                     {/* Export — permission-gated, exports only the filtered rows */}
                                     {canExport && (
@@ -4695,7 +4714,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                                 <option value="all">All</option>
                                                 <option value="wip">WIP</option>
                                                 <option value="rejected">Rejected</option>
-                                                <option value="rescheduled">FR (Rescheduled)</option>
+                                                <option value="rescheduled">Followups</option>
                                                 <option value="not_connected">NC (Not Connected)</option>
                                             </select>
                                             <svg className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-black pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">

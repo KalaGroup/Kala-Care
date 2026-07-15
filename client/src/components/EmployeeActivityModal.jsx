@@ -291,7 +291,7 @@ const EmployeeActivityModal = ({
                                                     fu.status === 'rescheduled' ? 'bg-purple-100 text-purple-700' :
                                                     'bg-gray-100 text-gray-700'
                                                 }`}>
-                                                    {fu.status === 'rescheduled' ? 'FR' : (fu.status || '-')}
+                                                    {fu.status === 'rescheduled' ? 'Followups' : (fu.status || '-')}
                                                 </span>
                                             </td>
                                             <td className="px-2 py-1 border border-gray-200 text-center whitespace-nowrap">

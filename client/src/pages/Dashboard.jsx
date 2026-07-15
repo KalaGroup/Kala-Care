@@ -278,7 +278,7 @@ const Dashboard = () => {
                     borderWidth: 1, borderRadius: 4, barPercentage: 0.7, categoryPercentage: 0.8
                 },
                 {
-                    label: 'FR',
+                    label: 'Followups',
                     data: campaignPerformance.map(c => c.rescheduled_count || 0),
                     backgroundColor: 'rgba(168, 85, 247, 0.85)',
                     borderColor: '#a855f7',
@@ -359,7 +359,7 @@ const Dashboard = () => {
 
     // === Memoized Pie Chart for Asset Status Distribution ===
     const assetStatusPieData = useMemo(() => ({
-        labels: ['Completed', 'WIP', 'FR', 'Rejected', 'NC'],
+        labels: ['Completed', 'WIP', 'Followups', 'Rejected', 'NC'],
         datasets: [{
             data: [
                 summaryStats?.completed_assets || 0,
@@ -2256,7 +2256,7 @@ const Dashboard = () => {
                 'Remaining': campaign.asset_numbers_count || 0,
                 'Attended': campaign.attended_customers || 0,
                 'WIP': campaign.wip_count || 0,
-                'FR': campaign.rescheduled_count || 0,
+                'Followups': campaign.rescheduled_count || 0,
                 'Rejected': campaign.rejected_count || 0,
                 'NC': campaign.not_connected_count || 0,
                 'Completed': campaign.completed_count || 0,
@@ -2781,7 +2781,7 @@ const Dashboard = () => {
                     'Branch': getBranchDisplayName(emp.branch),
                     'Total all Calls and follow-ups': total,
                     'Work in Progress': emp.wip_count || 0,
-                    'Rescheduled': emp.rescheduled_count || 0,
+                    'Followups': emp.rescheduled_count || 0,
                     'Rejected': emp.rejected_count || 0,
                     'Completed': completed,
                 };
@@ -2791,7 +2791,7 @@ const Dashboard = () => {
                 totalFollowups: exportData.reduce((sum, row) => sum + row['Total all Calls and follow-ups'], 0),
                 totalCompleted: exportData.reduce((sum, row) => sum + row['Completed'], 0),
                 totalWip: exportData.reduce((sum, row) => sum + row['Work in Progress'], 0),
-                totalRescheduled: exportData.reduce((sum, row) => sum + row['Rescheduled'], 0),
+                totalRescheduled: exportData.reduce((sum, row) => sum + row['Followups'], 0),
                 totalRejected: exportData.reduce((sum, row) => sum + row['Rejected'], 0),
             };
 
@@ -2801,7 +2801,7 @@ const Dashboard = () => {
                 'Branch': '',
                 'Total all Calls and follow-ups': totals.totalFollowups,
                 'Work in Progress': totals.totalWip,
-                'Rescheduled': totals.totalRescheduled,
+                'Followups': totals.totalRescheduled,
                 'Rejected': totals.totalRejected,
                 'Completed': totals.totalCompleted,
             });
@@ -2869,7 +2869,7 @@ const Dashboard = () => {
                 'Branch': getBranchDisplayName(emp.branch),
                 'Total all Calls and follow-ups': total,
                 'Work in Progress': emp.wip_count || 0,
-                'Rescheduled': emp.rescheduled_count || 0,
+                'Followups': emp.rescheduled_count || 0,
                 'Rejected': emp.rejected_count || 0,
                 'Not Connected': emp.not_connected_count || 0,
                 'Completed': completed,
@@ -2884,7 +2884,7 @@ const Dashboard = () => {
             'Branch': '',
             'Total all Calls and follow-ups': totals.totalFollowups,
             'Work in Progress': totals.totalWip,
-            'Rescheduled': totals.totalRescheduled,
+            'Followups': totals.totalRescheduled,
             'Rejected': totals.totalRejected,
             'Not Connected': totals.totalNotConnected,
             'Completed': totals.totalCompleted,
@@ -3198,7 +3198,7 @@ const getPerformanceTitle = () => {
                         </div>
                         <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-300 to-transparent"></div>
                         {i === 2 ? (
-                            /* 3rd card mirrors the real status grid (WIP / FR / R / NC / C) */
+                            /* 3rd card mirrors the real status grid (WIP / Followups / R / NC / C) */
                             <div className="w-[60%] grid grid-cols-3 gap-x-2 gap-y-1.5 max-sm:grid-cols-2">
                                 {[0, 1, 2, 3, 4].map((j) => (
                                     <div key={j} className="flex justify-between items-center">
@@ -3868,7 +3868,7 @@ const getPerformanceTitle = () => {
                                                         <span className="font-bold text-base whitespace-nowrap"><TimeValue>{summaryStats?.wip_assets || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
-                                                        <span>FR:</span>
+                                                        <span>F:</span>
                                                         <span className="font-bold text-base whitespace-nowrap"><TimeValue>{summaryStats?.rescheduled_assets || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
@@ -4104,7 +4104,7 @@ const getPerformanceTitle = () => {
                                                                                     `Attended Assets: ${totalEngagedCustomers.toLocaleString()}`,
                                                                                     `Completed: ${totalCompleted.toLocaleString()} (${completedPercent}%)`,
                                                                                     `WIP: ${totalWip.toLocaleString()} (${wipPercent}%)`,
-                                                                                    `FR: ${totalFR.toLocaleString()} (${frPercent}%)`,
+                                                                                    `Followups: ${totalFR.toLocaleString()} (${frPercent}%)`,
                                                                                     `Rejected: ${totalRejected.toLocaleString()} (${rejectedPercent}%)`,
                                                                                     `NC: ${totalNotConnected.toLocaleString()} (${ncPercent}%)`,
                                                                                     `━━━━━━━━━━━━━━━━━━━━`,
@@ -4421,7 +4421,7 @@ const getPerformanceTitle = () => {
                                                                     <span className="font-bold text-base text-black whitespace-nowrap">{totalWip.toLocaleString()}</span>
                                                                 </div>
                                                                 <div className="flex items-baseline gap-1 min-w-0">
-                                                                    <span className="w-8 shrink-0">FR:</span>
+                                                                    <span className="w-8 shrink-0">F:</span>
                                                                     <span className="font-bold text-base text-black whitespace-nowrap">{totalFR.toLocaleString()}</span>
                                                                 </div>
                                                                 <div className="flex items-baseline gap-1 min-w-0">
@@ -4664,7 +4664,7 @@ const getPerformanceTitle = () => {
                                                     className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
                                                 >
                                                     <div className="flex items-center justify-center gap-1">
-                                                        Rescheduled
+                                                        Followups
                                                         {renderBranchEmployeeSortIcon('rescheduledCount')}
                                                     </div>
                                                 </th>
@@ -4950,7 +4950,7 @@ const getPerformanceTitle = () => {
                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                                             </svg>
-                                            Non Drive Followup Data
+                                            Non-Drive/PW Followup Data
                                         </button>
                                         {canExport && (
                                             <button
@@ -5069,7 +5069,7 @@ const getPerformanceTitle = () => {
                                                     <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('rescheduled_count')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
-                                                            FR
+                                                            Followups
                                                             <span className="text-blue-600 font-bold">
                                                                 {campaignSortConfig.key === 'rescheduled_count' ? (campaignSortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
                                                             </span>

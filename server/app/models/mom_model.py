@@ -49,6 +49,7 @@ class MomMeeting(Base):
     location = Column(String(255), nullable=False, default="")
     type = Column(String(120), nullable=False, default="")          # preset OR custom typed text
     conducted_by = Column(String(120), nullable=False, default="")
+    heads = Column(Text, nullable=True)                             # JSON list of meeting-head names
     created_by = Column(String(50), ForeignKey("users.user_id"), nullable=True)
     created_at = Column(DateTime, default=now_ist)
 
@@ -106,6 +107,8 @@ class MomRow(Base):
     category = Column(String(80), nullable=False, default="Other")
     point = Column(Text, nullable=False, default="")
     responsibility = Column(Text, nullable=True)                     # JSON list of names (legacy: plain string)
+    assigned_by = Column(String(120), nullable=True)                 # meeting head who assigned the task
+    head_resp = Column(String(120), nullable=True)                   # meeting head responsible for the task
     due_date = Column(Date, nullable=True)
     flag = Column(String(1), nullable=False, default="I")            # T | I
     status = Column(String(20), nullable=False, default="pending")   # pending | in_progress | completed

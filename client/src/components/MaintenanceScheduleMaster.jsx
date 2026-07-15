@@ -56,7 +56,12 @@ const MaintenanceScheduleMaster = ({ onBack, initialTab, initialTabNonce }) => {
 
     return (
         <div className="min-h-screen">
-            <style>{`.qm-scroll{scrollbar-width:thin;scrollbar-color:#c7c9e0 transparent}.qm-scroll::-webkit-scrollbar{height:6px;width:6px}.qm-scroll::-webkit-scrollbar-thumb{background:#c7c9e0;border-radius:9999px}`}</style>
+            <style>{`.qm-scroll{scrollbar-width:thin;scrollbar-color:#c7c9e0 transparent}.qm-scroll::-webkit-scrollbar{height:6px;width:6px}.qm-scroll::-webkit-scrollbar-thumb{background:#c7c9e0;border-radius:9999px}
+.kit-wrap{display:grid;grid-template-rows:0fr;transition:grid-template-rows .32s cubic-bezier(.4,0,.2,1)}
+.kit-wrap.kit-open{grid-template-rows:1fr}
+.kit-inner{overflow:hidden;min-height:0}
+.kit-content{opacity:0;transform:translateY(-8px);transition:opacity .26s ease,transform .26s ease}
+.kit-open .kit-content{opacity:1;transform:none;transition-delay:.05s}`}</style>
             <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10 max-md:px-2">
                 {/* Intro */}
                 <div className="rounded-2xl px-3 sm:px-5 py-3 mb-3 text-white relative overflow-hidden"
@@ -168,7 +173,9 @@ const MasterData = () => {
         return rows.filter((a) =>
             a.appCode.toLowerCase().includes(q) || (a.engineModel || '').toLowerCase().includes(q) ||
             (a.kva || '').toLowerCase().includes(q) ||
-            a.parts.some((p) => (p.partNumber || '').toLowerCase().includes(q) || (p.partDesc || '').toLowerCase().includes(q)));
+            a.parts.some((p) =>
+                (p.partNumber || '').toLowerCase().includes(q) || (p.partDesc || '').toLowerCase().includes(q) ||
+                (p.altPartNo || '').toLowerCase().includes(q) || (p.altDesc || '').toLowerCase().includes(q)));
     }, [query, rows]);
 
     const selCodes = Object.keys(sel).filter((k) => sel[k]);
@@ -309,6 +316,7 @@ const MasterData = () => {
                                 <th className="px-3 py-2 border border-gray-200 text-center">KVA</th>
                                 <th className="px-3 py-2 border border-gray-200 text-center">Segment</th>
                                 <th className="px-3 py-2 border border-gray-200 text-center">Parts</th>
+                                <th className="px-3 py-2 border border-gray-200 text-center">Kits</th>
                                 <th className="px-3 py-2 border border-gray-200 text-center w-28">Actions</th>
                                 <th className="px-3 py-2 border border-gray-200 w-10 text-center" />
                             </tr>
@@ -332,6 +340,11 @@ const MasterData = () => {
                                             <td className="px-3 py-2 border border-gray-200 text-center text-gray-600 whitespace-nowrap">{a.kva || '—'} KVA</td>
                                             <td className="px-3 py-2 border border-gray-200 text-center text-gray-600">{a.segment || '—'}</td>
                                             <td className="px-3 py-2 border border-gray-200 text-center font-mono text-gray-600">{a.parts.length}</td>
+                                            <td className="px-3 py-2 border border-gray-200 text-center font-mono">
+                                                {(() => { const k = a.parts.filter(kitHasData).length; return k
+                                                    ? <span className="inline-block rounded px-1.5 py-0.5 text-[11px] font-bold bg-indigo-50 text-[#2f3192]">{k}</span>
+                                                    : <span className="text-gray-300">—</span>; })()}
+                                            </td>
                                             <td className="px-3 py-2 border border-gray-200">
                                                 <div className="flex items-center justify-center gap-1.5">
                                                     <button onClick={() => setEditing(a)} className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-[12px] font-medium text-gray-600 hover:bg-gray-50">
@@ -350,12 +363,12 @@ const MasterData = () => {
                                         </tr>
                                         {isOpen && (
                                             <tr>
-                                                <td colSpan={8} className="border border-gray-200 bg-gray-50/40 p-0">
+                                                <td colSpan={9} className="border border-gray-200 bg-gray-50/40 p-0">
                                                     <div className="overflow-x-auto qm-scroll">
-                                                        <table className="min-w-[640px] w-full border-collapse text-[12px]">
+                                                        <table className="min-w-[980px] w-full border-collapse text-[12px]">
                                                             <thead>
                                                                 <tr className="bg-gray-100/70 text-[10px] font-semibold text-black uppercase tracking-wider">
-                                                                    {['Sr.', 'Part Number', 'Description', 'Qty', 'Act', 'Svc Hrs', 'Service Type', 'Consumable'].map((h, i) => (
+                                                                    {['Sr.', 'Part Number', 'Description', 'Qty', 'Act', 'Kit Number', 'Kit Description', 'Qty', 'Act', 'Svc Hrs', 'Service Type', 'Consumable'].map((h, i) => (
                                                                         <th key={i} className="px-3 py-1.5 border border-gray-200 text-center">{h}</th>
                                                                     ))}
                                                                 </tr>
@@ -368,6 +381,10 @@ const MasterData = () => {
                                                                         <td className="px-3 py-1.5 border border-gray-200 text-gray-700">{p.partDesc || '—'}</td>
                                                                         <td className="px-3 py-1.5 border border-gray-200 text-center">{p.qty}</td>
                                                                         <td className="px-3 py-1.5 border border-gray-200 text-center"><Chip a={p.action} /></td>
+                                                                        <td className="px-3 py-1.5 border border-gray-200 font-mono text-gray-500 whitespace-nowrap">{p.altPartNo || '—'}</td>
+                                                                        <td className="px-3 py-1.5 border border-gray-200 text-gray-500">{p.altDesc || '—'}</td>
+                                                                        <td className="px-3 py-1.5 border border-gray-200 text-center text-gray-500">{p.altQty || '—'}</td>
+                                                                        <td className="px-3 py-1.5 border border-gray-200 text-center"><Chip a={p.altAction} /></td>
                                                                         <td className="px-3 py-1.5 border border-gray-200 text-center font-mono">{p.serviceHours}</td>
                                                                         <td className="px-3 py-1.5 border border-gray-200 text-[11px] text-gray-500">{partService(services, p).short}</td>
                                                                         <td className="px-3 py-1.5 border border-gray-200 text-center">{p.consumable}</td>
@@ -464,6 +481,10 @@ const Combo = ({ value, onChange, options, placeholder, mono, fieldCls }) => {
 
 /* ------------- Add / Edit modal with parts editor (dropdowns from data) ------------- */
 const blankPart = () => ({ partNumber: '', partDesc: '', qty: '1', action: 'R', serviceHours: '500', consumable: '', altPartNo: '', altDesc: '', altQty: '', altAction: '', schedule: '' });
+// Kit fields (Kit Number / Kit Description / Qty / Action) are stored on the part
+// line as altPartNo / altDesc / altQty / altAction. A part "has a kit" when any of
+// them is filled.
+const kitHasData = (p) => !!(String(p.altPartNo || '').trim() || String(p.altDesc || '').trim() || String(p.altQty || '').trim() || String(p.altAction || '').trim());
 
 const AppFormModal = ({ initial, opts, existing, onClose, onSave }) => {
     const isEdit = !!initial;
@@ -476,12 +497,19 @@ const AppFormModal = ({ initial, opts, existing, onClose, onSave }) => {
         appCode: initial?.appCode || '', segment: initial?.segment || 'PG', kva: initial?.kva || (opts.kvaOpts[0] || ''),
         engineModel: initial?.engineModel || '', systemAppCode: initial?.systemAppCode || '', emission: initial?.emission || 'CPCB IV+',
     });
-    const makeInitialParts = () => (initial ? JSON.parse(JSON.stringify(initial.parts)) : [blankPart()]);
+    // __kit is UI-only (kit editor row open/closed). Parts that already carry kit
+    // data open with their kit editor expanded so it is visible immediately.
+    const makeInitialParts = () => (initial
+        ? JSON.parse(JSON.stringify(initial.parts)).map((p) => ({ ...p, __kit: kitHasData(p) }))
+        : [blankPart()]);
     // Add drafts share one slot; edit drafts are keyed per app code.
     const draftKey = isEdit ? `msm:appDraft:edit:${initial.appCode}` : 'msm:appDraft:new';
     // Snapshot of the pristine form — we only persist (and only prompt) when the
     // current form actually differs from this, so blank/no-op drafts never linger.
-    const baseRef = useRef(JSON.stringify({ hdr: makeInitialHdr(), parts: makeInitialParts() }));
+    // __kit is stripped so merely expanding/collapsing a kit editor never counts
+    // as an edit or creates a draft.
+    const snap = (h, ps) => JSON.stringify({ hdr: h, parts: (ps || []).map(({ __kit, ...p }) => p) });
+    const baseRef = useRef(snap(makeInitialHdr(), makeInitialParts()));
 
     const [hdr, setHdr] = useState(makeInitialHdr);
     const [parts, setParts] = useState(makeInitialParts);
@@ -494,7 +522,7 @@ const AppFormModal = ({ initial, opts, existing, onClose, onSave }) => {
             const raw = localStorage.getItem(draftKey);
             if (!raw) return;
             const saved = JSON.parse(raw);
-            const same = JSON.stringify({ hdr: saved.hdr, parts: saved.parts }) === baseRef.current;
+            const same = snap(saved.hdr, saved.parts) === baseRef.current;
             if (same) localStorage.removeItem(draftKey); // stale no-op draft
             else setPendingDraft(saved);
         } catch { try { localStorage.removeItem(draftKey); } catch { /* ignore */ } }
@@ -505,7 +533,7 @@ const AppFormModal = ({ initial, opts, existing, onClose, onSave }) => {
     // from the pristine baseline, so it never clobbers a pending draft on mount
     // and never stores an empty/unchanged form.
     useEffect(() => {
-        const cur = JSON.stringify({ hdr, parts });
+        const cur = snap(hdr, parts);
         if (cur === baseRef.current) return;
         const t = setTimeout(() => {
             try { localStorage.setItem(draftKey, JSON.stringify({ hdr, parts, savedAt: Date.now() })); } catch { /* quota/full — ignore */ }
@@ -525,8 +553,11 @@ const AppFormModal = ({ initial, opts, existing, onClose, onSave }) => {
     };
 
     const setPart = (i, k, v) => setParts((arr) => arr.map((p, j) => (j === i ? { ...p, [k]: v } : p)));
+    const clearKit = (i) => setParts((arr) => arr.map((p, j) => (j === i ? { ...p, altPartNo: '', altDesc: '', altQty: '', altAction: '' } : p)));
     const sel = 'w-full rounded-md border border-gray-200 px-1.5 py-1 text-[12px] bg-white outline-none focus:ring-1 focus:ring-indigo-200';
     const inp = 'w-full rounded-md border border-gray-200 px-1.5 py-1 text-[12px] bg-white outline-none focus:ring-1 focus:ring-indigo-200';
+    // Kit editor uses larger, roomier fields than the compact part-line inputs.
+    const kitInp = 'w-full rounded-lg border border-indigo-200/70 bg-white px-2.5 py-2 text-[13px] outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 transition';
     const field = 'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-[13px] text-black outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition';
     const label = 'block text-[12px] font-semibold text-gray-700 mb-1';
 
@@ -550,7 +581,7 @@ const AppFormModal = ({ initial, opts, existing, onClose, onSave }) => {
         const rec = {
             appCode: code, segment: hdr.segment.trim(), kva: String(hdr.kva).trim(), engineModel: hdr.engineModel.trim(),
             systemAppCode: hdr.systemAppCode.trim(), emission: hdr.emission.trim(),
-            parts,
+            parts: parts.map(({ __kit, ...p }) => p), // __kit is UI-only
         };
         setSaving(true);
         try {
@@ -565,12 +596,12 @@ const AppFormModal = ({ initial, opts, existing, onClose, onSave }) => {
 
     return (
         <div className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto p-4 max-md:p-2" style={{ background: 'rgba(20,26,32,.55)' }}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl my-8 max-lg:max-w-[95vw] max-md:my-3">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl my-auto max-xl:max-w-[95vw]">
                 <div className="flex items-center gap-2 px-5 py-3.5 border-b border-gray-200 max-md:px-3">
                     <h3 className="text-[16px] font-bold text-gray-800">{isEdit ? 'Edit' : 'Add'} Application Code</h3>
                     <button onClick={onClose} disabled={saving} className="ml-auto rounded-lg p-1 text-gray-400 hover:bg-gray-100 disabled:opacity-50"><XMarkIcon className="h-5 w-5" /></button>
                 </div>
-                <div className="px-5 py-4 max-h-[64vh] overflow-y-auto max-md:px-3">
+                <div className="px-5 py-4 max-h-[72vh] overflow-y-auto max-md:px-3">
                     {pendingDraft && (
                         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
                             <span className="flex-1 text-[12px] font-medium text-amber-900">
@@ -614,31 +645,83 @@ const AppFormModal = ({ initial, opts, existing, onClose, onSave }) => {
                         </button>
                     </div>
                     <div className="border border-gray-200 rounded-lg overflow-x-auto qm-scroll">
-                        <table className="min-w-[660px] w-full border-collapse">
+                        <table className="min-w-[860px] w-full border-collapse">
                             <thead>
                                 <tr className="bg-gray-50 text-[9.5px] font-semibold text-gray-500 uppercase tracking-wide">
                                     <th className="px-2 py-1.5 text-center">Part Number</th><th className="px-2 py-1.5 text-center">Description</th>
-                                    <th className="px-2 py-1.5 text-center w-14">Qty</th><th className="px-2 py-1.5 text-center w-16">Action</th>
-                                    <th className="px-2 py-1.5 text-center w-20">Svc Hrs</th><th className="px-2 py-1.5 text-center w-24">Consumable</th><th className="w-9" />
+                                    <th className="px-2 py-1.5 text-center w-16">Qty</th><th className="px-2 py-1.5 text-center w-20">Action</th>
+                                    <th className="px-2 py-1.5 text-center w-24">Svc Hrs</th><th className="px-2 py-1.5 text-center w-28">Consumable</th>
+                                    <th className="px-2 py-1.5 text-center w-20">Kit</th><th className="w-9" />
                                 </tr>
                             </thead>
                             <tbody>
                                 {parts.map((p, i) => (
-                                    <tr key={i} className="border-t border-gray-100">
-                                        <td className="px-1.5 py-1"><input className={`${inp} font-mono`} value={p.partNumber} onChange={(e) => setPart(i, 'partNumber', e.target.value)} /></td>
-                                        <td className="px-1.5 py-1"><input className={inp} value={p.partDesc} onChange={(e) => setPart(i, 'partDesc', e.target.value)} /></td>
-                                        <td className="px-1.5 py-1"><input className={`${inp} font-mono`} value={p.qty} onChange={(e) => setPart(i, 'qty', e.target.value)} /></td>
-                                        <td className="px-1.5 py-1"><Combo value={p.action} onChange={(v) => setPart(i, 'action', v)} options={opts.actOpts} mono fieldCls={inp} /></td>
-                                        <td className="px-1.5 py-1"><Combo value={p.serviceHours} onChange={(v) => setPart(i, 'serviceHours', v)} options={opts.hrsOpts} mono fieldCls={inp} /></td>
-                                        <td className="px-1.5 py-1"><input className={`${inp} font-mono`} value={p.consumable} onChange={(e) => setPart(i, 'consumable', e.target.value)} /></td>
-                                        <td className="px-1.5 py-1 text-center">
-                                            <button onClick={() => setParts((a) => a.filter((_, j) => j !== i))} className="rounded-md border border-gray-200 p-1 text-gray-400 hover:text-red-600 hover:border-red-300 hover:bg-red-50">
-                                                <TrashIcon className="h-3.5 w-3.5" />
-                                            </button>
-                                        </td>
-                                    </tr>
+                                    <React.Fragment key={i}>
+                                        <tr className="border-t border-gray-100">
+                                            <td className="px-1.5 py-1"><input className={`${inp} font-mono`} value={p.partNumber} onChange={(e) => setPart(i, 'partNumber', e.target.value)} /></td>
+                                            <td className="px-1.5 py-1"><input className={inp} value={p.partDesc} onChange={(e) => setPart(i, 'partDesc', e.target.value)} /></td>
+                                            <td className="px-1.5 py-1"><input className={`${inp} font-mono`} value={p.qty} onChange={(e) => setPart(i, 'qty', e.target.value)} /></td>
+                                            <td className="px-1.5 py-1"><Combo value={p.action} onChange={(v) => setPart(i, 'action', v)} options={opts.actOpts} mono fieldCls={inp} /></td>
+                                            <td className="px-1.5 py-1"><Combo value={p.serviceHours} onChange={(v) => setPart(i, 'serviceHours', v)} options={opts.hrsOpts} mono fieldCls={inp} /></td>
+                                            <td className="px-1.5 py-1"><input className={`${inp} font-mono`} value={p.consumable} onChange={(e) => setPart(i, 'consumable', e.target.value)} /></td>
+                                            <td className="px-1.5 py-1 text-center">
+                                                <button type="button" onClick={() => setPart(i, '__kit', !p.__kit)}
+                                                    title={p.__kit ? 'Hide kit details' : 'Add / edit kit details'}
+                                                    className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-1 text-[10.5px] font-semibold transition ${kitHasData(p) ? 'border-indigo-200 bg-indigo-50 text-[#2f3192]' : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50'}`}>
+                                                    Kit <ChevronDownIcon className={`h-3 w-3 transition ${p.__kit ? 'rotate-180' : ''}`} />
+                                                </button>
+                                            </td>
+                                            <td className="px-1.5 py-1 text-center">
+                                                <button onClick={() => setParts((a) => a.filter((_, j) => j !== i))} className="rounded-md border border-gray-200 p-1 text-gray-400 hover:text-red-600 hover:border-red-300 hover:bg-red-50">
+                                                    <TrashIcon className="h-3.5 w-3.5" />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td colSpan={8} className="p-0 border-0">
+                                                <div className={`kit-wrap ${p.__kit ? 'kit-open' : ''}`} aria-hidden={!p.__kit}>
+                                                    <div className="kit-inner">
+                                                        <div className="kit-content px-2 pt-1 pb-2.5" inert={!p.__kit}>
+                                                            <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 px-4 py-3.5">
+                                                                <div className="relative flex items-center justify-center mb-3">
+                                                                    <div className="text-center">
+                                                                        <span className="text-[12.5px] font-bold uppercase tracking-wider text-[#2f3192]">Kit Details</span>
+                                                                        <span className="ml-2 text-[11px] text-gray-400">(optional)</span>
+                                                                    </div>
+                                                                    {kitHasData(p) && (
+                                                                        <button type="button" onClick={() => clearKit(i)}
+                                                                            className="absolute right-0 top-1/2 -translate-y-1/2 rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] font-semibold text-red-500 hover:bg-red-50 transition">
+                                                                            Clear kit
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                                <div className="grid grid-cols-[1.1fr_1.7fr_.45fr_.65fr] gap-3 max-md:grid-cols-2">
+                                                                    <div>
+                                                                        <label className="block text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Kit Number</label>
+                                                                        <input className={`${kitInp} font-mono`} value={p.altPartNo || ''} onChange={(e) => setPart(i, 'altPartNo', e.target.value)} placeholder="e.g. 3H.019.11.0.SP" />
+                                                                    </div>
+                                                                    <div>
+                                                                        <label className="block text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Kit Description</label>
+                                                                        <input className={kitInp} value={p.altDesc || ''} onChange={(e) => setPart(i, 'altDesc', e.target.value)} placeholder="e.g. 50 Hrs - A Check Maint Kit" />
+                                                                    </div>
+                                                                    <div>
+                                                                        <label className="block text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Qty</label>
+                                                                        <input className={`${kitInp} font-mono text-center`} value={p.altQty || ''} onChange={(e) => setPart(i, 'altQty', e.target.value)} />
+                                                                    </div>
+                                                                    <div>
+                                                                        <label className="block text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Action</label>
+                                                                        <Combo value={p.altAction || ''} onChange={(v) => setPart(i, 'altAction', v)} options={opts.actOpts} mono fieldCls={kitInp} />
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </React.Fragment>
                                 ))}
-                                {parts.length === 0 && <tr><td colSpan={7} className="text-center text-gray-400 py-3 text-[12px]">No parts yet — add a line.</td></tr>}
+                                {parts.length === 0 && <tr><td colSpan={8} className="text-center text-gray-400 py-3 text-[12px]">No parts yet — add a line.</td></tr>}
                             </tbody>
                         </table>
                     </div>
@@ -750,9 +833,15 @@ const ImportData = () => {
         r.onload = (ev) => {
             try {
                 const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array' });
-                const sheet = wb.SheetNames.find((n) => /master/i.test(n)) || wb.SheetNames[0];
-                const rowsAoa = XLSX.utils.sheet_to_json(wb.Sheets[sheet], { header: 1, blankrows: false, defval: '' });
-                parseRows(rowsAoa, file.name, sheet);
+                // Pick the sheet that actually contains an "App Code" header — master
+                // files often carry extra sheets (notes / working copies) before the
+                // data sheet, so name alone isn't enough.
+                const toAoa = (n) => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, blankrows: false, defval: '' });
+                const hasAppCode = (n) => toAoa(n).some((r) => r.some((c) => norm(c).includes('appcode')));
+                const sheet = wb.SheetNames.find((n) => /master|final/i.test(n) && hasAppCode(n))
+                    || wb.SheetNames.find(hasAppCode)
+                    || wb.SheetNames[0];
+                parseRows(toAoa(sheet), file.name, sheet);
             } catch (e) { toast.error('Could not read file: ' + e.message); }
         };
         r.readAsArrayBuffer(file);
@@ -762,18 +851,35 @@ const ImportData = () => {
         let hi = rowsAoa.findIndex((r) => r.some((c) => norm(c).includes('appcode')));
         if (hi < 0) hi = 0;
         const hdr = rowsAoa[hi].map(norm), col = (n) => hdr.findIndex((h) => h === n || h.includes(n));
+        // All indices matching a header name — the file repeats "Qty" / "Action" for
+        // the kit columns, so the first hit is the part's and the next one AFTER the
+        // kit-description column belongs to the kit.
+        const colAll = (n) => hdr.reduce((acc, h, i) => ((h === n || h.includes(n)) ? [...acc, i] : acc), []);
+        const qtyCols = colAll('qty'), actCols = colAll('action');
+        // Kit columns: "Kit Number" / "Kit Description" (new master file). Legacy
+        // files used "Part NO " / "Description " for the same pair — fall back to
+        // those exact normalized names (distinct from partnumber / partdescription).
+        const kitNo = (() => { const k = col('kitnumber'); return k >= 0 ? k : hdr.findIndex((h) => h === 'kitno' || h === 'partno'); })();
+        const kitDesc = (() => { const k = col('kitdescription'); return k >= 0 ? k : hdr.findIndex((h) => h === 'kitdesc' || h === 'description'); })();
+        const after = (indices, ref) => { const f = indices.find((i) => i > ref); return f === undefined ? -1 : f; };
         const C = {
             seg: col('segment'), app: col('appcode'), sys: col('systemappcode'), eng: col('enginemodel'), kva: col('kva'),
             emi: col('emmission') >= 0 ? col('emmission') : col('emission'), pn: col('partnumber'), pd: col('partdescription'),
-            qty: col('qty'), act: col('action'), hrs: col('servicehours'), cons: col('consumable'), sch: col('serviceschedules'),
+            qty: qtyCols[0] ?? -1, act: actCols[0] ?? -1, hrs: col('servicehours'), cons: col('consumable'), sch: col('serviceschedules'),
+            kitNo, kitDesc,
+            kitQty: kitDesc >= 0 ? after(qtyCols, kitDesc) : (qtyCols[1] ?? -1),
+            kitAct: kitDesc >= 0 ? after(actCols, kitDesc) : (actCols[1] ?? -1),
         };
         if (C.app < 0) { toast.error('No "App Code" column found in ' + sheet); return; }
         const g = (r, i) => (i >= 0 ? String(r[i] ?? '').trim() : '');
+        // The master file writes 0 in kit cells for parts that have no kit — treat
+        // 0 / - as blank so those rows don't become bogus kit lines.
+        const kv = (r, i) => { const v = g(r, i); return (v === '0' || v === '-') ? '' : v; };
         const groups = {}, order = [];
         for (let i = hi + 1; i < rowsAoa.length; i++) {
             const r = rowsAoa[i], code = g(r, C.app); if (!code) continue;
             if (!groups[code]) { groups[code] = { appCode: code, segment: g(r, C.seg), systemAppCode: g(r, C.sys), engineModel: g(r, C.eng), kva: g(r, C.kva), emission: g(r, C.emi), parts: [] }; order.push(code); }
-            if (g(r, C.pn) || g(r, C.pd)) groups[code].parts.push({ partNumber: g(r, C.pn), partDesc: g(r, C.pd), qty: g(r, C.qty), action: g(r, C.act), serviceHours: g(r, C.hrs), consumable: g(r, C.cons), schedule: g(r, C.sch), altPartNo: '', altDesc: '', altQty: '', altAction: '' });
+            if (g(r, C.pn) || g(r, C.pd)) groups[code].parts.push({ partNumber: g(r, C.pn), partDesc: g(r, C.pd), qty: g(r, C.qty), action: g(r, C.act), serviceHours: g(r, C.hrs), consumable: g(r, C.cons), schedule: g(r, C.sch), altPartNo: kv(r, C.kitNo), altDesc: kv(r, C.kitDesc), altQty: kv(r, C.kitQty), altAction: kv(r, C.kitAct) });
         }
         const items = order.map((c) => ({ code: c, rec: groups[c], exists: existing.has(c), parts: groups[c].parts.length }));
         setPreview({ items, news: items.filter((i) => !i.exists), reps: items.filter((i) => i.exists), fname, sheet });
@@ -821,7 +927,7 @@ const ImportData = () => {
                 onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); onFile(e.dataTransfer.files?.[0]); }}>
                 <ArrowUpTrayIcon className="h-9 w-9 mx-auto mb-2" style={{ color: themeColor }} />
                 <p className="text-[15px] font-semibold text-gray-800">Drop a file here or click to browse</p>
-                <p className="text-[12px] text-gray-400 mt-1">Expects columns like Segment · App Code · Engine Model · KVA · Part Number · Qty · Action · Service Hours</p>
+                <p className="text-[12px] text-gray-400 mt-1">Expects columns like Segment · App Code · Engine Model · KVA · Part Number · Qty · Action · Service Hours · Kit Number · Kit Description</p>
             </div>
 
             {preview && (
@@ -873,12 +979,16 @@ const ImportData = () => {
                                                                 <div className="px-4 py-3 text-[11px] text-gray-400">No part lines found in the file for this code.</div>
                                                             ) : (
                                                                 <div className="overflow-x-auto qm-scroll px-3 py-2">
-                                                                    <table className="min-w-[520px] w-full border-collapse text-[11.5px]">
+                                                                    <table className="min-w-[860px] w-full border-collapse text-[11.5px]">
                                                                         <thead>
                                                                             <tr className="text-[9.5px] font-semibold text-gray-500 uppercase tracking-wide">
                                                                                 <th className="px-2 py-1 text-center">Sr.</th>
                                                                                 <th className="px-2 py-1 text-center">Part Number</th>
                                                                                 <th className="px-2 py-1 text-center">Description</th>
+                                                                                <th className="px-2 py-1 text-center">Qty</th>
+                                                                                <th className="px-2 py-1 text-center">Act</th>
+                                                                                <th className="px-2 py-1 text-center">Kit Number</th>
+                                                                                <th className="px-2 py-1 text-center">Kit Description</th>
                                                                                 <th className="px-2 py-1 text-center">Qty</th>
                                                                                 <th className="px-2 py-1 text-center">Act</th>
                                                                                 <th className="px-2 py-1 text-center">Svc Hrs</th>
@@ -893,6 +1003,10 @@ const ImportData = () => {
                                                                                     <td className="px-2 py-1 text-gray-600">{p.partDesc || '—'}</td>
                                                                                     <td className="px-2 py-1 text-center">{p.qty || '—'}</td>
                                                                                     <td className="px-2 py-1 text-center"><Chip a={p.action} /></td>
+                                                                                    <td className="px-2 py-1 font-mono text-gray-500 whitespace-nowrap">{p.altPartNo || '—'}</td>
+                                                                                    <td className="px-2 py-1 text-gray-500">{p.altDesc || '—'}</td>
+                                                                                    <td className="px-2 py-1 text-center text-gray-500">{p.altQty || '—'}</td>
+                                                                                    <td className="px-2 py-1 text-center"><Chip a={p.altAction} /></td>
                                                                                     <td className="px-2 py-1 text-center font-mono">{p.serviceHours || '—'}</td>
                                                                                     <td className="px-2 py-1 text-center">{p.consumable || '—'}</td>
                                                                                 </tr>

@@ -76,6 +76,10 @@ class CampaignUpdate(BaseModel):
     status: Optional[str] = None
     asset_numbers: Optional[List[str]] = None
     scripts: Optional[List[Dict[str, Any]]] = None
+    # Asset numbers the admin uploaded DURING this edit session. Lets a
+    # re-upload of assets already on the drive be tagged admin-added (the
+    # drive's asset list itself stays deduplicated as before).
+    admin_entered_assets: Optional[List[str]] = None
 
 class DriveMetaUpsert(BaseModel):
     """Create/update payload for the separate drive-meta table (modal edits)."""
@@ -102,10 +106,16 @@ class CampaignResponse(CampaignBase):
     id: int
     asset_numbers: List[str] = []
     invalid_asset_numbers: List[str] = []
+    admin_asset_numbers: List[str] = []
     scripts: List[Dict[str, Any]] = []
     created_at: datetime
     updated_at: datetime
-    
+
+    # Drives created before the admin-added column existed hold NULL there
+    @validator('admin_asset_numbers', 'invalid_asset_numbers', pre=True, always=True)
+    def default_empty_list(cls, v):
+        return v if isinstance(v, list) else []
+
     class Config:
         from_attributes = True
 

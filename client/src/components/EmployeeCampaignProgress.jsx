@@ -8,7 +8,7 @@ const themeColor = '#2f3192';
 const STATUS_CONFIG = {
     completed: { label: 'Completed', color: '#16a34a', bg: '#dcfce7', short: 'C' },
     wip: { label: 'WIP', color: '#b45309', bg: '#fef3c7', short: 'W' },
-    rescheduled: { label: 'FR', color: '#7c3aed', bg: '#ede9fe', short: 'FR' },
+    rescheduled: { label: 'Followups', color: '#7c3aed', bg: '#ede9fe', short: 'Followups' },
     rejected: { label: 'Rejected', color: '#dc2626', bg: '#fee2e2', short: 'R' },
     not_connected: { label: 'NC', color: '#0369a1', bg: '#e0f2fe', short: 'NC' },
     pending: { label: 'Pending', color: '#6b7280', bg: '#f3f4f6', short: 'P' },
@@ -498,7 +498,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                             { label: 'Followups', value: totals.followups, color: '#000000' },
                             { label: 'Completed', value: totals.completed, color: '#000000' },
                             { label: 'WIP', value: totals.wip, color: '#000000' },
-                            { label: 'FR', value: totals.rescheduled, color: '#000000' },
+                            { label: 'Followups', value: totals.rescheduled, color: '#000000' },
                             { label: 'Rejected', value: totals.rejected, color: '#000000' },
                             { label: 'NC', value: totals.not_connected, color: '#000000' },
                         ].map(card => (
@@ -608,7 +608,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                                         className="px-3 py-2 text-center font-bold text-black border border-gray-200 cursor-pointer hover:bg-gray-100 select-none"
                                         onClick={() => handleSort('rescheduled')}
                                     >
-                                        FR <SortIcon col="rescheduled" />
+                                        Followups <SortIcon col="rescheduled" />
                                     </th>
                                     <th
                                         className="px-3 py-2 text-center font-bold text-black border border-gray-200 cursor-pointer hover:bg-gray-100 select-none"
@@ -784,7 +784,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                                             <option value="completed">Completed</option>
                                             <option value="wip">WIP</option>
                                             <option value="rejected">Rejected</option>
-                                            <option value="rescheduled">FR (Rescheduled)</option>
+                                            <option value="rescheduled">Followups</option>
                                         </select>
                                         <svg
                                             className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-black pointer-events-none"
@@ -898,7 +898,7 @@ const EmployeeCampaignProgress = ({ isOpen, onClose, employee, userData }) => {
                                                                     fu.status === 'rescheduled' ? 'bg-purple-100 text-purple-700' :
                                                                         'bg-gray-100 text-gray-700'
                                                             }`}>
-                                                            {fu.status === 'rescheduled' ? 'FR' : (fu.status || '-')}
+                                                            {fu.status === 'rescheduled' ? 'Followups' : (fu.status || '-')}
                                                         </span>
                                                     </td>
                                                     <td className="px-2 py-1 border border-gray-200 text-center whitespace-nowrap">

@@ -90,6 +90,65 @@ const themeShades = {
   dark: 'var(--erp-accent-dark)',
 };
 
+// Main nav item list. Lives at module scope (hover state passed in as props)
+// so its component identity is stable across Navbar re-renders — defined
+// inline it remounted on every hover, replaying the label fade animation.
+const NavLinks = ({ items, collapsed = false, onClick = () => { }, hoveredItem, setHoveredItem }) => (
+  <nav className="space-y-0.5">
+    {items.map((item) => (
+      <NavLink
+        key={item.path}
+        to={item.path}
+        onClick={onClick}
+        onMouseEnter={() => setHoveredItem(item.path)}
+        onMouseLeave={() => setHoveredItem(null)}
+        className={({ isActive }) =>
+          `group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200 min-w-full w-max ${isActive
+            ? 'text-gray-900 font-medium'
+            : 'text-black hover:text-gray-900'
+          } ${collapsed ? 'justify-center' : ''}`
+        }
+        style={({ isActive }) => ({
+          backgroundColor: isActive ? themeShades.light : 'transparent',
+          color: isActive ? themeColor : undefined
+        })}
+        title={collapsed ? item.name : ''}
+      >
+        {({ isActive }) => (
+          <>
+            <item.icon
+              className={`
+                h-3.5 w-3.5 transition-all duration-200 flex-shrink-0
+                ${collapsed ? 'mx-auto' : ''}
+              `}
+              style={{
+                color: isActive ? themeColor :
+                  hoveredItem === item.path ? themeColor : '#6B7280'
+              }}
+            />
+
+            {!collapsed && (
+              <>
+                <span className="nav-label-fade flex-1 text-sm font-medium whitespace-nowrap">
+                  {item.name}
+                </span>
+              </>
+            )}
+
+            {/* Tooltip for collapsed mode */}
+            {collapsed && (
+              <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
+                {item.name}
+                <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
+              </div>
+            )}
+          </>
+        )}
+      </NavLink>
+    ))}
+  </nav>
+);
+
 // Branch mapping
 const branchMap = {
   'HO': 'Pune Office',
@@ -125,7 +184,7 @@ const terminologyData = {
       { symbol: "W", meaning: "Work in Progress", description: "Ongoing" },
       { symbol: "C", meaning: "Completed", description: "Business converted" },
       { symbol: "R", meaning: "Rejected", description: "Rejected by customer" },
-      { symbol: "FR", meaning: "Rescheduled", description: "Follow-up rescheduled" },
+      { symbol: "F", meaning: "Followup", description: "Follow-up rescheduled" },
       { symbol: "NC", meaning: "Not Connected", description: "Call not connected during follow-up" }
     ]
   },
@@ -921,62 +980,6 @@ function Navbar({ children }) {
     return location.pathname === '/expense' || location.pathname === '/expense-dashboard';
   };
 
-  const NavLinks = ({ items, collapsed = false, onClick = () => { } }) => (
-    <nav className="space-y-0.5">
-      {items.map((item) => (
-        <NavLink
-          key={item.path}
-          to={item.path}
-          onClick={onClick}
-          onMouseEnter={() => setHoveredItem(item.path)}
-          onMouseLeave={() => setHoveredItem(null)}
-          className={({ isActive }) =>
-            `group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200 min-w-full w-max ${isActive
-              ? 'text-gray-900 font-medium'
-              : 'text-black hover:text-gray-900'
-            } ${collapsed ? 'justify-center' : ''}`
-          }
-          style={({ isActive }) => ({
-            backgroundColor: isActive ? themeShades.light : 'transparent',
-            color: isActive ? themeColor : undefined
-          })}
-          title={collapsed ? item.name : ''}
-        >
-          {({ isActive }) => (
-            <>
-              <item.icon
-                className={`
-                  h-3.5 w-3.5 transition-all duration-200 flex-shrink-0
-                  ${collapsed ? 'mx-auto' : ''}
-                `}
-                style={{
-                  color: isActive ? themeColor :
-                    hoveredItem === item.path ? themeColor : '#6B7280'
-                }}
-              />
-
-              {!collapsed && (
-                <>
-                  <span className="flex-1 text-sm font-medium whitespace-nowrap">
-                    {item.name}
-                  </span>
-                </>
-              )}
-
-              {/* Tooltip for collapsed mode */}
-              {collapsed && (
-                <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
-                  {item.name}
-                  <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
-                </div>
-              )}
-            </>
-          )}
-        </NavLink>
-      ))}
-    </nav>
-  );
-
   const Logo = ({ collapsed }) => {
     if (logoError) {
       return (
@@ -1508,11 +1511,12 @@ function Navbar({ children }) {
         fixed md:relative md:translate-x-0
         h-full bg-white backdrop-blur-xl
         border-r border-gray-200/50
-        transition-all duration-300 ease-in-out z-30
+        transition-all duration-500 z-30
         shadow-xl shadow-gray-200/20
         ${sidebarOpen ? 'w-56' : 'w-14'}
         ${isMobile ? (sidebarOpen ? 'translate-x-0' : '-translate-x-full') : ''}
-      `}>
+      `}
+        style={{ transitionTimingFunction: 'cubic-bezier(0.33, 1, 0.68, 1)' }}>
         <div className="flex flex-col h-full">
           {/* Sidebar Header - Logo and Name Centered */}
           <div className={`bg-[#ffdb62] flex items-center justify-center ${sidebarOpen ? 'pt-0 pb-1' : 'py-1'} ${sidebarOpen ? 'px-4' : 'px-2'}`}>
@@ -1521,7 +1525,7 @@ function Navbar({ children }) {
                 <Logo collapsed={!sidebarOpen} />
               </div>
               {sidebarOpen && (
-                <div className="flex flex-col items-center w-full">
+                <div className="nav-label-fade flex flex-col items-center w-full">
                   <span className="text-[15px] font-bold text-[#2f3192] leading-tight text-center">
                     KALA Care Global LLP.,
                   </span>
@@ -1581,14 +1585,34 @@ function Navbar({ children }) {
                   .nav-scroll::-webkit-scrollbar-thumb:hover {
                     background: #94a3b8;
                   }
-                  /* Submenu drop-in — springy slide + fade when a section opens */
-                  .nav-dd-anim {
-                    animation: navDropIn .22s cubic-bezier(.22, 1, .36, 1);
-                    transform-origin: top;
+                  /* Submenu open/close — always-mounted grid-rows collapse so
+                     BOTH expanding and collapsing glide smoothly (conditional
+                     render used to snap shut with no close animation). */
+                  .nav-dd-wrap {
+                    display: grid;
+                    grid-template-rows: 0fr;
+                    transition: grid-template-rows .45s cubic-bezier(.33, 1, .68, 1);
                   }
-                  @keyframes navDropIn {
-                    from { opacity: 0; transform: translateY(-6px) scaleY(.9); }
-                    to   { opacity: 1; transform: translateY(0) scaleY(1); }
+                  .nav-dd-wrap.nav-dd-open { grid-template-rows: 1fr; }
+                  .nav-dd-inner {
+                    overflow: hidden;
+                    min-height: 0;
+                    opacity: 0;
+                    transform: translateY(-6px);
+                    visibility: hidden; /* keeps closed submenu links out of the tab order */
+                    transition: opacity .3s ease, transform .45s cubic-bezier(.33, 1, .68, 1), visibility 0s .45s;
+                  }
+                  .nav-dd-wrap.nav-dd-open .nav-dd-inner {
+                    opacity: 1;
+                    transform: none;
+                    visibility: visible;
+                    transition: opacity .35s ease .08s, transform .45s cubic-bezier(.33, 1, .68, 1);
+                  }
+                  /* Labels fade+slide in as the rail expands instead of popping */
+                  .nav-label-fade { animation: navLabelIn .4s ease .12s both; }
+                  @keyframes navLabelIn {
+                    from { opacity: 0; transform: translateX(-6px); }
+                    to   { opacity: 1; transform: none; }
                   }
                 `}
               </style>
@@ -1599,7 +1623,7 @@ function Navbar({ children }) {
               <div
                 className={`py-1.5 ${sidebarOpen ? 'min-w-full w-max pl-3 pr-6' : 'overflow-visible w-full px-2'}`}
               >
-              <NavLinks items={mainNavItems} collapsed={!sidebarOpen} />
+              <NavLinks items={mainNavItems} collapsed={!sidebarOpen} hoveredItem={hoveredItem} setHoveredItem={setHoveredItem} />
 
               {/* Engagement Masters — master/IT admin only. Groups Data-Upload,
                   Customers Data Bouquet and Drive Creation under one dropdown. */}
@@ -1625,7 +1649,7 @@ function Navbar({ children }) {
                             hoveredItem === 'engagement-masters' ? themeColor : '#6B7280'
                         }}
                       />
-                      <span className="flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
+                      <span className="nav-label-fade flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
                         Engagement Masters
                       </span>
                       {engagementMastersDropdownOpen ? (
@@ -1635,8 +1659,9 @@ function Navbar({ children }) {
                       )}
                     </button>
 
-                    {(engagementMastersDropdownOpen || isEngagementMastersActive()) && (
-                      <div className="nav-dd-anim ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
+                    <div className={`nav-dd-wrap ${(engagementMastersDropdownOpen || isEngagementMastersActive()) ? 'nav-dd-open' : ''}`}>
+                      <div className="nav-dd-inner">
+                        <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
                         {engagementMastersItems.map((item) => (
                           <NavLink
                             key={item.path}
@@ -1664,8 +1689,9 @@ function Navbar({ children }) {
                             )}
                           </NavLink>
                         ))}
+                        </div>
                       </div>
-                    )}
+                    </div>
                   </div>
                 ) : (
                   /* Collapsed mode */
@@ -1744,7 +1770,7 @@ function Navbar({ children }) {
                             hoveredItem === 'part-detail-info' ? themeColor : '#6B7280'
                         }}
                       />
-                      <span className="flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
+                      <span className="nav-label-fade flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
                         Part Detail Info
                       </span>
                       {partInfoDropdownOpen ? (
@@ -1754,8 +1780,9 @@ function Navbar({ children }) {
                       )}
                     </button>
 
-                    {(partInfoDropdownOpen || isPartInfoActive()) && (
-                      <div className="nav-dd-anim ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
+                    <div className={`nav-dd-wrap ${(partInfoDropdownOpen || isPartInfoActive()) ? 'nav-dd-open' : ''}`}>
+                      <div className="nav-dd-inner">
+                        <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
                         {partDetailItems.map((item) => (
                           <NavLink
                             key={item.path}
@@ -1787,8 +1814,9 @@ function Navbar({ children }) {
                             )}
                           </NavLink>
                         ))}
+                        </div>
                       </div>
-                    )}
+                    </div>
                   </div>
                 ) : (
                   /* Collapsed mode */
@@ -1858,7 +1886,7 @@ function Navbar({ children }) {
                           hoveredItem === 'customer-engagement' ? 'var(--erp-ink)' : 'var(--erp-ink)'
                       }}
                     />
-                    <span className="flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
+                    <span className="nav-label-fade flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
                       Customer Engagement
                     </span>
                     {engagementDropdownOpen ? (
@@ -1869,8 +1897,9 @@ function Navbar({ children }) {
                   </button>
 
                   {/* Dropdown Items */}
-                  {(engagementDropdownOpen || isEngagementActive()) && (
-                    <div className="nav-dd-anim ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
+                  <div className={`nav-dd-wrap ${(engagementDropdownOpen || isEngagementActive()) ? 'nav-dd-open' : ''}`}>
+                    <div className="nav-dd-inner">
+                      <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
                       {/* Drive List Info — opens the modal (not a route); shown first.
                           Master Admin / IT Admin only. */}
                       {isMasterOrITAdmin && (
@@ -1915,8 +1944,9 @@ function Navbar({ children }) {
                           )}
                         </NavLink>
                       ))}
+                      </div>
                     </div>
-                  )}
+                  </div>
                 </div>
               ) : (
                 /* Collapsed mode */
@@ -2003,7 +2033,7 @@ function Navbar({ children }) {
                               hoveredItem === 'expense-tracking' ? 'var(--erp-ink)' : 'var(--erp-ink)'
                           }}
                         />
-                        <span className="flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
+                        <span className="nav-label-fade flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
                           Expense Tracking
                         </span>
                         {expenseDropdownOpen ? (
@@ -2014,8 +2044,9 @@ function Navbar({ children }) {
                       </button>
 
                       {/* Dropdown Items */}
-                      {(expenseDropdownOpen || isExpenseActive()) && (
-                        <div className="nav-dd-anim ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
+                      <div className={`nav-dd-wrap ${(expenseDropdownOpen || isExpenseActive()) ? 'nav-dd-open' : ''}`}>
+                        <div className="nav-dd-inner">
+                          <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
                           {expenseTrackingItems.map((item) => (
                             <NavLink
                               key={item.path}
@@ -2047,8 +2078,9 @@ function Navbar({ children }) {
                               )}
                             </NavLink>
                           ))}
+                          </div>
                         </div>
-                      )}
+                      </div>
                     </div>
                   ) : (
                     /* Collapsed mode */

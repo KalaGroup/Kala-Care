@@ -145,7 +145,7 @@ const DriveColorPicker = ({ value, onChange }) => {
 // 'completed' is intentionally NOT transferable.
 const TRANSFER_STATUS_OPTIONS = [
   { value: 'wip', label: 'Work in Progress', short: 'WIP', badge: 'bg-blue-100 text-blue-700' },
-  { value: 'rescheduled', label: 'Followup Reschedule', short: 'FR', badge: 'bg-amber-100 text-amber-700' },
+  { value: 'rescheduled', label: 'Followup', short: 'F', badge: 'bg-amber-100 text-amber-700' },
   { value: 'rejected', label: 'Rejected', short: 'R', badge: 'bg-red-100 text-red-700' },
   { value: 'not_connected', label: 'Not Connected', short: 'NC', badge: 'bg-gray-200 text-gray-700' },
   { value: 'pending', label: 'Pending (no status)', short: 'P', badge: 'bg-purple-100 text-purple-700' },
@@ -251,8 +251,13 @@ const Campaign = () => {
   const [serviceToDelete, setServiceToDelete] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [importedFile, setImportedFile] = useState(null);
+  // Asset numbers uploaded during the CURRENT edit session — sent to the
+  // backend so re-uploaded (already existing) assets get tagged admin-added
+  const [sessionAddedAssets, setSessionAddedAssets] = useState([]);
   const [showFollowupModal, setShowFollowupModal] = useState(false);
   const [selectedCampaignForModal, setSelectedCampaignForModal] = useState(null);
+  // true → the modal shows only admin-added assets (Admin Added button)
+  const [followupModalAdminOnly, setFollowupModalAdminOnly] = useState(false);
 
   // ⚡ Asset-transfer picker: when the chosen product already has active drives,
   // the user picks which of them to pull assets from (and inactivate).
@@ -455,8 +460,9 @@ const Campaign = () => {
     description: ''
   });
 
-  const openFollowupModal = (campaign, e) => {
+  const openFollowupModal = (campaign, e, adminOnly = false) => {
     e.stopPropagation();
+    setFollowupModalAdminOnly(adminOnly);
     setSelectedCampaignForModal(campaign);
     setShowFollowupModal(true);
   };
@@ -970,6 +976,9 @@ const Campaign = () => {
           ...prev,
           asset_numbers: allAssets
         }));
+        // Remember what the admin uploaded in this session, even if the assets
+        // already exist on the drive (they dedupe out of asset_numbers above)
+        setSessionAddedAssets(prev => [...new Set([...prev, ...uniqueImportedAssets])]);
       } else {
         const currentAssets = newCampaign.asset_numbers || [];
         allAssets = [...new Set([...currentAssets, ...uniqueImportedAssets])];
@@ -1516,7 +1525,8 @@ const Campaign = () => {
         end_date: editCampaignData.end_date || null,
         status: editCampaignData.status || 'active',
         asset_numbers: editCampaignData.asset_numbers,
-        scripts: editCampaignData.scripts || []
+        scripts: editCampaignData.scripts || [],
+        admin_entered_assets: sessionAddedAssets
       };
 
       const response = await fetch(`${API_BASE_URL}/v1/campaigns/${editCampaignData.id}`, {
@@ -1555,6 +1565,7 @@ const Campaign = () => {
       setShowEditCampaign(false);
       setSelectedCampaign(null);
       setPendingBranchUpdates([]);
+      setSessionAddedAssets([]);
       // Reset CSP Info File state so it never carries into the next drive.
       setSpInfoFile(null);
       setSpInfoData([]);
@@ -2342,6 +2353,7 @@ const Campaign = () => {
       scripts: campaign.scripts || []
     });
     setImportedFile(null);
+    setSessionAddedAssets([]);          // fresh edit session — nothing uploaded yet
     // Clear any CSP Info File left over from a previous create/edit so it can't
     // be uploaded against the drive being opened now.
     setSpInfoFile(null);
@@ -5504,6 +5516,13 @@ const Campaign = () => {
                               View All
                             </button>
                             <button
+                              onClick={(e) => openFollowupModal(campaign, e, true)}
+                              className="px-2 py-1 text-[10px] font-medium text-white bg-[#2f3192] rounded-md hover:bg-[#2f3192]/90 transition-all whitespace-nowrap"
+                              title="View only assets added by admin via Drive Creation"
+                            >
+                              Admin Added
+                            </button>
+                            <button
                               onClick={(e) => openEditModal(campaign, e)}
                               className="p-1 rounded-md hover:bg-gray-100 transition-all"
                               title="Edit drive"
@@ -5631,6 +5650,14 @@ const Campaign = () => {
                         View All
                       </button>
 
+                      <button
+                        onClick={(e) => openFollowupModal(campaign, e, true)}
+                        className="px-2 py-1 text-xs font-medium text-white bg-[#2f3192] rounded-md hover:bg-[#2f3192]/90 transition-all whitespace-nowrap"
+                        title="View only assets added by admin via Drive Creation"
+                      >
+                        Admin Added
+                      </button>
+
                       <div className="flex items-center gap-3">
                         <div className="flex items-center gap-1 text-sm text-black" title="Pending Follow-ups">
                           <UserGroupIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
@@ -5735,9 +5762,11 @@ const Campaign = () => {
           onClose={() => {
             setShowFollowupModal(false);
             setSelectedCampaignForModal(null);
+            setFollowupModalAdminOnly(false);
           }}
           campaign={selectedCampaignForModal}
           apiBaseUrl={API_BASE_URL}
+          adminOnly={followupModalAdminOnly}
         />
       </Suspense>
 

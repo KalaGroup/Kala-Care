@@ -31,7 +31,7 @@ const SITEMAP = [
         desc: 'Drive-wise customer follow-ups and letters.',
         features: [
             { label: 'Drive Customers & C1–C7 Flags' },
-            { label: 'Follow-up Statuses (WIP / FR / R / NC / C)' },
+            { label: 'Follow-up Statuses (WIP / F / R / NC / C)' },
             { label: 'Send Letters & Letter Wizard' },
             { label: 'Add Activity / Reject Reason' },
             { label: 'Quotations & PDF Scripts' },

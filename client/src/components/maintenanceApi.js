@@ -23,10 +23,12 @@ export const themeSoft = 'rgba(47, 49, 146, 0.10)';
 
 export const ACTION = { R: 'Replace', C: 'Check', T: 'Top-up' };
 
-// Original MASTER_DATA column order (used for "export exactly as provided")
+// MASTER_DATA export column order. The kit columns (Kit Number / Kit Description /
+// Qty / Action) are stored on the same part line as altPartNo / altDesc / altQty /
+// altAction — same order the new master file uses.
 export const ORIG_HEADERS = [
     'Segment', 'App Code', 'System App Code', 'Engine Model', 'KVA', 'Emmission ',
-    'Part Number', 'Part Description', 'Qty', 'Action', 'Part NO ', 'Description ',
+    'Part Number', 'Part Description', 'Qty', 'Action', 'Kit Number', 'Kit Description',
     'Qty', 'Action', 'Service Hours', 'Consumable', 'Service schedules ',
 ];
 
@@ -111,4 +113,4 @@ export const fmtDateTime = (ts) => {
     // must NOT convert again to the viewer's timezone (that double-counted +5:30).
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }) +
         ' \u00b7 ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
-};
+};

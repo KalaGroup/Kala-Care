@@ -680,7 +680,7 @@ const CustomerEng2 = () => {
         return "C";
       case "rejected":
         return "R";
-      case 'rescheduled': return 'FR';
+      case 'rescheduled': return 'F';
       case 'not_connected': return 'NC';
       default:
         return "";
@@ -1049,13 +1049,13 @@ const CustomerEng2 = () => {
       filtered = filtered.filter(c => statusColumnFilter.includes(c.latest_status));
     }
 
-    // Flag filter (also handles status filters: WIP, FR, R = Rejected, NC = Not connected)
+    // Flag filter (also handles status filters: WIP, F, R = Rejected, NC = Not connected)
     if (selectedFlag !== "all") {
       if (selectedFlag === 'WIP') {
         // Work in Progress — latest status is "wip"
         filtered = filtered.filter(c => c.latest_status === 'wip');
-      } else if (selectedFlag === 'FR') {
-        // Follow-up Reschedule — latest status is "rescheduled"
+      } else if (selectedFlag === 'F') {
+        // Followup — latest status is "rescheduled"
         filtered = filtered.filter(c => c.latest_status === 'rescheduled');
       } else if (selectedFlag === 'NC') {
         // "Not connected" — latest status is "not_connected"
@@ -1064,7 +1064,7 @@ const CustomerEng2 = () => {
         // Rejected — latest status is "rejected"
         filtered = filtered.filter(c => c.latest_status === 'rejected');
       } else if (selectedFlag === 'ALL_STATUS') {
-        // All statuses — WIP + FR + NC + R combined
+        // All statuses — WIP + F + NC + R combined
         filtered = filtered.filter(c =>
           ['wip', 'rescheduled', 'not_connected', 'rejected'].includes(c.latest_status)
         );
@@ -1146,7 +1146,7 @@ const CustomerEng2 = () => {
     return visible.filter(c => c.latest_status === 'wip').length;
   }, [customers, selectedBranches, isAdmin, userBranch]);
 
-  // FR (Follow-up Reschedule) count — loaded customers whose latest status is "rescheduled"
+  // F (Followup) count — loaded customers whose latest status is "rescheduled"
   const rescheduledCount = useMemo(() => {
     let visible = [...customers];
     if (!isAdmin && userBranch && userBranch !== 'HO') {
@@ -2513,7 +2513,7 @@ const CustomerEng2 = () => {
               });
             }
 
-            toast.success('Status auto-changed to "Follow-up Reschedule". Edit customer details, then save the follow-up.');
+            toast.success('Status auto-changed to "Followup". Edit customer details, then save the follow-up.');
 
             // Open edit customer modal
             handleEditCustomer();
@@ -2570,20 +2570,20 @@ const CustomerEng2 = () => {
 
         if (!nextDate) {
           if (campaignId === 'other') {
-            toast.error(`Please select Next Follow-up Date for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in Post Warranty follow-up`);
+            toast.error(`Please select Next Follow-up Date for "${campaignData.status === 'wip' ? 'WIP' : 'Followup'}" status in Post Warranty follow-up`);
           } else {
             const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
-            toast.error(`Please select Next Follow-up Date for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in drive: ${campaign?.name}`);
+            toast.error(`Please select Next Follow-up Date for "${campaignData.status === 'wip' ? 'WIP' : 'Followup'}" status in drive: ${campaign?.name}`);
           }
           return;
         }
 
         if (!flag && campaignData.status !== 'not_connected') {
           if (campaignId === 'other') {
-            toast.error(`Please select Follow-up Flag for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in Post Warranty follow-up`);
+            toast.error(`Please select Follow-up Flag for "${campaignData.status === 'wip' ? 'WIP' : 'Followup'}" status in Post Warranty follow-up`);
           } else {
             const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
-            toast.error(`Please select Follow-up Flag for "${campaignData.status === 'wip' ? 'WIP' : 'Follow-up Reschedule'}" status in drive: ${campaign?.name}`);
+            toast.error(`Please select Follow-up Flag for "${campaignData.status === 'wip' ? 'WIP' : 'Followup'}" status in drive: ${campaign?.name}`);
           }
           return;
         }
@@ -2634,7 +2634,7 @@ const CustomerEng2 = () => {
         if (campaignData.status === 'rescheduled') {
           if (campaignData.quotation_sent) {
             const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
-            toast.error(`Cannot save: Status is "Follow-up Reschedule" but quotation is sent for drive "${campaign?.name}". Please uncheck "Quote Sent" or change status.`);
+            toast.error(`Cannot save: Status is "Followup" but quotation is sent for drive "${campaign?.name}". Please uncheck "Quote Sent" or change status.`);
             return;
           }
           // Clear quotation data if rescheduled
@@ -4158,7 +4158,7 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
   const _ld = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
   const _followupStatusLabel = (s) =>
     s === 'not_connected' ? 'Not Connected'
-      : s === 'rescheduled' ? 'Rescheduled'
+      : s === 'rescheduled' ? 'Followup'
         : s === 'wip' ? 'WIP'
           : s === 'completed' ? 'Completed'
             : s === 'rejected' ? 'Rejected'
@@ -6079,11 +6079,11 @@ ${f.start_para}`;
         return (
           <div className="p-3 sm:p-4 space-y-4">
             {/* Oil service file data — 4 SR fields left, 5 oil change fields right */}
-            <div>
-              <p className="text-[11px] font-bold text-black uppercase tracking-wide mb-1.5">Asset Details with Oil Change Report</p>
-              <div className="space-y-4">
+            <div className="border border-gray-300 rounded-md overflow-hidden">
+              <p className="text-[11px] font-bold text-black uppercase tracking-wide text-center px-2 py-1 border-b border-gray-300">Asset Details with Oil Change Report</p>
+              <div className="divide-y divide-gray-300">
               {oilServices.map((service, idx) => (
-                <div key={idx} className="flex flex-col lg:flex-row border border-gray-300 rounded divide-y lg:divide-y-0 lg:divide-x divide-gray-300">
+                <div key={idx} className="flex flex-col lg:flex-row divide-y lg:divide-y-0 lg:divide-x divide-gray-300">
                   {/* Left Side — 4 SR fields */}
                   <div className="flex-1">
                     <div>
@@ -6429,10 +6429,10 @@ ${f.start_para}`;
                 {/* Divider */}
                 <span className="self-center px-0.5 text-gray-300 font-bold select-none">|</span>
 
-                {/* ALL statuses — WIP + FR + NC + R combined (styled like the flag-count All button) */}
+                {/* ALL statuses — WIP + F + NC + R combined (styled like the flag-count All button) */}
                 <button
                   onClick={() => handleFlagSelect("ALL_STATUS")}
-                  title="All statuses — WIP + FR + NC + R combined"
+                  title="All statuses — WIP + F + NC + R combined"
                   className={`px-1.5 py-1 text-sm rounded-md whitespace-nowrap font-bold transition-colors ${selectedFlag === "ALL_STATUS"
                     ? "bg-[#2f3192] text-white shadow-sm"
                     : "bg-transparent text-black hover:bg-gray-50"
@@ -6456,16 +6456,16 @@ ${f.start_para}`;
                   WIP-{wipCount}
                 </button>
 
-                {/* FR (Follow-up Reschedule) — latest status is "rescheduled" */}
+                {/* F (Followup) — latest status is "rescheduled" */}
                 <button
-                  onClick={() => handleFlagSelect("FR")}
-                  title="Follow-up Reschedule — latest status is Rescheduled"
-                  className={`px-2 py-0.5 text-[13px] whitespace-nowrap font-semibold rounded-md transition-colors ${selectedFlag === "FR"
+                  onClick={() => handleFlagSelect("F")}
+                  title="Followup — latest status is Followup"
+                  className={`px-2 py-0.5 text-[13px] whitespace-nowrap font-semibold rounded-md transition-colors ${selectedFlag === "F"
                     ? "bg-[#2f3192] text-white shadow-sm"
                     : "text-black hover:bg-gray-50"
                     }`}
                 >
-                  FR-{rescheduledCount}
+                  F-{rescheduledCount}
                 </button>
 
                 {/* NC (Not connected) — latest status is "not_connected" */}
@@ -7036,7 +7036,7 @@ ${f.start_para}`;
                               { value: 'wip', label: 'W - Work in Progress' },
                               { value: 'completed', label: 'C - Completed' },
                               { value: 'rejected', label: 'R - Rejected' },
-                              { value: 'rescheduled', label: 'FR - Rescheduled' },
+                              { value: 'rescheduled', label: 'F - Followup' },
                               { value: 'not_connected', label: 'NC - Not Connected' }
                             ];
                             const hasActiveFilter = statusColumnFilter.length > 0;
@@ -7397,7 +7397,7 @@ ${f.start_para}`;
                                   if (customer.latest_status === 'wip') statusTitle = 'Work in Progress';
                                   else if (customer.latest_status === 'completed') statusTitle = 'Completed';
                                   else if (customer.latest_status === 'rejected') statusTitle = 'Rejected';
-                                  else if (customer.latest_status === 'rescheduled') statusTitle = 'Follow-up Reschedule';
+                                  else if (customer.latest_status === 'rescheduled') statusTitle = 'Followup';
                                   else if (customer.latest_status === 'not_connected') statusTitle = 'Not Connected';
 
                                   return (
@@ -7883,7 +7883,7 @@ ${f.start_para}`;
               >
                 <div className="overflow-x-auto max-h-[280px] overflow-y-auto custom-scrollbar">
                   <table className="w-full min-w-[900px] border-collapse">
-                    <thead className="bg-gray-50 sticky top-0">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
                       <tr className="border-b border-gray-200">
                         <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">Sr.</th>
                         <th className="px-2 py-1 text-center text-[11px] font-bold text-black border-r border-gray-200">Instance ID</th>
@@ -8135,7 +8135,7 @@ ${f.start_para}`;
 
           <div className="overflow-x-auto overflow-y-auto max-h-[400px] custom-scrollbar">
             <table className="w-full min-w-[1000px] border-collapse">
-              <thead className="bg-gray-50 sticky top-0">
+              <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr className="border-b border-gray-200">
                   <th className="px-2 py-1.5 text-center text-[11px] font-semibold text-black whitespace-nowrap border-r border-gray-200">
                     Sr. No.
@@ -8440,7 +8440,7 @@ ${f.start_para}`;
           {selectedCampaignsForFollowup.length > 0 && (
             <div className="mb-4 overflow-x-auto border border-gray-300 rounded-lg shadow-sm">
               <table className="w-full min-w-[1500px] border-collapse">
-                <thead className="bg-gradient-to-r from-gray-100 to-gray-50 sticky top-0">
+                <thead className="bg-gradient-to-r from-gray-100 to-gray-50 sticky top-0 z-10">
                   <tr className="border-b border-gray-300">
                     <th className="px-2 py-2 text-center text-[11px] font-bold text-black border border-gray-300 whitespace-nowrap w-[120px] bg-gray-100">
                       Drive & Script
@@ -8678,7 +8678,7 @@ ${f.start_para}`;
                               // If quotation is sent, prevent changing status to "rescheduled"
                               if (campaignData.quotation_sent && newStatus === 'rescheduled') {
                                 const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
-                                toast.error(`Cannot change status to "Follow-up Reschedule" because quotation has already been sent for campaign "${campaign?.name}".`);
+                                toast.error(`Cannot change status to "Followup" because quotation has already been sent for campaign "${campaign?.name}".`);
                                 return;
                               }
 
@@ -8690,7 +8690,7 @@ ${f.start_para}`;
                             className="w-full border border-gray-300 rounded-lg px-2 py-1 text-[11px] focus:ring-2 focus:border-transparent transition-all font-medium text-center text-black"
                             style={{ '--tw-ring-color': "themeColor" }}
                           >
-                            <option value="rescheduled">Follow-up Reschedule</option>
+                            <option value="rescheduled">Followup</option>
                             <option value="wip">Work in Progress</option>
                             <option value="completed">Completed</option>
                             <option value="rejected">Rejected</option>
@@ -8704,7 +8704,7 @@ ${f.start_para}`;
                               // If quotation is sent, prevent switching to a status that can't carry a quotation
                               if (campaignData.quotation_sent && (newStatus === 'rescheduled' || newStatus === 'not_connected')) {
                                 const campaign = customerCampaigns.find(c => c.id === parseInt(campaignId));
-                                const lbl = newStatus === 'not_connected' ? 'Not Connected' : 'Follow-up Reschedule';
+                                const lbl = newStatus === 'not_connected' ? 'Not Connected' : 'Followup';
                                 toast.error(`Cannot change status to "${lbl}" because quotation has already been sent for drive "${campaign?.name}".`);
                                 return;
                               }
@@ -8727,7 +8727,7 @@ ${f.start_para}`;
                               const isQuotationRequiredActivity = activityContent.includes('quotation required');
 
                               const options = [
-                                { value: 'rescheduled', label: 'Follow-up Reschedule' },
+                                { value: 'rescheduled', label: 'Followup' },
                                 { value: 'not_connected', label: 'Not Connected' },
                                 { value: 'wip', label: 'Work in Progress' },
                                 { value: 'completed', label: 'Completed' },
@@ -8782,7 +8782,7 @@ ${f.start_para}`;
                               onChange={(e) => {
                                 // Statuses that cannot carry a quotation
                                 if (campaignData.status === 'rescheduled' || campaignData.status === 'not_connected') {
-                                  toast.error('Cannot send quotation when status is "Follow-up Reschedule" or "Not Connected"');
+                                  toast.error('Cannot send quotation when status is "Followup" or "Not Connected"');
                                   return;
                                 }
 
@@ -9244,7 +9244,7 @@ ${f.start_para}`;
                       <p className="font-medium text-[11px]">
                         <span className={`px-1.5 py-0.5 rounded-full text-[11px] capitalize ${getStatusBadgeClass(selectedFollowup.status)}`}>
                           {selectedFollowup.status === 'rescheduled'
-                            ? 'Rescheduled (FR)'
+                            ? 'Followup (F)'
                             : selectedFollowup.status === 'not_connected'
                               ? 'Not Connected (NC)'
                               : selectedFollowup.status}
@@ -9349,7 +9349,7 @@ ${f.start_para}`;
 
           <div className="overflow-x-auto overflow-y-auto max-h-[400px] custom-scrollbar">
             <table className="w-full min-w-[1500px] border-collapse">
-              <thead className="bg-gray-50 sticky top-0">
+              <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr className="border-b border-gray-200">
                   <th className="px-2 py-1.5 text-center text-[11px] font-medium text-black border-r border-gray-200 whitespace-nowrap">Date</th>
                   <th className="px-2 py-1.5 text-center text-[11px] font-medium text-black border-r border-gray-200 whitespace-nowrap">Drive</th>
@@ -9499,7 +9499,7 @@ ${f.start_para}`;
 
             <div className="overflow-x-auto overflow-y-auto max-h-[360px] custom-scrollbar">
               <table className="w-full min-w-[800px] border-collapse">
-                <thead className="bg-gray-50 sticky top-0">
+                <thead className="bg-gray-50 sticky top-0 z-10">
                   <tr className="border-b border-gray-200">
                     <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Ref No</th>
                     <th className="px-2 py-1.5 text-center text-[11px] font-bold text-black border-r border-gray-200 whitespace-nowrap">Format Type</th>

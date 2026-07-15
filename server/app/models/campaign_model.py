@@ -25,6 +25,12 @@ class Campaign(Base):
     asset_numbers = Column(JSON, default=[])  # e.g., ["100746690", "100769220", ...]
     invalid_asset_numbers = Column(JSON, default=[])  # Asset numbers not found in customers table
 
+    # Asset numbers the ADMIN entered on the Drive Creation form (create + edit).
+    # Employee pushes (follow-up auto-add, add-to-drive, CSP SR entry) and
+    # campaign-to-campaign transfers never write here — this is what separates
+    # admin-added assets from employee-pushed ones.
+    admin_asset_numbers = Column(JSON, default=[])
+
     # Store PDF scripts as JSON array (each script can be text or PDF metadata)
     scripts = Column(JSON, default=[])  # e.g., [{"name": "script1.pdf", "content": "base64..."}, ...]
     

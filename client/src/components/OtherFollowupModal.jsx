@@ -170,6 +170,19 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
     // Header count follows the applied filters
     const isFiltered = filteredCustomers.length !== customers.length;
 
+    // Any filter away from its default → show the Clear Filters button
+    const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all' || flagFilter !== 'all'
+        || userFilter !== 'all' || serviceFilter !== 'all' || dateFrom !== '' || dateTo !== '';
+    const clearAllFilters = () => {
+        setSearchTerm('');
+        setStatusFilter('all');
+        setFlagFilter('all');
+        setUserFilter('all');
+        setServiceFilter('all');
+        setDateFrom('');
+        setDateTo('');
+    };
+
     // Scroll sync
     useEffect(() => {
         const tableContainer = tableContainerRef.current;
@@ -310,7 +323,7 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                         >
                             <option value="all">All Status</option>
                             <option value="wip">WIP</option>
-                            <option value="rescheduled">FR</option>
+                            <option value="rescheduled">Followups</option>
                             <option value="not_connected">NC</option>
                             <option value="rejected">Rejected</option>
                             <option value="completed">Completed</option>
@@ -386,6 +399,21 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                                 </button>
                             )}
                         </div>
+
+                        {/* Clear all filters — visible only when something is filtered */}
+                        {hasActiveFilters && (
+                            <button
+                                onClick={clearAllFilters}
+                                type="button"
+                                title="Reset search, status, flag, user, service and date filters"
+                                className="flex-shrink-0 px-2.5 sm:px-3 py-1 text-[11px] sm:text-xs font-semibold text-[#2f3192] bg-white border border-[#2f3192]/40 rounded-lg hover:bg-[#2f3192]/10 transition-all flex items-center justify-center gap-1.5 w-full sm:w-auto whitespace-nowrap"
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                                Clear Filters
+                            </button>
+                        )}
 
                         {/* Filtered count badge */}
                         {isFiltered && (

@@ -888,7 +888,7 @@ class EmployeePerformanceController:
             
             headers = [
                 'User ID', 'Employee Name', 'Total Follow-ups', 'Completed',
-                'Work in Progress', 'Rejected', 'Rescheduled', 'Pending', 'Completion Rate %',
+                'Work in Progress', 'Rejected', 'Followups', 'Pending', 'Completion Rate %',
                 'Quotation Value (₹)', 'Quotations Sent', 'Can Export'
             ]
             

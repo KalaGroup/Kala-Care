@@ -110,6 +110,8 @@ def serialize_row(r: MomRow):
         "category": r.category,
         "point": r.point or "",
         "resp": _load_resp(r.responsibility),          # list of names
+        "assignedBy": r.assigned_by or "",
+        "headResp": r.head_resp or "",
         "due": _iso(r.due_date),
         "flag": r.flag,
         "status": r.status,
@@ -141,6 +143,7 @@ def serialize_meeting(m: MomMeeting):
         "location": m.location or "",
         "type": m.type or "",
         "conductedBy": m.conducted_by or "",
+        "heads": [str(h).strip() for h in _load_json_list(m.heads) if str(h).strip()],
         "attendees": [serialize_attendee(a) for a in m.attendees],
         "rows": [serialize_row(r) for r in m.rows],
     }
@@ -216,6 +219,13 @@ def create_meeting(db: Session, data: dict, conducted_by_id: str | None = None,
 
     branch_name = (data.get("branchName") or "").strip() or " + ".join(b["name"] for b in branches)
 
+    # meeting heads — the conductor is always kept as the first head
+    heads = []
+    for h in [conducted_by_name, *(data.get("heads") or [])]:
+        h = str(h or "").strip()
+        if h and h not in heads:
+            heads.append(h)
+
     meeting = MomMeeting(
         branch_code=data["branchCode"].strip(),
         branch_name=branch_name,
@@ -224,6 +234,7 @@ def create_meeting(db: Session, data: dict, conducted_by_id: str | None = None,
         location=(data.get("location") or "").strip(),
         type=(data.get("type") or "").strip(),          # preset OR custom typed text
         conducted_by=conducted_by_name or "",
+        heads=json.dumps(heads, ensure_ascii=False) if heads else None,
         created_by=conducted_by_id,
     )
     db.add(meeting)
@@ -254,6 +265,8 @@ def create_meeting(db: Session, data: dict, conducted_by_id: str | None = None,
             category=row.get("category") or "Other",
             point=row.get("point") or "",
             responsibility=json.dumps(resp, ensure_ascii=False) if resp else None,
+            assigned_by=(str(row.get("assignedBy") or "").strip() or None),
+            head_resp=(str(row.get("headResp") or "").strip() or None),
             due_date=_parse_date(row.get("due")) if flag == "T" else None,   # I rows never keep a due date
             flag=flag,
             status=row.get("status") or "pending",

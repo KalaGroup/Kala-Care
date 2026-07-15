@@ -513,6 +513,7 @@ html.dark .border-gray-300 { border-color: #3a4150 !important; }
 html.dark .border-gray-400 { border-color: #4b5563 !important; }
 html.dark .border-blue-100,
 html.dark .border-blue-200,
+html.dark .border-indigo-100,
 html.dark .border-indigo-200 { border-color: rgba(56, 189, 248, 0.35) !important; }
 html.dark .border-\[\#2f3192\] { border-color: #38bdf8 !important; }
 /* Loading spinners (border-t accent ring) — the border-gray-200 override above
@@ -1239,17 +1240,49 @@ html.dark .mom-live-head .bg-white {
 /* Dropdown-panel list items use hover:bg-gray-50 (no generic dark net) —
    keep the hover visible but dark on the MOM page. */
 html.dark .mom-anim .hover\:bg-gray-50:hover { background-color: #1f242e !important; }
+
+/* ============================================================
+   DARK THEME — MOM remark-history cards (Previous remarks trail).
+   The cards ship inline light styles (#f7f8fc bg / #eceef6 border /
+   slate date text); swap them for dark surfaces here.
+   ============================================================ */
+html.dark .mom-remark-card {
+  background: #1c212b !important;
+  border-color: #313845 !important;
+}
+/* date stamp inside the card uses inline color #475569 — lift it */
+html.dark .mom-remark-card [style*="color: rgb(71, 85, 105)"] { color: #cbd5e1 !important; }
 /* ============================================================
    DARK THEME — Dashboard polish (welcome header + tab pills).
    Placed last so these win over the generic inline-style nets.
    ============================================================ */
 
-/* Welcome box — subtle sky-tinted gradient card instead of a flat panel */
+/* Welcome box — clean elevated dark card (the old sky-tinted gradient
+   end-stop read as a teal smear on the right edge; keep it flat) */
 html.dark .dash-welcome {
-  background: linear-gradient(135deg, #131a24 0%, #171a20 55%, rgba(3, 105, 161, 0.22) 100%) !important;
-  border-color: rgba(56, 189, 248, 0.28) !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(56, 189, 248, 0.10);
+  background: #161b23 !important;
+  border-color: #2e3440 !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
+
+/* Identity pill (name + greeting) — the generic inline-gradient net above
+   repaints its indigo gradient flat #0369a1→#075985; give it a livelier
+   sky sweep + soft glow instead. Same specificity, later position → wins. */
+html.dark .dash-welcome [style*="linear-gradient"] {
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 45%, #075985 100%) !important;
+  box-shadow: 0 4px 14px rgba(14, 165, 233, 0.30) !important;
+}
+
+/* Info chips (branch / role / period / scope) — the light theme's
+   indigo-50 fill maps to a near-invisible tint here, leaving harsh
+   neon-outline pills; use a readable soft sky fill with a calmer
+   border and toned-down text/icon color. */
+html.dark .dash-welcome .bg-indigo-50 {
+  background: rgba(56, 189, 248, 0.10) !important;
+  border-color: rgba(56, 189, 248, 0.25) !important;
+  color: #9ddcfb !important;
+}
+html.dark .dash-welcome .bg-indigo-50 svg { color: #7dd3fc !important; }
 
 /* Inactive tab pills — elevated dark surface, sky glow on hover */
 html.dark .dash-tabs button.text-black {

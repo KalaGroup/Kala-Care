@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
     ClipboardDocumentCheckIcon, Cog6ToothIcon, PrinterIcon,
     ArrowUpTrayIcon, CheckIcon, XMarkIcon, ArrowPathIcon, ChevronDownIcon,
+    ChevronRightIcon, Squares2X2Icon,
 } from '@heroicons/react/24/outline';
 import MaintenanceScheduleMaster from '../components/MaintenanceScheduleMaster';
 import {
@@ -24,6 +25,12 @@ const Chip = React.memo(({ a }) => {
     if (!ACTION[k]) return null;
     return <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold font-mono ${chipCls[k]}`}>{k}</span>;
 });
+
+// Kit lines live on the same part rows (Kit Number / Kit Description / Qty / Action —
+// stored as altPartNo / altDesc / altQty / altAction). A part "has a kit" when either
+// the kit number or the kit description is filled.
+const kitRowsOf = (parts) =>
+    parts.filter((p) => String(p.altPartNo || '').trim() || String(p.altDesc || '').trim());
 
 /* ----------------------------- Application Code picker (tabular dropdown) ----------------------------- */
 const AppCodePicker = ({ master, value, onChange }) => {
@@ -101,9 +108,10 @@ const AppCodePicker = ({ master, value, onChange }) => {
 };
 
 /* ----------------------------- Watermarked print sheet ----------------------------- */
-const PrintSheet = ({ app, services, parts, onClose }) => {
+const PrintSheet = ({ app, services, parts, section = 'parts', onClose }) => {
     const svcLabel = services.map((s) => s.name).join(', ') || '—';
     const svcHours = [...new Set(services.map((s) => s.hours))].join(' / ') || '—';
+    const kitParts = kitRowsOf(parts);
     const [logoError, setLogoError] = useState(false);
     const th = 'bg-[#13181d] text-white text-[9.5px] font-semibold px-2 py-1.5 border border-gray-400';
     const td = 'px-2 py-1 border border-gray-300 text-[11px]';
@@ -170,35 +178,61 @@ const PrintSheet = ({ app, services, parts, onClose }) => {
                                 ))}
                             </tbody>
                         </table>
-                        <table className="w-full border-collapse">
-                            <thead>
-                                <tr>
-                                    <th className={`${th} text-center`}>Sr.</th><th className={`${th} text-center`}>Part Number</th><th className={`${th} text-center`}>Description</th>
-                                    <th className={`${th} text-center`}>Qty</th><th className={`${th} text-center`}>Action</th><th className={`${th} text-center`}>Part No</th>
-                                    <th className={`${th} text-center`}>Description</th><th className={`${th} text-center`}>Qty</th><th className={`${th} text-center`}>Action</th>
-                                    <th className={`${th} text-center`}>Svc Hrs</th><th className={`${th} text-center`}>Consumable</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {parts.length === 0 ? (
-                                    <tr><td colSpan={11} className="text-center py-5 text-gray-400 text-[11px]">No parts selected.</td></tr>
-                                ) : parts.map((p, i) => (
-                                    <tr key={i} className="even:bg-gray-50">
-                                        <td className={`${td} text-center`}>{i + 1}</td>
-                                        <td className={`${td} font-mono`}>{p.partNumber || '—'}</td>
-                                        <td className={td}>{p.partDesc || '—'}</td>
-                                        <td className={`${td} text-center`}>{p.qty}</td>
-                                        <td className={`${td} text-center`}>{p.action}</td>
-                                        <td className={`${td} font-mono`}>{p.altPartNo || '—'}</td>
-                                        <td className={td}>{p.altDesc || '—'}</td>
-                                        <td className={`${td} text-center`}>{p.altQty}</td>
-                                        <td className={`${td} text-center`}>{p.altAction}</td>
-                                        <td className={`${td} text-center font-mono`}>{p.serviceHours}</td>
-                                        <td className={`${td} text-center`}>{p.consumable}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                        {section === 'kits' ? (
+                            <>
+                                <div className="text-[11.5px] font-extrabold tracking-wide uppercase mb-1.5">Kit Details</div>
+                                <table className="w-full border-collapse">
+                                    <thead>
+                                        <tr>
+                                            <th className={`${th} text-center`}>Sr.</th><th className={`${th} text-center`}>Kit Number</th><th className={`${th} text-center`}>Kit Description</th>
+                                            <th className={`${th} text-center`}>Qty</th><th className={`${th} text-center`}>Action</th><th className={`${th} text-center`}>Svc Hrs</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {kitParts.length === 0 ? (
+                                            <tr><td colSpan={6} className="text-center py-5 text-gray-400 text-[11px]">No kit details for the selected service type(s).</td></tr>
+                                        ) : kitParts.map((p, i) => (
+                                            <tr key={i} className="even:bg-gray-50">
+                                                <td className={`${td} text-center`}>{i + 1}</td>
+                                                <td className={`${td} font-mono`}>{p.altPartNo || '—'}</td>
+                                                <td className={td}>{p.altDesc || '—'}</td>
+                                                <td className={`${td} text-center`}>{p.altQty || '—'}</td>
+                                                <td className={`${td} text-center`}>{p.altAction || '—'}</td>
+                                                <td className={`${td} text-center font-mono`}>{p.serviceHours}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </>
+                        ) : (
+                            <>
+                                <div className="text-[11.5px] font-extrabold tracking-wide uppercase mb-1.5">Service Parts &amp; Consumables</div>
+                                <table className="w-full border-collapse">
+                                    <thead>
+                                        <tr>
+                                            <th className={`${th} text-center`}>Sr.</th><th className={`${th} text-center`}>Part Number</th><th className={`${th} text-center`}>Description</th>
+                                            <th className={`${th} text-center`}>Qty</th><th className={`${th} text-center`}>Action</th>
+                                            <th className={`${th} text-center`}>Svc Hrs</th><th className={`${th} text-center`}>Consumable</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {parts.length === 0 ? (
+                                            <tr><td colSpan={7} className="text-center py-5 text-gray-400 text-[11px]">No parts selected.</td></tr>
+                                        ) : parts.map((p, i) => (
+                                            <tr key={i} className="even:bg-gray-50">
+                                                <td className={`${td} text-center`}>{i + 1}</td>
+                                                <td className={`${td} font-mono`}>{p.partNumber || '—'}</td>
+                                                <td className={td}>{p.partDesc || '—'}</td>
+                                                <td className={`${td} text-center`}>{p.qty}</td>
+                                                <td className={`${td} text-center`}>{p.action}</td>
+                                                <td className={`${td} text-center font-mono`}>{p.serviceHours}</td>
+                                                <td className={`${td} text-center`}>{p.consumable}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </>
+                        )}
                         <div className="flex justify-between items-center mt-6 pt-3 border-t border-gray-300 text-[10.5px] text-gray-500">
                             <span className="font-bold tracking-wide" style={{ color: '#bf372e' }}>Strictly For Internal Training &amp; Reference Purpose</span>
                             <span>Version 1 (Jan-26) · Generated {new Date().toLocaleDateString('en-GB')}</span>
@@ -245,6 +279,12 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
 
     const parts = useMemo(() => (app ? app.parts.filter((p) => effective.has(partService(services, p).id)) : []), [app, services, effective]);
     const chosen = avail.filter((s) => effective.has(s.id));
+    const kitRows = useMemo(() => kitRowsOf(parts), [parts]);
+
+    // Accordion: exactly ONE section is open at all times — opening one closes the
+    // other, and clicking the already-open header keeps it open (never both closed).
+    const [openSec, setOpenSec] = useState('parts');
+    const toggleSec = (id) => setOpenSec(id);
 
     const changeApp = useCallback((code) => {
         setAppCode(code);
@@ -269,7 +309,12 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
 
     return (
         <div className="min-h-screen">
-            <style>{`.q-scroll{scrollbar-width:thin;scrollbar-color:#c7c9e0 transparent}.q-scroll::-webkit-scrollbar{height:6px;width:6px}.q-scroll::-webkit-scrollbar-thumb{background:#c7c9e0;border-radius:9999px}`}</style>
+            <style>{`.q-scroll{scrollbar-width:thin;scrollbar-color:#c7c9e0 transparent}.q-scroll::-webkit-scrollbar{height:6px;width:6px}.q-scroll::-webkit-scrollbar-thumb{background:#c7c9e0;border-radius:9999px}
+.acc-wrap{display:grid;grid-template-rows:0fr;transition:grid-template-rows .34s cubic-bezier(.4,0,.2,1)}
+.acc-wrap.acc-open{grid-template-rows:1fr}
+.acc-inner{overflow:hidden;min-height:0}
+.acc-content{opacity:0;transform:translateY(-8px);transition:opacity .28s ease,transform .28s ease}
+.acc-open .acc-content{opacity:1;transform:none;transition-delay:.06s}`}</style>
 
             <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10 max-md:px-2">
                 {/* Intro */}
@@ -368,48 +413,100 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
                             {specCard('Part Lines', String(parts.length))}
                         </div>
 
-                        {/* Parts table */}
-                        <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm">
-                            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 bg-gray-50 max-sm:flex-wrap max-md:px-2">
+                        {/* Service Parts & Consumables — collapsible */}
+                        <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm mb-3">
+                            <button type="button" onClick={() => toggleSec('parts')} aria-expanded={openSec === 'parts'}
+                                className={`w-full flex items-center gap-2 px-4 py-2.5 bg-gray-50 text-left transition hover:bg-gray-100/70 max-sm:flex-wrap max-md:px-2 ${openSec === 'parts' ? 'border-b border-gray-200' : ''}`}>
+                                <ChevronRightIcon className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform ${openSec === 'parts' ? 'rotate-90' : ''}`} />
                                 <p className="text-[13px] font-semibold text-gray-800">Service Parts &amp; Consumables</p>
                                 <span className="text-[11px] text-gray-400 font-mono">{parts.length} lines · {chosen.length} service{chosen.length === 1 ? '' : 's'}</span>
+                                {openSec !== 'parts' && <span className="ml-auto text-[10px] font-semibold uppercase tracking-wider text-gray-400">Tap to expand</span>}
+                            </button>
+                            <div className={`acc-wrap ${openSec === 'parts' ? 'acc-open' : ''}`} aria-hidden={openSec !== 'parts'}>
+                                <div className="acc-inner">
+                                    <div className="acc-content">
+                                        <div className="overflow-x-auto q-scroll">
+                                            <table className="min-w-[640px] w-full border-collapse text-[12px]">
+                                                <thead>
+                                                    <tr className="bg-gray-50 text-[10px] sm:text-[11px] font-semibold text-black uppercase tracking-wider">
+                                                        {['Sr.', 'Part Number', 'Description', 'Qty', 'Act', 'Svc Hrs', 'Consumable'].map((h, i) => (
+                                                            <th key={i} className="px-3 py-2 border border-gray-200 text-center">{h}</th>
+                                                        ))}
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {parts.length === 0 ? (
+                                                        <tr><td colSpan={7} className="text-center py-10 text-gray-400">Select at least one service type above to list its parts.</td></tr>
+                                                    ) : parts.map((p, i) => (
+                                                        <tr key={i} className="hover:bg-indigo-50/40 transition">
+                                                            <td className="px-3 py-2 border border-gray-200 font-mono text-gray-400">{i + 1}</td>
+                                                            <td className="px-3 py-2 border border-gray-200 font-mono text-gray-800 whitespace-nowrap">{p.partNumber || '—'}</td>
+                                                            <td className="px-3 py-2 border border-gray-200 text-gray-700 min-w-[200px]">{p.partDesc || '—'}</td>
+                                                            <td className="px-3 py-2 border border-gray-200 text-center">{p.qty}</td>
+                                                            <td className="px-3 py-2 border border-gray-200 text-center"><Chip a={p.action} /></td>
+                                                            <td className="px-3 py-2 border border-gray-200 text-center font-mono">{p.serviceHours}</td>
+                                                            <td className="px-3 py-2 border border-gray-200 text-center">{p.consumable}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                            <div className="overflow-x-auto q-scroll">
-                                <table className="min-w-[900px] w-full border-collapse text-[12px]">
-                                    <thead>
-                                        <tr className="bg-gray-50 text-[10px] sm:text-[11px] font-semibold text-black uppercase tracking-wider">
-                                            {['Sr.', 'Part Number', 'Description', 'Qty', 'Act', 'Alt Part No', 'Alt Description', 'Qty', 'Act', 'Svc Hrs', 'Consumable'].map((h, i) => (
-                                                <th key={i} className="px-3 py-2 border border-gray-200 text-center">{h}</th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {parts.length === 0 ? (
-                                            <tr><td colSpan={11} className="text-center py-10 text-gray-400">Select at least one service type above to list its parts.</td></tr>
-                                        ) : parts.map((p, i) => (
-                                            <tr key={i} className="hover:bg-indigo-50/40 transition">
-                                                <td className="px-3 py-2 border border-gray-200 font-mono text-gray-400">{i + 1}</td>
-                                                <td className="px-3 py-2 border border-gray-200 font-mono text-gray-800 whitespace-nowrap">{p.partNumber || '—'}</td>
-                                                <td className="px-3 py-2 border border-gray-200 text-gray-700 min-w-[200px]">{p.partDesc || '—'}</td>
-                                                <td className="px-3 py-2 border border-gray-200 text-center">{p.qty}</td>
-                                                <td className="px-3 py-2 border border-gray-200 text-center"><Chip a={p.action} /></td>
-                                                <td className="px-3 py-2 border border-gray-200 font-mono text-gray-400 whitespace-nowrap">{p.altPartNo || '—'}</td>
-                                                <td className="px-3 py-2 border border-gray-200 text-gray-400">{p.altDesc || '—'}</td>
-                                                <td className="px-3 py-2 border border-gray-200 text-center text-gray-400">{p.altQty}</td>
-                                                <td className="px-3 py-2 border border-gray-200 text-center"><Chip a={p.altAction} /></td>
-                                                <td className="px-3 py-2 border border-gray-200 text-center font-mono">{p.serviceHours}</td>
-                                                <td className="px-3 py-2 border border-gray-200 text-center">{p.consumable}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                        </div>
+                        <div align="center" className="text-[12px] text-gray-400 font-semibold uppercase tracking-wider mb-2">
+                            OR
+                        </div>
+                        {/* Kit Details — collapsible (expanding it collapses the section above) */}
+                        <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm">
+                            <button type="button" onClick={() => toggleSec('kits')} aria-expanded={openSec === 'kits'}
+                                className={`w-full flex items-center gap-2 px-4 py-2.5 bg-gray-50 text-left transition hover:bg-gray-100/70 max-sm:flex-wrap max-md:px-2 ${openSec === 'kits' ? 'border-b border-gray-200' : ''}`}>
+                                <ChevronRightIcon className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform ${openSec === 'kits' ? 'rotate-90' : ''}`} />
+                                {/* <Squares2X2Icon className="h-4 w-4 flex-shrink-0" style={{ color: themeColor }} /> */}
+                                <p className="text-[13px] font-semibold text-gray-800">Kit Details</p>
+                                <span className="text-[11px] text-gray-400 font-mono">{kitRows.length} kit line{kitRows.length === 1 ? '' : 's'}</span>
+                                {openSec !== 'kits' && <span className="ml-auto text-[10px] font-semibold uppercase tracking-wider text-gray-400">Tap to expand</span>}
+                            </button>
+                            <div className={`acc-wrap ${openSec === 'kits' ? 'acc-open' : ''}`} aria-hidden={openSec !== 'kits'}>
+                                <div className="acc-inner">
+                                    <div className="acc-content">
+                                        {kitRows.length === 0 ? (
+                                            <div className="py-10 text-center text-[12.5px] text-gray-400">No kit details for the selected service type(s).</div>
+                                        ) : (
+                                            <div className="overflow-x-auto q-scroll">
+                                                <table className="min-w-[640px] w-full border-collapse text-[12px]">
+                                                    <thead>
+                                                        <tr className="bg-gray-50 text-[10px] sm:text-[11px] font-semibold text-black uppercase tracking-wider">
+                                                            {['Sr.', 'Kit Number', 'Kit Description', 'Qty', 'Act', 'Svc Hrs'].map((h, i) => (
+                                                                <th key={i} className="px-3 py-2 border border-gray-200 text-center">{h}</th>
+                                                            ))}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {kitRows.map((p, i) => (
+                                                            <tr key={i} className="hover:bg-indigo-50/40 transition">
+                                                                <td className="px-3 py-2 border border-gray-200 font-mono text-gray-400">{i + 1}</td>
+                                                                <td className="px-3 py-2 border border-gray-200 font-mono text-gray-800 whitespace-nowrap">{p.altPartNo || '—'}</td>
+                                                                <td className="px-3 py-2 border border-gray-200 text-gray-700 min-w-[200px]">{p.altDesc || '—'}</td>
+                                                                <td className="px-3 py-2 border border-gray-200 text-center">{p.altQty || '—'}</td>
+                                                                <td className="px-3 py-2 border border-gray-200 text-center"><Chip a={p.altAction} /></td>
+                                                                <td className="px-3 py-2 border border-gray-200 text-center font-mono">{p.serviceHours}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </>
                 )}
             </div>
 
-            {showPrint && app && <PrintSheet app={app} services={chosen} parts={parts} onClose={() => setShowPrint(false)} />}
+            {showPrint && app && <PrintSheet app={app} services={chosen} parts={parts} section={openSec} onClose={() => setShowPrint(false)} />}
         </div>
     );
 };

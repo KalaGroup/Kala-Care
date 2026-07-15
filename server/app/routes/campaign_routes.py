@@ -203,13 +203,14 @@ def update_branch_codes(
 
 @router.get("/{campaign_id}/customers-with-followups")
 def get_campaign_customers_with_followups(
-    campaign_id: int, 
+    campaign_id: int,
     request: Request,
+    admin_only: bool = Query(False, description="Only assets the admin added via Drive Creation (create + edit)"),
     db: Session = Depends(get_db)
 ):
     """Get all customers for a campaign with their last follow-up data"""
     controller = CampaignController(db)
-    return controller.get_campaign_customers_with_followups(campaign_id)
+    return controller.get_campaign_customers_with_followups(campaign_id, admin_only)
 
 @router.post("/{campaign_id}/sp-info")
 def upsert_sp_info(
