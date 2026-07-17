@@ -12,6 +12,7 @@ import * as XLSX from 'xlsx';
 import { verticalListSortingStrategy } from '@dnd-kit/sortable';
 import DraggableScrollButtons from '../components/DraggableScrollButtons';
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
+import { reflowLetterReferencesHtml } from '../utils/letterReferences';
 import {
     CalendarIcon,
     FunnelIcon,
@@ -1175,6 +1176,16 @@ const CustomerEng = () => {
             });
 
             filtered = [...tempWithinRange, ...tempOutsideRange, ...tempNoDate];
+        }
+
+        // ========== STEP 3.5: SINGLE-DRIVE REJECTED EXCLUSION ==========
+        // When EXACTLY ONE drive is selected, its rejected customers are hidden from
+        // the table by default — they are only visible through the R status chip
+        // (which STEP 4 already scopes to the selected drive). Selecting multiple
+        // drives (or none) leaves rejected rows visible as before.
+        if (selectedCampaigns.length === 1 && selectedStatus !== 'R') {
+            const singleDrive = selectedCampaigns[0];
+            filtered = filtered.filter(c => c.campaign_status?.[singleDrive] !== 'rejected');
         }
 
         // ========== STEP 4: FLAG (C1–C7) + STATUS (NC/R/WIP/F) FILTERS — INDEPENDENT ==========
@@ -2965,6 +2976,33 @@ const CustomerEng = () => {
                         handleEditCustomer();
                         return; // Stop form submission
                     }
+                }
+            }
+        }
+
+        // Daily 'Not Connected' cap (2/day per customer, across all users) —
+        // check the WHOLE bulk selection up front so we never store part of it
+        // and fail midway. The backend enforces the same rule; this just gives
+        // one clear message before anything is saved.
+        if (!editingFollowup) {
+            const ncSelectedCount = selectedCampaignsForFollowup.filter(
+                cId => campaignFollowupData[cId]?.status === 'not_connected'
+            ).length;
+            if (ncSelectedCount > 0) {
+                const todayStr = new Date().toDateString();
+                const ncUsedToday = (customerFollowups || []).filter(fu =>
+                    fu.status === 'not_connected' &&
+                    fu.followup_date &&
+                    new Date(fu.followup_date).toDateString() === todayStr
+                ).length;
+                const remaining = Math.max(0, 2 - ncUsedToday);
+                if (ncSelectedCount > remaining) {
+                    toast.error(
+                        remaining === 0
+                            ? `Daily limit reached: 'Not Connected' can be used only 2 times per day per customer — this customer already has ${ncUsedToday} 'Not Connected' follow-up(s) today.`
+                            : `You selected 'Not Connected' for ${ncSelectedCount} drives, but this customer has only ${remaining} 'Not Connected' use(s) left today (daily limit 2). Please reduce the selection.`
+                    );
+                    return;
                 }
             }
         }
@@ -5125,18 +5163,25 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     // "References" inner HTML — built from the editable rows, skipping any the user removed
     const buildReferencesHtml = () => {
         const rows = getLetterReferenceRows().filter(r => !letterRefHiddenFields.includes(r.key));
-        const cells = [];
+        const pairs = [];
         rows.forEach(r => {
             const v = letterRefFieldValue(r.key, r.value);
-            if (v) cells.push(
-                `<td style="padding:2px 8px 2px 0;vertical-align:top;white-space:nowrap;"><strong>${escapeLetterHtml(r.label)}:</strong></td>` +
-                `<td style="padding:2px 18px 2px 0;vertical-align:top;">${escapeLetterHtml(v)}</td>`
-            );
+            if (v) pairs.push({ label: r.label, value: v });
         });
-        if (cells.length === 0) return '';
+        if (pairs.length === 0) return '';
+        // 3 pairs per row only when every "Label: value" is short enough to share
+        // one ~700px line three-across at 12px; otherwise keep 2 per row.
+        const fitsThree = pairs.length >= 3 && pairs.every(p => (p.label.length + p.value.length + 2) <= 34);
+        const perRow = fitsThree ? 3 : 2;
+        const cell = (p) => p
+            ? `<td style="padding:2px 8px 2px 0;vertical-align:top;white-space:nowrap;"><strong>${escapeLetterHtml(p.label)}:</strong></td>` +
+              `<td style="padding:2px 18px 2px 0;vertical-align:top;">${escapeLetterHtml(p.value)}</td>`
+            : '<td></td><td></td>';
         let trs = '';
-        for (let i = 0; i < cells.length; i += 2) {
-            trs += `<tr>${cells[i]}${cells[i + 1] || '<td></td><td></td>'}</tr>`;
+        for (let i = 0; i < pairs.length; i += perRow) {
+            let tds = '';
+            for (let j = 0; j < perRow; j++) tds += cell(pairs[i + j]);
+            trs += `<tr>${tds}</tr>`;
         }
         return `<div style="margin-top:6px;color:#333;font-size:12px;">
       <div style="font-weight:bold;margin-bottom:2px;">References:</div>
@@ -5773,7 +5818,8 @@ ${f.start_para}`;
             // Drop the embedded letter PDF (kept as the first attachment when sent) so the
             // listed attachments are only the genuine extra files.
             const atts = stripEmbeddedLetterPdf(r.attachments || [], r.subject || '');
-            const bare = r.letter_html || '<p style="padding:20px;font-family:Arial">No letter content stored.</p>';
+            // Re-flow the stored References table (3 pairs per row when they fit, else 2)
+            const bare = reflowLetterReferencesHtml(r.letter_html) || '<p style="padding:20px;font-family:Arial">No letter content stored.</p>';
 
             // ---- Recipients this letter was sent to (To + CC) ----
             // Primary "To" sits on the record (email_to); the extra To/CC lists live in letter_fields.

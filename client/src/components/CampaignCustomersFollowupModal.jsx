@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { canExportExcel } from '../utils/exportPermission';
+import { dateOnly, finishDateColumns } from '../utils/excelDateColumns';
 
 // Short status labels used in the Last Status column and export:
 // wip→WIP, rescheduled→Followups, completed→Completed, not_connected→NC, rejected→Rejected
@@ -341,6 +342,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
             wsData.push([]);
         }
 
+        const headerRowIdx = wsData.length; // AutoFilter goes on this row
         wsData.push([
             'S.No', 'Instance ID', 'Customer Name', 'Phone Number', 'Email',
             'Branch ID', 'Location', 'Last Status', 'Subtype', 'Last Follow-up User',
@@ -361,8 +363,9 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                 customer.csp_subtype || '—',
                 customer.last_followup_user_name,
                 customer.last_followup_user_id,
-                customer.last_followup_date ? new Date(customer.last_followup_date).toLocaleDateString() : 'N/A',
-                customer.next_followup_date ? new Date(customer.next_followup_date).toLocaleDateString() : 'N/A',
+                // Real Date cells (not text) so Excel's filter groups Year → Month
+                dateOnly(customer.last_followup_date),
+                dateOnly(customer.next_followup_date),
                 customer.latest_flag,
                 customer.rr_content || '—',
                 customer.latest_remark || '—',
@@ -372,7 +375,8 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
             ]);
         });
 
-        const ws = XLSX.utils.aoa_to_sheet(wsData);
+        const ws = XLSX.utils.aoa_to_sheet(wsData, { cellDates: true });
+        finishDateColumns(ws, headerRowIdx);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, isAllReport ? 'All Drives' : 'All Drive Customers');
 

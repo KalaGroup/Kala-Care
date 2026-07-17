@@ -251,6 +251,10 @@ class CampaignController:
         # Start with the assets the user added to the new campaign.
         combined_assets = list(campaign.asset_numbers or [])
 
+        # Assets carried over from old same-product drives — collected so they
+        # can be counted as admin-added too (transferring is an admin action).
+        transferred_assets: set = set()
+
         # TRANSFER ASSETS FROM USER-SELECTED CAMPAIGNS (SAME PRODUCT ONLY).
         # The user picks which active same-product campaigns to pull from AND
         # which last-follow-up statuses to carry over. Only assets whose most
@@ -281,6 +285,7 @@ class CampaignController:
                     if status_map.get(str(a), 'pending') in allowed_statuses
                 ]
                 combined_assets.extend(matching)
+                transferred_assets.update(str(a).strip() for a in matching if a and str(a).strip())
 
                 src.status = 'inactive'
                 src.updated_at = now_ist()
@@ -322,13 +327,15 @@ class CampaignController:
             campaign_data['asset_numbers'] = []
             campaign_data['invalid_asset_numbers'] = []
 
-        # Admin-added tracking: only the VALID assets the admin typed/uploaded
-        # on the Drive Creation form. Assets pulled in via campaign transfer
-        # are NOT counted as admin-added.
+        # Admin-added tracking: the VALID assets the admin typed/uploaded on
+        # the Drive Creation form PLUS assets transferred from old same-product
+        # drives (both are admin actions). Only employee-pushed assets — added
+        # later via follow-ups on the Drive / Non-Drive pages — stay excluded.
         admin_entered = {
             str(a).strip() for a in (campaign.asset_numbers or [])
             if a and str(a).strip()
         }
+        admin_entered |= transferred_assets
         campaign_data['admin_asset_numbers'] = [
             a for a in campaign_data['asset_numbers'] if a in admin_entered
         ]

@@ -147,7 +147,7 @@ const SITEMAP = [
         ],
     },
     {
-        title: 'Activity Reports (Maintenance)', path: '/maintenance-reports', color: '#86198f',
+        title: 'Master Report (Maintenance)', path: '/maintenance-reports', color: '#86198f',
         desc: 'Coverage and activity reporting for maintenance.',
         features: [
             { label: 'Service Coverage Matrix', state: { openTab: 'coverage' } },

@@ -5,6 +5,8 @@ import { Bar, Pie, Line } from 'react-chartjs-2';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
+import { reflowLetterReferencesHtml } from '../utils/letterReferences';
+import { dateOnly, finishDateColumns } from '../utils/excelDateColumns';
 
 const themeColor = '#2f3192';
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
@@ -1147,7 +1149,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 `${API_BASE_URL}/performance/my-performance/letter-pdf/${row.id}`,
                 { params: { user_id: uid } }
             );
-            const rawHtml = res.data?.letter_html || '';
+            // Re-flow the stored References table (3 pairs per row when they fit, else 2)
+            const rawHtml = reflowLetterReferencesHtml(res.data?.letter_html || '');
             if (!rawHtml) { alert('This letter has no content to display.'); return; }
 
             // 2) strip the inline header/footer bands, then re-stamp them per page
@@ -2114,14 +2117,12 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             'Quotation Sent': c.quotation_sent ? 'Yes' : 'No',
             'Quotation No': c.quotation_no || '-',
             'Quotation Value': c.quotation_value || 0,
-            'Last Follow-up': c.last_followup_date
-                ? new Date(c.last_followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                : '-',
-            'Next Follow-up': c.next_followup_date
-                ? new Date(c.next_followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                : '-',
+            // Real Date cells (not text) so Excel's filter groups Year → Month
+            'Last Follow-up': dateOnly(c.last_followup_date),
+            'Next Follow-up': dateOnly(c.next_followup_date),
         }));
-        const ws = XLSX.utils.json_to_sheet(exportData);
+        const ws = XLSX.utils.json_to_sheet(exportData, { cellDates: true });
+        finishDateColumns(ws);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Non-Drive Customers');
         ws['!cols'] = Object.keys(exportData[0]).map(() => ({ wch: 20 }));
@@ -2133,9 +2134,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         if (!displayedFollowups.length) return;
         const exportData = displayedFollowups.map((fu, idx) => ({
             'S.No': idx + 1,
-            'Follow-up Date': fu.followup_date
-                ? new Date(fu.followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                : '-',
+            // Real Date cell (not text) so Excel's filter groups Year → Month
+            'Follow-up Date': dateOnly(fu.followup_date),
             'Instance ID': fu.customer_instance_id || '-',
             'Customer Name': fu.customer_name || '-',
             'Phone': fu.phone_number || '-',
@@ -2147,21 +2147,18 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             'Follow-up By': fu.followup_by || '-',
             'Flag': fu.followup_flag || '-',
             'Status': statusLabel(fu.status),
-            'Next Follow-up': fu.next_followup_date
-                ? new Date(fu.next_followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                : '-',
+            'Next Follow-up': dateOnly(fu.next_followup_date),
             'Activity': fu.activity_content || '-',
             'Reject Reason': fu.rr_content || '-',
             'Remark': fu.followup_remark || '-',
             'Quotation Sent': fu.quotation_sent ? 'Yes' : 'No',
             'Quotation No': fu.quotation_no || '-',
             'Quotation Value': fu.quotation_value || 0,
-            'Created At': fu.created_at
-                ? new Date(fu.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                : '-',
+            'Created At': dateOnly(fu.created_at),
         }));
 
-        const ws = XLSX.utils.json_to_sheet(exportData);
+        const ws = XLSX.utils.json_to_sheet(exportData, { cellDates: true });
+        finishDateColumns(ws);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Follow-ups');
         ws['!cols'] = Object.keys(exportData[0]).map(() => ({ wch: 20 }));
@@ -2188,9 +2185,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
         const exportData = rows.map((fu, idx) => ({
             'S.No': idx + 1,
-            'Follow-up Date': fu.followup_date
-                ? new Date(fu.followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                : '-',
+            // Real Date cell (not text) so Excel's filter groups Year → Month
+            'Follow-up Date': dateOnly(fu.followup_date),
             'Instance ID': fu.customer_instance_id || '-',
             'Customer Name': fu.customer_name || '-',
             'Phone': fu.phone_number || '-',
@@ -2202,21 +2198,18 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             'Follow-up By': fu.followup_by || '-',
             'Flag': fu.followup_flag || '-',
             'Status': statusLabel(fu.status),
-            'Next Follow-up': fu.next_followup_date
-                ? new Date(fu.next_followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                : '-',
+            'Next Follow-up': dateOnly(fu.next_followup_date),
             'Activity': fu.activity_content || '-',
             'Reject Reason': fu.rr_content || '-',
             'Remark': fu.followup_remark || '-',
             'Quotation Sent': fu.quotation_sent ? 'Yes' : 'No',
             'Quotation No': fu.quotation_no || '-',
             'Quotation Value': fu.quotation_value || 0,
-            'Created At': fu.created_at
-                ? new Date(fu.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                : '-',
+            'Created At': dateOnly(fu.created_at),
         }));
 
-        const ws = XLSX.utils.json_to_sheet(exportData);
+        const ws = XLSX.utils.json_to_sheet(exportData, { cellDates: true });
+        finishDateColumns(ws);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Total Follow-ups');
         ws['!cols'] = Object.keys(exportData[0]).map(() => ({ wch: 20 }));

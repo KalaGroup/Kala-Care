@@ -219,3 +219,97 @@ def log_activity(db: Session, app_code: str, user_id: str = None, employee: str 
     db.commit()
     db.refresh(row)
     return {"code": row.app_code, "employee": row.employee, "ts": _ts_ms(row.created_at)}
+
+# ---------------- APP MAPPING (assets vs master) ---------------- #
+
+def _clean_code(v) -> str:
+    """Asset application codes often arrive truncated with trailing dots
+    ("3H.8422...") or an ellipsis — strip those (and stray spaces) so they
+    match the real master codes. Internal dots are kept."""
+    return str(v or "").strip().rstrip(". \u2026").strip()
+
+
+def app_mapping(db: Session):
+    """Reconcile the application codes found in Customers Data Hub -> Asset
+    Detailed against the Part Detail Info master.
+
+    Returns counts plus the list of asset app codes that are NOT uploaded to
+    the master yet (with a representative engine model / segment / KVA and how
+    many assets carry each code) so the Master Admin can add them directly.
+    Codes are compared case-insensitively after trimming and after stripping
+    trailing dots ("3H.8422..." matches "3H.8422").
+    """
+    from sqlalchemy import func
+    from app.models.customer_model import AssetDetailed
+
+    norm = func.upper(func.ltrim(func.rtrim(AssetDetailed.application_code)))
+    rows = (
+        db.query(
+            norm.label("code"),
+            func.count(AssetDetailed.id).label("assets"),
+            func.max(AssetDetailed.engine_model).label("engine_model"),
+            func.max(AssetDetailed.segment).label("segment"),
+            func.max(AssetDetailed.kva_rating).label("kva"),
+        )
+        .filter(AssetDetailed.application_code.isnot(None))
+        .filter(func.ltrim(func.rtrim(AssetDetailed.application_code)) != "")
+        .group_by(norm)
+        .all()
+    )
+
+    # Re-aggregate after cleaning: "3H.8422..." and "3H.8422" collapse into one
+    # code, summing their asset counts and keeping the first non-empty details.
+    merged = {}
+    for r in rows:
+        code = _clean_code(r.code)
+        if not code:
+            continue
+        m = merged.setdefault(code, {"assets": 0, "engine_model": "", "segment": "", "kva": ""})
+        m["assets"] += int(r.assets or 0)
+        for k, v in (("engine_model", r.engine_model), ("segment", r.segment), ("kva", r.kva)):
+            if not m[k] and v:
+                m[k] = str(v)
+
+    master_codes = {
+        _clean_code(c).upper()
+        for (c,) in db.query(MaintenanceAppCode.app_code).all()
+    }
+    master_codes.discard("")
+
+    # `codes` is every unique asset code with an `uploaded` flag, so the UI can
+    # show all / uploaded / remaining without another round trip. `remaining` is
+    # kept as its own list because the Add form uses it directly.
+    codes, remaining, uploaded = [], [], 0
+    for code, m in merged.items():
+        is_uploaded = code in master_codes
+        item = {
+            "appCode": code,
+            "engineModel": m["engine_model"],
+            "segment": m["segment"],
+            "kva": m["kva"],
+            "assets": m["assets"],
+        }
+        codes.append({**item, "uploaded": is_uploaded})
+        if is_uploaded:
+            uploaded += 1
+        else:
+            remaining.append(item)
+
+    by_assets = lambda x: (-x["assets"], x["appCode"])
+    codes.sort(key=by_assets)
+    remaining.sort(key=by_assets)
+
+    # The other side of the reconciliation: master codes that no asset uses. Both
+    # sets are already cleaned + upper-cased, so they compare directly.
+    master_only = sorted(c for c in master_codes if c not in merged)
+
+    return {
+        "uniqueAssetCodes": len(merged),
+        "uploadedCount": uploaded,
+        "remainingCount": len(remaining),
+        "remaining": remaining,
+        "codes": codes,
+        "masterTotal": len(master_codes),
+        "masterOnlyCount": len(master_only),
+        "masterOnly": master_only,
+    }

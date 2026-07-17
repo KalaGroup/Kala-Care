@@ -1,4 +1,7 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Header
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -6,6 +9,7 @@ from app.database import SessionLocal
 from app.controllers import mom_controller as mc
 from app.schemas.mom_schema import (
     MeetingIn, MasterPointIn, MasterPointUpdate, CategoryIn, CategoryUpdate,
+    MeetingTypeIn,
 )
 from app.models.user_model import User, UserRole
 
@@ -87,15 +91,29 @@ async def create_meeting(
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    """Finalize a meeting sheet. Admins only (branch admins run branch meetings)."""
+    """Finalize a meeting sheet. Admins only (branch admins run branch meetings).
+
+    The flaky SQL Server link sometimes drops mid-request (pyodbc 08S01 /
+    TCP 10060). The transaction rolls back on failure, so retrying the whole
+    save here is safe — nothing partial is ever committed."""
     _require_role(db, user_id, user_role, ADMIN_ROLES,
                   "Only admins can finalize meeting minutes")
     conducted_by = _resolve_name(db, user_id, fallback="Master Admin")
-    meeting = mc.create_meeting(
-        db, payload.model_dump(),
-        conducted_by_id=user_id, conducted_by_name=conducted_by,
-    )
-    return {"success": True, "meeting": meeting}
+    for attempt in range(3):
+        try:
+            meeting = mc.create_meeting(
+                db, payload.model_dump(),
+                conducted_by_id=user_id, conducted_by_name=conducted_by,
+            )
+            return {"success": True, "meeting": meeting}
+        except OperationalError:
+            db.rollback()
+            if attempt == 2:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Database connection dropped while saving — the minutes were NOT saved. Please try again.",
+                )
+            await asyncio.sleep(1 + attempt)
 
 
 @router.delete("/meetings/{meeting_id}")
@@ -148,6 +166,33 @@ async def delete_master_point(
     _require_role(db, user_id, user_role, MASTER_ROLES,
                   "Only the Master Admin can edit the master list")
     mc.delete_point(db, point_id)
+    return {"success": True}
+
+
+# ---------------- MEETING TYPES ---------------- #
+
+@router.post("/meeting-types")
+async def create_meeting_type(
+    payload: MeetingTypeIn,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_role(db, user_id, user_role, MASTER_ROLES,
+                  "Only the Master Admin can edit meeting types")
+    return {"success": True, "item": mc.create_meeting_type(db, payload.name, created_by=user_id)}
+
+
+@router.delete("/meeting-types/{type_id}")
+async def delete_meeting_type(
+    type_id: int,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_role(db, user_id, user_role, MASTER_ROLES,
+                  "Only the Master Admin can edit meeting types")
+    mc.delete_meeting_type(db, type_id)
     return {"success": True}
 
 

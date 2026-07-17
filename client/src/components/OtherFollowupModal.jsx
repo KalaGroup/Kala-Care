@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { canExportExcel } from '../utils/exportPermission';
+import { dateOnly, finishDateColumns } from '../utils/excelDateColumns';
 
 const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
     const [customers, setCustomers] = useState([]);
@@ -63,6 +64,7 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
             wsData.push(['Rows Exported (after filters):', filteredCustomers.length]);
         }
         wsData.push([]);
+        const headerRowIdx = wsData.length; // AutoFilter goes on this row
         wsData.push([
             'S.No', 'Instance ID', 'Customer Name', 'Phone Number', 'Email',
             'Branch ID', 'Location', 'Service', 'Drive Type', 'Activity', 'Followup By',
@@ -87,8 +89,9 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                 customer.last_status,
                 customer.last_followup_user_name,
                 customer.last_followup_user_id,
-                customer.last_followup_date ? new Date(customer.last_followup_date).toLocaleDateString() : 'N/A',
-                customer.next_followup_date ? new Date(customer.next_followup_date).toLocaleDateString() : 'N/A',
+                // Real Date cells (not text) so Excel's filter groups Year → Month
+                dateOnly(customer.last_followup_date),
+                dateOnly(customer.next_followup_date),
                 customer.latest_flag,
                 customer.latest_remark,
                 customer.quotation_sent ? 'Yes' : 'No',
@@ -96,7 +99,8 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
             ]);
         });
 
-        const ws = XLSX.utils.aoa_to_sheet(wsData);
+        const ws = XLSX.utils.aoa_to_sheet(wsData, { cellDates: true });
+        finishDateColumns(ws, headerRowIdx);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Non Drive Followups');
 

@@ -29,8 +29,20 @@ export const ACTION = { R: 'Replace', C: 'Check', T: 'Top-up' };
 export const ORIG_HEADERS = [
     'Segment', 'App Code', 'System App Code', 'Engine Model', 'KVA', 'Emmission ',
     'Part Number', 'Part Description', 'Qty', 'Action', 'Kit Number', 'Kit Description',
-    'Qty', 'Action', 'Service Hours', 'Consumable', 'Service schedules ',
+    'Qty', 'Action', 'Service Hours', 'Service schedules ',
 ];
+
+// Columns the Import Data parser looks for, in file order — shown as the expected
+// format on the Import tab. Qty / Action appear twice in the file (once for the
+// part, once for the kit), so they are labelled here to tell the pairs apart.
+// 'App Code' is the only one an import cannot proceed without.
+export const IMPORT_COLUMNS = [
+    'Segment', 'App Code', 'System App Code', 'Engine Model', 'KVA', 'Emmission',
+    'Part Number', 'Part Description', 'Qty (part)', 'Action (part)',
+    'Kit Number', 'Kit Description', 'Qty (kit)', 'Action (kit)',
+    'Service Hours', 'Service schedules',
+];
+export const IMPORT_REQUIRED_COLUMN = 'App Code';
 
 // -- Current user (from sessionStorage, like the rest of the app) -------------
 function getUser() {
@@ -78,6 +90,10 @@ export const renameService = (key, name) => jsend('PUT', `/maintenance/services/
 
 // -- Search activity ----------------------------------------------------------
 export const getActivity = (limit = 1000) => jget(`/maintenance/activity?limit=${limit}`).then((d) => d.items || []);
+
+// App Mapping — Asset Detailed app codes vs the Part Detail master (master_admin).
+// -> { uniqueAssetCodes, uploadedCount, remainingCount, remaining:[{appCode, engineModel, segment, kva, assets}], masterTotal }
+export const getAppMapping = () => jget('/maintenance/app-mapping');
 // Fire-and-forget: a look-up should never block or error the UI.
 export const logActivity = (appCode) => {
     try {

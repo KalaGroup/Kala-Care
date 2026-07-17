@@ -6,7 +6,7 @@ import {
   ClipboardList, Building2, Plus, Trash2, CheckCircle2,
   AlertTriangle, CalendarDays, Users, X, CornerUpRight,
   BarChart3, Check, User, ListChecks, Zap,
-  ChevronDown, FileText, MapPin, UserPlus, Download, Upload, Search, RotateCcw,
+  ChevronDown, FileText, MapPin, UserPlus, Upload, Search, RotateCcw,
   Crown,
 } from 'lucide-react';
 import {
@@ -59,13 +59,22 @@ const DEFAULT_CATEGORIES = {
   People: '#7c3aed', Marketing: '#d97706', Other: '#64748b',
 };
 const NEW_CAT_COLORS = ['#0ea5e9', '#e11d48', '#16a34a', '#9333ea', '#f59e0b', '#475569', '#db2777', '#0d9488'];
+/* master meeting types — local fallback while the API is unreachable;
+   the real list comes from /mom/bootstrap and is managed in Master setup */
+const DEFAULT_MEETING_TYPES = [
+  { id: 'd1', name: 'Monthly Branch Review' },
+  { id: 'd2', name: 'Weekly Review' },
+  { id: 'd3', name: 'Sales Review' },
+  { id: 'd4', name: 'Service Review' },
+  { id: 'd5', name: 'Special / Ad-hoc' },
+];
 
 /* Suggested types — the select also has an "Other — type manually…" option */
 
 /* Column widths of the two sheet tables (kept in sync with the
    top scrollbar strip above the main table) */
 const SHEET_MINW = '96rem';
-const CARRY_MINW = '96rem';
+const CARRY_MINW = '100rem';
 
 /* ============================================================
    MASTER DISCUSSION AREAS (editable via "Master setup")
@@ -101,7 +110,110 @@ const respArr = (v) => Array.isArray(v) ? v : (v ? [v] : []);
 const isOverdue = (r) => r.flag === 'T' && r.status !== 'completed' && r.due && new Date(r.due) < today0();
 const effStatus = (r) => r.status === 'completed' ? 'completed' : isOverdue(r) ? 'overdue' : r.status;
 const autoGrow = (el) => { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px`; };
+/* bullet-list typing for Discussion points / Remark fields —
+   Enter starts a "● " line (and bullets the line just typed if it has
+   none yet); Enter on an empty bullet removes it (exits the list);
+   Backspace right after the marker deletes the bullet itself. */
+const BULLET = '● ';
+const handleBulletKeys = (e, value, commit) => {
+  const el = e.target;
+  const start = el.selectionStart, end = el.selectionEnd;
+  const setCaret = (pos) => requestAnimationFrame(() => { try { el.selectionStart = el.selectionEnd = pos; } catch { /* field gone */ } });
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    const before = value.slice(0, start), after = value.slice(end);
+    const lineStart = before.lastIndexOf('\n') + 1;
+    const line = before.slice(lineStart);
+    if (/^\s*[•●]\s*$/.test(line) && line.length) {
+      commit(value.slice(0, lineStart) + after);          // empty bullet → remove it
+      setCaret(lineStart);
+      return;
+    }
+    /* the first typed line gets its bullet on the first Enter too */
+    const needsOwn = line.trim() && !/^\s*[•●]/.test(line);
+    const fixedBefore = needsOwn ? value.slice(0, lineStart) + BULLET + line : before;
+    const insert = !fixedBefore ? BULLET : '\n' + BULLET;
+    commit(fixedBefore + insert + after);
+    setCaret(fixedBefore.length + insert.length);
+  } else if (e.key === 'Backspace' && start === end && start > 0) {
+    const before = value.slice(0, start);
+    const lineStart = before.lastIndexOf('\n') + 1;
+    if (/^\s*[•●]\s?$/.test(before.slice(lineStart))) {
+      e.preventDefault();
+      commit(value.slice(0, lineStart) + value.slice(start));   // delete the whole marker
+      setCaret(lineStart);
+    }
+  }
+};
 const daysFromDue = (due) => Math.round((today0() - new Date(due)) / 86400000); // +ve = overdue
+/* consecutive rows sharing a Discussion Area are grouped so tables can draw
+   the area cell ONCE (rowSpan) with its Discussion Points stacked beside it */
+const groupConsecutive = (list, keyFn) => {
+  const groups = [];
+  list.forEach((item, i) => {
+    const key = keyFn(item, i);
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) last.items.push(item); else groups.push({ key, items: [item] });
+  });
+  return groups;
+};
+/* generic list → Excel download used by the table "Excel" buttons across MOM
+   (branded bold header row, auto column widths). xlsx-js-style is loaded on
+   demand, same as the meeting-sheet export. */
+async function exportTableExcel(fileBase, headers, rows2d, opts = {}) {
+  const _xlsx = await import('xlsx-js-style');
+  const XLSX = _xlsx.utils ? _xlsx : (_xlsx.default || _xlsx);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows2d]);
+  ws['!cols'] = headers.map((h, i) => ({
+    wch: Math.min(60, Math.max(String(h).length + 2, ...rows2d.map((r) => String(r[i] ?? '').split('\n')[0].length + 2), 8)),
+  }));
+  headers.forEach((_, i) => {
+    const cell = ws[XLSX.utils.encode_cell({ r: 0, c: i })];
+    if (cell) cell.s = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: '2F3192' } }, alignment: { vertical: 'center', wrapText: true } };
+  });
+  /* wrap every data cell so bullet points / multi-line remarks show on their
+     own lines, and size each row to fit its tallest cell. Cells of merged
+     (grouped) columns are centered like on screen. */
+  const mergeCols = opts.mergeCols || [];
+  const rowHeights = [{ hpt: 20 }];
+  rows2d.forEach((r, ri) => {
+    let maxLines = 1;
+    r.forEach((v, ci) => {
+      const lines = String(v ?? '').split('\n').length;
+      if (lines > maxLines) maxLines = lines;
+      const cell = ws[XLSX.utils.encode_cell({ r: ri + 1, c: ci })];
+      if (cell) cell.s = mergeCols.includes(ci)
+        ? { alignment: { vertical: 'center', horizontal: 'center', wrapText: true } }
+        : { alignment: { vertical: 'top', wrapText: true } };
+    });
+    rowHeights.push({ hpt: Math.min(220, 14 * maxLines + 6) });
+  });
+  ws['!rows'] = rowHeights;
+  /* merge the grouped columns (Sr. No. / Discussion Area) across each
+     area group — same layout as the on-screen tables */
+  if (mergeCols.length && opts.groupSizes?.length) {
+    const merges = [];
+    let r = 1;                                     // data starts under the header row
+    opts.groupSizes.forEach((n) => {
+      if (n > 1) mergeCols.forEach((c) => merges.push({ s: { r, c }, e: { r: r + n - 1, c } }));
+      r += n;
+    });
+    if (merges.length) ws['!merges'] = merges;
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'MOM');
+  XLSX.writeFile(wb, `${fileBase}_${iso(new Date())}.xlsx`);
+}
+/* remark trail → readable multi-line cell text */
+const remarksText = (list) => (list || []).map((p) =>
+  `${fmtDDMMYY(p.date)}${p.status ? ` [${STATUS[p.status]?.label || p.status}]` : ''}${p.by ? ` by ${p.by}` : ''}${p.text ? ` — ${p.text}` : ''}`).join('\n');
+/* shared look for the small table "Excel" buttons */
+const XL_BTN = 'export-btn kc-lift inline-flex items-center gap-1 rounded-lg border bg-white px-2 py-1 fs-10 font-bold';
+
+/* group key for live-sheet rows — master rows group by their master point,
+   everything else (custom rows, shifted carried tasks) by area text, so a
+   carried point slots under an already-present Discussion Area */
+const sheetGroupKey = (r) => r.masterId ? `m-${r.masterId}` : (r.area ? `a-${r.area.trim().toLowerCase()}` : `x-${r.id}`);
 const taskRows = (m) => m.rows.filter((r) => r.flag === 'T');
 const progress = (m) => { const t = taskRows(m); return t.length ? Math.round(t.filter((r) => r.status === 'completed').length / t.length * 100) : 100; };
 
@@ -124,6 +236,44 @@ function collectCarry(history, codes) {
   }));
   return out;
 }
+
+/* ============================================================
+   BRANCH ATTRIBUTION — a task / info row belongs to the branch(es)
+   of its RESPONSIBLE people (looked up in the meeting's attendee
+   list, where each employee carries their branch). Owners from two
+   branches → the row counts in BOTH branches. Rows whose owners
+   can't be resolved to a branch (guests, no responsibility) fall
+   back to the meeting's own branch(es).
+   ============================================================ */
+const buildBranchNameToCode = (allBranches, meetings) => {
+  const map = new Map();
+  allBranches.forEach((b) => {
+    if (b.name) map.set(String(b.name).toLowerCase(), b.code);
+    if (b.code) map.set(String(b.code).toLowerCase(), b.code);   // legacy rows that stored the code
+  });
+  meetings.forEach((m) => (m.branches || []).forEach((b) => {
+    if (b.name && !map.has(String(b.name).toLowerCase())) map.set(String(b.name).toLowerCase(), b.code);
+  }));
+  return map;
+};
+const makeRowBranchCodes = (nameToCode) => {
+  const attCache = new Map();               // meeting id → attendee name → branch label
+  return (r, m) => {
+    let byName = attCache.get(m.id);
+    if (!byName) {
+      byName = new Map((m.attendees || []).map((a) => [String(a.name || '').toLowerCase(), a.branch]));
+      attCache.set(m.id, byName);
+    }
+    const codes = new Set();
+    respArr(r.resp).forEach((n) => {
+      const bn = byName.get(String(n).toLowerCase());
+      const code = bn ? nameToCode.get(String(bn).toLowerCase()) : null;
+      if (code) codes.add(code);
+    });
+    if (!codes.size) (m.branches?.length ? m.branches.map((b) => b.code) : [m.branchCode]).forEach((c) => c && codes.add(c));
+    return codes;
+  };
+};
 
 /* ============================================================
    EXCEL EXPORT — same layout as the register sheet:
@@ -226,29 +376,41 @@ async function exportMeetingExcel(m, brandColor = '#000080') {
   while (headRow.length < totalCols) headRow.push(txt('', S.head));
   push(headRow);
 
-  /* Table body — carried rows first, then fresh; zebra shading */
+  /* Table body — carried rows first, then fresh; zebra shading. Consecutive
+     rows of the same Discussion Area are grouped: the area cell is MERGED
+     across its point-rows, exactly like the on-screen sheet, and the C/F
+     marker moves to the point text. */
   const ordered = [...m.rows.filter((r) => r.carried), ...m.rows.filter((r) => !r.carried)];
-  ordered.forEach((r, i) => {
-    const alt = i % 2 === 1;
-    const isT = r.flag === 'T';
-    const od = isT && r.status !== 'completed' && r.due && new Date(r.due) < today0();
-    const stKey = !isT ? null : od ? 'overdue' : r.status;
-    const row = [
-      txt(r.area + (r.carried ? '  (C/F)' : ''), r.carried ? { ...cell(alt), font: { ...cell(alt).font, bold: true, color: { rgb: 'B45309' } } } : cell(alt)),
-      txt(r.point, cell(alt)),
-      txt(respArr(r.resp).join(', ') || (isT ? '' : '-'), cell(alt)),
-      txt(r.assignedBy || '-', cellC(alt)),
-      txt(r.flag, cellC(alt, { bold: true })),
-      txt(isT ? fmtDDMMYY(r.due) : '-', cellC(alt)),
-    ];
-    histDates.forEach((d) => {
-      const pr = (r.prevRemarks || []).find((p) => p.date === d);
-      row.push(txt(pr ? pr.text : '', cell(alt)));
+  const areaGroups = groupConsecutive(ordered, (r) => (r.area || '').trim().toLowerCase());
+  const bodyStart = aoa.length;
+  let ri = 0;
+  areaGroups.forEach((g) => {
+    if (g.items.length > 1) merges.push({ s: { r: bodyStart + ri, c: 0 }, e: { r: bodyStart + ri + g.items.length - 1, c: 0 } });
+    g.items.forEach((r) => {
+      const alt = false;                       // zebra shading removed — all rows white
+      const isT = r.flag === 'T';
+      const od = isT && r.status !== 'completed' && r.due && new Date(r.due) < today0();
+      const stKey = !isT ? null : od ? 'overdue' : r.status;
+      const areaStyle = { ...cell(alt), alignment: { vertical: 'center', horizontal: 'center', wrapText: true } };
+      const pointStyle = r.carried ? { ...cell(alt), font: { ...cell(alt).font, color: { rgb: '92400E' } } } : cell(alt);
+      const row = [
+        txt(r.area, areaStyle),
+        txt((r.carried ? '(C/F)  ' : '') + (r.point || ''), pointStyle),
+        txt(respArr(r.resp).join(', ') || (isT ? '' : '-'), cell(alt)),
+        txt(r.assignedBy || '-', cellC(alt)),
+        txt(r.flag, cellC(alt, { bold: true })),
+        txt(isT ? fmtDDMMYY(r.due) : '-', cellC(alt)),
+      ];
+      histDates.forEach((d) => {
+        const pr = (r.prevRemarks || []).find((p) => p.date === d);
+        row.push(txt(pr ? pr.text : '', cell(alt)));
+      });
+      row.push(txt(r.remark || '', cell(alt)));
+      row.push(txt(isT ? (od ? 'Overdue' : (STATUS[r.status]?.label || r.status)) : '-',
+        stKey ? cellC(alt, { bold: true, color: { rgb: ST_COLOR[stKey] || ST_COLOR.pending } }) : cellC(alt)));
+      push(row);
+      ri++;
     });
-    row.push(txt(r.remark || '', cell(alt)));
-    row.push(txt(isT ? (od ? 'Overdue' : (STATUS[r.status]?.label || r.status)) : '-',
-      stKey ? cellC(alt, { bold: true, color: { rgb: ST_COLOR[stKey] || ST_COLOR.pending } }) : cellC(alt)));
-    push(row);
   });
 
   const _xlsx = await import('xlsx-js-style');
@@ -319,11 +481,19 @@ const SegStatus = ({ value, onChange }) => (
 /* generic dropdown shell — trigger render-prop + panel that closes on
    outside click. Children can be a function receiving close() so list
    items can dismiss the panel after acting. */
-function Dropdown({ trigger, children, panelClass = '', panelStyle }) {
+function Dropdown({ trigger, children, panelClass = '', panelStyle, hover = false }) {
   const [open, setOpen] = useState(false);
   const [alignRight, setAlignRight] = useState(false);
   const ref = useRef(null);
   const panelRef = useRef(null);
+  const hoverTimer = useRef(null);
+  useEffect(() => () => clearTimeout(hoverTimer.current), []);
+  /* hover mode — panel opens while the mouse is over the box and closes as
+     soon as the pointer moves away (small delay bridges the trigger→panel gap) */
+  const hoverProps = hover ? {
+    onMouseEnter: () => { clearTimeout(hoverTimer.current); setOpen(true); },
+    onMouseLeave: () => { clearTimeout(hoverTimer.current); hoverTimer.current = setTimeout(() => setOpen(false), 150); },
+  } : {};
   useEffect(() => {
     if (!open) return undefined;
     /* flip the panel to right-aligned when its left-anchored position would
@@ -336,7 +506,7 @@ function Dropdown({ trigger, children, panelClass = '', panelStyle }) {
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative" ref={ref} {...hoverProps}>
       {trigger({ open, toggle: () => setOpen((o) => !o) })}
       {open && (
         <div ref={panelRef} className={`absolute z-[60] mt-1 rounded-xl border border-gray-200 bg-white shadow-2xl overflow-hidden ${panelClass}`}
@@ -349,24 +519,61 @@ function Dropdown({ trigger, children, panelClass = '', panelStyle }) {
 }
 /* previous remarks chips (the accumulating "Remarks - date" columns) */
 const RemarkHistory = React.memo(({ list }) => !list?.length ? <span className="fs-10 text-gray-300">—</span> : (
-  <div className="space-y-1.5">
+  <div>
     {list.map((p, i) => {
       const st = STATUS[p.status];
       return (
-        <div key={i} className="mom-remark-card rounded-lg px-2 py-1" style={{ background: '#f7f8fc', border: '1px solid #eceef6' }}>
+        <div key={i} className="py-1" style={i > 0 ? { borderTop: '1px solid #e4e7f2' } : undefined}>
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="fs-10 font-bold" style={{ color: '#475569' }}>{fmtDDMMYY(p.date)}</span>
             {st && <span className="rounded-full px-1.5 py-0.5 fs-10 font-bold" style={{ background: st.soft, color: st.color }}>{st.label}</span>}
             {p.by && <span className="fs-10 text-gray-400">by {p.by}</span>}
           </div>
           {p.text
-            ? <div className="fs-12 text-black mt-0.5 leading-snug" style={{ wordBreak: 'break-word' }}>{p.text}</div>
+            ? <div className="fs-12 text-black mt-0.5 leading-snug" style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>{p.text}</div>
             : <div className="fs-10 text-gray-400 mt-0.5 italic">no remark noted</div>}
         </div>
       );
     })}
   </div>
 ));
+
+/* dual-scrollbar wrapper — renders a thin phantom scrollbar ABOVE the real
+   scroll container and keeps the two in lockstep, so wide tables can be
+   scrolled left↔right from the top without going to the bottom edge first */
+const DualScroll = ({ className = 'overflow-x-auto kc-scroll', style, children }) => {
+  const topRef = useRef(null);
+  const mainRef = useRef(null);
+  useEffect(() => {
+    const main = mainRef.current, top = topRef.current;
+    if (!main || !top) return;
+    const syncPhantomWidth = () => {
+      const phantom = top.firstChild;
+      if (phantom && main.scrollWidth > 0) phantom.style.width = `${main.scrollWidth}px`;
+    };
+    syncPhantomWidth();
+    const timer = setTimeout(syncPhantomWidth, 100);
+    const onMain = () => { top.scrollLeft = main.scrollLeft; };
+    const onTop = () => { main.scrollLeft = top.scrollLeft; };
+    main.addEventListener('scroll', onMain);
+    top.addEventListener('scroll', onTop);
+    window.addEventListener('resize', syncPhantomWidth);
+    return () => {
+      clearTimeout(timer);
+      main.removeEventListener('scroll', onMain);
+      top.removeEventListener('scroll', onTop);
+      window.removeEventListener('resize', syncPhantomWidth);
+    };
+  });
+  return (
+    <>
+      <div ref={topRef} className="overflow-x-auto kc-scroll" style={{ overflowY: 'hidden' }}>
+        <div style={{ height: 1 }} />
+      </div>
+      <div ref={mainRef} className={className} style={style}>{children}</div>
+    </>
+  );
+};
 
 /* per-row head picker — the meeting head who assigns the task is also the
    one responsible for it, so ONE choice covers both (headResp is kept
@@ -377,8 +584,9 @@ const HeadCell = ({ row, heads = [], onChange }) => {
   return (
     <select value={row.assignedBy || ''}
       onChange={(e) => onChange({ assignedBy: e.target.value, headResp: e.target.value })}
-      title="Which meeting head assigned (and is responsible for) this task"
-      className="w-full fs-11 text-gray-700 outline-none px-1 py-1 rounded cursor-pointer">
+      title={row.assignedBy || 'Which meeting head assigned (and is responsible for) this task'}
+      className="w-full fs-11 text-gray-700 outline-none px-1 py-1 rounded cursor-pointer"
+      style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
       <option value="">— Select head —</option>
       {opts.map((h) => <option key={h} value={h}>{h}</option>)}
     </select>
@@ -484,7 +692,7 @@ const RespPicker = ({ value = [], options = [], onChange, disabled }) => {
   );
 };
 
-const FontScale = React.memo(() => <style>{`@keyframes livedot{0%,100%{opacity:1}50%{opacity:.35}} @keyframes pop{0%{transform:scale(.4)}70%{transform:scale(1.2)}100%{transform:scale(1)}} .kc-pop{animation:pop .18s ease-out} .kc-lift{transition:transform .15s ease,box-shadow .15s ease} .kc-lift:hover{transform:translateY(-1px);box-shadow:0 10px 22px -10px rgba(35,37,95,.35)} .kc-input{background:#f7f8fc;border:1.5px solid #e6e9f0;border-radius:10px;transition:border-color .15s,box-shadow .15s,background .15s} .kc-input:focus,.kc-input:focus-within{background:#fff;border-color:#2f3192;box-shadow:0 0 0 3px rgba(47,49,146,.10);outline:none} .kc-grid{background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px),repeating-linear-gradient(90deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px)} .kc-scroll::-webkit-scrollbar{height:6px;width:6px} .kc-scroll::-webkit-scrollbar-thumb{background:#d5d9e6;border-radius:8px} .kc-scroll::-webkit-scrollbar-thumb:hover{background:#bfc5d8} .kc-scroll::-webkit-scrollbar-track{background:transparent} .fs-9{font-size:9px;line-height:1.3} .fs-10{font-size:10px;line-height:1.35} .fs-11{font-size:11px;line-height:1.4} .fs-12{font-size:12px;line-height:1.45} .fs-13{font-size:13px;line-height:1.45} .mom-sheet td,.mom-sheet th{border:1px solid #e2e8f0} .mom-sheet thead th{text-align:center;vertical-align:middle} .mom-sheet input,.mom-sheet select,.mom-sheet textarea{background:transparent;border-radius:6px;transition:box-shadow .12s,background .12s} .mom-sheet input:hover,.mom-sheet select:hover,.mom-sheet textarea:hover{background:#f6f8fc} .mom-sheet input:focus,.mom-sheet select:focus,.mom-sheet textarea:focus{background:#fff;box-shadow:inset 0 0 0 1.5px ${BRAND}55} .mom-sheet tbody tr:nth-child(even){background:#fbfcfe} .mom-sheet tbody tr:hover{background:#f2f6ff}`}</style>);
+const FontScale = React.memo(() => <style>{`@keyframes livedot{0%,100%{opacity:1}50%{opacity:.35}} @keyframes pop{0%{transform:scale(.4)}70%{transform:scale(1.2)}100%{transform:scale(1)}} .kc-pop{animation:pop .18s ease-out} .kc-lift{transition:transform .15s ease,box-shadow .15s ease} .kc-lift:hover{transform:translateY(-1px);box-shadow:0 10px 22px -10px rgba(35,37,95,.35)} .kc-input{background:#f7f8fc;border:1.5px solid #e6e9f0;border-radius:10px;transition:border-color .15s,box-shadow .15s,background .15s} .kc-input:focus,.kc-input:focus-within{background:#fff;border-color:#2f3192;box-shadow:0 0 0 3px rgba(47,49,146,.10);outline:none} .kc-input::placeholder,.kc-input input::placeholder{font-size:10px;font-weight:500;color:#9ca3af} .kc-grid{background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px),repeating-linear-gradient(90deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px)} .kc-scroll::-webkit-scrollbar{height:6px;width:6px} .kc-scroll::-webkit-scrollbar-thumb{background:#d5d9e6;border-radius:8px} .kc-scroll::-webkit-scrollbar-thumb:hover{background:#bfc5d8} .kc-scroll::-webkit-scrollbar-track{background:transparent} .fs-9{font-size:9px;line-height:1.3} .fs-10{font-size:10px;line-height:1.35} .fs-11{font-size:11px;line-height:1.4} .fs-12{font-size:12px;line-height:1.45} .fs-13{font-size:13px;line-height:1.45} .mom-sheet td,.mom-sheet th{border:1px solid #cbd5e1} .mom-sheet thead th{text-align:center;vertical-align:middle} .mom-sheet input,.mom-sheet select,.mom-sheet textarea{background:transparent;border-radius:6px;transition:box-shadow .12s,background .12s} .mom-sheet input:hover,.mom-sheet select:hover,.mom-sheet textarea:hover{background:#f6f8fc} .mom-sheet input:focus,.mom-sheet select:focus,.mom-sheet textarea:focus{background:#fff;box-shadow:inset 0 0 0 1.5px ${BRAND}55} .mom-sheet tbody tr:nth-child(even){background:#fbfcfe}`}</style>);
 
 /* ============================================================
    MAIN COMPONENT
@@ -500,6 +708,7 @@ export default function MOMTracking() {
 
   const [master, setMaster] = useState(DEFAULT_MASTER);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [meetingTypes, setMeetingTypes] = useState(DEFAULT_MEETING_TYPES);
   const [history, setHistory] = useState({});
   // Non-master users (branch admin / employee) only get the personal report view.
   const [view, setView] = useState(isMaster ? 'new' : 'mine');   // new | history | reports | mine
@@ -532,10 +741,12 @@ export default function MOMTracking() {
   }, [routerLocation.state]);
   const [masterOpen, setMasterOpen] = useState(false);
   const [confirm, setConfirm] = useState(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);  // async onYes running → spinner on the Yes button
   const [viewMtg, setViewMtg] = useState(null);
   const [histBranch, setHistBranch] = useState(null);   // branch pre-selected when Reports jumps to History
   const [histSource, setHistSource] = useState('loading'); // loading | api | error
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);      // sync guard — a double-click can fire before the disabled state renders
   const [showAllAtt, setShowAllAtt] = useState(false);   // attendee strip: collapsed by default
   const topScrollRef = useRef(null);      // synced horizontal scrollbar shown ABOVE the sheet
   const mainScrollRef = useRef(null);
@@ -584,6 +795,8 @@ export default function MOMTracking() {
         const cats = {};
         (b.data.categories || []).forEach((c) => { cats[c.name] = c.color; });
         if (Object.keys(cats).length) setCategories(cats);
+        const types = (b.data.meetingTypes || []).map((t) => ({ id: t.id, name: t.name }));
+        if (types.length) setMeetingTypes(types);
       }
       if (m.data?.success) {
         const map = {};
@@ -617,7 +830,6 @@ export default function MOMTracking() {
   const [mType, setMType] = useState('');
   const [attendees, setAttendees] = useState([]);
   const [manualName, setManualName] = useState('');
-  const [pickBr, setPickBr] = useState('all');        // "Employee joined?" picker — branch filter
   const [picked, setPicked] = useState(new Set());    // which master points to discuss
   /* meeting heads — the logged-in conductor is the first head by default;
      more heads can be picked from the attendees or typed in manually */
@@ -677,7 +889,7 @@ export default function MOMTracking() {
   const rowFilled = (r) => !!(r && ((r.point || '').trim() || (r.remark || '').trim() || respArr(r.resp).length));
   const togglePick = (p) => {
     const on = picked.has(p.id);
-    if (on && rowFilled(rows.find((r) => r.masterId === p.id))) {
+    if (on && rows.some((r) => r.masterId === p.id && rowFilled(r))) {
       setConfirm({
         title: 'Unselect this discussion point?',
         meta: p.title,
@@ -721,7 +933,19 @@ export default function MOMTracking() {
     const c = carry.find((x) => x.id === id);
     if (!c) return;
     setCarry((p) => p.filter((x) => x.id !== id));
-    setRows((p) => [...p, { ...c, masterId: null }]);
+    setRows((p) => {
+      /* if the same Discussion Area is already on the sheet, the carried
+         point slots in UNDER it (adopting its master link so the group
+         survives the points↔rows sync); otherwise it lands at the end */
+      const areaKey = (c.area || '').trim().toLowerCase();
+      let at = -1;
+      for (let i = p.length - 1; i >= 0; i--) {
+        if ((p[i].area || '').trim().toLowerCase() === areaKey) { at = i; break; }
+      }
+      if (at < 0) return [...p, { ...c, masterId: null }];
+      const moved = { ...c, masterId: p[at].masterId || null };
+      return [...p.slice(0, at + 1), moved, ...p.slice(at + 1)];
+    });
     ping(`"${c.area}" moved into the current-meeting discussion`);
   };
   const returnRowToCarry = (id) => {
@@ -801,6 +1025,18 @@ export default function MOMTracking() {
     return { meetings: uniq.size, open, overdue };
   }, [history]);
 
+  /* branch list for the History dropdown in the tab row — real branches plus
+     history-only (manually added) ones that still have meetings */
+  const histAllBranches = useMemo(() => {
+    const map = new Map(branchOptions.map((b) => [b.code, { ...b }]));
+    Object.keys(history).forEach((code) => {
+      if (map.has(code) || !(history[code] || []).length) return;
+      const m = history[code][0];
+      map.set(code, { code, name: m?.branches?.find((x) => x.code === code)?.name || m?.branchName || code, manual: true });
+    });
+    return [...map.values()];
+  }, [branchOptions, history]);
+
   /* employees belonging to one branch */
   const branchEmployees = (b) => {
     if (!b) return [];
@@ -808,26 +1044,6 @@ export default function MOMTracking() {
     if (empSource === 'api') return employees.filter((e) => e.branch === b.code || e.branch_name === b.name).map((e) => ({ name: e.name, user_id: e.user_id }));
     return [];
   };
-
-  /* every employee of every branch — feeds the "Employee joined?
-     Select…" two-step picker on the sheet */
-  const allEmployees = useMemo(() => {
-    if (empSource === 'api') return employees.map((e) => ({ name: e.name, user_id: e.user_id, branch: e.branch, branchName: e.branch_name || e.branch }));
-    return [];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [empSource, employees]);
-  const remainingEmployees = useMemo(() => {
-    const inAtt = new Set(attendees.map((a) => a.name.toLowerCase()));
-    const seen = new Set(); const out = [];
-    allEmployees.forEach((e) => {
-      const k = e.name.toLowerCase();
-      if (inAtt.has(k) || seen.has(k)) return;
-      seen.add(k);
-      out.push({ ...e, key: `${e.name}|${e.branch || ''}` });
-    });
-    return out;
-  }, [allEmployees, attendees]);
-  const pickable = useMemo(() => remainingEmployees.filter((e) => pickBr === 'all' || e.branch === pickBr), [remainingEmployees, pickBr]);
 
   const allBranchOptions = useMemo(() => {
     const seen = new Set(branchOptions.map((b) => b.code));
@@ -947,10 +1163,6 @@ export default function MOMTracking() {
     }
     doDelete();
   };
-  const addEmployeeAttendee = (e) => {
-    setAttendees((p) => [...p, { id: uid('a'), name: e.name, user_id: e.user_id, source: 'employee', present: true, branch: e.branchName, extra: true }]);
-    ping(`${e.name} added to attendees`);
-  };
   const addManual = () => {
     const n = manualName.trim();
     if (!n) return;
@@ -970,13 +1182,26 @@ export default function MOMTracking() {
   useEffect(() => {
     if (!rowSyncReady.current) { rowSyncReady.current = true; return; }
     setRows((prev) => {
-      const byMaster = new Map(prev.filter((r) => r.masterId).map((r) => [r.masterId, r]));
-      const custom = prev.filter((r) => !r.masterId);   // rows added live during the meeting
-      const fromMaster = master.filter((p) => picked.has(p.id)).map((p) => byMaster.get(p.id) || ({
+      /* one Discussion Area can hold SEVERAL point-rows — keep every row of
+         a still-ticked master (in sheet order), not just the first one.
+         Rows whose masterId is NOT in the current master list (e.g. a draft
+         restored before the API master list arrives) are NEVER dropped —
+         they ride along as custom rows and re-attach once their master
+         point is known again. */
+      const masterIds = new Set(master.map((p) => String(p.id)));
+      const byMaster = new Map();                       // masterId -> [rows]
+      prev.forEach((r) => {
+        if (!r.masterId || !masterIds.has(String(r.masterId))) return;
+        const k = String(r.masterId);
+        if (!byMaster.has(k)) byMaster.set(k, []);
+        byMaster.get(k).push(r);
+      });
+      const custom = prev.filter((r) => !r.masterId || !masterIds.has(String(r.masterId)));
+      const fromMaster = master.filter((p) => picked.has(p.id)).flatMap((p) => byMaster.get(String(p.id)) || [{
         id: uid(), trackId: uid('t'), masterId: p.id, area: p.title, category: p.category,
         point: '', resp: [], due: '', flag: 'I', status: 'pending', remark: '',
         originDate: mDate, prevRemarks: [],
-      }));
+      }]);
       return [...fromMaster, ...custom];
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -992,7 +1217,7 @@ export default function MOMTracking() {
 
   const resetWizard = () => {
     setBranches([]); setAttendees([]); setManualName(''); setPicked(new Set()); setShowAllAtt(false);
-    setManualBranch(''); setPickBr('all');
+    setManualBranch('');
     setHeads(me?.name ? [me.name] : []); setManualHead('');
     setMDate(iso(new Date())); setMLocation(''); setMType('');
     setRows([]); setCarry([]);
@@ -1023,27 +1248,49 @@ export default function MOMTracking() {
   const updRow = (id, patch) => setRows((p) => p.map((r) => {
     if (r.id !== id) return r;
     const next = { ...r, ...patch };
-    /* Information rows CAN carry responsibility (info directed at people),
-       but never a due date or a status — those belong to Tasks only */
+    /* I (Information) is for EVERYONE — no owners, no due date, no status.
+       T (Task) is user-wise — picking any owner flips the row to T
+       automatically, and switching to I clears the owners again. */
+    if (patch.resp !== undefined && respArr(patch.resp).length && next.flag !== 'T') next.flag = 'T';
+    if (next.flag === 'T' && r.flag !== 'T' && !next.due) next.due = iso(addDays(new Date(mDate || iso(new Date())), 7));
     if (patch.flag === 'T' && !next.due) next.due = iso(addDays(new Date(mDate || iso(new Date())), 7));
-    if (patch.flag === 'I') { next.due = ''; next.status = 'pending'; }
+    if (patch.flag === 'I') { next.due = ''; next.status = 'pending'; next.resp = []; }
     return next;
   }));
-  /* removing a master-point row also unticks its point — otherwise the
-     live points↔rows sync would put the row straight back */
+  /* removing the LAST row of a master point also unticks the point —
+     otherwise the live points↔rows sync would put the row straight back.
+     When the area still has other point-rows, only this row goes. */
   const delRow = (id) => {
     const r = rows.find((x) => x.id === id);
-    if (r?.masterId) setPicked((s) => { const n = new Set(s); n.delete(r.masterId); return n; });
+    if (r?.masterId && rows.filter((x) => x.masterId === r.masterId).length <= 1) {
+      setPicked((s) => { const n = new Set(s); n.delete(r.masterId); return n; });
+    }
     setRows((p) => p.filter((x) => x.id !== id));
   };
+  /* one Discussion Area → many Discussion Points: adds a fresh point-row
+     right below, under the same area, with its own owners, due date,
+     status and remark — reports count every point separately */
+  const addPointRow = (rowId) => {
+    setRows((prev) => {
+      const i = prev.findIndex((x) => x.id === rowId);
+      if (i < 0) return prev;
+      const src = prev[i];
+      const nr = {
+        id: uid(), trackId: uid('t'), masterId: src.masterId || null,
+        area: src.area, category: src.category, point: '', resp: [], due: '',
+        flag: 'I', status: 'pending', remark: '', carried: false,
+        originDate: mDate, prevRemarks: [],
+      };
+      return [...prev.slice(0, i + 1), nr, ...prev.slice(i + 1)];
+    });
+  };
   const askDelRow = (r) => {
-    /* a carried task dragged onto the sheet isn't deleted — it goes back
-       to the previous-meeting pending list with all its data intact */
-    if (r.carried) { returnRowToCarry(r.id); return; }
     setConfirm({
       title: 'Remove this row?',
       meta: r.area,
-      note: (r.point?.trim() || r.remark?.trim()) ? 'Anything typed in it will be lost.' : '',
+      note: r.carried
+        ? 'This carried task is removed from this meeting\'s sheet only — it stays open in history and will carry forward again next meeting. Use the ↱ arrow instead to send it back to the pending list above.'
+        : ((r.point?.trim() || r.remark?.trim()) ? 'Anything typed in it will be lost.' : ''),
       yesLabel: 'Yes, remove',
       onYes: () => { delRow(r.id); setConfirm(null); },
     });
@@ -1069,6 +1316,34 @@ export default function MOMTracking() {
      land on the full carry list by id) */
   const [carryStatusF, setCarryStatusF] = useState([]);   // ['pending','overdue',…]
   const [carryCatF, setCarryCatF] = useState([]);         // category names
+
+  /* dual scrollbar for the carried-tasks table — a thin phantom bar on top
+     mirrors the real container so users can scroll right without first
+     scrolling to the bottom of the (tall) table */
+  const carryTopScrollRef = useRef(null);
+  const carryMainScrollRef = useRef(null);
+  useEffect(() => {
+    const main = carryMainScrollRef.current;
+    const top = carryTopScrollRef.current;
+    if (!main || !top) return;
+    const syncPhantomWidth = () => {
+      const phantom = top.firstChild;
+      if (phantom && main.scrollWidth > 0) phantom.style.width = `${main.scrollWidth}px`;
+    };
+    syncPhantomWidth();
+    const timer = setTimeout(syncPhantomWidth, 100);
+    const onMain = () => { top.scrollLeft = main.scrollLeft; };
+    const onTop = () => { main.scrollLeft = top.scrollLeft; };
+    main.addEventListener('scroll', onMain);
+    top.addEventListener('scroll', onTop);
+    window.addEventListener('resize', syncPhantomWidth);
+    return () => {
+      clearTimeout(timer);
+      main.removeEventListener('scroll', onMain);
+      top.removeEventListener('scroll', onTop);
+      window.removeEventListener('resize', syncPhantomWidth);
+    };
+  });
   const toggleIn = (setter) => (v) => setter((p) => p.includes(v) ? p.filter((x) => x !== v) : [...p, v]);
   const toggleCarryStatus = toggleIn(setCarryStatusF);
   const toggleCarryCat = toggleIn(setCarryCatF);
@@ -1108,6 +1383,8 @@ export default function MOMTracking() {
       ],
       note: blankCount ? `${blankCount} untouched blank row${blankCount > 1 ? 's' : ''} will be skipped.` : '',
       onYes: () => {
+        if (savingRef.current) return;   // a save is already in flight — ignore the extra click
+        savingRef.current = true;
         const kept = rows.filter((r) => !(r.flag === 'I' && !r.point.trim() && !r.remark.trim() && !respArr(r.resp).length));
         const allRows = [...carry, ...kept];
         setSaving(true);
@@ -1134,7 +1411,7 @@ export default function MOMTracking() {
             setConfirm(null); ping('Minutes saved'); resetWizard(); setView('history');
           })
           .catch((e) => ping(e?.response?.data?.detail || 'Could not save minutes — is the server running?', 'err'))
-          .finally(() => setSaving(false));
+          .finally(() => { savingRef.current = false; setSaving(false); });
       },
     });
   };
@@ -1174,6 +1451,8 @@ export default function MOMTracking() {
     addPoint: (title, category) => axios.post(`${MOM_API}/master-points`, { title, category }, { headers: authHeaders }).then((r) => r.data.item),
     updatePoint: (id, data) => axios.put(`${MOM_API}/master-points/${id}`, data, { headers: authHeaders }),
     deletePoint: (id) => axios.delete(`${MOM_API}/master-points/${id}`, { headers: authHeaders }),
+    addMeetingType: (name) => axios.post(`${MOM_API}/meeting-types`, { name }, { headers: authHeaders }).then((r) => r.data.item),
+    deleteMeetingType: (id) => axios.delete(`${MOM_API}/meeting-types/${id}`, { headers: authHeaders }),
     addCategory: (name, color) => axios.post(`${MOM_API}/categories`, { name, color }, { headers: authHeaders }),
     updateCategory: (name, color) => axios.put(`${MOM_API}/categories/${encodeURIComponent(name)}`, { color }, { headers: authHeaders }),
     deleteCategory: (name) => axios.delete(`${MOM_API}/categories/${encodeURIComponent(name)}`, { headers: authHeaders }),
@@ -1225,7 +1504,7 @@ export default function MOMTracking() {
         <div className="kc-in flex items-center justify-between gap-2 mb-4 flex-wrap">
           <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm w-fit max-sm:max-w-full max-sm:overflow-x-auto">
             {(isMaster
-              ? [{ k: 'new', label: 'New meeting', icon: Zap }, { k: 'history', label: 'History', icon: FileText }, { k: 'reports', label: 'Reports', icon: BarChart3 }, { k: 'mine', label: 'Employee report', icon: Users }]
+              ? [{ k: 'new', label: 'New meeting', icon: Zap }, { k: 'history', label: 'MOM History', icon: FileText }, { k: 'reports', label: 'Reports', icon: BarChart3 }, { k: 'mine', label: 'Employee report', icon: Users }]
               : [{ k: 'mine', label: 'My MOM', icon: Users }]
             ).map((t) => (
               <button key={t.k} onClick={() => setView(t.k)} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 fs-13 font-semibold transition ${view === t.k ? 'mom-tab-active' : ''}`} style={view === t.k ? { background: BRAND_SOFT, color: INK } : { color: '#6b7280' }}>
@@ -1233,6 +1512,16 @@ export default function MOMTracking() {
               </button>
             ))}
           </div>
+          {isMaster && view === 'history' && (
+            <select value={histBranch || '__all__'} onChange={(e) => setHistBranch(e.target.value)}
+              className="kc-input px-2 py-1.5 fs-12 font-bold text-gray-800 bg-white shadow-sm"
+              title="Filter MOM History by branch" style={{ maxWidth: '16rem' }}>
+              <option value="__all__">All branches - {stats.meetings}</option>
+              {histAllBranches.map((b) => (
+                <option key={b.code} value={b.code}>{b.name} - {(history[b.code] || []).length}{b.manual ? ' · manual' : ''}</option>
+              ))}
+            </select>
+          )}
           {isMaster && view === 'new' && (
             <button onClick={askReset} title="Clear the whole meeting and start over"
               className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 fs-12 font-semibold transition shadow-sm"
@@ -1253,12 +1542,15 @@ export default function MOMTracking() {
 
             {/* ---- sheet header block — chrome + editable meta + attendees + points ---- */}
             <div className="rounded-2xl border border-gray-200 bg-white shadow-sm" style={{ overflow: 'visible' }}>
-              <div className="mom-view-head mom-live-head rounded-t-2xl px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 border-b" style={{ background: '#ffda6e' }}>
-                <div className="flex items-center gap-2.5">
-                  <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 fs-10 font-bold bg-white" style={{ color: '#b45309' }}>
-                    <span className="h-2 w-2 rounded-full" style={{ background: '#d97706', animation: 'livedot 1.4s infinite' }} /> LIVE
+              <div className="mom-view-head mom-live-head rounded-t-2xl px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 border-b border-gray-200" style={{ background: '#ffda6e' }}>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(0,0,0,0.10)' }}>
+                    <ClipboardList size={17} style={{ color: '#1f2937' }} />
                   </span>
-                  <div className="text-sm font-bold uppercase" style={{ letterSpacing: '0.16em', color: '#000000' }}>Minutes of Meeting</div>
+                  <div className="min-w-0">
+                    <div className="fs-13 sm:text-base font-bold leading-tight text-gray-900">Minutes of Meeting</div>
+                    <div className="fs-10 font-medium leading-tight" style={{ color: 'rgba(0,0,0,0.55)' }}>Live sheet — fill, assign &amp; finalize from this one screen</div>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 max-md:flex-wrap">
                   {canExport && <button onClick={exportDraft} className="export-btn kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: INK }}><Upload size={13} /> Export Excel</button>}
@@ -1269,7 +1561,7 @@ export default function MOMTracking() {
                 {/* Date */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
-                    <div className="fs-9 uppercase tracking-wide text-black">Date <span className="text-red-300">*</span></div>
+                    <div className="fs-9 font-bold uppercase tracking-wide text-black pb-1">Date <span className="text-red-300">*</span></div>
                     <input type="date" required value={mDate} onChange={(e) => setMDate(e.target.value)}
                       className="kc-input mt-0.5 w-full fs-12 font-semibold text-gray-800 outline-none px-2 py-1"
                       style={!mDate ? { borderColor: '#f87171' } : {}} />
@@ -1278,7 +1570,7 @@ export default function MOMTracking() {
                 {/* Location */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
-                    <div className="fs-9 uppercase tracking-wide text-black">Location <span className="text-red-300">*</span></div>
+                    <div className="fs-9 font-bold uppercase tracking-wide text-black pb-1">Location <span className="text-red-300">*</span></div>
                     <input value={mLocation} onChange={(e) => setMLocation(e.target.value)} placeholder="e.g. Branch Office"
                       className="kc-input mt-0.5 w-full fs-12 font-semibold text-gray-800 outline-none px-2 py-1" />
                   </div>
@@ -1286,14 +1578,14 @@ export default function MOMTracking() {
                 {/* Branch(es) — multi-select dropdown; employees auto-load as attendees */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
-                    <div className="fs-9 uppercase tracking-wide text-black">Branches <span className="text-red-300">*</span></div>
-                    <Dropdown panelClass="w-72 max-w-[90vw]"
+                    <div className="fs-9 font-bold uppercase tracking-wide text-black pb-1">Branches <span className="text-red-300">*</span></div>
+                    <Dropdown hover panelClass="w-72 max-w-[90vw]"
                       trigger={({ open, toggle }) => (
                         <button type="button" onClick={toggle}
                           className="kc-input mt-0.5 w-full flex items-center justify-between gap-1.5 px-2 py-1 fs-12 font-semibold text-gray-800 text-left"
                           title={branches.length ? branchLabel : 'Select one or more branches'}
                           style={open ? { borderColor: BRAND, background: '#fff', boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}}>
-                          <span className="truncate flex-1 min-w-0" style={!branches.length ? { color: '#9ca3af', fontWeight: 500 } : {}}>{branches.length ? branchLabel : 'Select branches…'}</span>
+                          <span className="truncate flex-1 min-w-0" style={!branches.length ? { color: '#9ca3af', fontWeight: 500, fontSize: '10px' } : {}}>{branches.length ? branchLabel : 'Select branches…'}</span>
                           <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
                         </button>
                       )}>
@@ -1348,7 +1640,7 @@ export default function MOMTracking() {
                 {/* Meeting type — free text + previously used types */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
                   <div className="min-w-0 flex-1 relative" ref={typeDdRef}>
-                    <div className="fs-9 uppercase tracking-wide text-black">Meeting type <span className="text-red-300">*</span></div>
+                    <div className="fs-9 font-bold uppercase tracking-wide text-black pb-1">Meeting type <span className="text-red-300">*</span></div>
                     <div className="kc-input mt-0.5 flex items-center px-2 py-1 relative">
                       <input value={mType} onChange={(e) => setMType(e.target.value)} placeholder="Type or pick…"
                         className="w-full fs-12 font-semibold text-gray-800 outline-none bg-transparent pr-5" />
@@ -1358,36 +1650,69 @@ export default function MOMTracking() {
                         <ChevronDown size={13} className={`text-gray-500 transition-transform ${typeDdOpen ? 'rotate-180' : ''}`} />
                       </button>
                     </div>
-                    {typeDdOpen && (
-                      <div className="absolute z-[60] mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden" style={{ minWidth: '15rem' }}>
-                        <div className="fs-9 font-bold uppercase tracking-wide text-black px-3 pt-2 pb-1">Previously used meeting types</div>
-                        <div className="max-h-44 overflow-y-auto kc-scroll">
-                          {usedMeetingTypes.length === 0 && (
-                            <div className="px-3 py-2 fs-11 text-gray-400">No meeting types in history yet — type one in the box above.</div>
-                          )}
-                          {usedMeetingTypes.map((t) => (
-                            <button key={t} type="button" onClick={() => { setMType(t); setTypeDdOpen(false); }}
-                              className="w-full text-left px-3 py-1.5 fs-12 text-black hover:bg-gray-50 flex items-center gap-2">
-                              {mType.trim().toLowerCase() === t.toLowerCase() ? <Check size={12} style={{ color: BRAND }} /> : <span className="w-3 flex-shrink-0" />}
-                              <span className="truncate">{t}</span>
-                            </button>
-                          ))}
+                    {typeDdOpen && (() => {
+                      const masterNames = new Set(meetingTypes.map((t) => t.name.toLowerCase()));
+                      const histOnly = usedMeetingTypes.filter((t) => !masterNames.has(t.toLowerCase()));
+                      const isSel = (n) => mType.trim().toLowerCase() === n.toLowerCase();
+                      const Row = ({ name }) => (
+                        <button type="button" onClick={() => { setMType(name); setTypeDdOpen(false); }}
+                          className="w-full text-left px-3 py-1.5 fs-12 flex items-center gap-2 transition-colors"
+                          style={isSel(name) ? { background: BRAND_SOFT, color: BRAND, fontWeight: 700 } : { color: '#1f2937' }}
+                          onMouseEnter={(e) => { if (!isSel(name)) e.currentTarget.style.background = '#f7f9ff'; }}
+                          onMouseLeave={(e) => { if (!isSel(name)) e.currentTarget.style.background = ''; }}>
+                          <span className="h-4 w-4 rounded-full border flex items-center justify-center flex-shrink-0"
+                            style={isSel(name) ? { background: BRAND, borderColor: BRAND } : { borderColor: '#d7dbe7' }}>
+                            {isSel(name) && <Check size={10} color="#fff" className="kc-pop" />}
+                          </span>
+                          <span className="truncate">{name}</span>
+                        </button>
+                      );
+                      const Head = ({ icon: Icon, label, count }) => (
+                        <div className="sticky top-0 z-10 flex items-center gap-1.5 px-3 py-1.5 fs-9 font-bold uppercase tracking-wide border-b border-gray-100"
+                          style={{ background: '#f4f6fb', color: BRAND }}>
+                          <Icon size={11} className="flex-shrink-0" />
+                          <span className="flex-1">{label}</span>
+                          <span className="rounded-full px-1.5 py-0.5 fs-9 font-bold bg-white" style={{ color: BRAND }}>{count}</span>
                         </div>
-                      </div>
-                    )}
+                      );
+                      return (
+                        <div className="kc-scale-in absolute z-[60] mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden" style={{ minWidth: '16rem' }}>
+                          <div className="max-h-64 overflow-y-auto kc-scroll">
+                            <Head icon={ListChecks} label="Master meeting types" count={meetingTypes.length} />
+                            {meetingTypes.length === 0 && (
+                              <div className="px-3 py-2.5 fs-11 text-gray-400">No master types yet — add them in Master setup.</div>
+                            )}
+                            <div className="py-1">
+                              {meetingTypes.map((t) => <Row key={`mt-${t.id}`} name={t.name} />)}
+                            </div>
+                            {histOnly.length > 0 && (
+                              <>
+                                <Head icon={RotateCcw} label="Previously used" count={histOnly.length} />
+                                <div className="py-1">
+                                  {histOnly.map((t) => <Row key={`h-${t}`} name={t} />)}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                          <div className="px-3 py-1.5 border-t border-gray-100 fs-10 text-gray-400" style={{ background: '#fafbfd' }}>
+                            or type your own in the box above
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
                 {/* Meeting heads — the logged-in conductor plus any other head(s) */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
-                    <div className="fs-9 uppercase tracking-wide text-black">Meeting heads</div>
+                    <div className="fs-9 font-bold uppercase tracking-wide text-black pb-1">Meeting heads</div>
                     <Dropdown panelClass="w-72 max-w-[90vw]"
                       trigger={({ open, toggle }) => (
                         <button type="button" onClick={toggle}
                           className="kc-input mt-0.5 w-full flex items-center justify-between gap-1.5 px-2 py-1 fs-12 font-semibold text-gray-800 text-left"
                           title={heads.length ? heads.join(', ') : 'Select one or more meeting heads'}
                           style={open ? { borderColor: BRAND, background: '#fff', boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}}>
-                          <span className="truncate flex-1 min-w-0" style={!heads.length ? { color: '#9ca3af', fontWeight: 500 } : {}}>
+                          <span className="truncate flex-1 min-w-0" style={!heads.length ? { color: '#9ca3af', fontWeight: 500, fontSize: '10px' } : {}}>
                             {heads.length ? heads.join(', ') : 'Select heads…'}
                           </span>
                           <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
@@ -1433,18 +1758,18 @@ export default function MOMTracking() {
                 </div>
               </div>
               {/* ---- row 2: attendees · add employee / guest · points to discuss · legend ---- */}
-              <div className="grid grid-cols-2 lg:grid-cols-[1fr_1.3fr_1.2fr_0.8fr] divide-x divide-gray-100 max-sm:grid-cols-1">
+              <div className="grid grid-cols-2 lg:grid-cols-[1.1fr_1fr_1.2fr_0.7fr] divide-x divide-gray-100 max-sm:grid-cols-1">
                 {/* Attendees — count in the box, full list (present toggles) in the dropdown */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
-                    <div className="fs-9 uppercase tracking-wide text-black">Attendees <span className="text-red-300">*</span></div>
-                    <Dropdown panelClass="w-80 max-w-[90vw]"
+                    <div className="fs-9 font-bold uppercase tracking-wide text-black pb-1">Attendees <span className="text-red-300">*</span></div>
+                    <Dropdown hover panelClass="w-80 max-w-[90vw]"
                       trigger={({ open, toggle }) => (
                         <button type="button" onClick={toggle}
                           className="kc-input mt-0.5 w-full flex items-center justify-between gap-1.5 px-2 py-1 fs-12 font-semibold text-gray-800 text-left"
                           title="See the attendee list & mark who is present"
                           style={open ? { borderColor: BRAND, background: '#fff', boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}}>
-                          <span className="truncate flex-1 min-w-0" style={!attendees.length ? { color: '#9ca3af', fontWeight: 500 } : {}}>
+                          <span className="truncate flex-1 min-w-0" style={!attendees.length ? { color: '#9ca3af', fontWeight: 500, fontSize: '10px' } : {}}>
                             {attendees.length ? `${presentNames.length}/${attendees.length} present` : 'No attendees yet…'}
                           </span>
                           <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
@@ -1456,7 +1781,7 @@ export default function MOMTracking() {
                       </div>
                       <div className="max-h-64 overflow-y-auto kc-scroll py-1">
                         {attendees.length === 0 && (
-                          <div className="px-3 py-2 fs-11 text-gray-400">No attendees yet — select branches (their employees auto-load), or add an employee / guest in the next box.</div>
+                          <div className="px-3 py-2 fs-11 text-gray-400">No attendees yet — select branches (their employees auto-load), or add a guest in the next box.</div>
                         )}
                         {attendees.map((a) => (
                           <div key={a.id} role="button" tabIndex={0} onClick={() => togglePresent(a.id)}
@@ -1470,7 +1795,7 @@ export default function MOMTracking() {
                             {a.branch && <span className="fs-9 font-medium px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: '#eef0fa', color: '#4b4e9e' }}>{a.branch}</span>}
                             {a.source === 'manual' && <span className="rounded-full px-1 fs-9 font-bold flex-shrink-0" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Manually added guest">M</span>}
                             {(a.source === 'manual' || a.extra) && (
-                              <button type="button" onClick={(e) => { e.stopPropagation(); removeAttendee(a.id); }} className="flex-shrink-0 rounded-lg p-1 text-gray-300 hover:text-red-400 hover:bg-red-50" title="Remove"><Trash2 size={12} /></button>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); removeAttendee(a.id); }} className="flex-shrink-0 rounded-lg p-1 text-black hover:text-red-500 hover:bg-red-50" title="Remove"><Trash2 size={12} /></button>
                             )}
                           </div>
                         ))}
@@ -1481,63 +1806,27 @@ export default function MOMTracking() {
                     </Dropdown>
                   </div>
                 </div>
-                {/* Add employee / guest — type & Add = guest (M); the arrow opens the
-                     branch → employee picker so real employees are added as Employee */}
+                {/* Add guest — type & Add = guest (M); employees auto-load via branches */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
-                    <div className="fs-9 uppercase tracking-wide text-black">Add employee / guest</div>
-                    <Dropdown panelClass="w-72 max-w-[90vw]"
-                      trigger={({ open, toggle }) => (
-                        <div className="kc-input mt-0.5 w-full flex items-center gap-1 px-2 py-1"
-                          style={open ? { borderColor: BRAND, background: '#fff', boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}}>
-                          <input value={manualName} onChange={(e) => setManualName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addManual()}
-                            placeholder="Type Guest Name/Dropdown For Employee" className="flex-1 min-w-0 fs-12 font-semibold text-gray-800 outline-none bg-transparent" />
-                          <button type="button" onClick={addManual} className="rounded px-2 py-0.5 fs-10 font-bold text-white flex-shrink-0" style={{ background: BRAND }} title="Add the typed name as a guest (manually added)">Add</button>
-                          <button type="button" onClick={toggle} className="p-0.5 rounded hover:bg-gray-100 flex-shrink-0" title="An employee joined? Pick their branch, then the employee — added as an Employee, not a guest">
-                            <ChevronDown size={13} className={`text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`} />
-                          </button>
-                        </div>
-                      )}>
-                    {(close) => (
-                      <>
-                        <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-black border-b border-gray-100">Add employee as attendee</div>
-                        <div className="px-3 pt-2 pb-1.5">
-                          <div className="fs-9 font-bold uppercase tracking-wide text-black mb-1">Step 1 — select branch</div>
-                          <select value={pickBr} onChange={(e) => setPickBr(e.target.value)}
-                            className="kc-input w-full fs-11 text-gray-700 outline-none px-2 py-1.5">
-                            <option value="all">All branches</option>
-                            {branchOptions.map((b) => <option key={b.code} value={b.code}>{b.name}</option>)}
-                          </select>
-                        </div>
-                        <div className="fs-9 font-bold uppercase tracking-wide text-black px-3 pt-0.5">Step 2 — select employee</div>
-                        <div className="max-h-48 overflow-y-auto kc-scroll py-1">
-                          {pickable.length === 0 && (
-                            <div className="px-3 py-2 fs-10 text-gray-400">No more employees{pickBr !== 'all' ? ' in this branch' : ''} — all are already attendees.</div>
-                          )}
-                          {pickable.map((e) => (
-                            <button key={e.key} type="button" onClick={() => { addEmployeeAttendee(e); close(); }}
-                              className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50">
-                              <span className="h-4 w-4 rounded border flex-shrink-0" style={{ borderColor: '#cfcfe0' }} />
-                              <span className="fs-11 text-gray-700 flex-1 truncate">{e.name}</span>
-                              {e.branchName && <span className="fs-9 font-medium px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: '#eef0fa', color: '#4b4e9e' }}>{e.branchName}</span>}
-                            </button>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                    </Dropdown>
+                    <div className="fs-9 font-bold uppercase tracking-wide text-black pb-1">Add guest</div>
+                    <div className="kc-input mt-0.5 w-full flex items-center gap-1 px-2 py-1">
+                      <input value={manualName} onChange={(e) => setManualName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addManual()}
+                        placeholder="Type guest name…" className="flex-1 min-w-0 fs-12 font-semibold text-gray-800 outline-none bg-transparent" />
+                      <button type="button" onClick={addManual} className="rounded px-2 py-0.5 fs-10 font-bold text-white flex-shrink-0" style={{ background: BRAND }} title="Add the typed name as a guest (manually added)">Add</button>
+                    </div>
                   </div>
                 </div>
                 {/* Points to discuss — ticking a point adds its row to the sheet instantly */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
-                    <div className="fs-9 uppercase tracking-wide text-black">Points to discuss</div>
-                    <Dropdown panelClass="w-80 max-w-[90vw]"
+                    <div className="fs-9 font-bold uppercase tracking-wide text-black pb-1">Points to discuss</div>
+                    <Dropdown hover panelClass="w-80 max-w-[90vw]"
                       trigger={({ open, toggle }) => (
                         <button type="button" onClick={toggle}
                           className="kc-input mt-0.5 w-full flex items-center justify-between gap-1.5 px-2 py-1 fs-12 font-semibold text-gray-800 text-left"
                           style={open ? { borderColor: BRAND, background: '#fff', boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}}>
-                          <span className="truncate flex-1" style={!picked.size ? { color: '#9ca3af', fontWeight: 500 } : {}}>
+                          <span className="truncate flex-1" style={!picked.size ? { color: '#9ca3af', fontWeight: 500, fontSize: '10px' } : {}}>
                             {picked.size ? `${picked.size} of ${master.length} selected` : 'Select master points…'}
                           </span>
                           <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
@@ -1574,7 +1863,7 @@ export default function MOMTracking() {
                 {/* Action-flag legend */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
-                    <div className="fs-9 uppercase tracking-wide text-black">Action flag</div>
+                    <div className="fs-9 font-bold uppercase tracking-wide text-black pb-1">Action flag</div>
                     <div className="mt-1.5 flex items-center gap-3 fs-10 text-gray-500 flex-wrap">
                       <span className="inline-flex items-center gap-1"><FlagChip f="T" small /> Task</span>
                       <span className="inline-flex items-center gap-1"><FlagChip f="I" small /> Information</span>
@@ -1596,6 +1885,20 @@ export default function MOMTracking() {
                     <span className="rounded-full px-2 py-0.5 fs-10 font-bold bg-white" style={{ color: BRAND }}>{shownCarry.length !== carry.length ? `${shownCarry.length} / ${carry.length}` : carry.length}</span>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
+                    {canExport && shownCarry.length > 0 && (
+                      <button type="button" onClick={() => {
+                        const gs = groupConsecutive(shownCarry, (c) => (c.area || '').trim().toLowerCase());
+                        exportTableExcel('MOM_pending_tasks',
+                          ['Sr. No.', 'Discussion Area', 'Discussion Points', 'Responsibility', 'Assigned by (Head)', 'Flag', 'Due Date', 'Previous remarks', 'Remark — this meeting', 'Status'],
+                          gs.flatMap((g, gIdx) => g.items.map((c) => [
+                            gIdx + 1, c.area, c.point || '', respArr(c.resp).join(', '), c.assignedBy || '', c.flag, c.due ? fmtDDMMYY(c.due) : '', remarksText(c.prevRemarks), c.remark || '', STATUS[c.status]?.label || c.status,
+                          ])),
+                          { mergeCols: [0, 1], groupSizes: gs.map((g) => g.items.length) }).catch(() => toast.error('Could not generate the Excel file'));
+                      }}
+                        className={XL_BTN} title="Download this pending-tasks table as Excel">
+                        <Upload size={11} /> Export Excel
+                      </button>
+                    )}
                     {[
                       {
                         label: 'status', selected: carryStatusF, toggle: toggleCarryStatus, clear: () => setCarryStatusF([]),
@@ -1606,7 +1909,7 @@ export default function MOMTracking() {
                         items: carryCats.map((c) => [c, c]),
                       },
                     ].map((f) => (
-                      <Dropdown key={f.label} panelClass="w-52" panelStyle={{ left: 'auto', right: 0 }}
+                      <Dropdown key={f.label} hover panelClass="w-52" panelStyle={{ left: 'auto', right: 0 }}
                         trigger={({ open, toggle }) => (
                           <button type="button" onClick={toggle} title={`Filter carried tasks by ${f.label} — tick one or more`}
                             className="inline-flex items-center gap-1.5 rounded-lg border bg-white px-2 py-1 fs-11 font-semibold"
@@ -1640,15 +1943,19 @@ export default function MOMTracking() {
                     ))}
                   </div>
                 </div>
-                <div className="overflow-x-auto kc-scroll rounded-b-2xl">
+                <div ref={carryTopScrollRef} className="overflow-x-auto kc-scroll" style={{ overflowY: 'hidden' }}>
+                  <div style={{ width: CARRY_MINW, height: 1 }} />
+                </div>
+                <div ref={carryMainScrollRef} className="overflow-x-auto kc-scroll rounded-b-2xl">
                   <table className="mom-sheet w-full fs-12" style={{ borderCollapse: 'collapse', minWidth: CARRY_MINW }}>
                     <thead>
                       <tr style={{ background: '#f1f3fb', color: INK }}>
                         <th className="px-1 py-2 fs-10 font-bold" style={{ width: '2.6rem' }} title="Tick to move the task into the current-meeting discussion">Discuss</th>
-                        <th className="px-1 py-2 fs-11 font-bold" style={{ width: '2rem' }}>Sr</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '13rem' }}>Discussion Area / Point</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '9.5rem' }}>Responsibility</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8.5rem' }}>Assigned by (Head)</th>
+                        <th className="px-1 py-2 fs-11 font-bold" style={{ width: '2rem' }}>Sr. No.</th>
+                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '10rem' }}>Discussion Area</th>
+                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '12rem' }}>Discussion Points</th>
+                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7rem' }}>Responsibility</th>
+                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '6.5rem' }}>Assigned by (Head)</th>
                         <th className="px-1 py-2 fs-10 font-bold" style={{ width: '3rem' }}>Flag</th>
                         <th className="px-1 py-2 fs-11 font-bold" style={{ width: '6rem' }}>Due Date</th>
                         <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '18rem' }}>Previous remarks</th>
@@ -1658,9 +1965,9 @@ export default function MOMTracking() {
                     </thead>
                     <tbody>
                       {shownCarry.length === 0 && (
-                        <tr><td colSpan={10} className="px-3 py-5 text-center fs-12 text-gray-400">No carried tasks match the current status / category filter.</td></tr>
+                        <tr><td colSpan={11} className="px-3 py-5 text-center fs-12 text-gray-400">No carried tasks match the current status / category filter.</td></tr>
                       )}
-                      {shownCarry.map((c, i) => {
+                      {groupConsecutive(shownCarry, (c) => (c.area || '').toLowerCase()).flatMap((g, gIdx) => g.items.map((c, gi) => {
                         const od = c.due ? daysFromDue(c.due) : 0;
                         const isOd = c.status !== 'completed' && c.due && od > 0;
                         return (
@@ -1670,13 +1977,17 @@ export default function MOMTracking() {
                                 className="h-4 w-4 cursor-pointer align-middle" style={{ accentColor: BRAND }}
                                 title="Tick to move this task into the current-meeting discussion table below" />
                             </td>
-                            <td className="px-1 py-2 text-center text-black">{i + 1}</td>
+                            {gi === 0 && <td rowSpan={g.items.length} className="px-1 py-2 text-center text-black align-middle">{gIdx + 1}</td>}
+                            {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 align-middle text-center">
+                              <span className="font-semibold text-black">{c.area}</span>
+                            </td>}
                             <td className="px-2 py-2">
                               <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className={`font-semibold text-black ${c.status === 'completed' ? 'line-through' : ''}`}>{c.area}</span>
+                                {c.point
+                                  ? <span className={`fs-11 text-black ${c.status === 'completed' ? 'line-through' : ''}`} style={{ whiteSpace: 'pre-wrap' }}>{c.point}</span>
+                                  : <span className="fs-11 text-gray-300">—</span>}
                                 {isOd && <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 fs-9 font-semibold" style={{ background: STATUS.overdue.soft, color: STATUS.overdue.color }}><AlertTriangle size={9} /> {od}d overdue</span>}
                               </div>
-                              {c.point && <div className="fs-11 text-black mt-0.5">{c.point}</div>}
                               <div className="fs-9 text-black mt-0.5">raised {fmt(c.originDate || c.srcDate)}</div>
                             </td>
                             {/* read-only here — tick "Discuss" to move the task below and edit everything */}
@@ -1693,7 +2004,12 @@ export default function MOMTracking() {
                             <td className="px-2 py-2 text-center"><FlagChip f={c.flag} small /></td>
                             <td className="px-2 py-2 text-center fs-11 text-black" title='Read-only — tick "Discuss" to edit this on the current-meeting sheet'>{c.due ? fmt(c.due) : <span className="text-gray-300">—</span>}</td>
                             <td className="px-2 py-2"><RemarkHistory list={c.prevRemarks} /></td>
-                            <td className="px-1 py-1 mom-fill"><input value={c.remark} onChange={(e) => updCarry(c.id, { remark: e.target.value })} placeholder="Remark for this meeting…" className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded" /></td>
+                            <td className="px-1 py-1 mom-fill">
+                              <textarea rows={1} value={c.remark}
+                                ref={(el) => el && autoGrow(el)}
+                                onChange={(e) => { autoGrow(e.target); updCarry(c.id, { remark: e.target.value }); }}
+                                onKeyDown={(e) => handleBulletKeys(e, c.remark, (v) => updCarry(c.id, { remark: v }))}
+                                placeholder="Remark for this meeting…" className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded resize-none overflow-hidden" style={{ minHeight: '2rem' }} /></td>
                             <td className="px-1 py-1">
                               <select value={c.status} onChange={(e) => updCarry(c.id, { status: e.target.value })}
                                 className="w-full fs-11 font-semibold outline-none px-1 py-1.5 rounded-lg cursor-pointer"
@@ -1703,7 +2019,7 @@ export default function MOMTracking() {
                             </td>
                           </tr>
                         );
-                      })}
+                      }))}
                     </tbody>
                   </table>
                 </div>
@@ -1717,9 +2033,6 @@ export default function MOMTracking() {
                 <div className="flex items-center gap-2">
                   <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: SHEET_SOFT }}><ListChecks size={15} style={{ color: SHEET_DARK }} /></span>
                   <span className="fs-13 font-bold text-gray-800">Discussion — current meeting</span>
-                  <span className="fs-10 text-gray-400">
-                    assign one or more owners · T needs a due date, Information doesn't{carry.length > 0 && ' · tick "Discuss" on a pending task above to bring it here'}
-                  </span>
                 </div>
                 <span className="fs-10 text-gray-400">{rows.filter((r) => r.flag === 'T').length} tasks · {infoCount} info</span>
               </div>
@@ -1733,31 +2046,28 @@ export default function MOMTracking() {
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '2.8rem' }}>Sr.no</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '12rem' }}>Discussion Area</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '15rem' }}>Discussion points</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '13rem' }}>Responsibility</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '10rem' }}>Assigned by (Head)</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8rem' }}>Responsibility</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7.75rem' }}>Assigned by (Head)</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '5rem' }}>Action flag</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8.5rem' }}>Due Date</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '16rem' }}>Remark/Observation/Action</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '6.5rem' }}>Status</th>
-                      <th style={{ width: '2.5rem' }} />
+                      <th className="px-1 py-2 fs-11 font-bold" style={{ width: '3.5rem' }}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r, i) => {
+                    {(() => {
+                      /* consecutive rows of the same Discussion Area are grouped —
+                         the area cell is drawn ONCE (rowSpan) with its Discussion
+                         Points stacked beside it, one sheet row per point */
+                      const groups = groupConsecutive(rows, sheetGroupKey).map((g) => ({ key: g.key, rows: g.items }));
+                      return groups.flatMap((g, gIdx) => g.rows.map((r, gi) => {
                       const isT = r.flag === 'T';
                       return (
                         <tr key={r.id}>
-                          <td className="px-2 py-2 text-center text-gray-500">{i + 1}</td>
-                          <td className="px-2 py-2 align-top">
-                            {r.carried ? (
-                              <>
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="font-semibold text-gray-800">{r.area}</span>
-                                  <span className="fs-9 font-bold rounded px-1 py-0.5" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Carried forward from a previous meeting">C/F</span>
-                                </div>
-                                <div className="fs-9 mt-0.5 font-medium text-gray-400">carried · raised {fmt(r.originDate || r.srcDate)}</div>
-                              </>
-                            ) : r.masterId === null ? (
+                          {gi === 0 && <td rowSpan={g.rows.length} className="px-2 py-2 text-center text-gray-500 align-middle">{gIdx + 1}</td>}
+                          {gi === 0 && <td rowSpan={g.rows.length} className="px-2 py-2 align-middle text-center">
+                            {(r.masterId === null && !r.area) ? (
                               <>
                                 <select value="" onChange={(e) => assignMasterToRow(r.id, e.target.value)}
                                   className="no-ring w-full fs-12 font-semibold text-gray-800 outline-none px-1 py-1 rounded cursor-pointer"
@@ -1779,13 +2089,27 @@ export default function MOMTracking() {
                                 <div className="fs-11 mt-0.5 font-bold text-gray-600">{r.category}</div>
                               </>
                             )}
-                          </td>
+                          </td>}
                           <td className="px-1 py-1 align-top mom-fill">
+                            {r.carried && (
+                              <div className="px-1.5 pt-1">
+                                <span className="fs-9 font-bold rounded px-1 py-0.5" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Carried forward from a previous meeting">C/F · raised {fmt(r.originDate || r.srcDate)}</span>
+                              </div>
+                            )}
                             <textarea rows={1} value={r.point}
                               ref={(el) => el && autoGrow(el)}
                               onChange={(e) => { autoGrow(e.target); updRow(r.id, { point: e.target.value }); }}
+                              onKeyDown={(e) => handleBulletKeys(e, r.point, (v) => updRow(r.id, { point: v }))}
                               placeholder="What was discussed / decided…"
                               className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded resize-none overflow-hidden" style={{ minHeight: '2rem' }} />
+                            {gi === g.rows.length - 1 && !!r.area && (
+                              <button onClick={() => addPointRow(r.id)}
+                                className="mb-1 ml-1.5 inline-flex items-center gap-1 fs-10 font-bold rounded-lg px-1.5 py-0.5"
+                                style={{ color: '#047857', background: 'rgba(5,150,105,0.1)', border: '1px solid rgba(5,150,105,0.25)' }}
+                                title="Add another discussion point under this Discussion Area — each point gets its own owners, due date, status and remark">
+                                <Plus size={11} strokeWidth={2.5} /> point
+                              </button>
+                            )}
                           </td>
                           <td className="px-1 py-1">
                             <RespPicker value={respArr(r.resp)} options={respOptions} onChange={(v) => updRow(r.id, { resp: v })} />
@@ -1799,7 +2123,11 @@ export default function MOMTracking() {
                           </td>
                           <td className="px-1 py-1 mom-fill">
                             {r.carried && r.prevRemarks?.length > 0 && <div className="px-1.5 pt-1"><RemarkHistory list={r.prevRemarks} /></div>}
-                            <input value={r.remark} onChange={(e) => updRow(r.id, { remark: e.target.value })} placeholder="Remark…" className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded" />
+                            <textarea rows={1} value={r.remark}
+                              ref={(el) => el && autoGrow(el)}
+                              onChange={(e) => { autoGrow(e.target); updRow(r.id, { remark: e.target.value }); }}
+                              onKeyDown={(e) => handleBulletKeys(e, r.remark, (v) => updRow(r.id, { remark: v }))}
+                              placeholder="Remark…" className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded resize-none overflow-hidden" style={{ minHeight: '2rem' }} />
                           </td>
                           <td className="px-1 py-1">
                             {isT ? (
@@ -1808,22 +2136,39 @@ export default function MOMTracking() {
                               </select>
                             ) : <div className="text-center fs-11 text-gray-300">—</div>}
                           </td>
-                          <td className="px-1 py-2 text-center"><button onClick={() => askDelRow(r)} className="text-gray-300 hover:text-red-400" title={r.carried ? 'Send back to the previous-meeting pending list' : 'Remove row'}>{r.carried ? <CornerUpRight size={14} /> : <Trash2 size={14} />}</button></td>
+                          <td className="px-1 py-2">
+                            <div className="flex items-center justify-center gap-1.5">
+                              {r.carried && (
+                                <button onClick={() => returnRowToCarry(r.id)} className="text-gray-700 hover:text-amber-600" title="Shift back to the previous-meeting pending list (top)">
+                                  <CornerUpRight size={14} strokeWidth={2.25} />
+                                </button>
+                              )}
+                              <button onClick={() => askDelRow(r)} className="text-gray-700 hover:text-red-500" title="Remove row">
+                                <Trash2 size={14} strokeWidth={2.25} />
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       );
-                    })}
-                    {rows.length === 0 && <tr><td colSpan={10} className="px-3 py-6 text-center fs-12 text-gray-400">No rows — add a discussion area below{carry.length > 0 ? ', or tick "Discuss" on a pending task above' : ''}.</td></tr>}
-                    {/* add custom row — full-width clickable strip as the sheet's last row */}
-                    <tr>
-                      <td colSpan={10} className="p-0">
+                      }));
+                    })()}
+                    {rows.length === 0 && <tr><td colSpan={10} className="px-3 text-center fs-12 text-gray-400" style={{ height: '7rem', verticalAlign: 'middle' }}>No rows — add a discussion area below{carry.length > 0 ? ', or tick "Discuss" on a pending task above' : ''}.</td></tr>}
+                    {/* add custom row — button lives in the Discussion Area column so the
+                         last row keeps the full sheet grid lines */}
+                    <tr style={{ background: '#fafbfd' }}>
+                      <td className="px-2 py-2 text-center text-gray-300">{groupConsecutive(rows, sheetGroupKey).length + 1}</td>
+                      <td className="p-0">
                         <button onClick={addRow} type="button"
-                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 fs-11 font-bold transition hover:bg-[#eef2ff]"
-                          style={{ color: BRAND, background: '#fafbfd' }}
+                          className="mom-addrow w-full flex items-center justify-start gap-1.5 px-3 py-2 fs-11 font-bold transition hover:bg-[#eef2ff]"
+                          style={{ color: BRAND, background: 'transparent', border: 'none' }}
                           title="Pick the new row's Discussion Area from the master points (only points not already on the sheet are listed)">
                           <Plus size={14} /> Add row
-                          <span className="fs-10 font-normal text-gray-400 max-sm:hidden">— pick its Discussion Area from the master points</span>
                         </button>
                       </td>
+                      <td className="px-2 py-2">
+                        <span className="fs-10 font-normal text-gray-400 max-sm:hidden">— pick its Discussion Area from the master points</span>
+                      </td>
+                      <td /><td /><td /><td /><td /><td /><td />
                     </tr>
                   </tbody>
                 </table>
@@ -1831,14 +2176,13 @@ export default function MOMTracking() {
             </div>
 
             {/* ---- finalize bar ---- */}
-            <div className="flex items-center justify-between gap-2 rounded-2xl border border-gray-200 bg-white shadow-sm px-3 py-2.5 flex-wrap">
-              <span className="fs-10 text-gray-400">Everything above is live — no separate setup step. Fill, assign &amp; finalize from this one screen.</span>
-              <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex justify-end">
+              <div className="flex items-center gap-3 flex-wrap rounded-2xl border border-gray-200 bg-white shadow-sm px-3 py-1.5">
                 {unassigned > 0 && <span className="fs-11 font-semibold inline-flex items-center gap-1" style={{ color: '#f87171' }}><AlertTriangle size={13} /> {unassigned} task{unassigned > 1 ? 's' : ''} without responsibility</span>}
                 <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 fs-11 font-semibold" style={{ background: FLAG.T.bg, color: FLAG.T.color }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: FLAG.T.color }} /><b className="tabular-nums">{taskCount}</b> tasks</span>
                 <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 fs-11 font-semibold" style={{ background: FLAG.I.bg, color: FLAG.I.color }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: FLAG.I.color }} /><b className="tabular-nums">{infoCount}</b> info</span>
                 <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 fs-11 font-semibold" style={{ background: '#f1f3f9', color: '#5b6170' }}><CornerUpRight size={11} /><b className="tabular-nums">{carry.length}</b> carried</span>
-                <button onClick={finalize} className="kc-lift inline-flex items-center gap-2 rounded-xl px-5 py-2.5 fs-12 font-bold text-white max-sm:w-full max-sm:justify-center" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})`, boxShadow: '0 6px 16px -6px rgba(47,49,146,.55)' }}><CheckCircle2 size={15} /> Finalize &amp; save</button>
+                <button onClick={finalize} className="kc-lift inline-flex items-center gap-2 rounded-xl px-5 py-1.5 fs-12 font-bold text-white max-sm:w-full max-sm:justify-center" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})`, boxShadow: '0 6px 16px -6px rgba(47,49,146,.55)' }}><CheckCircle2 size={15} /> Finalize &amp; save</button>
               </div>
             </div>
           </div>
@@ -1848,7 +2192,7 @@ export default function MOMTracking() {
         {view === 'history' && <HistoryView history={history} branches={branchOptions} onView={setViewMtg} onDelete={deleteMeeting} canDelete={histSource === 'api' && me?.role === 'master_admin'} canExport={canExport} onExport={doExport} source={histSource} initialCode={histBranch} />}
 
         {/* ===== REPORTS ===== */}
-        {view === 'reports' && <ReportsView history={history} branches={branchOptions} onView={setViewMtg} onOpenBranch={(code) => { setHistBranch(code); setView('history'); }} />}
+        {view === 'reports' && <ReportsView history={history} branches={branchOptions} canExport={canExport} onView={setViewMtg} onOpenBranch={(code) => { setHistBranch(code); setView('history'); }} />}
 
         {/* ===== MY MOM / EMPLOYEE REPORT ===== */}
         {view === 'mine' && (
@@ -1872,14 +2216,14 @@ export default function MOMTracking() {
       </div>
 
       {/* ===== MASTER SETUP MODAL ===== */}
-      {masterOpen && <MasterModal master={master} setMaster={setMaster} categories={categories} setCategories={setCategories} persist={persist} onClose={() => setMasterOpen(false)} ping={ping} />}
+      {masterOpen && <MasterModal master={master} setMaster={setMaster} categories={categories} setCategories={setCategories} meetingTypes={meetingTypes} setMeetingTypes={setMeetingTypes} persist={persist} onClose={() => setMasterOpen(false)} ping={ping} />}
 
       {/* ===== VIEW MEETING (sheet replica) ===== */}
       {viewMtg && <MeetingSheetModal data={viewMtg} categories={categories} canExport={canExport} onExport={doExport} onClose={() => setViewMtg(null)} />}
 
       {/* ===== CONFIRM (finalize) ===== */}
       {confirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setConfirm(null)}>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setConfirm(null)}>
           <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-lg:max-h-[90vh] max-lg:overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             {/* header */}
             <div className="px-5 pt-5 pb-4 flex items-start gap-3">
@@ -1914,9 +2258,23 @@ export default function MOMTracking() {
             </div>
             {/* actions */}
             <div className="flex justify-end gap-2 px-5 py-4 mt-2 border-t border-gray-100 max-sm:flex-col max-sm:items-stretch" style={{ background: '#fafbfd' }}>
-              <button onClick={() => setConfirm(null)} className="rounded-lg border border-gray-200 bg-white px-4 py-2 fs-12 font-semibold text-gray-600 hover:bg-gray-50 max-sm:w-full">Cancel</button>
-              <button onClick={confirm.onYes} disabled={saving} className="kc-lift inline-flex items-center gap-1.5 rounded-lg px-4 py-2 fs-12 font-bold text-white disabled:opacity-60 max-sm:w-full max-sm:justify-center" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})` }}>
-                <CheckCircle2 size={15} /> {saving ? 'Saving…' : (confirm.yesLabel || 'Yes, finalize')}
+              <button onClick={() => setConfirm(null)} disabled={saving || confirmBusy} className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 fs-11 font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-60 max-sm:w-full">Cancel</button>
+              <button
+                onClick={() => {
+                  const r = confirm.onYes?.();
+                  /* async actions (delete meeting etc.) keep the dialog open with
+                     a spinner on this button until the request settles */
+                  if (r && typeof r.then === 'function') {
+                    setConfirmBusy(true);
+                    r.finally(() => setConfirmBusy(false));
+                  }
+                }}
+                disabled={saving || confirmBusy}
+                className="kc-lift inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 fs-11 font-bold text-white disabled:opacity-60 max-sm:w-full max-sm:justify-center" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})` }}>
+                {(saving || confirmBusy)
+                  ? <span className="h-3 w-3 rounded-full animate-spin flex-shrink-0" style={{ border: '2px solid rgba(255,255,255,0.35)', borderTopColor: '#fff' }} />
+                  : <CheckCircle2 size={13} />}
+                {(saving || confirmBusy) ? 'Please wait…' : (confirm.yesLabel || 'Yes, finalize')}
               </button>
             </div>
           </div>
@@ -1937,7 +2295,7 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
     [data],
   );
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-7xl flex flex-col" style={{ maxHeight: '96vh' }} onClick={(e) => e.stopPropagation()}>
         {/* header */}
         <div className="mom-view-head px-4 py-3 flex items-start justify-between rounded-t-2xl border-b border-gray-100 max-md:flex-wrap max-md:gap-2" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
@@ -1986,14 +2344,15 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
             </div>
           </div>
           <div className="flex items-center gap-2 max-md:flex-wrap">
-            {canExport && <button onClick={() => onExport(data)} className="export-btn kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-bold max-sm:text-xs max-sm:px-2" style={{ borderColor: '#dfe3f2', color: INK }}><Download size={13} /> Download Excel</button>}
+            {canExport && <button onClick={() => onExport(data)} className="export-btn kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-bold max-sm:text-xs max-sm:px-2" style={{ borderColor: '#dfe3f2', color: INK }}><Upload size={13} /> Export Excel</button>}
             <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100"><X className="h-4 w-4" /></button>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
           {/* the sheet — same column order as the live table & the Excel */}
-          <div className="overflow-x-auto rounded-xl border border-gray-200">
+          <div className="rounded-xl border border-gray-200 overflow-hidden">
+            <DualScroll>
             <table className="mom-sheet w-full fs-11" style={{ borderCollapse: 'collapse', minWidth: '96rem' }}>
               <thead>
                 <tr style={{ background: '#f1f3fb', color: INK }}>
@@ -2010,11 +2369,14 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
                 </tr>
               </thead>
               <tbody>
-                {ordered.map((r, i) => (
+                {groupConsecutive(ordered, (r) => (r.area || '').toLowerCase()).flatMap((g, gIdx) => g.items.map((r, gi) => (
                   <tr key={r.id}>
-                    <td className="px-2 py-2 text-center text-black">{i + 1}{r.carried && <div className="fs-9 font-bold" style={{ color: '#b45309' }}>C/F</div>}</td>
-                    <td className="px-2 py-2"><div className="flex items-center gap-1.5"><span className="font-semibold text-black">{r.area}</span></div></td>
-                    <td className="px-2 py-2 text-black">{r.point || <span className="text-gray-300">—</span>}</td>
+                    {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 text-center text-black align-middle">{gIdx + 1}</td>}
+                    {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 align-middle text-center"><span className="font-semibold text-black">{r.area}</span></td>}
+                    <td className="px-2 py-2 text-black" style={{ whiteSpace: 'pre-wrap' }}>
+                      {r.carried && <span className="fs-9 font-bold mr-1" style={{ color: '#b45309' }} title="Carried forward from a previous meeting">C/F</span>}
+                      {r.point || <span className="text-gray-300">—</span>}
+                    </td>
                     <td className="px-2 py-2">
                       {respArr(r.resp).length ? (
                         <div className="flex items-center gap-1 flex-wrap">
@@ -2030,12 +2392,13 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
                     <td className="px-2 py-2 text-center"><FlagChip f={r.flag} small /></td>
                     <td className="px-2 py-2 text-center text-black">{r.flag === 'T' ? fmt(r.due) : '—'}</td>
                     <td className="px-2 py-2"><RemarkHistory list={r.prevRemarks} /></td>
-                    <td className="px-2 py-2 text-black">{r.remark || <span className="text-gray-300">—</span>}</td>
+                    <td className="px-2 py-2 text-black" style={{ whiteSpace: 'pre-wrap' }}>{r.remark || <span className="text-gray-300">—</span>}</td>
                     <td className="px-2 py-2 text-center"><StatusBadge r={r} /></td>
                   </tr>
-                ))}
+                )))}
               </tbody>
             </table>
+            </DualScroll>
           </div>
         </div>
       </div>
@@ -2061,15 +2424,23 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
     return [...map.values()];
   }, [branches, history]);
 
-  const [code, setCode] = useState(initialCode || allBranches[0]?.code);
+  const ALL_CODE = '__all__';
+  const [code, setCode] = useState(initialCode || ALL_CODE);
   useEffect(() => { if (initialCode) setCode(initialCode); }, [initialCode]);
-  useEffect(() => { if (allBranches.length && !allBranches.some((b) => b.code === code)) setCode(allBranches[0].code); }, [allBranches, code]);
+  useEffect(() => { if (code !== ALL_CODE && allBranches.length && !allBranches.some((b) => b.code === code)) setCode(ALL_CODE); }, [allBranches, code]);
   const [q, setQ] = useState('');
   const [typeF, setTypeF] = useState('all');
   const [asc, setAsc] = useState(false);
   useEffect(() => { setQ(''); setTypeF('all'); }, [code]);
 
-  const meetings = history[code] || [];
+  /* every meeting once (multi-branch meetings are filed under each branch) */
+  const allMeetingsList = useMemo(() => {
+    const seen = new Map();
+    Object.values(history).forEach((ms) => ms.forEach((m) => { if (!seen.has(m.id)) seen.set(m.id, m); }));
+    return [...seen.values()].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }, [history]);
+
+  const meetings = code === ALL_CODE ? allMeetingsList : (history[code] || []);
   const types = useMemo(() => [...new Set(meetings.map((m) => m.type).filter(Boolean))], [meetings]);
   const shown = useMemo(() => meetings
     .filter((m) => (typeF === 'all' || m.type === typeF)
@@ -2078,84 +2449,120 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
     .sort((a, b) => asc ? (a.date || '').localeCompare(b.date || '') : (b.date || '').localeCompare(a.date || '')),
   [meetings, q, typeF, asc]);
 
-  const openCount = (c) => {
-    const seen = new Set(); let o = 0;
-    (history[c] || []).forEach((m) => m.rows.forEach((r) => {
-      if (r.flag !== 'T' || seen.has(r.trackId)) return;
+  /* KPI stats — tasks are attributed to the branch(es) of their RESPONSIBLE
+     people (same rule as Reports), scoped to the branch picked in the dropdown */
+  const rowCodes = useMemo(() => makeRowBranchCodes(buildBranchNameToCode(allBranches, allMeetingsList)), [allBranches, allMeetingsList]);
+  const scopeStats = useMemo(() => {
+    const inBranch = (r, m) => code === ALL_CODE || rowCodes(r, m).has(code);
+    const seen = new Set();
+    let tasks = 0, done = 0, wip = 0, pending = 0, overdue = 0, info = 0;
+    allMeetingsList.forEach((m) => m.rows.forEach((r) => {
+      if (r.flag !== 'T') { if (inBranch(r, m)) info++; return; }
+      if (seen.has(r.trackId)) return;            // latest state per tracked task
       seen.add(r.trackId);
-      if (r.status !== 'completed') o++;
+      if (!inBranch(r, m)) return;
+      tasks++;
+      if (r.status === 'completed') done++;
+      else if (isOverdue(r)) overdue++;
+      else if (r.status === 'in_progress') wip++;
+      else pending++;
     }));
-    return o;
-  };
-  const selBranch = allBranches.find((b) => b.code === code);
+    return { meetings: meetings.length, tasks, info, wip, pending, done, overdue, completion: tasks ? Math.round(done / tasks * 100) : 0 };
+  }, [allMeetingsList, meetings.length, code, rowCodes]);
 
-  /* resizable branches panel — drag the divider; width is remembered.
-     Double-click the divider to reset to the default width. */
-  const SIDE_DEF = 200, SIDE_MIN = 144, SIDE_MAX = 420;
-  const [sideW, setSideW] = useState(() => {
-    try {
-      const v = parseInt(localStorage.getItem('mom_hist_sidew') || '', 10);
-      return Number.isFinite(v) && v >= SIDE_MIN && v <= SIDE_MAX ? v : SIDE_DEF;
-    } catch { return SIDE_DEF; }
-  });
-  const saveSideW = (w) => { try { localStorage.setItem('mom_hist_sidew', String(w)); } catch { /* storage unavailable */ } };
-  const startDrag = (e) => {
-    e.preventDefault();
-    const startX = e.clientX; const startW = sideW;
-    let latest = startW;
-    const move = (ev) => {
-      latest = Math.min(SIDE_MAX, Math.max(SIDE_MIN, startW + (ev.clientX - startX)));
-      setSideW(latest);
-    };
-    const up = () => {
-      document.removeEventListener('mousemove', move);
-      document.removeEventListener('mouseup', up);
-      document.body.style.cursor = '';
-      saveSideW(latest);
-    };
-    document.body.style.cursor = 'col-resize';
-    document.addEventListener('mousemove', move);
-    document.addEventListener('mouseup', up);
-  };
+  /* drill-down box — opened by clicking a KPI count */
+  const [drill, setDrill] = useState(null);   // { filter }
+  const DRILL_LABEL = { tasks: 'All tasks', done: 'Completed tasks', wip: 'WIP tasks', pending: 'Pending tasks', overdue: 'Overdue tasks', info: 'Information rows' };
+  const selBranchName = code === ALL_CODE ? 'All branches' : (allBranches.find((b) => b.code === code)?.name || code);
+  const drillRows = useMemo(() => {
+    if (!drill) return [];
+    /* same responsibility-based attribution as the KPI counts */
+    const inBranch = (r, m) => code === ALL_CODE || rowCodes(r, m).has(code);
+    const out = [];
+    if (drill.filter === 'info') {
+      allMeetingsList.forEach((m) => m.rows.forEach((r) => { if (r.flag === 'I' && inBranch(r, m)) out.push({ ...r, meeting: m }); }));
+      return out;
+    }
+    const seen = new Set();
+    allMeetingsList.forEach((m) => m.rows.forEach((r) => {
+      if (r.flag !== 'T' || seen.has(r.trackId)) return;
+      seen.add(r.trackId);                        // latest state per tracked task
+      if (!inBranch(r, m)) return;
+      out.push({ ...r, meeting: m });
+    }));
+    return out.filter((t) =>
+      drill.filter === 'done' ? t.status === 'completed'
+        : drill.filter === 'overdue' ? isOverdue(t)
+          : drill.filter === 'wip' ? (t.status === 'in_progress' && !isOverdue(t))
+            : drill.filter === 'pending' ? (t.status === 'pending' && !isOverdue(t))
+              : true);
+  }, [drill, code, allMeetingsList, rowCodes]);
+  const KPI_COLS = [
+    { key: 'meetings', label: 'Meetings', icon: CalendarDays, color: BRAND },
+    { key: 'tasks', label: 'Tasks', icon: ListChecks, color: BRAND },
+    { key: 'info', label: 'Info', icon: FileText, color: '#2563eb' },
+    { key: 'wip', label: 'WIP', icon: Zap, color: '#d97706' },
+    { key: 'pending', label: 'Pending', icon: ClipboardList, color: '#64748b' },
+    { key: 'done', label: 'Completed', icon: CheckCircle2, color: '#059669' },
+    { key: 'overdue', label: 'Overdue', icon: AlertTriangle, color: '#f87171' },
+  ];
 
   return (
-    <div className="flex flex-col lg:flex-row gap-2 items-stretch">
-      <aside className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden h-fit lg:flex-shrink-0 max-lg:!w-full" style={{ width: sideW }}>
-        <div className="px-3 py-2.5 border-b border-gray-100 fs-12 font-bold text-gray-700 flex items-center gap-2"><Building2 size={14} style={{ color: INK }} /> Branches{source === 'error' && <span className="ml-auto fs-9 font-bold rounded-full px-1.5 py-0.5" style={{ background: 'rgba(248,113,113,0.12)', color: '#f87171' }} title="MOM API not reachable">offline</span>}</div>
-        <div className="overflow-y-auto kc-scroll" style={{ maxHeight: '26rem' }}>
-          {allBranches.map((b) => {
-            const oc = openCount(b.code);
-            return (
-              <button key={b.code} onClick={() => setCode(b.code)} className="w-full text-left px-3 py-2 border-b border-gray-50 transition" style={code === b.code ? { background: BRAND_SOFT } : {}}>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="fs-12 font-medium truncate" style={code === b.code ? { color: INK } : { color: '#374151' }}>{b.name}</span>
-                  {oc > 0 && <span className="fs-9 font-bold rounded-full px-1.5 py-0.5 flex-shrink-0" style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171' }} title="Open tasks">{oc}</span>}
-                </div>
-                <div className="fs-10 text-gray-400">{(history[b.code] || []).length} meetings{b.manual ? ' · manual' : ''}</div>
-              </button>
-            );
-          })}
+    <div className="space-y-3">
+      {/* KPI boxes — counts follow the branch picked in the tab-row dropdown; click a count to see its rows */}
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2.5">
+        {KPI_COLS.map((c) => {
+          const isMeetings = c.key === 'meetings';
+          const clickable = isMeetings || scopeStats[c.key] > 0;
+          const active = isMeetings ? !drill : drill?.filter === c.key;
+          return (
+            <button key={c.key} type="button" disabled={!clickable}
+              onClick={() => clickable && setDrill(isMeetings ? null : (drill?.filter === c.key ? null : { filter: c.key }))}
+              style={active ? { borderColor: BRAND, boxShadow: '0 0 0 2px rgba(47,49,146,0.15)' } : {}}
+              className={`kc-lift group flex items-center gap-2.5 rounded-2xl border border-gray-200 bg-white shadow-sm px-3 py-2.5 text-left ${clickable ? '' : 'cursor-default'}`}
+              title={isMeetings ? 'Show the meetings list' : (clickable ? `See these ${c.label.toLowerCase()} in detail` : '')}>
+              <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${c.color}1a` }}><c.icon size={14} style={{ color: c.color }} /></span>
+              <span>
+                <span className={`block text-lg font-extrabold text-black tabular-nums leading-none ${clickable ? 'group-hover:text-[#2f3192] group-hover:underline' : ''}`}>{scopeStats[c.key]}</span>
+                <span className={`block fs-10 font-semibold text-black mt-1 ${clickable ? 'group-hover:text-[#2f3192]' : ''}`}>{c.label}</span>
+              </span>
+            </button>
+          );
+        })}
+        <div className="kc-lift flex items-center gap-2.5 rounded-2xl border border-gray-200 bg-white shadow-sm px-3 py-2.5">
+          <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(5,150,105,0.1)' }}><BarChart3 size={14} style={{ color: '#059669' }} /></span>
+          <span className="flex-1 min-w-0"><span className="block text-lg font-extrabold text-black tabular-nums leading-none">{scopeStats.completion}%</span><span className="block fs-10 font-semibold text-black mt-1 mb-1">Completion</span><Bar2 v={scopeStats.completion} /></span>
         </div>
-      </aside>
-
-      {/* drag handle — resize the branches panel */}
-      <div onMouseDown={startDrag} onDoubleClick={() => { setSideW(SIDE_DEF); saveSideW(SIDE_DEF); }}
-        className="hidden lg:flex items-center justify-center cursor-col-resize select-none flex-shrink-0 group"
-        style={{ width: 10 }} title="Drag to resize the branches panel · double-click to reset">
-        <div className="rounded-full transition group-hover:bg-[#a9aed3]" style={{ width: 3, height: '3.5rem', background: '#dfe2ee' }} />
       </div>
 
-      <div className="min-w-0 flex-1 rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col">
-        {/* toolbar: search · type filter · sort */}
+    <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col">
+        {!drill && <>
+        {/* toolbar: branch picker · search · type filter · sort */}
         <div className="px-3 py-2.5 border-b border-gray-100 flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0 flex-wrap">
             <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: BRAND_SOFT }}><FileText size={15} style={{ color: INK }} /></span>
             <div className="min-w-0">
-              <div className="fs-13 font-bold text-gray-800 truncate">{selBranch?.name || '—'}</div>
+              <div className="fs-13 font-bold text-gray-800 truncate flex items-center gap-1.5">
+                {selBranchName}
+                {source === 'error' && <span className="fs-9 font-bold rounded-full px-1.5 py-0.5" style={{ background: 'rgba(248,113,113,0.12)', color: '#f87171' }} title="MOM API not reachable">offline</span>}
+              </div>
               <div className="fs-10 text-gray-400">{meetings.length} meeting{meetings.length === 1 ? '' : 's'} recorded{shown.length !== meetings.length ? ` · ${shown.length} shown` : ''}</div>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            {canExport && shown.length > 0 && (
+              <button type="button" onClick={() => exportTableExcel(`MOM_history_${selBranchName.replace(/\s+/g, '_')}`,
+                ['Sr. No.', 'Date', 'Meeting type', 'Location', 'Branch(es)', 'Conducted by', 'Attendees (present)', 'Tasks done', 'Tasks total', 'Progress %'],
+                shown.map((m, i) => {
+                  const tasks = taskRows(m); const done = tasks.filter((r) => r.status === 'completed').length;
+                  const presentN = m.attendees.filter((a) => a.present).map((a) => a.name);
+                  const brName = m.branches?.length ? m.branches.map((b) => b.name || b.code).join(', ') : (m.branchName || m.branchCode);
+                  return [i + 1, fmtDDMMYY(m.date), m.type || 'Meeting', m.location || '', brName, m.conductedBy || '', presentN.join(', '), done, tasks.length, progress(m)];
+                })).catch(() => toast.error('Could not generate the Excel file'))}
+                className={XL_BTN} title="Download this meetings list as Excel">
+                <Upload size={11} /> Export Excel
+              </button>
+            )}
             <span className="kc-input flex items-center gap-1.5 px-2 py-1.5">
               <Search size={12} className="text-gray-400" />
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search type / location / person…" className="fs-11 bg-transparent outline-none text-gray-700" style={{ width: '11rem' }} />
@@ -2177,12 +2584,12 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
         {source !== 'loading' && meetings.length > 0 && shown.length === 0 && <div className="p-10 text-center fs-12 text-gray-400">Nothing matches the current search / filter.</div>}
 
         {shown.length > 0 && (
-          <div className="overflow-x-auto kc-scroll">
-            <table className="w-full fs-12" style={{ minWidth: '58rem' }}>
+          <DualScroll>
+            <table className="mom-sheet w-full fs-12" style={{ borderCollapse: 'collapse', minWidth: '62rem' }}>
               <thead>
-                <tr className="text-left text-gray-500">
-                  {[['Meeting', ''], ['Conducted by', ''], ['Attendees', ''], ['Rows', 'text-center'], ['Tasks', 'text-center'], ['Progress', ''], ['', 'text-right']].map(([h, extra], i) => (
-                    <th key={i} className={`sticky top-0 z-10 px-3 py-2 fs-10 font-bold uppercase tracking-wide border-b border-gray-100 ${extra}`} style={{ background: '#f7f8fc' }}>{h}</th>
+                <tr className="text-center text-black">
+                  {[['Date'], ['Meeting type & location'], ['Conducted by'], ['Attendees'], ['Tasks'], ['Progress'], ['Action']].map(([h], i) => (
+                    <th key={i} className="sticky top-0 z-10 px-3 py-2 fs-10 font-bold uppercase tracking-wide" style={{ background: '#f7f8fc' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -2195,29 +2602,22 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
                   const pr = progress(m);
                   const presentN = m.attendees.filter((a) => a.present).map((a) => a.name);
                   return (
-                    <tr key={m.id} className="border-t border-gray-50 transition hover:bg-[#f7f9ff]">
+                    <tr key={m.id}>
+                      <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                        <span className="fs-12 font-bold" style={{ color: BRAND }}>{fmtDDMMYY(m.date).replaceAll('/', '-')}</span>
+                      </td>
                       <td className="px-3 py-2.5">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div className="h-10 w-10 rounded-xl flex flex-col items-center justify-center flex-shrink-0" style={{ background: '#eef0fa', color: BRAND, border: '1px solid #e2e6f5' }}>
-                            <span className="fs-13 font-bold leading-none">{new Date(m.date).getDate()}</span>
-                            <span className="fs-9 leading-none mt-0.5">{new Date(m.date).toLocaleDateString(undefined, { month: 'short' })}</span>
-                          </div>
-                          <div className="min-w-0">
-                            <div className="fs-12 font-bold text-gray-800 flex items-center gap-1.5 flex-wrap">
-                              {m.type || 'Meeting'}
-                              {m.branches?.length > 1 && <span className="fs-9 font-bold rounded-full px-1.5 py-0.5" style={{ background: BRAND_SOFT, color: INK }} title={m.branches.map((b) => b.name).join(' + ')}>{m.branches.length} branches</span>}
-                            </div>
-                            <div className="fs-10 text-black flex items-center gap-1 min-w-0" style={{ maxWidth: '15rem' }} title={m.location || '—'}>
-                              <MapPin size={9} className="flex-shrink-0" />
-                              <span className="truncate min-w-0">{m.location || '—'}</span>
-                              <span className="flex-shrink-0">· {fmt(m.date)}</span>
-                            </div>
-                          </div>
+                        <div className="fs-12 font-bold text-gray-800 flex items-center gap-1.5 flex-wrap min-w-0">
+                          <span className="truncate" style={{ maxWidth: '10rem' }} title={m.type || 'Meeting'}>{m.type || 'Meeting'}</span>
+                          {m.branches?.length > 1 && <span className="fs-9 font-bold rounded-full px-1.5 py-0.5" style={{ background: BRAND_SOFT, color: INK }} title={m.branches.map((b) => b.name).join(' + ')}>{m.branches.length} branches</span>}
+                        </div>
+                        <div className="fs-10 text-black flex items-center gap-1 min-w-0" style={{ maxWidth: '10rem' }} title={m.location || '—'}>
+                          <MapPin size={9} className="flex-shrink-0" />
+                          <span className="truncate min-w-0">{m.location || '—'}</span>
                         </div>
                       </td>
                       <td className="px-3 py-2.5"><div className="flex items-center gap-1.5"><Avatar name={m.conductedBy} size={20} /><span className="fs-11 text-gray-700 truncate" style={{ maxWidth: '8rem' }}>{m.conductedBy}</span></div></td>
                       <td className="px-3 py-2.5"><div className="flex items-center gap-1.5 min-w-0" title={presentN.join(', ')}><span className="fs-11 text-gray-700 truncate" style={{ maxWidth: '13rem' }}>{presentN.join(', ') || '—'}</span><span className="fs-9 text-gray-400 flex-shrink-0">({presentN.length})</span></div></td>
-                      <td className="px-3 py-2.5 text-center text-gray-700 font-semibold">{m.rows.length}</td>
                       <td className="px-3 py-2.5 text-center">
                         <div className="fs-12 font-bold text-gray-800">{done}<span className="fs-10 font-normal text-gray-400">/{tasks.length}</span></div>
                         <div className="flex items-center justify-center gap-1 mt-0.5 flex-wrap">
@@ -2232,7 +2632,7 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-end gap-1.5">
-                          {canExport && <button onClick={() => onExport(m)} title="Download Excel" className="export-btn rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50"><Download size={13} /></button>}
+                          {canExport && <button onClick={() => onExport(m)} title="Export Excel" className="export-btn rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50"><Upload size={13} /></button>}
                           {canDelete && <button onClick={() => onDelete(m)} title="Delete meeting" className="rounded-lg border border-gray-200 p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-50"><Trash2 size={13} /></button>}
                           <button onClick={() => onView(m)} className="kc-lift rounded-lg px-2.5 py-1.5 fs-11 font-bold text-white" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})` }}>View sheet</button>
                         </div>
@@ -2242,8 +2642,112 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
                 })}
               </tbody>
             </table>
-          </div>
+          </DualScroll>
         )}
+        </>}
+
+      {/* ===== DRILL-DOWN — rendered IN PLACE of the meetings list ===== */}
+      {drill && (
+        <>
+            <div className="px-4 py-3 flex items-center justify-between gap-2 flex-wrap border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
+              <div className="min-w-0">
+                <div className="text-base font-bold text-gray-800 truncate">{selBranchName} — {DRILL_LABEL[drill.filter]}</div>
+                <div className="fs-10 text-black">{drillRows.length} row{drillRows.length === 1 ? '' : 's'} · latest state per tracked task{code !== ALL_CODE ? ' · counted here because a responsible employee belongs to this branch' : ''} · click View to open the meeting sheet · click the Meetings box above to go back to the list</div>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {canExport && drillRows.length > 0 && (
+                  <button type="button" onClick={() => {
+                    const gs = groupConsecutive(drillRows, (t) => (t.area || '').toLowerCase());
+                    const isAll = code === ALL_CODE;
+                    exportTableExcel(`MOM_${(DRILL_LABEL[drill.filter] || 'report').replace(/\s+/g, '_')}`,
+                      ['Sr. No.', ...(isAll ? ['Branch'] : []), 'Discussion Area', 'Discussion Points', 'Category', 'Assigned by (Head)', 'Assigned to', 'Meeting', 'Due Date', 'Status', 'Remarks'],
+                      gs.flatMap((g, gIdx) => g.items.map((t) => {
+                        const rem = [...(t.prevRemarks || [])];
+                        if (t.remark?.trim()) rem.push({ date: t.meeting.date, text: t.remark, status: t.status, by: t.assignedBy || (t.meeting.heads || [])[0] || t.meeting.conductedBy });
+                        const brName = t.meeting.branches?.length ? t.meeting.branches.map((b) => b.name || b.code).join(', ') : (t.meeting.branchName || t.meeting.branchCode || '');
+                        return [gIdx + 1, ...(isAll ? [brName] : []), t.area, t.point || '', t.category || '', t.assignedBy || '', respArr(t.resp).join(', '), `${t.meeting.type || 'Meeting'} · ${fmtDDMMYY(t.meeting.date)}`, t.due ? fmtDDMMYY(t.due) : '', isOverdue(t) ? 'Overdue' : (STATUS[t.status]?.label || t.status), remarksText(rem)];
+                      })),
+                      { mergeCols: isAll ? [0, 2] : [0, 1], groupSizes: gs.map((g) => g.items.length) }).catch(() => toast.error('Could not generate the Excel file'));
+                  }}
+                    className={XL_BTN} title="Download this report as Excel">
+                    <Upload size={11} /> Export Excel
+                  </button>
+                )}
+              </div>
+            </div>
+            <DualScroll className="overflow-x-auto kc-scroll max-h-[34rem] overflow-y-auto">
+                <table className="mom-sheet w-full fs-11" style={{ borderCollapse: 'collapse', minWidth: '86rem' }}>
+                  <thead>
+                    <tr style={{ background: '#f1f3fb', color: INK }}>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '2.6rem' }}>Sr. No.</th>
+                      {code === ALL_CODE && <th className="px-2 py-2 fs-11 font-bold" style={{ width: '9rem' }}>Branch</th>}
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '9rem' }}>Discussion Area</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '11rem' }}>Discussion Points</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7rem' }}>Category</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '10rem' }}>Assigned by (Head)</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '12rem' }}>Assigned to</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '12rem' }}>Meeting</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7.5rem' }}>Due Date</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7rem' }}>Status</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '14rem' }}>Remarks</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {drillRows.length === 0 && <tr><td colSpan={code === ALL_CODE ? 11 : 10} className="px-3 py-6 text-center fs-12 text-gray-400">No rows in this bucket.</td></tr>}
+                    {groupConsecutive(drillRows, (t) => (t.area || '').toLowerCase()).flatMap((g, gIdx) => g.items.map((t, gi) => {
+                      /* all remarks on this task — carried history plus the one
+                         from its latest meeting — each with date, status and head */
+                      const remarks = [...(t.prevRemarks || [])];
+                      if (t.remark?.trim()) remarks.push({ date: t.meeting.date, text: t.remark, status: t.status, by: t.assignedBy || (t.meeting.heads || [])[0] || t.meeting.conductedBy });
+                      const brName = t.meeting.branches?.length ? t.meeting.branches.map((b) => b.name || b.code).join(', ') : (t.meeting.branchName || t.meeting.branchCode || '—');
+                      return (
+                        <tr key={`${t.meeting.id}-${t.trackId || t.id || gi}`}>
+                          {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 text-center text-black align-middle">{gIdx + 1}</td>}
+                          {code === ALL_CODE && <td className="px-2 py-2 text-center fs-11 text-black">{brName}</td>}
+                          {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 align-middle text-center">
+                            <div className="font-semibold text-black">{t.area}</div>
+                          </td>}
+                          <td className="px-2 py-2">
+                            {t.carried && <span className="fs-9 font-bold rounded px-1 py-0.5 mr-1" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Carried forward from a previous meeting">C/F</span>}
+                            {t.point ? <div className="fs-11 text-black inline" style={{ whiteSpace: 'pre-wrap' }}>{t.point}</div> : <span className="text-gray-300">—</span>}
+                            <div className="fs-9 text-gray-400 mt-0.5">raised {fmt(t.originDate)}</div>
+                          </td>
+                          <td className="px-2 py-2 text-center text-black">{t.category || '—'}</td>
+                          <td className="px-2 py-2 text-center text-black">{t.assignedBy || <span className="text-gray-300">—</span>}</td>
+                          <td className="px-2 py-2">
+                            {respArr(t.resp).length ? (
+                              <div className="flex items-center gap-1 flex-wrap">
+                                {respArr(t.resp).map((n) => (
+                                  <span key={n} className="inline-flex items-center rounded-full px-2 py-0.5 fs-10 font-semibold" style={{ background: BRAND_SOFT, color: INK }}>{n}</span>
+                                ))}
+                              </div>
+                            ) : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className="fs-11 font-semibold text-black">{t.meeting.type || 'Meeting'}</div>
+                            <div className="fs-9 text-gray-400">{fmt(t.meeting.date)}{t.meeting.location ? ` · ${t.meeting.location}` : ''}</div>
+                            {onView && <button type="button" onClick={() => onView(t.meeting)} className="mt-1 fs-9 font-bold rounded px-1.5 py-0.5 text-white" style={{ background: BRAND }}>View</button>}
+                          </td>
+                          <td className="px-2 py-2 text-center text-black">
+                            {t.due ? fmt(t.due) : '—'}
+                            {isOverdue(t) && <div className="fs-9 font-bold" style={{ color: STATUS.overdue.color }}>{daysFromDue(t.due)}d overdue</div>}
+                          </td>
+                          <td className="px-2 py-2 text-center"><StatusBadge r={t} /></td>
+                          <td className="px-2 py-2">
+                            {remarks.length === 0 ? <span className="text-gray-300">—</span> : (
+                              <div className="overflow-y-auto kc-scroll pr-1" style={{ minWidth: '14rem', maxWidth: '18rem', maxHeight: '9rem' }}>
+                                <RemarkHistory list={remarks} />
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    }))}
+                  </tbody>
+                </table>
+            </DualScroll>
+        </>
+      )}
       </div>
     </div>
   );
@@ -2262,49 +2766,67 @@ function MeetingGrid({ title, meetings, onView, onExport }) {
   const today = iso(new Date());
   return (
     <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-gray-100 fs-12 font-bold text-gray-700">{title}</div>
-      <div className="overflow-x-auto max-h-[26rem] overflow-y-auto">
-        <table className="w-full fs-11" style={{ minWidth: '46rem' }}>
-          <thead className="sticky top-0 z-10"><tr className="text-left text-gray-400" style={{ background: '#f4f6fb' }}>
+      <div className="px-4 py-2.5 border-b border-gray-100 fs-12 font-bold text-gray-700 flex items-center justify-between gap-2">
+        <span>{title}</span>
+        {onExport && meetings.length > 0 && (
+          <button type="button" onClick={() => exportTableExcel(`MOM_${title.replace(/[^\w]+/g, '_')}`,
+            ['Sr. No.', 'Date', 'Meeting type', 'Location', 'Branch(es)', 'Present', 'Points', 'Tasks done', 'Tasks total'],
+            meetings.map((m, i) => {
+              const present = (m.attendees || []).filter((a) => a.present !== false);
+              const tasks = (m.rows || []).filter((r) => r.flag === 'T');
+              const doneT = tasks.filter((r) => r.status === 'completed').length;
+              const brName = m.branches?.length ? m.branches.map((b) => b.name || b.code).join(', ') : (m.branchName || m.branchCode);
+              return [i + 1, fmtDDMMYY(m.date), m.type || 'Meeting', m.location || '', brName, present.length, (m.rows || []).length, doneT, tasks.length];
+            })).catch(() => toast.error('Could not generate the Excel file'))}
+            className={XL_BTN} title="Download this list as Excel">
+            <Upload size={11} /> Export Excel
+          </button>
+        )}
+      </div>
+      <DualScroll className="overflow-x-auto kc-scroll max-h-[26rem] overflow-y-auto">
+        <table className="mom-sheet w-full fs-11" style={{ borderCollapse: 'collapse', minWidth: '48rem' }}>
+          <thead className="sticky top-0 z-10"><tr className="text-center text-black" style={{ background: '#f4f6fb' }}>
+            <th className="px-3 py-2 font-semibold">Sr. No.</th>
             <th className="px-3 py-2 font-semibold">Date</th>
             <th className="px-3 py-2 font-semibold">Type</th>
             <th className="px-3 py-2 font-semibold">Location</th>
             <th className="px-3 py-2 font-semibold">Branch</th>
-            <th className="px-3 py-2 font-semibold text-center">Present</th>
-            <th className="px-3 py-2 font-semibold text-center">Points</th>
-            <th className="px-3 py-2 font-semibold text-center">Tasks</th>
-            <th className="px-3 py-2 font-semibold"></th>
+            <th className="px-3 py-2 font-semibold">Present</th>
+            <th className="px-3 py-2 font-semibold">Points</th>
+            <th className="px-3 py-2 font-semibold">Tasks</th>
+            <th className="px-3 py-2 font-semibold">Action</th>
           </tr></thead>
           <tbody>
-            {meetings.length === 0 && <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-400">Nothing yet.</td></tr>}
-            {meetings.map((m) => {
+            {meetings.length === 0 && <tr><td colSpan={9} className="px-3 text-center text-gray-400" style={{ height: '8rem', verticalAlign: 'middle' }}>No meetings yet.</td></tr>}
+            {meetings.map((m, idx) => {
               const present = (m.attendees || []).filter((a) => a.present !== false);
               const tasks = (m.rows || []).filter((r) => r.flag === 'T');
               const doneT = tasks.filter((r) => r.status === 'completed').length;
               const odT = tasks.filter((r) => r.status !== 'completed' && r.due && r.due < today).length;
               const brName = m.branches?.length ? m.branches.map((b) => b.name || b.code).join(', ') : (m.branchName || m.branchCode);
               return (
-                <tr key={m.id} className="border-t border-gray-50 hover:bg-[#f7f9ff]">
-                  <td className="px-3 py-2 font-semibold text-gray-800 whitespace-nowrap">{fmt(m.date)}</td>
-                  <td className="px-3 py-2 text-gray-700">{m.type || 'Meeting'}</td>
-                  <td className="px-3 py-2 text-gray-500 truncate" style={{ maxWidth: '10rem' }} title={m.location || ''}>{m.location || '—'}</td>
-                  <td className="px-3 py-2 text-gray-500 truncate" style={{ maxWidth: '10rem' }} title={brName}>{brName}</td>
-                  <td className="px-3 py-2 text-center text-gray-700" title={present.map((a) => a.name).join(', ')}>{present.length}</td>
-                  <td className="px-3 py-2 text-center text-gray-700">{(m.rows || []).length}</td>
+                <tr key={m.id} className="border-t border-gray-50">
+                  <td className="px-3 py-2 text-center text-black">{idx + 1}</td>
+                  <td className="px-3 py-2 font-semibold text-black whitespace-nowrap">{fmt(m.date)}</td>
+                  <td className="px-3 py-2 text-black">{m.type || 'Meeting'}</td>
+                  <td className="px-3 py-2 text-black truncate" style={{ maxWidth: '10rem' }} title={m.location || ''}>{m.location || '—'}</td>
+                  <td className="px-3 py-2 text-black truncate" style={{ maxWidth: '10rem' }} title={brName}>{brName}</td>
+                  <td className="px-3 py-2 text-center text-black" title={present.map((a) => a.name).join(', ')}>{present.length}</td>
+                  <td className="px-3 py-2 text-center text-black">{(m.rows || []).length}</td>
                   <td className="px-3 py-2 text-center whitespace-nowrap">
-                    <span className="font-bold text-gray-800">{doneT}/{tasks.length}</span>
+                    <span className="font-bold text-black">{doneT}/{tasks.length}</span>
                     {odT > 0 && <span className="ml-1 fs-9 font-bold rounded-full px-1.5 py-0.5" style={{ background: STATUS.overdue.soft, color: STATUS.overdue.color }}>{odT} od</span>}
                   </td>
-                  <td className="px-2 py-2 whitespace-nowrap text-right">
+                  <td className="px-2 py-2 whitespace-nowrap text-center">
                     {onView && <button onClick={() => onView(m)} className="fs-10 font-bold rounded-lg text-white px-2 py-1 mr-1" style={{ background: BRAND }}>View</button>}
-                    {onExport && <button onClick={() => onExport(m)} className="fs-10 font-bold rounded-lg border px-2 py-1 text-gray-600 hover:bg-gray-50" style={{ borderColor: '#e5e7eb' }}>Excel</button>}
+                    {onExport && <button onClick={() => onExport(m)} className="export-btn fs-10 font-bold rounded-lg border px-2 py-1 inline-flex items-center gap-1" title="Download this meeting's sheet as Excel"><Upload size={11} /> Excel</button>}
                   </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-      </div>
+      </DualScroll>
     </div>
   );
 }
@@ -2373,17 +2895,16 @@ function PersonReport({ meetings, person, canExport, onExport, onView }) {
 
   const Stat = ({ label, value, color }) => (
     <div className="kc-pop-in kc-lift rounded-xl border border-gray-100 bg-white px-3 py-2.5 text-center">
-      <div className="text-xl font-bold leading-none" style={{ color: value ? (color || INK) : '#9ca3af' }}>{value}</div>
-      <div className="fs-10 text-gray-400 mt-1 leading-tight">{label}</div>
+      <div className="text-xl font-bold leading-none" style={{ color: value ? (color || '#000') : '#000' }}>{value}</div>
+      <div className="fs-10 font-semibold text-black mt-1 leading-tight">{label}</div>
     </div>
   );
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         <Stat label="Meetings attended" value={data.attended.length} />
         <Stat label="Branch meetings" value={data.branchM.length} />
-        <Stat label="Tasks assigned" value={total} />
         <Stat label="Completed" value={data.done} color={STATUS.completed.color} />
         <Stat label="Open" value={data.open} color={STATUS.in_progress.color} />
         <Stat label="Overdue" value={data.overdue} color={STATUS.overdue.color} />
@@ -2432,42 +2953,74 @@ function PersonReport({ meetings, person, canExport, onExport, onView }) {
       <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
         <div className="px-4 py-2.5 border-b border-gray-100 fs-12 font-bold text-gray-700 flex items-center justify-between flex-wrap gap-1">
           <span>Tasks assigned to {person.name || 'you'} ({total})</span>
-          {total > 0 && <span className="fs-10 font-semibold text-gray-400">{data.done} done · {data.open} open · {data.overdue} overdue</span>}
+          <span className="flex items-center gap-2">
+            {total > 0 && <span className="fs-10 font-semibold text-gray-400">{data.done} done · {data.open} open · {data.overdue} overdue</span>}
+            {canExport && total > 0 && (
+              <button type="button" onClick={() => {
+                const gs = groupConsecutive(data.tasks, (t) => (t.area || '').toLowerCase());
+                exportTableExcel(`MOM_tasks_${(person.name || 'me').replace(/\s+/g, '_')}`,
+                  ['Sr. No.', 'Discussion Area', 'Discussion Points', 'Remarks', 'Category', 'Owners', 'Meeting', 'Due Date', 'Status'],
+                  gs.flatMap((g, gIdx) => g.items.map((t) => {
+                    const rem = [...(t.prevRemarks || [])];
+                    if (t.remark?.trim()) rem.push({ date: t.meetingDate, text: t.remark, status: t.status, by: t.assignedBy || (t.meeting?.heads || [])[0] || t.meeting?.conductedBy });
+                    return [gIdx + 1, t.area, t.point || '', remarksText(rem), t.category || '', respArr(t.resp).join(', '), `${t.meetingType || 'Meeting'} · ${fmtDDMMYY(t.meetingDate)}`, t.due ? fmtDDMMYY(t.due) : '', data.isOd(t) ? 'Overdue' : (STATUS[t.status]?.label || t.status)];
+                  })),
+                  { mergeCols: [0, 1], groupSizes: gs.map((g) => g.items.length) }).catch(() => toast.error('Could not generate the Excel file'));
+              }}
+                className={XL_BTN} title="Download this table as Excel">
+                <Upload size={11} /> Export Excel
+              </button>
+            )}
+          </span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full fs-11" style={{ minWidth: '54rem' }}>
-            <thead><tr className="text-left text-gray-400" style={{ background: '#f4f6fb' }}>
-              <th className="px-3 py-2 font-semibold">#</th>
-              <th className="px-3 py-2 font-semibold">Discussion area / point</th>
+        <DualScroll className="overflow-x-auto kc-scroll max-h-[26rem] overflow-y-auto">
+          <table className="mom-sheet w-full fs-11" style={{ borderCollapse: 'collapse', minWidth: '66rem' }}>
+            <thead className="sticky top-0 z-10"><tr className="text-center text-black" style={{ background: '#f4f6fb' }}>
+              <th className="px-3 py-2 font-semibold">Sr. No.</th>
+              <th className="px-3 py-2 font-semibold">Discussion Area</th>
+              <th className="px-3 py-2 font-semibold">Discussion Points</th>
+              <th className="px-3 py-2 font-semibold">Remark</th>
               <th className="px-3 py-2 font-semibold">Category</th>
               <th className="px-3 py-2 font-semibold">Owners</th>
               <th className="px-3 py-2 font-semibold">Meeting</th>
               <th className="px-3 py-2 font-semibold">Due</th>
               <th className="px-3 py-2 font-semibold">Status</th>
-              <th className="px-3 py-2 font-semibold"></th>
+              <th className="px-3 py-2 font-semibold">Action</th>
             </tr></thead>
             <tbody>
-              {data.tasks.length === 0 && <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-400">No tasks assigned.</td></tr>}
-              {data.tasks.map((t, i) => {
+              {data.tasks.length === 0 && <tr><td colSpan={10} className="px-3 text-center text-gray-400" style={{ height: '8rem', verticalAlign: 'middle' }}>No tasks assigned.</td></tr>}
+              {groupConsecutive(data.tasks, (t) => (t.area || '').toLowerCase()).flatMap((g, gIdx) => g.items.map((t, gi) => {
                 const od = data.isOd(t);
                 const st = od ? STATUS.overdue : (STATUS[t.status] || STATUS.pending);
                 const odDays = od ? Math.max(1, Math.floor((new Date(iso(new Date())) - new Date(t.due)) / 86400000)) : 0;
+                /* all remarks on this task — carried history plus the one from
+                   its latest meeting — each with date, status and by whom */
+                const remarks = [...(t.prevRemarks || [])];
+                if (t.remark?.trim()) remarks.push({ date: t.meetingDate, text: t.remark, status: t.status, by: t.assignedBy || (t.meeting?.heads || [])[0] || t.meeting?.conductedBy });
                 return (
-                  <tr key={t.trackId} className="border-t border-gray-50 hover:bg-[#f7f9ff] align-top">
-                    <td className="px-3 py-2 text-gray-400">{i + 1}</td>
-                    <td className="px-3 py-2"><div className="font-semibold text-gray-800">{t.area}</div>{t.point && <div className="fs-10 text-gray-500" style={{ maxWidth: '24rem' }}>{t.point}</div>}{t.remark && <div className="fs-9 text-gray-400 mt-0.5" style={{ maxWidth: '24rem' }}>Remark: {t.remark}</div>}</td>
-                    <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{t.category || '—'}</td>
-                    <td className="px-3 py-2 text-gray-600" style={{ maxWidth: '11rem' }}>{respArr(t.resp).join(', ') || '—'}</td>
-                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{t.meetingType || 'Meeting'}<div className="fs-9 text-gray-400">{fmt(t.meetingDate)}</div></td>
-                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{t.due ? fmt(t.due) : '—'}{odDays > 0 && <div className="fs-9 font-bold" style={{ color: STATUS.overdue.color }}>{odDays}d overdue</div>}</td>
+                  <tr key={t.trackId} className="border-t border-gray-50 align-top">
+                    {gi === 0 && <td rowSpan={g.items.length} className="px-3 py-2 text-center text-black align-middle">{gIdx + 1}</td>}
+                    {gi === 0 && <td rowSpan={g.items.length} className="px-3 py-2 align-middle text-center"><div className="font-semibold text-black" style={{ minWidth: '9rem' }}>{t.area}</div></td>}
+                    <td className="px-3 py-2">{t.point ? <div className="fs-12 text-black" style={{ minWidth: '12rem', maxWidth: '18rem', whiteSpace: 'pre-wrap' }}>{t.point}</div> : <span className="text-gray-300">—</span>}</td>
+                    <td className="px-3 py-2">
+                      {remarks.length === 0 ? <span className="text-gray-300">—</span> : (
+                        <div className="overflow-y-auto kc-scroll pr-1" style={{ minWidth: '14rem', maxWidth: '18rem', maxHeight: '9rem' }}>
+                          <RemarkHistory list={remarks} />
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-black whitespace-nowrap">{t.category || '—'}</td>
+                    <td className="px-3 py-2 text-black" style={{ maxWidth: '11rem' }}>{respArr(t.resp).join(', ') || '—'}</td>
+                    <td className="px-3 py-2 text-black whitespace-nowrap">{t.meetingType || 'Meeting'}<div className="fs-9 text-black">{fmt(t.meetingDate)}</div></td>
+                    <td className="px-3 py-2 text-black whitespace-nowrap">{t.due ? fmt(t.due) : '—'}{odDays > 0 && <div className="fs-9 font-bold" style={{ color: STATUS.overdue.color }}>{odDays}d overdue</div>}</td>
                     <td className="px-3 py-2"><span className="inline-block rounded-full px-2 py-0.5 fs-10 font-bold whitespace-nowrap" style={{ color: st.color, background: st.soft }}>{st.label}</span></td>
-                    <td className="px-2 py-2 text-right">{onView && t.meeting && <button onClick={() => onView(t.meeting)} className="fs-10 font-bold rounded-lg text-white px-2 py-1" style={{ background: BRAND }}>View</button>}</td>
+                    <td className="px-2 py-2 text-center">{onView && t.meeting && <button onClick={() => onView(t.meeting)} className="fs-10 font-bold rounded-lg text-white px-2 py-1" style={{ background: BRAND }}>View</button>}</td>
                   </tr>
                 );
-              })}
+              }))}
             </tbody>
           </table>
-        </div>
+        </DualScroll>
       </div>
 
       <MeetingGrid title={`Meetings enrolled in (${data.attended.length})`} meetings={data.attended} onView={onView} onExport={canExport ? onExport : null} />
@@ -2482,7 +3035,7 @@ function PersonReport({ meetings, person, canExport, onExport, onView }) {
    status pie · completion by branch · category split · monthly
    trend · overdue ageing · owner workload · branch summary
    ============================================================ */
-function ReportsView({ history, branches, onView, onOpenBranch }) {
+function ReportsView({ history, branches, canExport, onView, onOpenBranch }) {
   const allBranches = useMemo(() => {
     const map = new Map(branches.map((b) => [b.code, { ...b }]));
     Object.keys(history).forEach((code) => {
@@ -2500,18 +3053,25 @@ function ReportsView({ history, branches, onView, onOpenBranch }) {
     const inScope = (m) => scope === 'all' || (m.branches?.length ? m.branches.some((b) => b.code === scope) : m.branchCode === scope);
     /* multi-branch meetings are filed under several branches — count each once */
     const uniq = new Map();
-    Object.values(history).forEach((ms) => ms.forEach((m) => { if (inScope(m)) uniq.set(m.id, m); }));
+    Object.values(history).forEach((ms) => ms.forEach((m) => { if (!uniq.has(m.id)) uniq.set(m.id, m); }));
     const all = [...uniq.values()].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    const scoped = all.filter(inScope);          // meetings held for/covering the scope branch
 
-    const seen = new Set(); const latest = [];
+    /* tasks are attributed to the branch(es) of their RESPONSIBLE people —
+       a task owned by employees of two branches counts for both branches */
+    const rowCodes = makeRowBranchCodes(buildBranchNameToCode(allBranches, all));
+    const inBranch = (r, m) => scope === 'all' || rowCodes(r, m).has(scope);
+
+    const seen = new Set(); const latestAll = [];
     let info = 0;
     all.forEach((m) => {
       m.rows.forEach((r) => {
-        if (r.flag !== 'T') { info++; return; }
+        if (r.flag !== 'T') { if (inBranch(r, m)) info++; return; }
         if (seen.has(r.trackId)) return;
-        seen.add(r.trackId); latest.push(r);
+        seen.add(r.trackId); latestAll.push({ r, m });
       });
     });
+    const latest = latestAll.filter(({ r, m }) => inBranch(r, m)).map((x) => x.r);
     const completed = latest.filter((r) => r.status === 'completed').length;
     const overRows = latest.filter((r) => isOverdue(r));
     const inProg = latest.filter((r) => r.status === 'in_progress' && !isOverdue(r)).length;
@@ -2530,7 +3090,7 @@ function ReportsView({ history, branches, onView, onOpenBranch }) {
       const dt = new Date(); dt.setDate(1); dt.setMonth(dt.getMonth() - (5 - i));
       return { key: `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`, name: dt.toLocaleDateString(undefined, { month: 'short' }) };
     });
-    const trend = months.map((mo) => ({ name: mo.name, meetings: all.filter((m) => (m.date || '').startsWith(mo.key)).length }));
+    const trend = months.map((mo) => ({ name: mo.name, meetings: scoped.filter((m) => (m.date || '').startsWith(mo.key)).length }));
 
     /* per-owner workload (a task with 3 owners counts for each of them) */
     const own = {};
@@ -2545,29 +3105,22 @@ function ReportsView({ history, branches, onView, onOpenBranch }) {
     const aging = [{ name: '1–7 d', v: 0 }, { name: '8–14 d', v: 0 }, { name: '15–30 d', v: 0 }, { name: '30+ d', v: 0 }];
     overRows.forEach((r) => { const dd = daysFromDue(r.due); aging[dd <= 7 ? 0 : dd <= 14 ? 1 : dd <= 30 ? 2 : 3].v++; });
 
-    /* branch-wise summary */
-    const branchRows = (scope === 'all' ? allBranches : allBranches.filter((b) => b.code === scope)).map((b) => {
-      const ms = history[b.code] || [];
-      const s2 = new Set(); let done = 0, tot = 0, open = 0, od = 0, inf = 0;
-      ms.forEach((m) => {
-        m.rows.forEach((r) => {
-          if (r.flag !== 'T') { inf++; return; }
-          if (s2.has(r.trackId)) return;
-          s2.add(r.trackId); tot++;
-          if (r.status === 'completed') done++;
-          else { open++; if (isOverdue(r)) od++; }
-        });
-      });
-      return { code: b.code, name: b.name, last: ms[0]?.date, lastMeeting: ms[0] || null, meetings: ms.length, tasks: tot, done, open, overdue: od, info: inf, completion: tot ? Math.round(done / tot * 100) : 0 };
-    }).sort((a, b) => b.meetings - a.meetings || a.name.localeCompare(b.name));
+    /* completion % per branch — same responsibility-based attribution */
+    const per = new Map((scope === 'all' ? allBranches : allBranches.filter((b) => b.code === scope))
+      .map((b) => [b.code, { name: b.name, done: 0, tot: 0 }]));
+    latestAll.forEach(({ r, m }) => rowCodes(r, m).forEach((c) => {
+      const s = per.get(c); if (!s) return;
+      s.tot++; if (r.status === 'completed') s.done++;
+    }));
+    const compBar = [...per.values()].map((b) => ({ name: b.name, completion: b.tot ? Math.round(b.done / b.tot * 100) : 0 }));
 
     return {
-      meetings: all.length,
+      meetings: scoped.length,
       completion: latest.length ? Math.round(completed / latest.length * 100) : 0,
       open: latest.length - completed,
       overdue: overRows.length,
       info,
-      avg: all.length ? (latest.length / all.length).toFixed(1) : '0',
+      avg: scoped.length ? (latest.length / scoped.length).toFixed(1) : '0',
       pie: [
         { name: 'Completed', value: completed, color: '#059669' },
         { name: 'WIP', value: inProg, color: '#d97706' },
@@ -2575,29 +3128,9 @@ function ReportsView({ history, branches, onView, onOpenBranch }) {
         { name: 'Overdue', value: overRows.length, color: '#f87171' },
       ],
       cats: Object.values(catMap).sort((a, b) => (b.done + b.open) - (a.done + a.open)),
-      trend, owners, aging, branchRows,
-      compBar: branchRows.map((b) => ({ name: b.name, completion: b.completion })),
+      trend, owners, aging, compBar,
     };
   }, [history, allBranches, scope]);
-
-  /* task drill-down modal — opened by clicking a count in the branch summary.
-     Latest state per tracked task of that branch, filtered by the clicked column. */
-  const [drill, setDrill] = useState(null);   // { code, name, filter: tasks|done|open|overdue }
-  const DRILL_LABEL = { tasks: 'All tasks', done: 'Completed tasks', open: 'Open tasks', overdue: 'Overdue tasks' };
-  const drillTasks = useMemo(() => {
-    if (!drill) return [];
-    const seen = new Set(); const out = [];
-    (history[drill.code] || []).forEach((m) => m.rows.forEach((r) => {
-      if (r.flag !== 'T' || seen.has(r.trackId)) return;
-      seen.add(r.trackId);
-      out.push({ ...r, meeting: m });
-    }));
-    return out.filter((t) =>
-      drill.filter === 'done' ? t.status === 'completed'
-        : drill.filter === 'open' ? t.status !== 'completed'
-          : drill.filter === 'overdue' ? isOverdue(t)
-            : true);
-  }, [drill, history]);
 
   const KPI = ({ icon: Icon, label, value, color, hint }) => (
     <div className="kc-lift flex items-center gap-3 rounded-2xl border border-gray-200 bg-white shadow-sm px-3.5 py-3" title={hint || ''}>
@@ -2702,11 +3235,21 @@ function ReportsView({ history, branches, onView, onOpenBranch }) {
           )}
         </div>
         <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-          <div className="px-3 py-2.5 border-b border-gray-100 fs-12 font-bold text-gray-700">Responsibility workload <span className="fs-10 font-normal text-gray-400">(top owners by open tasks)</span></div>
+          <div className="px-3 py-2.5 border-b border-gray-100 fs-12 font-bold text-gray-700 flex items-center justify-between gap-2">
+            <span>Responsibility workload <span className="fs-10 font-normal text-gray-400">(top owners by open tasks)</span></span>
+            {canExport && d.owners.length > 0 && (
+              <button type="button" onClick={() => exportTableExcel('MOM_responsibility_workload',
+                ['Sr. No.', 'Person', 'Open', 'Overdue', 'Completed'],
+                d.owners.map((o, i) => [i + 1, o.name, o.open, o.overdue, o.done])).catch(() => toast.error('Could not generate the Excel file'))}
+                className={XL_BTN} title="Download this table as Excel">
+                <Upload size={11} /> Export Excel
+              </button>
+            )}
+          </div>
           {d.owners.length === 0 ? (
             <div className="p-8 text-center fs-11 text-gray-400">No tasks assigned yet.</div>
           ) : (
-            <div className="overflow-x-auto kc-scroll">
+            <DualScroll>
               <table className="w-full fs-12" style={{ minWidth: '26rem' }}>
                 <thead>
                   <tr className="text-left text-gray-500" style={{ background: '#f7f8fc' }}>
@@ -2729,128 +3272,11 @@ function ReportsView({ history, branches, onView, onOpenBranch }) {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </DualScroll>
           )}
         </div>
       </div>
 
-      {/* branch-wise summary — extended */}
-      <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-        <div className="px-3 py-2.5 border-b border-gray-100 fs-12 font-bold text-gray-700">Branch-wise summary</div>
-        <div className="overflow-x-auto kc-scroll">
-          <table className="w-full fs-12" style={{ minWidth: '52rem' }}>
-            <thead><tr className="text-left text-gray-500" style={{ background: SHEET_SOFT }}>
-              <th className="px-3 py-1.5 font-semibold">Branch</th><th className="px-3 py-1.5 font-semibold">Last meeting</th>
-              <th className="px-3 py-1.5 font-semibold text-center">Meetings</th><th className="px-3 py-1.5 font-semibold text-center">Tasks</th>
-              <th className="px-3 py-1.5 font-semibold text-center">Done</th><th className="px-3 py-1.5 font-semibold text-center">Open</th>
-              <th className="px-3 py-1.5 font-semibold text-center">Overdue</th><th className="px-3 py-1.5 font-semibold text-center">Info</th>
-              <th className="px-3 py-1.5 font-semibold" style={{ width: '8rem' }}>Completion</th>
-            </tr></thead>
-            <tbody>
-              {d.branchRows.map((b) => {
-                const countBtn = (n, filter, colorStyle) => n > 0
-                  ? <button type="button" onClick={() => setDrill({ code: b.code, name: b.name, filter })}
-                      className="font-semibold hover:underline cursor-pointer" style={colorStyle}
-                      title={`See these ${DRILL_LABEL[filter].toLowerCase()} in detail`}>{n}</button>
-                  : <span className="text-gray-300">0</span>;
-                return (
-                  <tr key={b.code} style={{ borderTop: '1px solid #f6f6f9' }}>
-                    <td className="px-3 py-1.5">
-                      <button type="button" onClick={() => onOpenBranch?.(b.code)} className="font-medium text-left hover:underline" style={{ color: BRAND }}
-                        title="Open this branch in the History tab">{b.name}</button>
-                    </td>
-                    <td className="px-3 py-1.5">
-                      {b.lastMeeting
-                        ? <button type="button" onClick={() => onView?.(b.lastMeeting)} className="hover:underline" style={{ color: BRAND }}
-                            title="Open this meeting's sheet">{fmt(b.last)}</button>
-                        : <span className="text-gray-300">—</span>}
-                    </td>
-                    <td className="px-3 py-1.5 text-center text-gray-700">{b.meetings}</td>
-                    <td className="px-3 py-1.5 text-center">{countBtn(b.tasks, 'tasks', { color: BRAND })}</td>
-                    <td className="px-3 py-1.5 text-center">{countBtn(b.done, 'done', { color: '#059669' })}</td>
-                    <td className="px-3 py-1.5 text-center">{countBtn(b.open, 'open', { color: '#b45309' })}</td>
-                    <td className="px-3 py-1.5 text-center">{countBtn(b.overdue, 'overdue', { color: '#f87171' })}</td>
-                    <td className="px-3 py-1.5 text-center text-gray-600">{b.info}</td>
-                    <td className="px-3 py-1.5"><div className="flex items-center gap-2"><div className="flex-1"><Bar2 v={b.completion} /></div><span className="fs-10 text-gray-500" style={{ width: '2rem', textAlign: 'right' }}>{b.completion}%</span></div></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* ===== TASK DRILL-DOWN — details of the clicked count ===== */}
-      {drill && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setDrill(null)}>
-          <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-6xl flex flex-col" style={{ maxHeight: '92vh' }} onClick={(e) => e.stopPropagation()}>
-            <div className="mom-view-head px-4 py-3 flex items-center justify-between rounded-t-2xl border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
-              <div className="min-w-0">
-                <div className="text-base font-bold text-gray-800 truncate">{drill.name} — {DRILL_LABEL[drill.filter]}</div>
-                <div className="fs-10 text-black">{drillTasks.length} task{drillTasks.length === 1 ? '' : 's'} · latest state per tracked task · click View to open the meeting sheet</div>
-              </div>
-              <button onClick={() => setDrill(null)} className="rounded-lg p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100"><X className="h-4 w-4" /></button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3">
-              <div className="overflow-x-auto rounded-xl border border-gray-200">
-                <table className="mom-sheet w-full fs-11" style={{ borderCollapse: 'collapse', minWidth: '68rem' }}>
-                  <thead>
-                    <tr style={{ background: '#f1f3fb', color: INK }}>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '2.6rem' }}>Sr</th>
-                      <th className="px-2 py-2 fs-11 font-bold">Discussion Area / Point</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7rem' }}>Category</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '10rem' }}>Assigned by (Head)</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '12rem' }}>Assigned to</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '12rem' }}>Meeting</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7.5rem' }}>Due Date</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7rem' }}>Status</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '10rem' }}>Latest remark</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {drillTasks.length === 0 && <tr><td colSpan={9} className="px-3 py-6 text-center fs-12 text-gray-400">No tasks in this bucket.</td></tr>}
-                    {drillTasks.map((t, i) => {
-                      const lastPrev = (t.prevRemarks || [])[t.prevRemarks?.length - 1];
-                      return (
-                        <tr key={t.trackId}>
-                          <td className="px-2 py-2 text-center text-black">{i + 1}</td>
-                          <td className="px-2 py-2">
-                            <div className="font-semibold text-black">{t.area}{t.carried && <span className="ml-1.5 fs-9 font-bold rounded px-1 py-0.5" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }}>C/F</span>}</div>
-                            {t.point && <div className="fs-10 text-black mt-0.5">{t.point}</div>}
-                            <div className="fs-9 text-gray-400 mt-0.5">raised {fmt(t.originDate)}</div>
-                          </td>
-                          <td className="px-2 py-2 text-center text-black">{t.category || '—'}</td>
-                          <td className="px-2 py-2 text-center text-black">{t.assignedBy || <span className="text-gray-300">—</span>}</td>
-                          <td className="px-2 py-2">
-                            {respArr(t.resp).length ? (
-                              <div className="flex items-center gap-1 flex-wrap">
-                                {respArr(t.resp).map((n) => (
-                                  <span key={n} className="inline-flex items-center rounded-full px-2 py-0.5 fs-10 font-semibold" style={{ background: BRAND_SOFT, color: INK }}>{n}</span>
-                                ))}
-                              </div>
-                            ) : <span className="text-gray-300">—</span>}
-                          </td>
-                          <td className="px-2 py-2">
-                            <div className="fs-11 font-semibold text-black">{t.meeting.type || 'Meeting'}</div>
-                            <div className="fs-9 text-gray-400">{fmt(t.meeting.date)}{t.meeting.location ? ` · ${t.meeting.location}` : ''}</div>
-                            {onView && <button type="button" onClick={() => onView(t.meeting)} className="mt-1 fs-9 font-bold rounded px-1.5 py-0.5 text-white" style={{ background: BRAND }}>View</button>}
-                          </td>
-                          <td className="px-2 py-2 text-center text-black">
-                            {t.due ? fmt(t.due) : '—'}
-                            {isOverdue(t) && <div className="fs-9 font-bold" style={{ color: STATUS.overdue.color }}>{daysFromDue(t.due)}d overdue</div>}
-                          </td>
-                          <td className="px-2 py-2 text-center"><StatusBadge r={t} /></td>
-                          <td className="px-2 py-2 text-black">{t.remark || lastPrev?.text || <span className="text-gray-300">—</span>}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -2858,18 +3284,21 @@ function ReportsView({ history, branches, onView, onOpenBranch }) {
 /* ============================================================
    MASTER SETUP MODAL — discussion areas & categories
    ============================================================ */
-function MasterModal({ master, setMaster, categories, setCategories, persist, onClose, ping }) {
+function MasterModal({ master, setMaster, categories, setCategories, meetingTypes, setMeetingTypes, persist, onClose, ping }) {
   const [tab, setTab] = useState('points');
   const [title, setTitle] = useState('');
   const catKeys = Object.keys(categories);
   const [cat, setCat] = useState(catKeys[0]);
   const [newCat, setNewCat] = useState('');
   const [newColor, setNewColor] = useState(NEW_CAT_COLORS[0]);
+  const [newType, setNewType] = useState('');
+  const [busyAdd, setBusyAdd] = useState(false);   // an Add request is in flight → spinner on the button
 
   const fail = (e, msg) => ping(e?.response?.data?.detail || msg, 'err');
 
   const add = async () => {
     const t = title.trim(); if (!t) return;
+    setBusyAdd(true);
     try {
       if (persist) {
         const item = await persist.addPoint(t, cat);
@@ -2877,6 +3306,7 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
       } else setMaster((p) => [...p, { id: uid('m'), title: t, category: cat }]);
       setTitle(''); ping('Master point added');
     } catch (e) { fail(e, 'Could not add the point'); }
+    finally { setBusyAdd(false); }
   };
   const rename = (id, v) => setMaster((p) => p.map((x) => x.id === id ? { ...x, title: v } : x));
   const commitTitle = (id) => {
@@ -2898,11 +3328,13 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
   const addCat = async () => {
     const n = newCat.trim(); if (!n) return;
     if (categories[n]) return ping('Category already exists', 'err');
+    setBusyAdd(true);
     try {
       if (persist) await persist.addCategory(n, newColor);
       setCategories((c) => ({ ...c, [n]: newColor })); setNewCat('');
       setNewColor(NEW_CAT_COLORS[(catKeys.length + 1) % NEW_CAT_COLORS.length]); ping('Category added');
     } catch (e) { fail(e, 'Could not add the category'); }
+    finally { setBusyAdd(false); }
   };
   const setCatColor = (n, v) => setCategories((c) => ({ ...c, [n]: v }));
   const commitColor = (n) => {
@@ -2920,8 +3352,28 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
     } catch (e) { fail(e, 'Could not delete the category'); }
   };
 
+  const addType = async () => {
+    const n = newType.trim(); if (!n) return;
+    if (meetingTypes.some((t) => t.name.toLowerCase() === n.toLowerCase())) return ping('Meeting type already exists', 'err');
+    setBusyAdd(true);
+    try {
+      if (persist) {
+        const item = await persist.addMeetingType(n);
+        setMeetingTypes((p) => [...p, { id: item.id, name: item.name }]);
+      } else setMeetingTypes((p) => [...p, { id: uid('mt'), name: n }]);
+      setNewType(''); ping('Meeting type added');
+    } catch (e) { fail(e, 'Could not add the meeting type'); }
+    finally { setBusyAdd(false); }
+  };
+  const removeType = async (t) => {
+    try {
+      if (persist) await persist.deleteMeetingType(t.id);
+      setMeetingTypes((p) => p.filter((x) => x.id !== t.id));
+    } catch (e) { fail(e, 'Could not delete the meeting type'); }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col" style={{ maxHeight: '86vh' }} onClick={(e) => e.stopPropagation()}>
         <div className="mom-view-head px-4 py-3 flex items-center justify-between rounded-t-2xl border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
           <div>
@@ -2932,7 +3384,7 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
         </div>
 
         <div className="flex items-center gap-1 px-4 pt-2 border-b border-gray-100 max-sm:overflow-x-auto">
-          {[['points', `Discussion areas (${master.length})`], ['cats', `Categories (${catKeys.length})`]].map(([k, l]) => (
+          {[['points', `Discussion areas (${master.length})`], ['cats', `Categories (${catKeys.length})`], ['types', `Meeting types (${meetingTypes.length})`]].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} className="rounded-t-md px-3 py-2 fs-12 font-semibold transition" style={tab === k ? { color: BRAND, borderBottom: `2px solid ${BRAND}` } : { color: '#9ca3af' }}>{l}</button>
           ))}
         </div>
@@ -2942,14 +3394,14 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
             <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 max-sm:flex-wrap" style={{ background: '#fafafc' }}>
               <input value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder="Add a new discussion area…" className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 fs-12 outline-none" />
               <select value={cat} onChange={(e) => setCat(e.target.value)} className="rounded-lg border border-gray-200 px-2 py-1.5 fs-12 bg-white outline-none">{catKeys.map((c) => <option key={c}>{c}</option>)}</select>
-              <button onClick={add} className="rounded-lg px-3 py-1.5 fs-12 font-semibold text-white inline-flex items-center gap-1" style={{ background: BRAND }}><Plus className="h-3.5 w-3.5" /> Add</button>
+              <button onClick={add} disabled={busyAdd} className="rounded-lg px-3 py-1.5 fs-12 font-semibold text-white inline-flex items-center gap-1 disabled:opacity-60" style={{ background: BRAND }}>{busyAdd ? <span className="h-3 w-3 rounded-full animate-spin" style={{ border: '2px solid rgba(255,255,255,0.35)', borderTopColor: '#fff' }} /> : <Plus className="h-3.5 w-3.5" />} {busyAdd ? 'Adding…' : 'Add'}</button>
             </div>
             <div className="flex-1 overflow-y-auto p-2.5">
               {master.map((p) => (
                 <div key={p.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50">
                   <input value={p.title} onChange={(e) => rename(p.id, e.target.value)} onBlur={() => commitTitle(p.id)} className="flex-1 fs-12 text-gray-800 bg-transparent outline-none border-b border-transparent focus:border-gray-200 py-0.5" />
                   <select value={p.category} onChange={(e) => recat(p.id, e.target.value)} className="rounded-md border border-gray-200 px-1.5 py-1 fs-11 font-bold text-gray-600 bg-white outline-none">{catKeys.map((c) => <option key={c}>{c}</option>)}</select>
-                  <button onClick={() => remove(p.id)} className="text-gray-300 hover:text-red-400 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => remove(p.id)} className="text-black hover:text-red-500 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               ))}
             </div>
@@ -2958,11 +3410,11 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
               <button onClick={onClose} className="rounded-lg px-3 py-1.5 fs-12 font-semibold text-white" style={{ background: BRAND }}>Done</button>
             </div>
           </>
-        ) : (
+        ) : tab === 'cats' ? (
           <>
             <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 max-sm:flex-wrap" style={{ background: '#fafafc' }}>
               <input value={newCat} onChange={(e) => setNewCat(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addCat()} placeholder="Add a new category…" className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 fs-12 outline-none" />
-              <button onClick={addCat} className="rounded-lg px-3 py-1.5 fs-12 font-semibold text-white inline-flex items-center gap-1" style={{ background: BRAND }}><Plus className="h-3.5 w-3.5" /> Add</button>
+              <button onClick={addCat} disabled={busyAdd} className="rounded-lg px-3 py-1.5 fs-12 font-semibold text-white inline-flex items-center gap-1 disabled:opacity-60" style={{ background: BRAND }}>{busyAdd ? <span className="h-3 w-3 rounded-full animate-spin" style={{ border: '2px solid rgba(255,255,255,0.35)', borderTopColor: '#fff' }} /> : <Plus className="h-3.5 w-3.5" />} {busyAdd ? 'Adding…' : 'Add'}</button>
             </div>
             <div className="flex-1 overflow-y-auto p-2.5">
               {catKeys.map((name) => {
@@ -2971,13 +3423,33 @@ function MasterModal({ master, setMaster, categories, setCategories, persist, on
                   <div key={name} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-gray-50">
                     <span className="flex-1 fs-12 font-medium text-gray-800">{name}</span>
                     <span className="fs-10 text-gray-400">{used} point{used === 1 ? '' : 's'}</span>
-                    <button onClick={() => removeCat(name)} className="text-gray-300 hover:text-red-400 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => removeCat(name)} className="text-black hover:text-red-500 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
                   </div>
                 );
               })}
             </div>
             <div className="px-4 py-2.5 border-t border-gray-100 flex items-center justify-between max-md:flex-wrap max-md:gap-2">
               <span className="fs-10 text-gray-400">Deleting a category moves its points to another one</span>
+              <button onClick={onClose} className="rounded-lg px-3 py-1.5 fs-12 font-semibold text-white" style={{ background: BRAND }}>Done</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 max-sm:flex-wrap" style={{ background: '#fafafc' }}>
+              <input value={newType} onChange={(e) => setNewType(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addType()} placeholder="Add a new meeting type…" className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 fs-12 outline-none" />
+              <button onClick={addType} disabled={busyAdd} className="rounded-lg px-3 py-1.5 fs-12 font-semibold text-white inline-flex items-center gap-1 disabled:opacity-60" style={{ background: BRAND }}>{busyAdd ? <span className="h-3 w-3 rounded-full animate-spin" style={{ border: '2px solid rgba(255,255,255,0.35)', borderTopColor: '#fff' }} /> : <Plus className="h-3.5 w-3.5" />} {busyAdd ? 'Adding…' : 'Add'}</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2.5">
+              {meetingTypes.length === 0 && <div className="px-3 py-6 text-center fs-11 text-gray-400">No meeting types yet — add one above.</div>}
+              {meetingTypes.map((t) => (
+                <div key={t.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-gray-50">
+                  <span className="flex-1 fs-12 font-medium text-gray-800">{t.name}</span>
+                  <button onClick={() => removeType(t)} className="text-black hover:text-red-500 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
+              ))}
+            </div>
+            <div className="px-4 py-2.5 border-t border-gray-100 flex items-center justify-between max-md:flex-wrap max-md:gap-2">
+              <span className="fs-10 text-gray-400">These types appear in the Meeting-type dropdown on New meeting</span>
               <button onClick={onClose} className="rounded-lg px-3 py-1.5 fs-12 font-semibold text-white" style={{ background: BRAND }}>Done</button>
             </div>
           </>

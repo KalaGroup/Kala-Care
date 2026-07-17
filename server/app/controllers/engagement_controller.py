@@ -1335,6 +1335,48 @@ class EngagementController:
             "updated_at": followup.updated_at
         }
     
+    # "Not Connected" daily cap — one customer (instance_id) can be marked
+    # not_connected at most this many times per calendar day, counted across
+    # ALL users and BOTH pages (drive followups + non-drive non_followups).
+    NOT_CONNECTED_DAILY_LIMIT = 2
+
+    def _check_not_connected_daily_limit(self, instance_id: Optional[str],
+                                         exclude_followup_id: Optional[int] = None,
+                                         exclude_non_followup_id: Optional[int] = None) -> None:
+        """Raise 400 when today's 'Not Connected' uses for this customer are exhausted."""
+        if not instance_id:
+            return
+        day_start = now_ist().replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
+
+        fu_q = self.db.query(FollowUp).filter(
+            FollowUp.customer_instance_id == instance_id,
+            FollowUp.status == 'not_connected',
+            FollowUp.followup_date >= day_start,
+            FollowUp.followup_date < day_end
+        )
+        if exclude_followup_id is not None:
+            fu_q = fu_q.filter(FollowUp.id != exclude_followup_id)
+
+        nfu_q = self.db.query(NonFollowUp).filter(
+            NonFollowUp.customer_instance_id == instance_id,
+            NonFollowUp.status == 'not_connected',
+            NonFollowUp.followup_date >= day_start,
+            NonFollowUp.followup_date < day_end
+        )
+        if exclude_non_followup_id is not None:
+            nfu_q = nfu_q.filter(NonFollowUp.id != exclude_non_followup_id)
+
+        used = fu_q.count() + nfu_q.count()
+        if used >= self.NOT_CONNECTED_DAILY_LIMIT:
+            raise HTTPException(
+                status_code=400,
+                detail=(f"'Not Connected' status can be used only "
+                        f"{self.NOT_CONNECTED_DAILY_LIMIT} times per day per customer. "
+                        f"This customer already has {used} 'Not Connected' follow-up(s) "
+                        f"today.")
+            )
+
     def create_followup(self, customer_id: int, followup: engagement_schema.FollowUpCreate) -> Dict[str, Any]:
         """Create a new follow-up for a customer and return as dictionary"""
         # Check if customer exists
@@ -1363,7 +1405,11 @@ class EngagementController:
         
         # ADDED: Add customer_instance_id to the data
         data['customer_instance_id'] = self._normalize_id(customer.instance_id)
-        
+
+        # Enforce the daily 'Not Connected' cap (2/day per customer, all users)
+        if data.get('status') == 'not_connected':
+            self._check_not_connected_daily_limit(data['customer_instance_id'])
+
         # Create the follow-up object
         db_followup = FollowUp(**data, customer_id=customer_id)
         self.db.add(db_followup)
@@ -1464,7 +1510,14 @@ class EngagementController:
         # ADDED: Update customer_instance_id if customer has it
         if customer and customer.instance_id:
             update_data['customer_instance_id'] = self._normalize_id(customer.instance_id)
-        
+
+        # Enforce the daily 'Not Connected' cap when CHANGING a row to that status
+        if update_data.get('status') == 'not_connected' and old_status != 'not_connected':
+            self._check_not_connected_daily_limit(
+                update_data.get('customer_instance_id') or db_followup.customer_instance_id,
+                exclude_followup_id=followup_id
+            )
+
         for key, value in update_data.items():
             setattr(db_followup, key, value)
         
@@ -2353,7 +2406,11 @@ class EngagementController:
         
         # Add customer_instance_id to the data
         data['customer_instance_id'] = self._normalize_id(customer.instance_id)
-        
+
+        # Enforce the daily 'Not Connected' cap (2/day per customer, all users)
+        if data.get('status') == 'not_connected':
+            self._check_not_connected_daily_limit(data['customer_instance_id'])
+
         # Create the non-follow-up object
         db_non_followup = NonFollowUp(**data, customer_id=customer_id)
         self.db.add(db_non_followup)
@@ -2403,10 +2460,17 @@ class EngagementController:
         
         # Remove any fields not in the model
         update_data.pop('campaign_name', None)
-        
+
+        # Enforce the daily 'Not Connected' cap when CHANGING a row to that status
+        if update_data.get('status') == 'not_connected' and db_non_followup.status != 'not_connected':
+            self._check_not_connected_daily_limit(
+                db_non_followup.customer_instance_id,
+                exclude_non_followup_id=non_followup_id
+            )
+
         for key, value in update_data.items():
             setattr(db_non_followup, key, value)
-        
+
         db_non_followup.updated_at = now_ist()
         self.db.commit()
         self.db.refresh(db_non_followup)

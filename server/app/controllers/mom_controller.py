@@ -2,10 +2,11 @@ import json
 from datetime import datetime, date
 
 from fastapi import HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.mom_model import (
-    MomCategory, MomMasterPoint, MomMeeting, MomAttendee, MomRow,
+    MomCategory, MomMasterPoint, MomMeetingType, MomMeeting, MomAttendee, MomRow,
 )
 
 # ------------------------------------------------------------------ #
@@ -15,6 +16,13 @@ DEFAULT_CATEGORIES = {
     "Sales": "#2f3192", "Service": "#0d9488", "Finance": "#059669",
     "People": "#7c3aed", "Marketing": "#d97706", "Other": "#64748b",
 }
+DEFAULT_MEETING_TYPES = [
+    "Monthly Branch Review",
+    "Weekly Review",
+    "Sales Review",
+    "Service Review",
+    "Special / Ad-hoc",
+]
 DEFAULT_MASTER_POINTS = [
     ("Sales target vs achievement (MTD)", "Sales"),
     ("Outstanding payments & collections", "Finance"),
@@ -157,6 +165,10 @@ def serialize_category(c: MomCategory):
     return {"id": c.id, "name": c.name, "color": c.color}
 
 
+def serialize_meeting_type(t: MomMeetingType):
+    return {"id": t.id, "name": t.name}
+
+
 # ------------------------------------------------------------------ #
 #  bootstrap: master points + categories (seed defaults on first run) #
 # ------------------------------------------------------------------ #
@@ -169,6 +181,10 @@ def get_bootstrap(db: Session, created_by: str | None = None):
         for title, cat in DEFAULT_MASTER_POINTS:
             db.add(MomMasterPoint(title=title, category=cat))
         db.commit()
+    if db.query(MomMeetingType).count() == 0:
+        for name in DEFAULT_MEETING_TYPES:
+            db.add(MomMeetingType(name=name))
+        db.commit()
 
     points = (
         db.query(MomMasterPoint)
@@ -177,9 +193,11 @@ def get_bootstrap(db: Session, created_by: str | None = None):
         .all()
     )
     cats = db.query(MomCategory).order_by(MomCategory.id).all()
+    types = db.query(MomMeetingType).order_by(MomMeetingType.id).all()
     return {
         "masterPoints": [serialize_master_point(p) for p in points],
         "categories": [serialize_category(c) for c in cats],
+        "meetingTypes": [serialize_meeting_type(t) for t in types],
     }
 
 
@@ -325,6 +343,35 @@ def delete_point(db: Session, point_id: int):
     if not point:
         raise HTTPException(status_code=404, detail="Master point not found")
     point.is_active = False          # soft delete → old meetings keep their rows
+    db.commit()
+
+
+# ------------------------------------------------------------------ #
+#  meeting types                                                      #
+# ------------------------------------------------------------------ #
+def create_meeting_type(db: Session, name: str, created_by: str | None = None):
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Meeting type name is required")
+    exists = (
+        db.query(MomMeetingType)
+        .filter(func.lower(MomMeetingType.name) == name.lower())
+        .first()
+    )
+    if exists:
+        raise HTTPException(status_code=409, detail="Meeting type already exists")
+    mt = MomMeetingType(name=name)
+    db.add(mt)
+    db.commit()
+    db.refresh(mt)
+    return serialize_meeting_type(mt)
+
+
+def delete_meeting_type(db: Session, type_id: int):
+    mt = db.query(MomMeetingType).filter(MomMeetingType.id == type_id).first()
+    if not mt:
+        raise HTTPException(status_code=404, detail="Meeting type not found")
+    db.delete(mt)   # saved meetings keep their type text — nothing to migrate
     db.commit()
 
 

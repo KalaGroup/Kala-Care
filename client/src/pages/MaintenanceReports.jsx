@@ -6,26 +6,36 @@ import { canExportExcel } from '../utils/exportPermission';
 import {
     DocumentChartBarIcon, ChartBarIcon, ClockIcon, UsersIcon,
     ArrowUpTrayIcon, ArrowPathIcon, Squares2X2Icon, ExclamationTriangleIcon,
+    CircleStackIcon, WrenchScrewdriverIcon, ArrowsRightLeftIcon,
 } from '@heroicons/react/24/outline';
 import {
-    getAppCodes, getServices, getActivity, partService, findApp,
+    getAppCodes, getServices, getActivity, partService, findApp, getRole,
     themeColor, themeDark, themeSoft, fmtDateTime,
 } from '../components/maintenanceApi';
+import MaintenanceScheduleMaster from '../components/MaintenanceScheduleMaster';
+import { SortTh, useSort, useSortedRows } from '../components/TableSort';
 
 const sortByHours = (svcs) => svcs.slice().sort((a, b) => (parseFloat(a.hours) || 0) - (parseFloat(b.hours) || 0));
 
+// Master-only management tabs hosted on this page (moved here from the
+// Quotation Template page's old "Manage Master" panel).
+const MGMT_TABS = ['master', 'service', 'import', 'mapping'];
+
 const MaintenanceReports = () => {
+    const isMaster = getRole() === 'master_admin';
     const [tab, setTab] = useState('coverage');
 
-    // Deep-link support: the ERP Sitemap opens a specific report tab via router
+    // Deep-link support: the ERP Sitemap opens a specific tab via router
     // state — navigate('/maintenance-reports', { state: { openTab: 'activity' } }).
-    // The state is consumed immediately so a refresh doesn't re-apply it.
+    // Management tabs ('master' | 'service' | 'import' | 'mapping') are only
+    // honoured for the Master Admin. The state is consumed immediately so a
+    // refresh doesn't re-apply it.
     const routerLocation = useLocation();
     const routerNavigate = useNavigate();
     useEffect(() => {
         const t = routerLocation.state?.openTab;
         if (t) {
-            setTab(t);
+            if (!MGMT_TABS.includes(t) || isMaster) setTab(t);
             routerNavigate(routerLocation.pathname, { replace: true, state: null });
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -92,7 +102,7 @@ const MaintenanceReports = () => {
                             </div>
                             <div>
                                 <h1 className="text-lg sm:text-xl font-bold leading-tight">Part Detail Info — Reports</h1>
-                                <p className="text-[11px] text-white/70 leading-tight">Service coverage and application-code look-up activity</p>
+                                <p className="text-[11px] text-white/70 leading-tight">{isMaster ? 'Reports, master data, imports and app mapping' : 'Service coverage and application-code look-up activity'}</p>
                             </div>
                         </div>
                         <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium bg-white/15 text-white">
@@ -106,6 +116,12 @@ const MaintenanceReports = () => {
                     {[
                         { id: 'coverage', label: 'Service Applicability', Icon: Squares2X2Icon },
                         { id: 'activity', label: 'Search Activity Count', Icon: ClockIcon },
+                        ...(isMaster ? [
+                            { id: 'master', label: 'Master Data', Icon: CircleStackIcon },
+                            { id: 'mapping', label: 'App Mapping', Icon: ArrowsRightLeftIcon },
+                            { id: 'service', label: 'Master of Service', Icon: WrenchScrewdriverIcon },
+                            { id: 'import', label: 'Import Data', Icon: ArrowUpTrayIcon },
+                        ] : []),
                     ].map(({ id, label, Icon }) => (
                         <button key={id} onClick={() => setTab(id)}
                             className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-[13px] font-semibold border-b-2 -mb-px transition ${tab === id ? 'border-current' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
@@ -113,13 +129,17 @@ const MaintenanceReports = () => {
                             <Icon className="h-4 w-4" /> {label}
                         </button>
                     ))}
-                    <button onClick={load} title="Refresh"
-                        className="ml-auto mb-1 rounded-lg border border-gray-200 bg-white p-2 text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition">
-                        <ArrowPathIcon className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                    </button>
+                    {!MGMT_TABS.includes(tab) && (
+                        <button onClick={load} title="Refresh"
+                            className="ml-auto mb-1 rounded-lg border border-gray-200 bg-white p-2 text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition">
+                            <ArrowPathIcon className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        </button>
+                    )}
                 </div>
 
-                {err ? (
+                {MGMT_TABS.includes(tab) && isMaster ? (
+                    <MaintenanceScheduleMaster embedded initialTab={tab} />
+                ) : err ? (
                     <div className="rounded-2xl border border-red-200 bg-red-50 py-12 text-center">
                         <ExclamationTriangleIcon className="h-9 w-9 mx-auto text-red-400" />
                         <p className="mt-2 text-sm font-semibold text-red-700">{err}</p>
@@ -143,6 +163,8 @@ const MaintenanceReports = () => {
 };
 
 /* ----------------------------- Service Coverage ----------------------------- */
+const th = 'px-3 py-2 text-center border border-gray-200 bg-gray-50';
+
 const CoverageReport = ({ master, services }) => {
     const cols = useMemo(() => sortByHours(services), [services]);
     const [search, setSearch] = useState('');
@@ -161,24 +183,40 @@ const CoverageReport = ({ master, services }) => {
         [master, services]
     );
 
-    const visible = useMemo(() => {
+    const filtered = useMemo(() => {
         const q = search.trim().toLowerCase();
         return coverage.filter(({ a }) => {
             if (segment && (a.segment || '').trim() !== segment) return false;
             if (!q) return true;
             return String(a.engineModel || '').toLowerCase().includes(q)
-                || String(a.appCode || '').toLowerCase().includes(q);
+                || String(a.appCode || '').toLowerCase().includes(q)
+                || String(a.kva || '').toLowerCase().includes(q)
+                || String(a.emission || '').toLowerCase().includes(q);
         });
     }, [coverage, search, segment]);
 
+    // Sortable on every identity column, plus each service column (has parts first).
+    const { sort, toggle } = useSort();
+    const accessors = useMemo(() => ({
+        appCode: (r) => r.a.appCode,
+        engineModel: (r) => r.a.engineModel,
+        segment: (r) => r.a.segment,
+        kva: (r) => r.a.kva,
+        emission: (r) => r.a.emission,
+        ...Object.fromEntries(cols.map((c) => [`svc:${c.id}`, (r) => (r.ids.has(c.id) ? 0 : 1)])),
+    }), [cols]);
+    const visible = useSortedRows(filtered, sort, accessors);
+
     const exportXlsx = () => {
-        const aoa = [['Model', 'App Code', 'Segment', ...cols.map((c) => c.short)]];
-        master.forEach((a) => {
-            const ids = new Set(a.parts.map((p) => partService(services, p).id));
-            aoa.push([a.engineModel, a.appCode, a.segment, ...cols.map((c) => (ids.has(c.id) ? 'Yes' : 'No'))]);
+        const aoa = [['Sr.', 'App Code', 'Engine Model', 'Segment', 'KVA Rating', 'Emission Norm', ...cols.map((c) => c.short)]];
+        // Export exactly what is on screen, in the same order.
+        visible.forEach(({ a, ids }, i) => {
+            aoa.push([i + 1, a.appCode, a.engineModel, a.segment, a.kva, a.emission, ...cols.map((c) => (ids.has(c.id) ? 'Yes' : 'No'))]);
         });
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws['!cols'] = [{ wch: 5 }, { wch: 14 }, { wch: 18 }, { wch: 10 }, { wch: 11 }, { wch: 13 }, ...cols.map(() => ({ wch: 8 }))];
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Coverage');
+        XLSX.utils.book_append_sheet(wb, ws, 'Coverage');
         XLSX.writeFile(wb, 'Service_Coverage_Report.xlsx');
     };
 
@@ -214,32 +252,39 @@ const CoverageReport = ({ master, services }) => {
                     </button>
                 )}
             </div>
-            <div className="overflow-x-auto r-scroll">
-                <table className="min-w-[760px] w-full border-collapse text-[12px]">
-                    <thead>
+            <div className="overflow-auto r-scroll max-h-[70vh]">
+                <table className="min-w-[900px] w-full border-collapse text-[12px]">
+                    <thead className="sticky top-0 z-10">
                         <tr className="bg-gray-50 text-[10px] sm:text-[11px] font-semibold text-black uppercase tracking-wider">
-                            <th className="px-3 py-2 text-center border border-gray-200">Model</th>
-                            <th className="px-3 py-2 text-center border border-gray-200">App Code</th>
-                            <th className="px-3 py-2 text-center border border-gray-200">Segment</th>
+                            <th className={`${th} w-12`}>Sr.</th>
+                            <SortTh label="App Code" sortKey="appCode" sort={sort} onSort={toggle} className={th} />
+                            <SortTh label="Engine Model" sortKey="engineModel" sort={sort} onSort={toggle} className={th} />
+                            <SortTh label="Segment" sortKey="segment" sort={sort} onSort={toggle} className={th} />
+                            <SortTh label="KVA Rating" sortKey="kva" sort={sort} onSort={toggle} className={th} />
+                            <SortTh label="Emission Norm" sortKey="emission" sort={sort} onSort={toggle} className={th} />
                             {cols.map((c) => (
-                                <th key={c.id} title={c.name} className="px-3 py-2 text-center border border-gray-200 whitespace-nowrap">{c.short}</th>
+                                <SortTh key={c.id} label={c.short} sortKey={`svc:${c.id}`} sort={sort} onSort={toggle}
+                                    title={c.name} className={`${th} whitespace-nowrap`} />
                             ))}
                         </tr>
                     </thead>
                     <tbody>
                         {visible.length === 0 && (
                             <tr>
-                                <td colSpan={3 + cols.length} className="px-3 py-10 border border-gray-200 text-center text-gray-400">
+                                <td colSpan={6 + cols.length} className="px-3 py-10 border border-gray-200 text-center text-gray-400">
                                     No codes match the search / segment filter.
                                 </td>
                             </tr>
                         )}
-                        {visible.map(({ a, ids }) => {
+                        {visible.map(({ a, ids }, i) => {
                             return (
                                 <tr key={a.appCode} className="hover:bg-indigo-50/40 transition">
-                                    <td className="px-3 py-2 border border-gray-200 font-mono text-gray-700">{a.engineModel || '—'}</td>
-                                    <td className="px-3 py-2 border border-gray-200 font-mono font-semibold text-gray-800">{a.appCode}</td>
+                                    <td className="px-2 py-2 border border-gray-200 text-center font-mono font-semibold text-gray-500">{i + 1}</td>
+                                    <td className="px-3 py-2 border border-gray-200 font-mono font-semibold text-gray-800 whitespace-nowrap">{a.appCode}</td>
+                                    <td className="px-3 py-2 border border-gray-200 font-mono text-gray-700 whitespace-nowrap">{a.engineModel || '—'}</td>
                                     <td className="px-3 py-2 border border-gray-200 text-center text-gray-600">{a.segment || '—'}</td>
+                                    <td className="px-3 py-2 border border-gray-200 text-center text-gray-600 whitespace-nowrap">{a.kva ? `${a.kva} KVA` : '—'}</td>
+                                    <td className="px-3 py-2 border border-gray-200 text-center text-gray-600 whitespace-nowrap">{a.emission || '—'}</td>
                                     {cols.map((c) => (
                                         <td key={c.id} className="px-3 py-2 border border-gray-200 text-center">
                                             {ids.has(c.id)
@@ -368,8 +413,15 @@ const ActivityReport = ({ master, activity }) => {
                     {/* Header: title + date range + employee filter + export (beside the title) */}
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 border-b border-gray-200 bg-gray-50 max-md:px-2">
                         <div className="flex items-center gap-2">
-                            <ClockIcon className="h-4 w-4" style={{ color: themeColor }} />
-                            <p className="text-[13px] font-semibold text-gray-800 whitespace-nowrap">Activity Log</p>
+                            <ClockIcon className="h-4 w-4 flex-shrink-0" style={{ color: themeColor }} />
+                            <div className="min-w-0 py-0.5">
+                                <p className="text-[13px] font-semibold text-gray-800 whitespace-nowrap leading-none">Activity Log</p>
+                                <p className="mt-1.5 text-[10.5px] text-gray-400 whitespace-nowrap leading-none">
+                                    {(data.filtering || search.trim() || segment)
+                                        ? `Showing ${data.shownTotal} of ${data.allTotal} look-ups · ${visibleGroups.length} rows`
+                                        : `${data.allTotal} look-ups total · ${visibleGroups.length} rows`}
+                                </p>
+                            </div>
                         </div>
 
                         <div className="ml-auto flex flex-wrap items-center gap-2 max-sm:ml-0">
@@ -415,13 +467,6 @@ const ActivityReport = ({ master, activity }) => {
                         )}
                     </div>
 
-                    {/* Count line */}
-                    <div className="px-4 py-1.5 border-b border-gray-200 bg-white text-[11px] text-gray-400">
-                        {(data.filtering || search.trim() || segment)
-                            ? `Showing ${data.shownTotal} of ${data.allTotal} look-ups · ${visibleGroups.length} rows`
-                            : `${data.allTotal} look-ups total · ${visibleGroups.length} rows`}
-                    </div>
-
                     {visibleGroups.length === 0 ? (
                         <div className="py-14 text-center text-gray-400 text-[13px]">No look-ups match the selected filters.</div>
                     ) : (
@@ -464,4 +509,4 @@ const Empty = React.memo(({ label }) => (
     <div className="rounded-2xl border border-dashed border-gray-300 bg-white py-16 text-center text-gray-400 text-[13px]">{label}</div>
 ));
 
-export default MaintenanceReports;
+export default MaintenanceReports;

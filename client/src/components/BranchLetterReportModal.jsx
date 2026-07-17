@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import ReactDOM from 'react-dom';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
+import { reflowLetterReferencesHtml } from '../utils/letterReferences';
 
 const themeColor = '#2f3192';
 
@@ -427,7 +428,8 @@ const BranchLetterReportModal = ({ isOpen, onClose, branch, branchDisplayName, a
                 `${apiBaseUrl}/performance/branch-letter-pdf/${branchCode}/${row.id}`,
                 { params: { user_id: userData.user_id || userData.id, role: userData.role, branch: userData.branch } }
             );
-            const rawHtml = res.data?.letter_html || '';
+            // Re-flow the stored References table (3 pairs per row when they fit, else 2)
+            const rawHtml = reflowLetterReferencesHtml(res.data?.letter_html || '');
             if (!rawHtml) { alert('This letter has no content to display.'); return; }
             const bodyHtml = rawHtml.replace(/<img\b[^>]*?(?:max-width\s*:\s*780px|width\s*:\s*100%)[^>]*?>/gi, '');
             const b64 = await generateBandedLetterPdf(bodyHtml);

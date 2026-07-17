@@ -826,7 +826,9 @@ html.dark .kc-input:focus-within {
 html.dark .mom-sheet td,
 html.dark .mom-sheet th { border-color: #2e3440 !important; }
 html.dark .mom-sheet tbody tr:nth-child(even) { background: #161b23 !important; }
-html.dark .mom-sheet tbody tr:hover { background: #1c2330 !important; }
+/* "Add row" footer button — transparent over the dark sheet, soft hover */
+html.dark .mom-sheet .mom-addrow { background: transparent !important; color: #8ea2ff !important; }
+html.dark .mom-sheet .mom-addrow:hover { background: #1c2330 !important; }
 html.dark .mom-sheet input:hover,
 html.dark .mom-sheet select:hover,
 html.dark .mom-sheet textarea:hover { background: #1f242e !important; }
@@ -1461,4 +1463,23 @@ html.dark .status-r-btn:hover { background: rgba(239, 68, 68, 0.14) !important; 
 html.dark .status-r-btn.status-r-selected {
   background: #991b1b !important;
   color: #ffffff !important;
+}
+
+/* ============================================================
+   Master Data sheet (Part Detail Info → Master Data tab).
+   border-separate keeps the sticky two-tier header solid while
+   scrolling — with border-collapse, Chrome drops the sticky
+   cells' borders/backgrounds and the header rows show a thin
+   gap with body rows leaking through. Top/left borders are
+   stripped so the remaining right/bottom borders stay single
+   (the rounded container supplies the outer edge).
+   ============================================================ */
+.master-sheet-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.master-sheet-table th,
+.master-sheet-table td {
+  border-top: 0;
+  border-left: 0;
 }

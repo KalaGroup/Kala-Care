@@ -18,6 +18,7 @@ import { CSS } from '@dnd-kit/utilities';
 import Swal from 'sweetalert2';
 import { verticalListSortingStrategy } from '@dnd-kit/sortable';
 import DraggableScrollButtons from '../components/DraggableScrollButtons';
+import { reflowLetterReferencesHtml } from '../utils/letterReferences';
 import {
   CalendarIcon,
   FunnelIcon,
@@ -2523,6 +2524,33 @@ const CustomerEng2 = () => {
       }
     }
 
+    // Daily 'Not Connected' cap (2/day per customer, across all users) —
+    // check the WHOLE bulk selection up front so we never store part of it
+    // and fail midway. The backend enforces the same rule; this just gives
+    // one clear message before anything is saved.
+    if (!editingFollowup) {
+      const ncSelectedCount = selectedCampaignsForFollowup.filter(
+        cId => campaignFollowupData[cId]?.status === 'not_connected'
+      ).length;
+      if (ncSelectedCount > 0) {
+        const todayStr = new Date().toDateString();
+        const ncUsedToday = (customerFollowups || []).filter(fu =>
+          fu.status === 'not_connected' &&
+          fu.followup_date &&
+          new Date(fu.followup_date).toDateString() === todayStr
+        ).length;
+        const remaining = Math.max(0, 2 - ncUsedToday);
+        if (ncSelectedCount > remaining) {
+          toast.error(
+            remaining === 0
+              ? `Daily limit reached: 'Not Connected' can be used only 2 times per day per customer — this customer already has ${ncUsedToday} 'Not Connected' follow-up(s) today.`
+              : `You selected 'Not Connected' for ${ncSelectedCount} drives, but this customer has only ${remaining} 'Not Connected' use(s) left today (daily limit 2). Please reduce the selection.`
+          );
+          return;
+        }
+      }
+    }
+
     // Validate all selected campaigns
     for (const campaignId of selectedCampaignsForFollowup) {
       const campaignData = campaignFollowupData[campaignId];
@@ -4373,22 +4401,25 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
   };
 
   // "References" inner HTML / text — built from the editable rows, skipping removed ones.
-  // Rendered as a two-pair-per-row table so EVERY configured field shows (bold label + value)
-  // instead of one long wrapping pipe-joined line.
+  // Rendered as a pair-per-cell table so EVERY configured field shows (bold label + value)
+  // instead of one long wrapping pipe-joined line. Uses 3 pairs per row when every
+  // "Label: value" is short enough to share one line three-across; otherwise 2 per row.
   const buildReferencesHtml = () => {
     const rows = getLetterReferenceRows().filter(r => !letterRefHiddenFields.includes(r.key));
     const pairs = [];
     rows.forEach(r => { const v = letterRefFieldValue(r.key, r.value); if (v) pairs.push({ label: r.label, value: v }); });
     if (pairs.length === 0) return '';
+    const fitsThree = pairs.length >= 3 && pairs.every(p => (p.label.length + p.value.length + 2) <= 34);
+    const perRow = fitsThree ? 3 : 2;
+    const cell = (p) => p
+      ? `<td style="padding:2px 10px 2px 0;white-space:nowrap;vertical-align:top;"><strong>${escapeLetterHtml(p.label)}:</strong></td>
+         <td style="padding:2px 16px 2px 0;vertical-align:top;">${escapeLetterHtml(p.value)}</td>`
+      : `<td></td><td></td>`;
     let trs = '';
-    for (let i = 0; i < pairs.length; i += 2) {
-      const a = pairs[i];
-      const b = pairs[i + 1];
-      const cell = (p) => p
-        ? `<td style="padding:2px 10px 2px 0;white-space:nowrap;vertical-align:top;"><strong>${escapeLetterHtml(p.label)}:</strong></td>
-           <td style="padding:2px 16px 2px 0;vertical-align:top;">${escapeLetterHtml(p.value)}</td>`
-        : `<td></td><td></td>`;
-      trs += `<tr>${cell(a)}${cell(b)}</tr>`;
+    for (let i = 0; i < pairs.length; i += perRow) {
+      let tds = '';
+      for (let j = 0; j < perRow; j++) tds += cell(pairs[i + j]);
+      trs += `<tr>${tds}</tr>`;
     }
     return `<div style="margin-top:6px;color:#333;font-size:12px;">
       <table style="border-collapse:collapse;font-size:12px;line-height:1.6;">${trs}</table>
@@ -5133,7 +5164,8 @@ ${f.start_para}`;
       // Drop the embedded letter PDF (kept as the first attachment when sent) so the
       // listed attachments are only the genuine extra files.
       const atts = stripEmbeddedLetterPdf(r.attachments || [], r.subject || '');
-      const bare = r.letter_html || '<p style="padding:20px;font-family:Arial">No letter content stored.</p>';
+      // Re-flow the stored References table (3 pairs per row when they fit, else 2)
+      const bare = reflowLetterReferencesHtml(r.letter_html) || '<p style="padding:20px;font-family:Arial">No letter content stored.</p>';
 
       const lf = r.letter_fields || {};
       const toEmails = [];

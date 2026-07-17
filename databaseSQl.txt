@@ -1,2 +1,18 @@
 IF COL_LENGTH('dbo.campaigns', 'admin_asset_numbers') IS NULL
     ALTER TABLE dbo.campaigns ADD admin_asset_numbers NVARCHAR(MAX) NULL;
+
+
+
+-- ============================================================
+-- MOM TRACKING: Unicode fix
+-- Bullet chars ("●") and regional-language text were saved as "?"
+-- because these columns were VARCHAR (non-Unicode).
+-- Converts them to NVARCHAR(MAX). Safe to run more than once.
+-- ============================================================
+
+ALTER TABLE dbo.mom_rows     ALTER COLUMN point          NVARCHAR(MAX) NOT NULL;
+ALTER TABLE dbo.mom_rows     ALTER COLUMN remark         NVARCHAR(MAX) NOT NULL;
+ALTER TABLE dbo.mom_rows     ALTER COLUMN responsibility NVARCHAR(MAX) NULL;
+ALTER TABLE dbo.mom_rows     ALTER COLUMN prev_remarks   NVARCHAR(MAX) NULL;
+ALTER TABLE dbo.mom_meetings ALTER COLUMN branches       NVARCHAR(MAX) NULL;
+ALTER TABLE dbo.mom_meetings ALTER COLUMN heads          NVARCHAR(MAX) NULL;

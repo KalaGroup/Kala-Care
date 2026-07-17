@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, Text, Boolean, Date, DateTime,
+    Column, Integer, String, Text, UnicodeText, Boolean, Date, DateTime,
     ForeignKey, func,
 )
 from sqlalchemy.orm import relationship
@@ -28,6 +28,17 @@ class MomMasterPoint(Base):
     created_at = Column(DateTime, default=now_ist)
 
 
+class MomMeetingType(Base):
+    """Master 'Meeting type' offered in the New-meeting type dropdown.
+    Meetings store the type as plain text, so deleting a master type never
+    touches saved meetings."""
+    __tablename__ = "mom_meeting_types"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(120), unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=now_ist)
+
+
 class MomMeeting(Base):
     """
     One finalized meeting sheet.
@@ -44,12 +55,12 @@ class MomMeeting(Base):
     id = Column(Integer, primary_key=True, index=True)
     branch_code = Column(String(40), nullable=False, index=True)    # primary branch
     branch_name = Column(String(255), nullable=False, default="")   # display label ("A + B" for joint)
-    branches = Column(Text, nullable=True)                          # JSON: [{code, name}, …]
+    branches = Column(UnicodeText, nullable=True)                   # JSON: [{code, name}, …]
     date = Column(Date, nullable=False, index=True)
     location = Column(String(255), nullable=False, default="")
     type = Column(String(120), nullable=False, default="")          # preset OR custom typed text
     conducted_by = Column(String(120), nullable=False, default="")
-    heads = Column(Text, nullable=True)                             # JSON list of meeting-head names
+    heads = Column(UnicodeText, nullable=True)                      # JSON list of meeting-head names
     created_by = Column(String(50), ForeignKey("users.user_id"), nullable=True)
     created_at = Column(DateTime, default=now_ist)
 
@@ -105,16 +116,18 @@ class MomRow(Base):
     master_id = Column(Integer, nullable=True)                       # source master point, if any
     area = Column(String(255), nullable=False)
     category = Column(String(80), nullable=False, default="Other")
-    point = Column(Text, nullable=False, default="")
-    responsibility = Column(Text, nullable=True)                     # JSON list of names (legacy: plain string)
+    # UnicodeText → NVARCHAR(max) on SQL Server: keeps bullet chars ("●"),
+    # Devanagari names etc. intact — plain Text (VARCHAR) turns them into "?"
+    point = Column(UnicodeText, nullable=False, default="")
+    responsibility = Column(UnicodeText, nullable=True)              # JSON list of names (legacy: plain string)
     assigned_by = Column(String(120), nullable=True)                 # meeting head who assigned the task
     head_resp = Column(String(120), nullable=True)                   # meeting head responsible for the task
     due_date = Column(Date, nullable=True)
     flag = Column(String(1), nullable=False, default="I")            # T | I
     status = Column(String(20), nullable=False, default="pending")   # pending | in_progress | completed
-    remark = Column(Text, nullable=False, default="")
+    remark = Column(UnicodeText, nullable=False, default="")
     origin_date = Column(Date, nullable=True)                        # when the task was first raised
     carried = Column(Boolean, nullable=False, default=False)
-    prev_remarks = Column(Text, nullable=True)                       # JSON list (see docstring)
+    prev_remarks = Column(UnicodeText, nullable=True)                # JSON list (see docstring)
 
     meeting = relationship("MomMeeting", back_populates="rows")

@@ -5514,6 +5514,9 @@ const Campaign = () => {
                               title="View customer follow-ups"
                             >
                               View All
+                              <span className="ml-1 px-1 rounded bg-white/25 tabular-nums">
+                                {(campaign.asset_numbers?.length || 0) + (campaignCounts[campaign.id]?.completed || 0)}
+                              </span>
                             </button>
                             <button
                               onClick={(e) => openFollowupModal(campaign, e, true)}
@@ -5521,6 +5524,9 @@ const Campaign = () => {
                               title="View only assets added by admin via Drive Creation"
                             >
                               Admin Added
+                              <span className="ml-1 px-1 rounded bg-white/25 tabular-nums">
+                                {campaign.admin_asset_numbers?.length || 0}
+                              </span>
                             </button>
                             <button
                               onClick={(e) => openEditModal(campaign, e)}
@@ -5648,6 +5654,9 @@ const Campaign = () => {
                         title="View customer follow-ups"
                       >
                         View All
+                        <span className="ml-1 px-1 rounded bg-white/25 text-[10px] tabular-nums">
+                          {(campaign.asset_numbers?.length || 0) + (campaignCounts[campaign.id]?.completed || 0)}
+                        </span>
                       </button>
 
                       <button
@@ -5656,6 +5665,9 @@ const Campaign = () => {
                         title="View only assets added by admin via Drive Creation"
                       >
                         Admin Added
+                        <span className="ml-1 px-1 rounded bg-white/25 text-[10px] tabular-nums">
+                          {campaign.admin_asset_numbers?.length || 0}
+                        </span>
                       </button>
 
                       <div className="flex items-center gap-3">

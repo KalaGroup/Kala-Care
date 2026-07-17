@@ -69,6 +69,10 @@ class MasterPointUpdate(BaseModel):
     category: Optional[str] = None
 
 
+class MeetingTypeIn(BaseModel):
+    name: str
+
+
 class CategoryIn(BaseModel):
     name: str
     color: Optional[str] = "#64748b"

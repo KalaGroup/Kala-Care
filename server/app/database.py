@@ -40,6 +40,29 @@ engine = create_engine(
 
 Base = declarative_base()
 
+# ---------------- TRANSIENT-NETWORK CONNECT RETRY ---------------- #
+# The SQL Server link occasionally drops the FIRST packet of a brand-new
+# connection (pyodbc 08S01 / TCP 10060) — any request unlucky enough to
+# need a fresh pool connection at that moment used to die with a 500
+# ("Could not save minutes"). pool_pre_ping only protects EXISTING pooled
+# connections, so retry the initial connect itself a couple of times.
+import time as _time
+from sqlalchemy import event as _sa_event
+
+
+@_sa_event.listens_for(engine, "do_connect")
+def _connect_with_retry(dialect, conn_rec, cargs, cparams):
+    last_err = None
+    for attempt in range(3):
+        try:
+            return dialect.loaded_dbapi.connect(*cargs, **cparams)
+        except dialect.loaded_dbapi.OperationalError as e:
+            last_err = e
+            logging.warning(f"DB connect attempt {attempt + 1}/3 failed ({e}); retrying…")
+            _time.sleep(1 + attempt)          # 1s, then 2s before the final try
+    raise last_err
+
+
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,

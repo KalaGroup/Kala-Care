@@ -1,22 +1,21 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-    ClipboardDocumentCheckIcon, Cog6ToothIcon, PrinterIcon,
+    ClipboardDocumentCheckIcon, PrinterIcon,
     ArrowUpTrayIcon, CheckIcon, XMarkIcon, ArrowPathIcon, ChevronDownIcon,
-    ChevronRightIcon, Squares2X2Icon,
+    ChevronRightIcon,
 } from '@heroicons/react/24/outline';
-import MaintenanceScheduleMaster from '../components/MaintenanceScheduleMaster';
 import {
-    getAppCodes, getServices, logActivity, getRole,
+    getAppCodes, getServices, logActivity,
     servicesForApp, partService, findApp, ACTION, themeColor, themeDark,
 } from '../components/maintenanceApi';
 
 /*
   Part Detail Info — read-only Service Selection for all allowed users.
-  Master / IT admins get a "Manage Master" button that swaps the read-only view
-  for the Master panel (manage data / services / import) IN THE SAME TAB (a Back
-  button returns to the view). Reports live on a separate route
-  (/maintenance-reports). Data is fetched live; each look-up is logged server-side.
+  Master management (Master Data / Master of Service / Import Data / App
+  Mapping) now lives as tabs on the Activity Reports page
+  (/maintenance-reports). Data is fetched live; each look-up is logged
+  server-side.
 */
 
 const chipCls = { R: 'bg-blue-50 text-blue-700', C: 'bg-amber-50 text-amber-700', T: 'bg-emerald-50 text-emerald-700' };
@@ -180,7 +179,7 @@ const PrintSheet = ({ app, services, parts, section = 'parts', onClose }) => {
                         </table>
                         {section === 'kits' ? (
                             <>
-                                <div className="text-[11.5px] font-extrabold tracking-wide uppercase mb-1.5">Kit Details</div>
+                                <div className="text-[11.5px] font-extrabold tracking-wide uppercase mb-1.5">Service Part Kit Consumable Details</div>
                                 <table className="w-full border-collapse">
                                     <thead>
                                         <tr>
@@ -206,18 +205,18 @@ const PrintSheet = ({ app, services, parts, section = 'parts', onClose }) => {
                             </>
                         ) : (
                             <>
-                                <div className="text-[11.5px] font-extrabold tracking-wide uppercase mb-1.5">Service Parts &amp; Consumables</div>
+                                <div className="text-[11.5px] font-extrabold tracking-wide uppercase mb-1.5">Service Part Consumable Details</div>
                                 <table className="w-full border-collapse">
                                     <thead>
                                         <tr>
                                             <th className={`${th} text-center`}>Sr.</th><th className={`${th} text-center`}>Part Number</th><th className={`${th} text-center`}>Description</th>
                                             <th className={`${th} text-center`}>Qty</th><th className={`${th} text-center`}>Action</th>
-                                            <th className={`${th} text-center`}>Svc Hrs</th><th className={`${th} text-center`}>Consumable</th>
+                                            <th className={`${th} text-center`}>Svc Hrs</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {parts.length === 0 ? (
-                                            <tr><td colSpan={7} className="text-center py-5 text-gray-400 text-[11px]">No parts selected.</td></tr>
+                                            <tr><td colSpan={6} className="text-center py-5 text-gray-400 text-[11px]">No parts selected.</td></tr>
                                         ) : parts.map((p, i) => (
                                             <tr key={i} className="even:bg-gray-50">
                                                 <td className={`${td} text-center`}>{i + 1}</td>
@@ -226,7 +225,6 @@ const PrintSheet = ({ app, services, parts, section = 'parts', onClose }) => {
                                                 <td className={`${td} text-center`}>{p.qty}</td>
                                                 <td className={`${td} text-center`}>{p.action}</td>
                                                 <td className={`${td} text-center font-mono`}>{p.serviceHours}</td>
-                                                <td className={`${td} text-center`}>{p.consumable}</td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -245,7 +243,7 @@ const PrintSheet = ({ app, services, parts, section = 'parts', onClose }) => {
 };
 
 /* ----------------------------- Service Selection view ----------------------------- */
-const MaintenanceScheduleView = ({ isMaster, onManage }) => {
+const MaintenanceScheduleView = () => {
     const [master, setMaster] = useState([]);
     const [services, setServices] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -281,10 +279,10 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
     const chosen = avail.filter((s) => effective.has(s.id));
     const kitRows = useMemo(() => kitRowsOf(parts), [parts]);
 
-    // Accordion: exactly ONE section is open at all times — opening one closes the
-    // other, and clicking the already-open header keeps it open (never both closed).
-    const [openSec, setOpenSec] = useState('parts');
-    const toggleSec = (id) => setOpenSec(id);
+    // Accordion: at most ONE section open — opening one closes the other; clicking
+    // the open header collapses it (both closed is allowed). Starts fully closed.
+    const [openSec, setOpenSec] = useState(null);
+    const toggleSec = (id) => setOpenSec((cur) => (cur === id ? null : id));
 
     const changeApp = useCallback((code) => {
         setAppCode(code);
@@ -332,12 +330,10 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
                                 {/* <p className="text-[11px] text-white/70 leading-tight">Generate the B-Check service schedule for an application code</p> */}
                             </div>
                         </div>
-                        {isMaster && (
-                            <button onClick={onManage}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-[12px] font-semibold transition hover:bg-white/90" style={{ color: themeColor }}>
-                                <Cog6ToothIcon className="h-3.5 w-3.5" /> Manage Master
-                            </button>
-                        )}
+                        <button onClick={load} disabled={loading} title="Refresh"
+                            className="rounded-lg bg-white/15 hover:bg-white/25 p-2 transition disabled:opacity-50 max-lg:self-start">
+                            <ArrowPathIcon className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        </button>
                     </div>
                 </div>
 
@@ -356,7 +352,7 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
                     </div>
                 ) : !app ? (
                     <div className="rounded-2xl border border-dashed border-gray-300 bg-white py-16 text-center text-gray-400 text-[13px]">
-                        No application codes yet.{isMaster ? ' Use “Manage Master” to add or import them.' : ''}
+                        No application codes yet. The Master Admin can add or import them from Master Report → Master Data.
                     </div>
                 ) : (
                     <>
@@ -413,12 +409,12 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
                             {specCard('Part Lines', String(parts.length))}
                         </div>
 
-                        {/* Service Parts & Consumables — collapsible */}
-                        <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm mb-3">
+                        {/* Service Part Consumable Details — collapsible */}
+                        <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm">
                             <button type="button" onClick={() => toggleSec('parts')} aria-expanded={openSec === 'parts'}
                                 className={`w-full flex items-center gap-2 px-4 py-2.5 bg-gray-50 text-left transition hover:bg-gray-100/70 max-sm:flex-wrap max-md:px-2 ${openSec === 'parts' ? 'border-b border-gray-200' : ''}`}>
                                 <ChevronRightIcon className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform ${openSec === 'parts' ? 'rotate-90' : ''}`} />
-                                <p className="text-[13px] font-semibold text-gray-800">Service Parts &amp; Consumables</p>
+                                <p className="text-[13px] font-bold text-gray-800">Service Part Consumable Details</p>
                                 <span className="text-[11px] text-gray-400 font-mono">{parts.length} lines · {chosen.length} service{chosen.length === 1 ? '' : 's'}</span>
                                 {openSec !== 'parts' && <span className="ml-auto text-[10px] font-semibold uppercase tracking-wider text-gray-400">Tap to expand</span>}
                             </button>
@@ -429,14 +425,14 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
                                             <table className="min-w-[640px] w-full border-collapse text-[12px]">
                                                 <thead>
                                                     <tr className="bg-gray-50 text-[10px] sm:text-[11px] font-semibold text-black uppercase tracking-wider">
-                                                        {['Sr.', 'Part Number', 'Description', 'Qty', 'Act', 'Svc Hrs', 'Consumable'].map((h, i) => (
+                                                        {['Sr.', 'Part Number', 'Description', 'Qty', 'Act', 'Svc Hrs'].map((h, i) => (
                                                             <th key={i} className="px-3 py-2 border border-gray-200 text-center">{h}</th>
                                                         ))}
                                                     </tr>
                                                 </thead>
                                                 <tbody>
                                                     {parts.length === 0 ? (
-                                                        <tr><td colSpan={7} className="text-center py-10 text-gray-400">Select at least one service type above to list its parts.</td></tr>
+                                                        <tr><td colSpan={6} className="text-center py-10 text-gray-400">Select at least one service type above to list its parts.</td></tr>
                                                     ) : parts.map((p, i) => (
                                                         <tr key={i} className="hover:bg-indigo-50/40 transition">
                                                             <td className="px-3 py-2 border border-gray-200 font-mono text-gray-400">{i + 1}</td>
@@ -445,7 +441,6 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
                                                             <td className="px-3 py-2 border border-gray-200 text-center">{p.qty}</td>
                                                             <td className="px-3 py-2 border border-gray-200 text-center"><Chip a={p.action} /></td>
                                                             <td className="px-3 py-2 border border-gray-200 text-center font-mono">{p.serviceHours}</td>
-                                                            <td className="px-3 py-2 border border-gray-200 text-center">{p.consumable}</td>
                                                         </tr>
                                                     ))}
                                                 </tbody>
@@ -455,16 +450,17 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
                                 </div>
                             </div>
                         </div>
-                        <div align="center" className="text-[12px] text-gray-400 font-semibold uppercase tracking-wider mb-2">
-                            OR
-                        </div>
-                        {/* Kit Details — collapsible (expanding it collapses the section above) */}
+
+                        {/* OR divider */}
+                        <div className="my-2.5 text-center text-[11px] font-semibold uppercase tracking-widest text-gray-400 select-none">OR</div>
+
+                        {/* Service Part Kit Consumable Details — collapsible (expanding it collapses the section above) */}
                         <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm">
                             <button type="button" onClick={() => toggleSec('kits')} aria-expanded={openSec === 'kits'}
                                 className={`w-full flex items-center gap-2 px-4 py-2.5 bg-gray-50 text-left transition hover:bg-gray-100/70 max-sm:flex-wrap max-md:px-2 ${openSec === 'kits' ? 'border-b border-gray-200' : ''}`}>
                                 <ChevronRightIcon className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform ${openSec === 'kits' ? 'rotate-90' : ''}`} />
-                                {/* <Squares2X2Icon className="h-4 w-4 flex-shrink-0" style={{ color: themeColor }} /> */}
-                                <p className="text-[13px] font-semibold text-gray-800">Kit Details</p>
+                                {/* icon removed */}
+                                <p className="text-[13px] font-bold text-gray-800">Service Part Kit Consumable Details</p>
                                 <span className="text-[11px] text-gray-400 font-mono">{kitRows.length} kit line{kitRows.length === 1 ? '' : 's'}</span>
                                 {openSec !== 'kits' && <span className="ml-auto text-[10px] font-semibold uppercase tracking-wider text-gray-400">Tap to expand</span>}
                             </button>
@@ -506,47 +502,34 @@ const MaintenanceScheduleView = ({ isMaster, onManage }) => {
                 )}
             </div>
 
-            {showPrint && app && <PrintSheet app={app} services={chosen} parts={parts} section={openSec} onClose={() => setShowPrint(false)} />}
+            {showPrint && app && <PrintSheet app={app} services={chosen} parts={parts} section={openSec || 'parts'} onClose={() => setShowPrint(false)} />}
         </div>
     );
 };
 
 /* ----------------------------- Page wrapper ----------------------------- */
 const MaintenanceSchedule = () => {
-    const role = getRole();
-    const isManager = role === 'master_admin';
-    const [showMaster, setShowMaster] = useState(false);
-    // { tab, n } — n bumps on every deep-link so the panel re-applies the tab
-    // even when the same one is requested twice.
-    const [masterReq, setMasterReq] = useState({ tab: 'master', n: 0 });
-
-    // Deep-link support: the ERP Sitemap opens the Master panel on a specific
-    // tab via router state — navigate('/maintenance-schedule', { state:
-    // { openMaster: 'service' } }) with 'master' | 'service' | 'import' — or
-    // returns to the schedule view via { openSchedule: true }. The state is
-    // consumed immediately so a refresh doesn't re-apply it.
+    // Master management moved to the Activity Reports page (tabs: Master Data /
+    // Master of Service / Import Data / App Mapping). Old sitemap deep-links that
+    // still target this route with { openMaster } are forwarded there.
     const routerLocation = useLocation();
     const routerNavigate = useNavigate();
     useEffect(() => {
         const s = routerLocation.state;
         if (!s) return;
         const m = s.openMaster;
-        if (m && isManager) {
-            setMasterReq((r) => ({ tab: typeof m === 'string' ? m : 'master', n: r.n + 1 }));
-            setShowMaster(true);
+        if (m) {
+            routerNavigate('/maintenance-reports', {
+                replace: true,
+                state: { openTab: typeof m === 'string' ? m : 'master' },
+            });
+            return;
         }
-        if (s.openSchedule) setShowMaster(false);
-        if (m || s.openSchedule) {
-            routerNavigate(routerLocation.pathname, { replace: true, state: null });
-        }
+        if (s.openSchedule) routerNavigate(routerLocation.pathname, { replace: true, state: null });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [routerLocation.state]);
 
-    // Master / IT admin can flip into the Master panel in the SAME tab.
-    if (showMaster && isManager) {
-        return <MaintenanceScheduleMaster onBack={() => setShowMaster(false)} initialTab={masterReq.tab} initialTabNonce={masterReq.n} />;
-    }
-    return <MaintenanceScheduleView isMaster={isManager} onManage={() => setShowMaster(true)} />;
+    return <MaintenanceScheduleView />;
 };
 
-export default MaintenanceSchedule;
+export default MaintenanceSchedule;

@@ -126,6 +126,21 @@ async def rename_service(
     return {"success": True, "item": mc.rename_service(db, key, payload.name)}
 
 
+# ---------------- APP MAPPING (assets vs master) ---------------- #
+
+@router.get("/app-mapping")
+async def app_mapping(
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Master Admin only: unique application codes from Customers Data Hub ->
+    Asset Detailed, how many are already uploaded to the Part Detail master,
+    and the remaining (not-yet-uploaded) codes ready to be added."""
+    _require_master_admin(db, user_id, user_role)
+    return {"success": True, **mc.app_mapping(db)}
+
+
 # ---------------- SEARCH ACTIVITY ---------------- #
 
 @router.get("/activity")
@@ -142,4 +157,4 @@ async def log_activity(
 ):
     """Logged for any signed-in user — the employee defaults to the user's name."""
     employee = payload.employee or _resolve_name(db, user_id)
-    return {"success": True, "item": mc.log_activity(db, payload.appCode, user_id=user_id, employee=employee)}
+    return {"success": True, "item": mc.log_activity(db, payload.appCode, user_id=user_id, employee=employee)}

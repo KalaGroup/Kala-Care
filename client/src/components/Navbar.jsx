@@ -236,7 +236,7 @@ const expenseTrackingItems = [
 // ← added
 const partDetailItems = [
   { path: '/maintenance-schedule', name: 'Quotation Template' },
-  { path: '/maintenance-reports', name: 'Activity Reports' },
+  { path: '/maintenance-reports', name: 'Master Report' },
 ];
 
 function Navbar({ children }) {
