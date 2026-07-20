@@ -9,6 +9,7 @@ import {
     getAppCodes, getServices, logActivity,
     servicesForApp, partService, findApp, ACTION, themeColor, themeDark,
 } from '../components/maintenanceApi';
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 
 /*
   Part Detail Info — read-only Service Selection for all allowed users.
@@ -32,9 +33,13 @@ const kitRowsOf = (parts) =>
     parts.filter((p) => String(p.altPartNo || '').trim() || String(p.altDesc || '').trim());
 
 /* ----------------------------- Application Code picker (tabular dropdown) ----------------------------- */
-const AppCodePicker = ({ master, value, onChange }) => {
+const PICKER_CHUNK = 60;
+const AppCodePicker = React.memo(({ master, value, onChange }) => {
     const [open, setOpen] = useState(false);
     const [q, setQ] = useState('');
+    // Lazy dropdown: render rows in chunks and extend as the list is scrolled,
+    // so opening the picker stays instant even with thousands of app codes.
+    const [shown, setShown] = useState(PICKER_CHUNK);
     const wrapRef = useRef(null);
 
     useEffect(() => {
@@ -44,13 +49,23 @@ const AppCodePicker = ({ master, value, onChange }) => {
         return () => document.removeEventListener('mousedown', onDown);
     }, [open]);
 
-    const sel = master.find((a) => a.appCode === value);
+    useEffect(() => { setShown(PICKER_CHUNK); }, [q, open]);
+
+    const sel = useMemo(() => master.find((a) => a.appCode === value), [master, value]);
     const list = useMemo(() => {
         const t = q.trim().toLowerCase();
         if (!t) return master;
         return master.filter((a) =>
             [a.appCode, a.kva, a.emission].some((v) => String(v || '').toLowerCase().includes(t)));
     }, [master, q]);
+    const visibleList = useMemo(() => list.slice(0, shown), [list, shown]);
+
+    const onListScroll = useCallback((e) => {
+        const el = e.currentTarget;
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80) {
+            setShown((s) => (s < list.length ? Math.min(s + PICKER_CHUNK, list.length) : s));
+        }
+    }, [list.length]);
 
     const th = 'px-3 py-1.5 text-left text-[10px] font-bold uppercase tracking-wider text-gray-400 bg-gray-50 border-b border-gray-200 sticky top-0 whitespace-nowrap';
     const td = 'px-3 py-1.5 text-[12px] border-b border-gray-100';
@@ -77,7 +92,7 @@ const AppCodePicker = ({ master, value, onChange }) => {
                             placeholder="Search code, KVA, emission…"
                             className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-[12px] outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100" />
                     </div>
-                    <div className="max-h-64 overflow-auto q-scroll">
+                    <div className="max-h-64 overflow-auto q-scroll" onScroll={onListScroll}>
                         <table className="w-full border-collapse">
                             <thead>
                                 <tr>
@@ -89,7 +104,7 @@ const AppCodePicker = ({ master, value, onChange }) => {
                             <tbody>
                                 {list.length === 0 ? (
                                     <tr><td colSpan={3} className="px-3 py-5 text-center text-[12px] text-gray-400">No matching application codes.</td></tr>
-                                ) : list.map((a) => (
+                                ) : visibleList.map((a) => (
                                     <tr key={a.appCode} onClick={() => { onChange(a.appCode); setOpen(false); }}
                                         className={`cursor-pointer transition ${a.appCode === value ? 'bg-indigo-50/70' : 'hover:bg-indigo-50/40'}`}>
                                         <td className={`${td} font-mono text-gray-800 whitespace-nowrap`}>{a.appCode}</td>
@@ -97,6 +112,9 @@ const AppCodePicker = ({ master, value, onChange }) => {
                                         <td className={`${td} text-gray-600 whitespace-nowrap`}>{a.emission || 'CPCB IV+'}</td>
                                     </tr>
                                 ))}
+                                {shown < list.length && (
+                                    <tr><td colSpan={3} className="px-3 py-2 text-center text-[11px] text-gray-400">Loading more… ({visibleList.length}/{list.length})</td></tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
@@ -104,7 +122,7 @@ const AppCodePicker = ({ master, value, onChange }) => {
             )}
         </div>
     );
-};
+});
 
 /* ----------------------------- Watermarked print sheet ----------------------------- */
 const PrintSheet = ({ app, services, parts, section = 'parts', onClose }) => {
@@ -253,12 +271,33 @@ const MaintenanceScheduleView = () => {
     const [selSvc, setSelSvc] = useState(null); // null = all (default); Set = explicit selection
     const [showPrint, setShowPrint] = useState(false);
 
+    // Warm-cache-first paint: on the very first load only, instantly repaint the
+    // last dataset this user saw while the normal fetch below runs unchanged and
+    // overwrites it. Manual "Refresh" (and any later load) behaves exactly as before.
+    const firstLoadRef = useRef(true);
+
     const load = useCallback(async () => {
-        setLoading(true); setErr('');
+        const u = (() => { try { return JSON.parse(sessionStorage.getItem('user')) || {}; } catch { return {}; } })();
+        const cacheKey = warmKey('maintenance-schedule', { userId: u.user_id || '', branch: u.branch || '' });
+        let painted = false;
+        if (firstLoadRef.current) {
+            firstLoadRef.current = false;
+            const warm = readWarmCache(cacheKey);
+            if (warm && Array.isArray(warm.master) && Array.isArray(warm.services)) {
+                setMaster((prev) => (prev.length ? prev : warm.master));
+                setServices((prev) => (prev.length ? prev : warm.services));
+                setAppCode((prev) => (prev && warm.master.some((a) => a.appCode === prev)) ? prev : (warm.master[0]?.appCode || ''));
+                setLoading(false);
+                painted = true;
+            }
+        }
+        if (!painted) setLoading(true);
+        setErr('');
         try {
             const [m, s] = await Promise.all([getAppCodes(), getServices()]);
             setMaster(m); setServices(s);
             setAppCode((prev) => (prev && m.some((a) => a.appCode === prev)) ? prev : (m[0]?.appCode || ''));
+            writeWarmCache(cacheKey, { master: m, services: s });
         } catch (e) {
             setErr(e.message || 'Could not load schedule');
         } finally { setLoading(false); }
@@ -266,7 +305,7 @@ const MaintenanceScheduleView = () => {
 
     useEffect(() => { load(); }, [load]);
 
-    const app = findApp(master, appCode);
+    const app = useMemo(() => findApp(master, appCode), [master, appCode]);
     const avail = useMemo(() => (app ? servicesForApp(services, app) : []), [app, services]);
     const availIds = useMemo(() => new Set(avail.map((s) => s.id)), [avail]);
 
@@ -276,7 +315,7 @@ const MaintenanceScheduleView = () => {
     }, [selSvc, availIds]);
 
     const parts = useMemo(() => (app ? app.parts.filter((p) => effective.has(partService(services, p).id)) : []), [app, services, effective]);
-    const chosen = avail.filter((s) => effective.has(s.id));
+    const chosen = useMemo(() => avail.filter((s) => effective.has(s.id)), [avail, effective]);
     const kitRows = useMemo(() => kitRowsOf(parts), [parts]);
 
     // Accordion: at most ONE section open — opening one closes the other; clicking
@@ -326,8 +365,8 @@ const MaintenanceScheduleView = () => {
                                 <ClipboardDocumentCheckIcon className="h-5 w-5" />
                             </div>
                             <div>
-                                <h1 className="text-lg sm:text-xl font-bold leading-tight">Part Detail Info</h1>
-                                {/* <p className="text-[11px] text-white/70 leading-tight">Generate the B-Check service schedule for an application code</p> */}
+                                <h1 className="text-lg sm:text-xl font-bold leading-tight">Part Detail Info — Quotation Template</h1>
+                                <p className="text-[11px] text-white/70 leading-tight">Generate the service schedule for an application code</p>
                             </div>
                         </div>
                         <button onClick={load} disabled={loading} title="Refresh"

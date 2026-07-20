@@ -1217,6 +1217,13 @@ html.dark .mom-sheet thead tr {
   color: #7dd3fc !important;
 }
 html.dark .mom-sheet thead th { background: transparent !important; }
+/* Pinned sheet headers (New-meeting tables): the page-scroll fix shifts the
+   header CELLS, not the row — transparent cells would float over the rows
+   and let their content bleed through, so give them the header surface. */
+html.dark .mom-sheet.mom-stickyhead thead th {
+  background: #10141c !important;
+  box-shadow: inset 0 -1px 0 #2e3440;
+}
 /* Row base — the zebra (:nth-child(even)) and :hover rules defined
    earlier have higher specificity, so striping and hover keep working. */
 html.dark .mom-sheet tbody tr { background-color: #171a20 !important; }
@@ -1239,6 +1246,16 @@ html.dark .mom-live-head .bg-white {
   background: rgba(251, 191, 36, 0.16) !important;
   border: 1px solid rgba(251, 191, 36, 0.35) !important;
 }
+/* Live-band inline texts were tuned for the yellow strip (black-alpha
+   subtitle, near-black icon on a black-alpha tile) — invisible on the
+   dark amber surface. Lift them. */
+html.dark .mom-live-head [style*="color: rgba(0, 0, 0, 0.55)"] { color: #cbd5e1 !important; }
+html.dark .mom-live-head [style*="color: rgb(31, 41, 55)"] { color: #fbbf24 !important; }
+html.dark .mom-live-head [style*="background: rgba(0, 0, 0, 0.1)"] { background: rgba(251, 191, 36, 0.18) !important; }
+/* History drill-down strip ("<branch> — <bucket>") ships an inline light
+   gradient with no class hook — swap it for a dark surface so its (lifted)
+   title text is readable. */
+html.dark [style*="linear-gradient"][style*="rgb(246, 247, 253)"] { background: linear-gradient(135deg, #1e2534, #181d29) !important; }
 /* Dropdown-panel list items use hover:bg-gray-50 (no generic dark net) —
    keep the hover visible but dark on the MOM page. */
 html.dark .mom-anim .hover\:bg-gray-50:hover { background-color: #1f242e !important; }
@@ -1483,3 +1500,39 @@ html.dark .status-r-btn.status-r-selected {
   border-top: 0;
   border-left: 0;
 }
+/* One consistent font + size across every column. Some cells used a monospace
+   utility (font-mono), which falls back to different fonts on different laptops
+   and made the columns look mismatched. Force the app's own font everywhere in
+   the sheet — including inner chips/spans — so it renders the same on any machine. */
+.master-sheet-table,
+.master-sheet-table th,
+.master-sheet-table td,
+.master-sheet-table th *,
+.master-sheet-table td * {
+  font-family: inherit !important;
+}
+
+/* ============================================================
+   DARK THEME — Master Data sheet + Part Detail Info tables.
+   Classes the global nets don't catch. Light mode untouched.
+   ============================================================ */
+/* Kit-detail cells: the 20% amber wash renders as muddy gray
+   blocks on dark — use a faint amber tint instead */
+html.dark .bg-amber-50\/20 { background-color: rgba(234, 179, 8, 0.07) !important; }
+/* Selected rows in the kit part-picker table */
+html.dark .bg-indigo-50\/60 { background-color: rgba(56, 189, 248, 0.12) !important; }
+/* qm-scroll scrollbars (top + bottom sheet scrollbars, dropdown
+   lists): the light lavender thumb is a glaring bright bar on
+   dark — deepen it */
+html.dark .qm-scroll { scrollbar-color: #3a4150 transparent; }
+html.dark .qm-scroll::-webkit-scrollbar-thumb { background: #3a4150; }
+/* Heavy rule closing each application-code block (inline
+   1.5px #9ca3af) — too bright on dark */
+html.dark [style*="border-bottom: 1.5px solid rgb(156, 163, 175)"] { border-bottom-color: #4b5563 !important; }
+/* Add App Code modal — unsaved-draft banner text was near-black
+   amber on the dark card; amber borders (banner, kit badges,
+   "Please add kit details" chip) stayed light and glaring */
+html.dark .text-amber-900 { color: #fcd34d !important; }
+html.dark .border-amber-200,
+html.dark .border-amber-300 { border-color: rgba(234, 179, 8, 0.4) !important; }
+html.dark .hover\:bg-amber-100:hover { background-color: rgba(234, 179, 8, 0.16) !important; }

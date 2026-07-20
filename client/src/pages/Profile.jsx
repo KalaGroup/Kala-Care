@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
@@ -7,7 +7,7 @@ import Swal from 'sweetalert2';
 import {
     FaImage, FaEdit, FaTrash, FaSearch, FaUserPlus, FaSignOutAlt,
     FaUserCog, FaUserCircle, FaBuilding, FaIdCard,
-    FaChevronDown, FaChevronUp, FaTimes, FaSave, FaPlus,
+    FaChevronDown, FaChevronUp, FaTimes, FaSave, FaPlus, FaCheck,
     FaUser, FaKey, FaUsers, FaUserTie, FaCog,
     FaCheckCircle, FaExclamationCircle, FaBan, FaFileExport, FaUpload,
     FaEye, FaEyeSlash, FaEllipsisV, FaCalendarAlt, FaPhone
@@ -1027,6 +1027,27 @@ const Profile = () => {
 
     const canDeleteEmployee = isMasterAdmin;
     const canGrantExport = isMasterAdmin;
+
+    // Second horizontal scrollbar ABOVE the employees table, kept in lockstep
+    // with the table's own one, so the wide table can be panned without first
+    // scrolling to its bottom. The spacer is sized to the real scroll width.
+    const empTopScrollRef = useRef(null);
+    const empTableScrollRef = useRef(null);
+    const [empTableW, setEmpTableW] = useState(0);
+    useEffect(() => {
+        const el = empTableScrollRef.current;
+        if (!el) return;
+        const measure = () => setEmpTableW(el.scrollWidth);
+        measure();
+        const ro = new ResizeObserver(measure);
+        ro.observe(el);
+        if (el.firstElementChild) ro.observe(el.firstElementChild);
+        return () => ro.disconnect();
+    });
+    const mirrorEmpScroll = (from, to) => () => {
+        if (from.current && to.current && to.current.scrollLeft !== from.current.scrollLeft)
+            to.current.scrollLeft = from.current.scrollLeft;
+    };
     const canGrantExpense = isMasterAdmin;
     const canViewCDBUpdate = isMasterAdmin;
     const canExport = isMasterAdmin || (user && user.can_export);
@@ -1998,6 +2019,53 @@ const Profile = () => {
         }
     };
 
+    // Grant/revoke the Part Detail Info or MOM Tracking pages for a user.
+    // Master Admin only; page is 'part_detail' | 'mom'.
+    const handleTogglePageAccess = async (id, page, currentStatus) => {
+        const label = page === 'part_detail' ? 'Part Detail Info' : 'MOM Tracking';
+        if (!isMasterAdmin) {
+            Swal.fire({
+                title: 'Access Denied',
+                text: `You do not have permission to change ${label} access`,
+                icon: 'error',
+                confirmButtonColor: '#2f3192'
+            });
+            return;
+        }
+
+        try {
+            const response = await axios.put(`${API_BASE_URL}/users/employees/${id}/page-access`,
+                { page, allowed: !currentStatus },
+                { headers: { 'user-id': user.user_id } }
+            );
+
+            if (response.data.success) {
+                Swal.fire({
+                    title: 'Success!',
+                    text: `${label} access ${currentStatus ? 'revoked' : 'granted'} successfully!`,
+                    icon: 'success',
+                    confirmButtonColor: '#2f3192',
+                    timer: 2000
+                });
+
+                await fetchEmployees();
+
+                if (editingUser && editingUser.id === id) {
+                    const field = page === 'part_detail' ? 'can_access_part_detail' : 'can_access_mom';
+                    setEditingUser({ ...editingUser, [field]: !currentStatus });
+                }
+            }
+        } catch (err) {
+            console.error('Toggle page access error:', err);
+            Swal.fire({
+                title: 'Error!',
+                text: err.response?.data?.detail || `Failed to update ${label} access`,
+                icon: 'error',
+                confirmButtonColor: '#2f3192'
+            });
+        }
+    };
+
     const handleUpdateProfile = async (e) => {
         e.preventDefault();
         setLoading(true);
@@ -2621,30 +2689,38 @@ const Profile = () => {
 
                                     {/* Employees Table */}
                                     <div className="border border-gray-200 rounded-lg overflow-hidden">
+                                        {/* Top scrollbar — mirrored with the table's own one */}
+                                        <div ref={empTopScrollRef} onScroll={mirrorEmpScroll(empTopScrollRef, empTableScrollRef)}
+                                            className="overflow-x-auto overflow-y-hidden border-b border-gray-100" style={{ scrollbarWidth: 'thin' }}>
+                                            <div style={{ width: empTableW, height: 1 }} />
+                                        </div>
                                         {/* Table container */}
-                                        <div id="employees-table-container" className="overflow-auto max-h-[150vh]" style={{ scrollbarWidth: 'thin' }}>
-                                            <table className="border-collapse min-w-[1000px] w-full">
+                                        <div id="employees-table-container" ref={empTableScrollRef} onScroll={mirrorEmpScroll(empTableScrollRef, empTopScrollRef)}
+                                            className="overflow-auto max-h-[150vh]" style={{ scrollbarWidth: 'thin' }}>
+                                            <table className="border-collapse min-w-[1420px] w-full">
                                                 <thead className="bg-gray-50 sticky top-0 z-10">
                                                     <tr>
-                                                        <th className="px-2 py-1.5 text-center text-xs font-medium text-black uppercase tracking-wider border-r border-gray-200 w-16">Sr. No.</th>
-                                                        <th className="px-2 py-1.5 text-center text-xs font-medium text-black uppercase tracking-wider border-r border-gray-200">Employee</th>
-                                                        <th className="px-2 py-1.5 text-center text-xs font-medium text-black uppercase tracking-wider border-r border-gray-200">User ID</th>
-                                                        <th className="px-2 py-1.5 text-center text-xs font-medium text-black uppercase tracking-wider border-r border-gray-200">Mobile</th>
-                                                        <th className="px-2 py-1.5 text-center text-xs font-medium text-black uppercase tracking-wider border-r border-gray-200">Branch Code</th>
-                                                        <th className="px-2 py-1.5 text-center text-xs font-medium text-black uppercase tracking-wider border-r border-gray-200">Branch Name</th>
-                                                        <th className="px-2 py-1.5 text-center text-xs font-medium text-black uppercase tracking-wider border-r border-gray-200">Role</th>
-                                                        <th className="px-2 py-1.5 text-center text-xs font-medium text-black uppercase tracking-wider border-r border-gray-200">Status</th>
-                                                        <th className="px-2 py-1.5 text-center text-xs font-medium text-black uppercase tracking-wider border-r border-gray-200">Export</th>
-                                                        <th className="px-2 py-1.5 text-center text-xs font-medium text-black uppercase tracking-wider border-r border-gray-200">Expense</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-16">Sr. No.</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Employee</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">User ID</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Mobile</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Branch Code</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Branch Name</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Role</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Status</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Export</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Expense</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Part Detail Info</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">MOM Tracking</th>
                                                         {!isRestrictedUser && (
-                                                            <th className="px-2 py-1.5 text-center text-xs font-medium text-black uppercase tracking-wider">Actions</th>
+                                                            <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap">Actions</th>
                                                         )}
                                                     </tr>
                                                 </thead>
                                                 <tbody className="bg-white divide-y divide-gray-200">
                                                     {loading ? (
                                                         <tr>
-                                                            <td colSpan={isRestrictedUser ? 10 : 11} className="px-2 py-4 text-center">
+                                                            <td colSpan={isRestrictedUser ? 12 : 13} className="px-2 py-4 text-center">
                                                                 <div className="flex flex-col items-center justify-center space-y-2">
                                                                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#2f3192]"></div>
                                                                     <p className="text-xs text-black">Loading employees...</p>
@@ -2697,33 +2773,31 @@ const Profile = () => {
                                                                         )}
                                                                     </td>
                                                                     <td className="px-2 py-1 text-center border-r border-gray-200">
-                                                                        {emp.user_id === MASTER_ADMIN_ID ? (
-                                                                            <span className="px-1 py-0.5 bg-purple-100 text-black rounded text-xs font-medium whitespace-nowrap">
-                                                                                Always Allowed
-                                                                            </span>
-                                                                        ) : emp.can_export ? (
-                                                                            <span className="px-1 py-0.5 bg-blue-100 text-black rounded text-xs font-medium">
-                                                                                Allowed
-                                                                            </span>
+                                                                        {emp.user_id === MASTER_ADMIN_ID || emp.can_export ? (
+                                                                            <FaCheck className="inline-block text-sm text-green-500" title={emp.user_id === MASTER_ADMIN_ID ? 'Always Allowed' : 'Allowed'} />
                                                                         ) : (
-                                                                            <span className="px-1 py-0.5 bg-gray-100 text-black rounded text-xs font-medium">
-                                                                                Not Allowed
-                                                                            </span>
+                                                                            <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />
                                                                         )}
                                                                     </td>
                                                                     <td className="px-2 py-1 text-center border-r border-gray-200">
-                                                                        {emp.user_id === MASTER_ADMIN_ID ? (
-                                                                            <span className="px-1 py-0.5 bg-purple-100 text-black rounded text-xs font-medium whitespace-nowrap">
-                                                                                Always Allowed
-                                                                            </span>
-                                                                        ) : emp.can_access_expense ? (
-                                                                            <span className="px-1 py-0.5 bg-emerald-100 text-black rounded text-xs font-medium">
-                                                                                Allowed
-                                                                            </span>
+                                                                        {emp.user_id === MASTER_ADMIN_ID || emp.can_access_expense ? (
+                                                                            <FaCheck className="inline-block text-sm text-green-500" title={emp.user_id === MASTER_ADMIN_ID ? 'Always Allowed' : 'Allowed'} />
                                                                         ) : (
-                                                                            <span className="px-1 py-0.5 bg-gray-100 text-black rounded text-xs font-medium">
-                                                                                Not Allowed
-                                                                            </span>
+                                                                            <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-2 py-1 text-center border-r border-gray-200">
+                                                                        {emp.user_id === MASTER_ADMIN_ID || emp.can_access_part_detail ? (
+                                                                            <FaCheck className="inline-block text-sm text-green-500" title={emp.user_id === MASTER_ADMIN_ID ? 'Always Allowed' : 'Allowed'} />
+                                                                        ) : (
+                                                                            <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-2 py-1 text-center border-r border-gray-200">
+                                                                        {emp.user_id === MASTER_ADMIN_ID || emp.can_access_mom ? (
+                                                                            <FaCheck className="inline-block text-sm text-green-500" title={emp.user_id === MASTER_ADMIN_ID ? 'Always Allowed' : 'Allowed'} />
+                                                                        ) : (
+                                                                            <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />
                                                                         )}
                                                                     </td>
                                                                     {!isRestrictedUser && (
@@ -2752,7 +2826,7 @@ const Profile = () => {
                                                             ))
                                                     ) : (
                                                         <tr>
-                                                            <td colSpan={isRestrictedUser ? 10 : 11} className="px-2 py-6 text-center text-black">
+                                                            <td colSpan={isRestrictedUser ? 12 : 13} className="px-2 py-6 text-center text-black">
                                                                 <div className="flex flex-col items-center gap-1">
                                                                     <FaUsers className="w-5 h-5 text-gray-300" />
                                                                     <p className="text-xs">No employees found</p>
@@ -2770,7 +2844,7 @@ const Profile = () => {
                                                     )}
                                                     {visibleEmployeeCount < filteredEmployees.length && (
                                                         <tr ref={employeeLoadMoreRef}>
-                                                            <td colSpan={isRestrictedUser ? 10 : 11} className="py-3 text-center text-xs text-gray-400">
+                                                            <td colSpan={isRestrictedUser ? 12 : 13} className="py-3 text-center text-xs text-gray-400">
                                                                 Loading more... ({visibleEmployeeCount}/{filteredEmployees.length})
                                                             </td>
                                                         </tr>
@@ -3011,8 +3085,10 @@ const Profile = () => {
             {/* Edit Employee Modal */}
             {editingUser && (
                 <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-xl p-5 max-w-4xl w-full shadow-2xl max-h-[90vh] overflow-y-auto max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh] max-md:px-2">
-                        <div className="flex justify-between items-center mb-4 max-md:flex-wrap max-md:gap-2">
+                    {/* Fixed header + fixed footer; the two form columns scroll
+                        independently (each its own scrollbar) in between. */}
+                    <div className="bg-white rounded-xl max-w-4xl w-full shadow-2xl max-h-[90vh] flex flex-col overflow-hidden max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh]">
+                        <div className="flex justify-between items-center px-5 pt-4 pb-3 border-b border-gray-200 max-md:px-2 max-md:flex-wrap max-md:gap-2">
                             <h3 className="text-base sm:text-lg font-semibold text-black flex items-center space-x-2">
                                 <FaEdit className="text-[#2f3192]" />
                                 <span>Edit Employee</span>
@@ -3025,9 +3101,9 @@ const Profile = () => {
                             </button>
                         </div>
 
-                        <form onSubmit={handleUpdateEmployee}>
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                <div className="space-y-4">
+                        <form onSubmit={handleUpdateEmployee} className="flex flex-col flex-1 min-h-0">
+                            <div className="grid grid-cols-1 lg:grid-cols-2 lg:grid-rows-[minmax(0,1fr)] gap-6 flex-1 min-h-0 overflow-y-auto lg:overflow-hidden px-5 py-4 max-md:px-2">
+                                <div className="space-y-4 lg:overflow-y-auto lg:min-h-0 lg:pr-2" style={{ scrollbarWidth: 'thin' }}>
                                     <div>
                                         <label className="block text-xs text-black mb-1">Full Name <span className="text-red-500">*</span></label>
                                         <div className="relative">
@@ -3159,7 +3235,7 @@ const Profile = () => {
                                     )}
                                 </div>
 
-                                <div className="space-y-4">
+                                <div className="space-y-4 lg:overflow-y-auto lg:min-h-0 lg:pr-2" style={{ scrollbarWidth: 'thin' }}>
                                     <div>
                                         <label className="block text-xs text-black mb-1">Role</label>
                                         <div className="relative">
@@ -3324,6 +3400,54 @@ const Profile = () => {
                                             </div>
                                         )}
 
+                                        {/* Page access — Part Detail Info & MOM Tracking (Master Admin decides,
+                                            for every role: master admin, branch admin and employee) */}
+                                        {isMasterAdmin && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id && (
+                                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg max-sm:flex-wrap max-sm:gap-2">
+                                                <div className="flex items-center space-x-3">
+                                                    <FaBuilding className={`text-sm ${editingUser.can_access_part_detail ? 'text-emerald-500' : 'text-gray-400'}`} />
+                                                    <div>
+                                                        <p className="text-xs font-medium text-black">Part Detail Info Access</p>
+                                                        <p className="text-xs text-black">Show the Part Detail Info pages (employees get the Quotation Template only)</p>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleTogglePageAccess(editingUser.id, 'part_detail', editingUser.can_access_part_detail)}
+                                                    disabled={loading}
+                                                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${editingUser.can_access_part_detail
+                                                        ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                        } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                >
+                                                    {editingUser.can_access_part_detail ? 'Revoke' : 'Grant'}
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {isMasterAdmin && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id && (
+                                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg max-sm:flex-wrap max-sm:gap-2">
+                                                <div className="flex items-center space-x-3">
+                                                    <FaBuilding className={`text-sm ${editingUser.can_access_mom ? 'text-emerald-500' : 'text-gray-400'}`} />
+                                                    <div>
+                                                        <p className="text-xs font-medium text-black">MOM Tracking Access</p>
+                                                        <p className="text-xs text-black">Show the MOM Tracking page (branch admins see only their branches; employees only their report)</p>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleTogglePageAccess(editingUser.id, 'mom', editingUser.can_access_mom)}
+                                                    disabled={loading}
+                                                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${editingUser.can_access_mom
+                                                        ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                        } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                >
+                                                    {editingUser.can_access_mom ? 'Revoke' : 'Grant'}
+                                                </button>
+                                            </div>
+                                        )}
+
                                         {canDeleteEmployee && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id && (
                                             <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg border border-red-100 max-sm:flex-wrap max-sm:gap-2">
                                                 <div className="flex items-center space-x-3">
@@ -3347,7 +3471,8 @@ const Profile = () => {
                                 </div>
                             </div>
 
-                            <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3 pt-6 mt-4 border-t border-gray-200">
+                            {/* Fixed footer — always visible, the columns above scroll */}
+                            <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3 px-5 py-3 border-t border-gray-200 bg-white flex-shrink-0 max-md:px-2">
                                 <button
                                     type="submit"
                                     disabled={loading}

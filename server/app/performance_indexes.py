@@ -115,6 +115,19 @@ INDEX_STATEMENTS = [
     # return rows already ordered by moved_at (existing index has
     # verification_status between the two, which blocks the ordered scan).
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_tada_history_branch_moved' AND object_id = OBJECT_ID('dbo.tada_history')) CREATE NONCLUSTERED INDEX IX_tada_history_branch_moved ON dbo.tada_history (sd_branch_code, moved_at DESC);",
+    # IX_maintenance_parts_appid_sort — Part Detail Info app-codes list:
+    # selectinload fetches parts WHERE app_code_id IN (...) ORDER BY app_code_id,
+    # sort_order; this composite returns them pre-sorted with no sort operator.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_maintenance_parts_appid_sort' AND object_id = OBJECT_ID('dbo.maintenance_parts')) CREATE NONCLUSTERED INDEX IX_maintenance_parts_appid_sort ON dbo.maintenance_parts (app_code_id, sort_order);",
+    # IX_maintenance_activity_created_id — Part Detail Info activity report:
+    # TOP-N ORDER BY created_at DESC, id DESC becomes an index-only ordered scan
+    # (all serialized columns are INCLUDEd, so no key lookups on the base table).
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_maintenance_activity_created_id' AND object_id = OBJECT_ID('dbo.maintenance_activity')) CREATE NONCLUSTERED INDEX IX_maintenance_activity_created_id ON dbo.maintenance_activity (created_at DESC, id DESC) INCLUDE (app_code, employee, engine_model, segment);",
+    # IX_asset_detailed_application_code — Part Detail Info app-mapping + coverage
+    # commissioning tabs: the GROUP BY over asset application codes (with MAX over
+    # engine/segment/kva/commissioning) scans this covering index instead of the
+    # wide asset_detailed base table.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_asset_detailed_application_code' AND object_id = OBJECT_ID('dbo.asset_detailed')) CREATE NONCLUSTERED INDEX IX_asset_detailed_application_code ON dbo.asset_detailed (application_code) INCLUDE (engine_model, segment, kva_rating, commissioning_date, emission_norm);",
 ]
 
 
@@ -131,3 +144,45 @@ def ensure_performance_indexes(engine):
             failed += 1
             print(f"[perf-indexes] skipped one index: {e}")
     print(f"[perf-indexes] ensured {created} indexes ({failed} skipped)")
+
+
+# ---------------------------------------------------------------------------
+# Schema top-ups: columns the ORM models expect but create_all can't add to an
+# EXISTING table. Each entry adds the column when missing and, once (only on the
+# add), backfills it from the row's dynamic extra_data JSON — so values already
+# imported into extra_data (before the column existed) show up without a
+# re-upload. Idempotent: after the column exists, the whole entry is skipped.
+# ---------------------------------------------------------------------------
+COLUMN_STATEMENTS = [
+    {
+        "name": "asset_detailed.emission_norm",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.asset_detailed') AND name = 'emission_norm'",
+        "add": "ALTER TABLE dbo.asset_detailed ADD emission_norm NVARCHAR(100) NULL",
+        # Pull 'EMISSION NORM' out of the extra_data JSON for rows imported before
+        # the column existed. ISJSON guards non-JSON text; LEFT caps to the width.
+        "backfill": (
+            "UPDATE dbo.asset_detailed "
+            "SET emission_norm = LEFT(JSON_VALUE(extra_data, '$.\"EMISSION NORM\"'), 100) "
+            "WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1 "
+            "AND JSON_VALUE(extra_data, '$.\"EMISSION NORM\"') IS NOT NULL"
+        ),
+    },
+]
+
+
+def ensure_schema(engine):
+    """Add any missing ORM columns to existing tables. Safe on every startup."""
+    for st in COLUMN_STATEMENTS:
+        try:
+            with engine.begin() as conn:
+                if conn.execute(text(st["exists"])).first():
+                    continue  # already present — nothing to do
+                conn.execute(text(st["add"]))
+                if st.get("backfill"):
+                    try:
+                        conn.execute(text(st["backfill"]))
+                    except Exception as e:
+                        print(f"[schema] backfill skipped for {st['name']}: {e}")
+            print(f"[schema] added column {st['name']}")
+        except Exception as e:
+            print(f"[schema] skipped {st['name']}: {e}")

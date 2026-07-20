@@ -84,6 +84,7 @@ class AssetDetailed(Base):
     installation_date = Column(DateTime, nullable=True)
     goem_oem = Column(String(200), nullable=True)
     application_code = Column(String(200), nullable=True)
+    emission_norm = Column(String(100), nullable=True)
     engine_serial_no = Column(String(200), nullable=True, index=True)
     engine_model = Column(String(200), nullable=True)
     account_name = Column(String(500), nullable=True)

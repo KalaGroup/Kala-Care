@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import func
@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models.mom_model import (
     MomCategory, MomMasterPoint, MomMeetingType, MomMeeting, MomAttendee, MomRow,
+    MomDraft,
 )
+from app.time_utils import now_ist
 
 # ------------------------------------------------------------------ #
 #  defaults seeded on first run                                       #
@@ -118,8 +120,6 @@ def serialize_row(r: MomRow):
         "category": r.category,
         "point": r.point or "",
         "resp": _load_resp(r.responsibility),          # list of names
-        "assignedBy": r.assigned_by or "",
-        "headResp": r.head_resp or "",
         "due": _iso(r.due_date),
         "flag": r.flag,
         "status": r.status,
@@ -283,8 +283,6 @@ def create_meeting(db: Session, data: dict, conducted_by_id: str | None = None,
             category=row.get("category") or "Other",
             point=row.get("point") or "",
             responsibility=json.dumps(resp, ensure_ascii=False) if resp else None,
-            assigned_by=(str(row.get("assignedBy") or "").strip() or None),
-            head_resp=(str(row.get("headResp") or "").strip() or None),
             due_date=_parse_date(row.get("due")) if flag == "T" else None,   # I rows never keep a due date
             flag=flag,
             status=row.get("status") or "pending",
@@ -367,6 +365,26 @@ def create_meeting_type(db: Session, name: str, created_by: str | None = None):
     return serialize_meeting_type(mt)
 
 
+def update_meeting_type(db: Session, type_id: int, name: str):
+    mt = db.query(MomMeetingType).filter(MomMeetingType.id == type_id).first()
+    if not mt:
+        raise HTTPException(status_code=404, detail="Meeting type not found")
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Meeting type name is required")
+    clash = (
+        db.query(MomMeetingType)
+        .filter(func.lower(MomMeetingType.name) == name.lower(),
+                MomMeetingType.id != type_id)
+        .first()
+    )
+    if clash:
+        raise HTTPException(status_code=409, detail="Meeting type already exists")
+    mt.name = name   # saved meetings keep their type text — nothing to migrate
+    db.commit()
+    return serialize_meeting_type(mt)
+
+
 def delete_meeting_type(db: Session, type_id: int):
     mt = db.query(MomMeetingType).filter(MomMeetingType.id == type_id).first()
     if not mt:
@@ -391,11 +409,21 @@ def create_category(db: Session, name: str, color: str, created_by: str | None =
     return serialize_category(cat)
 
 
-def update_category(db: Session, name: str, color: str):
+def update_category(db: Session, name: str, color: str | None = None,
+                    new_name: str | None = None):
     cat = db.query(MomCategory).filter(MomCategory.name == name).first()
     if not cat:
         raise HTTPException(status_code=404, detail="Category not found")
-    cat.color = (color or cat.color).strip()
+    new_name = (new_name or "").strip()
+    if new_name and new_name != cat.name:
+        if db.query(MomCategory).filter(MomCategory.name == new_name).first():
+            raise HTTPException(status_code=409, detail="Category already exists")
+        # master points follow the rename; saved meeting rows keep their text
+        db.query(MomMasterPoint).filter(MomMasterPoint.category == cat.name)\
+            .update({MomMasterPoint.category: new_name})
+        cat.name = new_name
+    if color:
+        cat.color = color.strip()
     db.commit()
     return serialize_category(cat)
 
@@ -417,3 +445,41 @@ def delete_category(db: Session, name: str):
     db.delete(cat)
     db.commit()
     return {"movedTo": fallback.name}
+
+
+# ------------------------------------------------------------------ #
+#  meeting drafts (auto-saved wizard state, one per user)             #
+# ------------------------------------------------------------------ #
+DRAFT_MAX_AGE = timedelta(days=7)
+
+
+def get_draft(db: Session, user_id: str):
+    """The user's saved draft as a dict, or None. Stale drafts are purged."""
+    row = db.query(MomDraft).filter(MomDraft.user_id == user_id).first()
+    if not row:
+        return None
+    if row.saved_at and now_ist() - row.saved_at > DRAFT_MAX_AGE:
+        db.delete(row)
+        db.commit()
+        return None
+    try:
+        parsed = json.loads(row.data)
+        return parsed if isinstance(parsed, dict) else None
+    except (ValueError, TypeError):
+        return None
+
+
+def save_draft(db: Session, user_id: str, data: dict):
+    payload = json.dumps(data or {}, ensure_ascii=False)
+    row = db.query(MomDraft).filter(MomDraft.user_id == user_id).first()
+    if row:
+        row.data = payload
+        row.saved_at = now_ist()
+    else:
+        db.add(MomDraft(user_id=user_id, data=payload, saved_at=now_ist()))
+    db.commit()
+
+
+def delete_draft(db: Session, user_id: str):
+    db.query(MomDraft).filter(MomDraft.user_id == user_id).delete()
+    db.commit()

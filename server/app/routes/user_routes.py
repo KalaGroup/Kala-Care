@@ -101,6 +101,8 @@ def login(user_login: UserLogin, db: Session = Depends(get_db)):
                     "is_blocked": user.is_blocked,
                     "can_export": user.can_export,
                     "can_access_expense": user.can_access_expense,
+                    "can_access_part_detail": bool(user.can_access_part_detail),
+                    "can_access_mom": bool(user.can_access_mom),
                     "theme": user.theme or "light",
                     "session_id": session_id,
                     "branches": [
@@ -385,6 +387,8 @@ def get_all_employees(
                         "is_blocked": emp.is_blocked,
                         "can_export": emp.can_export,
                         "can_access_expense": emp.can_access_expense,
+                        "can_access_part_detail": bool(emp.can_access_part_detail),
+                        "can_access_mom": bool(emp.can_access_mom),
                         "password": emp.password if is_master else None
                     }
                     for emp in employees
@@ -579,6 +583,42 @@ def toggle_export_permission(
             detail=f"Error toggling export permission: {str(e)}"
         )
 
+@router.put("/employees/{employee_id}/page-access")
+def toggle_page_access(
+    employee_id: int,
+    body: dict,
+    user_id: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    """Grant/revoke a user's access to the Part Detail Info or MOM Tracking
+    pages (Master Admin only). Body: { page: 'part_detail'|'mom', allowed: bool }."""
+    try:
+        page = body.get('page')
+        allowed = bool(body.get('allowed', False))
+        updated = UserController.toggle_page_access(db, employee_id, user_id, page, allowed)
+
+        page_label = "Part Detail Info" if page == "part_detail" else "MOM Tracking"
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "success": True,
+                "message": f"{page_label} access {'granted' if allowed else 'revoked'} successfully",
+                "employee": {
+                    "id": updated.id,
+                    "can_access_part_detail": bool(updated.can_access_part_detail),
+                    "can_access_mom": bool(updated.can_access_mom)
+                }
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error toggling page access: {str(e)}"
+        )
+
 @router.put("/profile")
 def update_profile(
     profile_update: UserProfileUpdate,
@@ -643,6 +683,8 @@ def get_profile(
                     "is_blocked": user.is_blocked,
                     "can_export": user.can_export,
                     "can_access_expense": user.can_access_expense,
+                    "can_access_part_detail": bool(user.can_access_part_detail),
+                    "can_access_mom": bool(user.can_access_mom),
                     "password": user.password
                 }
             }

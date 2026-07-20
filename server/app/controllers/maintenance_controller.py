@@ -229,6 +229,49 @@ def _clean_code(v) -> str:
     return str(v or "").strip().rstrip(". \u2026").strip()
 
 
+def _date_iso(dt) -> str:
+    """Serialize a commissioning date to YYYY-MM-DD (the client formats it)."""
+    if not dt:
+        return ""
+    try:
+        return dt.date().isoformat()
+    except Exception:
+        try:
+            return str(dt)[:10]
+        except Exception:
+            return ""
+
+
+def asset_commissioning(db: Session):
+    """Latest commissioning date per application code from Asset Detailed.
+
+    Used by the Service Applicability (coverage) tab, which is visible to every
+    signed-in user \u2014 so this is intentionally NOT gated to the Master Admin like
+    app_mapping is. One grouped, index-covered query; codes are cleaned + upper-
+    cased the same way as app_mapping so the two line up."""
+    from sqlalchemy import func
+    from app.models.customer_model import AssetDetailed
+
+    norm = func.upper(func.ltrim(func.rtrim(AssetDetailed.application_code)))
+    rows = (
+        db.query(norm.label("code"), func.max(AssetDetailed.commissioning_date).label("commissioning"))
+        .filter(AssetDetailed.application_code.isnot(None))
+        .filter(func.ltrim(func.rtrim(AssetDetailed.application_code)) != "")
+        .filter(AssetDetailed.commissioning_date.isnot(None))
+        .group_by(norm)
+        .all()
+    )
+    merged = {}
+    for r in rows:
+        code = _clean_code(r.code)
+        if not code or not r.commissioning:
+            continue
+        cur = merged.get(code)
+        if cur is None or r.commissioning > cur:
+            merged[code] = r.commissioning
+    return [{"appCode": code, "commissioning": _date_iso(dt)} for code, dt in merged.items()]
+
+
 def app_mapping(db: Session):
     """Reconcile the application codes found in Customers Data Hub -> Asset
     Detailed against the Part Detail Info master.
@@ -250,6 +293,8 @@ def app_mapping(db: Session):
             func.max(AssetDetailed.engine_model).label("engine_model"),
             func.max(AssetDetailed.segment).label("segment"),
             func.max(AssetDetailed.kva_rating).label("kva"),
+            func.max(AssetDetailed.emission_norm).label("emission"),
+            func.max(AssetDetailed.commissioning_date).label("commissioning"),
         )
         .filter(AssetDetailed.application_code.isnot(None))
         .filter(func.ltrim(func.rtrim(AssetDetailed.application_code)) != "")
@@ -259,16 +304,19 @@ def app_mapping(db: Session):
 
     # Re-aggregate after cleaning: "3H.8422..." and "3H.8422" collapse into one
     # code, summing their asset counts and keeping the first non-empty details.
+    # Commissioning keeps the LATEST date across the collapsed rows.
     merged = {}
     for r in rows:
         code = _clean_code(r.code)
         if not code:
             continue
-        m = merged.setdefault(code, {"assets": 0, "engine_model": "", "segment": "", "kva": ""})
+        m = merged.setdefault(code, {"assets": 0, "engine_model": "", "segment": "", "kva": "", "emission": "", "commissioning": None})
         m["assets"] += int(r.assets or 0)
-        for k, v in (("engine_model", r.engine_model), ("segment", r.segment), ("kva", r.kva)):
+        for k, v in (("engine_model", r.engine_model), ("segment", r.segment), ("kva", r.kva), ("emission", r.emission)):
             if not m[k] and v:
                 m[k] = str(v)
+        if r.commissioning and (m["commissioning"] is None or r.commissioning > m["commissioning"]):
+            m["commissioning"] = r.commissioning
 
     master_codes = {
         _clean_code(c).upper()
@@ -287,7 +335,9 @@ def app_mapping(db: Session):
             "engineModel": m["engine_model"],
             "segment": m["segment"],
             "kva": m["kva"],
+            "emission": m["emission"],
             "assets": m["assets"],
+            "commissioning": _date_iso(m["commissioning"]),
         }
         codes.append({**item, "uploaded": is_uploaded})
         if is_uploaded:

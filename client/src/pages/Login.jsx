@@ -216,6 +216,8 @@ const Login = () => {
                     is_blocked: response.data.user.is_blocked,
                     can_export: response.data.user.can_export,
                     can_access_expense: response.data.user.can_access_expense === true,  // <-- new
+                    can_access_part_detail: response.data.user.can_access_part_detail === true,  // <-- page permission
+                    can_access_mom: response.data.user.can_access_mom === true,                  // <-- page permission
                     session_id: response.data.user.session_id,  // <-- login session for logout tracking
                     theme: response.data.user.theme || 'light', // <-- saved UI theme (dark/light)
                     branches: branches                      // <-- all accessible branches

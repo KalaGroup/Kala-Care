@@ -1,18 +1,13 @@
-IF COL_LENGTH('dbo.campaigns', 'admin_asset_numbers') IS NULL
-    ALTER TABLE dbo.campaigns ADD admin_asset_numbers NVARCHAR(MAX) NULL;
+-- 1) Add the new column (only if it doesn't already exist)
+IF COL_LENGTH('dbo.asset_detailed', 'emission_norm') IS NULL
+    ALTER TABLE dbo.asset_detailed ADD emission_norm NVARCHAR(100) NULL;
+GO
 
-
-
--- ============================================================
--- MOM TRACKING: Unicode fix
--- Bullet chars ("●") and regional-language text were saved as "?"
--- because these columns were VARCHAR (non-Unicode).
--- Converts them to NVARCHAR(MAX). Safe to run more than once.
--- ============================================================
-
-ALTER TABLE dbo.mom_rows     ALTER COLUMN point          NVARCHAR(MAX) NOT NULL;
-ALTER TABLE dbo.mom_rows     ALTER COLUMN remark         NVARCHAR(MAX) NOT NULL;
-ALTER TABLE dbo.mom_rows     ALTER COLUMN responsibility NVARCHAR(MAX) NULL;
-ALTER TABLE dbo.mom_rows     ALTER COLUMN prev_remarks   NVARCHAR(MAX) NULL;
-ALTER TABLE dbo.mom_meetings ALTER COLUMN branches       NVARCHAR(MAX) NULL;
-ALTER TABLE dbo.mom_meetings ALTER COLUMN heads          NVARCHAR(MAX) NULL;
+-- 2) Backfill emission from the old dynamic extra_data JSON
+--    (fills the values you already imported, before the column existed)
+UPDATE dbo.asset_detailed
+SET emission_norm = LEFT(JSON_VALUE(extra_data, '$."EMISSION NORM"'), 100)
+WHERE extra_data IS NOT NULL
+  AND ISJSON(extra_data) = 1
+  AND JSON_VALUE(extra_data, '$."EMISSION NORM"') IS NOT NULL;
+GO

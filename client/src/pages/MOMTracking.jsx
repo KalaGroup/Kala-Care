@@ -2,17 +2,19 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import Swal from 'sweetalert2';
 import {
   ClipboardList, Building2, Plus, Trash2, CheckCircle2,
   AlertTriangle, CalendarDays, Users, X, CornerUpRight,
   BarChart3, Check, User, ListChecks, Zap,
   ChevronDown, FileText, MapPin, UserPlus, Upload, Search, RotateCcw,
-  Crown,
+  Crown, Pencil,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
+import { SortTh, useSort, compareValues } from '../components/TableSort';
 // xlsx-js-style is heavy (~140kB gzip) and only needed when a user actually
 // exports to Excel — loaded on demand inside exportMeetingExcel() so it never
 // weighs down the initial MOM page load (esp. for employees who only view).
@@ -73,8 +75,8 @@ const DEFAULT_MEETING_TYPES = [
 
 /* Column widths of the two sheet tables (kept in sync with the
    top scrollbar strip above the main table) */
-const SHEET_MINW = '96rem';
-const CARRY_MINW = '100rem';
+const SHEET_MINW = '98rem';
+const CARRY_MINW = '98rem';
 
 /* ============================================================
    MASTER DISCUSSION AREAS (editable via "Master setup")
@@ -111,39 +113,79 @@ const isOverdue = (r) => r.flag === 'T' && r.status !== 'completed' && r.due && 
 const effStatus = (r) => r.status === 'completed' ? 'completed' : isOverdue(r) ? 'overdue' : r.status;
 const autoGrow = (el) => { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px`; };
 /* bullet-list typing for Discussion points / Remark fields —
-   Enter starts a "● " line (and bullets the line just typed if it has
-   none yet); Enter on an empty bullet removes it (exits the list);
+   the very FIRST character typed in an empty field starts a "● " line;
+   Enter starts the next "● " line (and bullets the line just typed if it
+   has none yet); Enter on an empty bullet removes it (exits the list);
    Backspace right after the marker deletes the bullet itself. */
 const BULLET = '● ';
-const handleBulletKeys = (e, value, commit) => {
-  const el = e.target;
-  const start = el.selectionStart, end = el.selectionEnd;
-  const setCaret = (pos) => requestAnimationFrame(() => { try { el.selectionStart = el.selectionEnd = pos; } catch { /* field gone */ } });
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    const before = value.slice(0, start), after = value.slice(end);
-    const lineStart = before.lastIndexOf('\n') + 1;
-    const line = before.slice(lineStart);
-    if (/^\s*[•●]\s*$/.test(line) && line.length) {
-      commit(value.slice(0, lineStart) + after);          // empty bullet → remove it
-      setCaret(lineStart);
-      return;
-    }
-    /* the first typed line gets its bullet on the first Enter too */
-    const needsOwn = line.trim() && !/^\s*[•●]/.test(line);
-    const fixedBefore = needsOwn ? value.slice(0, lineStart) + BULLET + line : before;
-    const insert = !fixedBefore ? BULLET : '\n' + BULLET;
-    commit(fixedBefore + insert + after);
-    setCaret(fixedBefore.length + insert.length);
-  } else if (e.key === 'Backspace' && start === end && start > 0) {
-    const before = value.slice(0, start);
-    const lineStart = before.lastIndexOf('\n') + 1;
-    if (/^\s*[•●]\s?$/.test(before.slice(lineStart))) {
+/* lines that are just a bullet with nothing typed are dropped when the
+   field loses focus, so "● " alone is never kept or saved */
+const stripEmptyBullets = (v) => {
+  if (!v) return '';
+  const cleaned = v.split('\n').filter((l) => !/^\s*[•●]\s*$/.test(l)).join('\n');
+  return cleaned.trim() ? cleaned : '';
+};
+/* BULLET EDITOR — one text box PER point with the "●" marker rendered
+   OUTSIDE it, so when a long point wraps, the wrapped text always starts
+   after the bullet (never under it) in every browser. Enter starts the
+   next point, Backspace at the start merges into the previous one.
+   The value round-trips as the same "● …" lines the DB, drafts, Excel
+   export and read-only views already use. */
+const BulletEditor = ({ value, onChange, placeholder }) => {
+  const items = String(value || '').split('\n').map((l) => l.replace(/^\s*[•●]\s?/, ''));
+  const refs = useRef([]);
+  const boxRef = useRef(null);
+  const focusAt = useRef(null);                  // {i, caret} to restore after a structural change
+  useEffect(() => {
+    if (!focusAt.current) return;
+    const { i, caret } = focusAt.current;
+    focusAt.current = null;
+    const el = refs.current[i];
+    if (el) { el.focus(); try { el.selectionStart = el.selectionEnd = caret; } catch { /* field gone */ } }
+  });
+  const commit = (arr) => onChange(arr.map((t) => BULLET + t).join('\n'));
+  const setItem = (i, t) => { const arr = [...items]; arr[i] = t.replace(/\n/g, ' '); commit(arr); };
+  const onKey = (e, i) => {
+    const el = e.target;
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      commit(value.slice(0, lineStart) + value.slice(start));   // delete the whole marker
-      setCaret(lineStart);
+      const arr = [...items];
+      const before = arr[i].slice(0, el.selectionStart), after = arr[i].slice(el.selectionEnd);
+      arr[i] = before; arr.splice(i + 1, 0, after);
+      focusAt.current = { i: i + 1, caret: 0 };
+      commit(arr);
+    } else if (e.key === 'Backspace' && el.selectionStart === 0 && el.selectionEnd === 0 && i > 0) {
+      e.preventDefault();
+      const arr = [...items];
+      const caret = arr[i - 1].length;
+      arr[i - 1] += arr[i]; arr.splice(i, 1);
+      focusAt.current = { i: i - 1, caret };
+      commit(arr);
     }
-  }
+  };
+  const onBlur = (e) => {
+    if (boxRef.current?.contains(e.relatedTarget)) return;   // still inside the editor
+    const cleaned = stripEmptyBullets(String(value || ''));
+    if (cleaned !== value) onChange(cleaned);
+  };
+  return (
+    <div ref={boxRef} className="w-full px-1.5 py-1.5" style={{ minHeight: '2rem' }}>
+      {items.map((t, i) => (
+        <div key={i} className="flex items-start gap-1.5">
+          <span className="fs-11 text-gray-700 select-none flex-shrink-0" style={{ paddingTop: 2 }}
+            onMouseDown={(e) => { e.preventDefault(); refs.current[i]?.focus(); }}>●</span>
+          <textarea rows={1} value={t}
+            ref={(el) => { refs.current[i] = el; if (el) autoGrow(el); }}
+            onChange={(e) => { autoGrow(e.target); setItem(i, e.target.value); }}
+            onKeyDown={(e) => onKey(e, i)}
+            onBlur={onBlur}
+            placeholder={i === 0 && items.length === 1 ? placeholder : undefined}
+            className="no-ring flex-1 min-w-0 fs-11 text-gray-700 outline-none resize-none overflow-hidden bg-transparent rounded px-0.5"
+          />
+        </div>
+      ))}
+    </div>
+  );
 };
 const daysFromDue = (due) => Math.round((today0() - new Date(due)) / 86400000); // +ve = overdue
 /* consecutive rows sharing a Discussion Area are grouped so tables can draw
@@ -173,8 +215,10 @@ async function exportTableExcel(fileBase, headers, rows2d, opts = {}) {
   });
   /* wrap every data cell so bullet points / multi-line remarks show on their
      own lines, and size each row to fit its tallest cell. Cells of merged
-     (grouped) columns are centered like on screen. */
+     (grouped) columns are centered like on screen — except columns listed in
+     opts.leftCols (e.g. Discussion Area), which stay left-aligned. */
   const mergeCols = opts.mergeCols || [];
+  const leftCols = opts.leftCols || [];
   const rowHeights = [{ hpt: 20 }];
   rows2d.forEach((r, ri) => {
     let maxLines = 1;
@@ -182,9 +226,16 @@ async function exportTableExcel(fileBase, headers, rows2d, opts = {}) {
       const lines = String(v ?? '').split('\n').length;
       if (lines > maxLines) maxLines = lines;
       const cell = ws[XLSX.utils.encode_cell({ r: ri + 1, c: ci })];
-      if (cell) cell.s = mergeCols.includes(ci)
-        ? { alignment: { vertical: 'center', horizontal: 'center', wrapText: true } }
-        : { alignment: { vertical: 'top', wrapText: true } };
+      if (cell) {
+        const merged = mergeCols.includes(ci);
+        cell.s = {
+          alignment: {
+            vertical: merged ? 'center' : 'top',
+            ...(leftCols.includes(ci) ? { horizontal: 'left' } : (merged ? { horizontal: 'center' } : {})),
+            wrapText: true,
+          },
+        };
+      }
     });
     rowHeights.push({ hpt: Math.min(220, 14 * maxLines + 6) });
   });
@@ -205,8 +256,10 @@ async function exportTableExcel(fileBase, headers, rows2d, opts = {}) {
   XLSX.writeFile(wb, `${fileBase}_${iso(new Date())}.xlsx`);
 }
 /* remark trail → readable multi-line cell text */
+/* one entry = a dated header line, then the remark text on its OWN line;
+   a blank line separates entries so the trail stays readable in one cell */
 const remarksText = (list) => (list || []).map((p) =>
-  `${fmtDDMMYY(p.date)}${p.status ? ` [${STATUS[p.status]?.label || p.status}]` : ''}${p.by ? ` by ${p.by}` : ''}${p.text ? ` — ${p.text}` : ''}`).join('\n');
+  `${fmtDDMMYY(p.date)}${p.status ? ` [${STATUS[p.status]?.label || p.status}]` : ''}${p.by ? ` by ${p.by}` : ''}${p.text ? `\n${p.text}` : ''}`).join('\n\n');
 /* shared look for the small table "Excel" buttons */
 const XL_BTN = 'export-btn kc-lift inline-flex items-center gap-1 rounded-lg border bg-white px-2 py-1 fs-10 font-bold';
 
@@ -239,40 +292,14 @@ function collectCarry(history, codes) {
 
 /* ============================================================
    BRANCH ATTRIBUTION — a task / info row belongs to the branch(es)
-   of its RESPONSIBLE people (looked up in the meeting's attendee
-   list, where each employee carries their branch). Owners from two
-   branches → the row counts in BOTH branches. Rows whose owners
-   can't be resolved to a branch (guests, no responsibility) fall
-   back to the meeting's own branch(es).
+   the MEETING was held for (m.branches / m.branchCode), NOT the
+   branches of its responsible employees. A joint meeting covering
+   two branches counts its rows in both.
    ============================================================ */
-const buildBranchNameToCode = (allBranches, meetings) => {
-  const map = new Map();
-  allBranches.forEach((b) => {
-    if (b.name) map.set(String(b.name).toLowerCase(), b.code);
-    if (b.code) map.set(String(b.code).toLowerCase(), b.code);   // legacy rows that stored the code
-  });
-  meetings.forEach((m) => (m.branches || []).forEach((b) => {
-    if (b.name && !map.has(String(b.name).toLowerCase())) map.set(String(b.name).toLowerCase(), b.code);
-  }));
-  return map;
-};
-const makeRowBranchCodes = (nameToCode) => {
-  const attCache = new Map();               // meeting id → attendee name → branch label
-  return (r, m) => {
-    let byName = attCache.get(m.id);
-    if (!byName) {
-      byName = new Map((m.attendees || []).map((a) => [String(a.name || '').toLowerCase(), a.branch]));
-      attCache.set(m.id, byName);
-    }
-    const codes = new Set();
-    respArr(r.resp).forEach((n) => {
-      const bn = byName.get(String(n).toLowerCase());
-      const code = bn ? nameToCode.get(String(bn).toLowerCase()) : null;
-      if (code) codes.add(code);
-    });
-    if (!codes.size) (m.branches?.length ? m.branches.map((b) => b.code) : [m.branchCode]).forEach((c) => c && codes.add(c));
-    return codes;
-  };
+const rowBranchCodes = (_r, m) => {
+  const codes = new Set();
+  (m.branches?.length ? m.branches.map((b) => b.code) : [m.branchCode]).forEach((c) => c && codes.add(c));
+  return codes;
 };
 
 /* ============================================================
@@ -283,7 +310,7 @@ const makeRowBranchCodes = (nameToCode) => {
      Action-Flag legend
    • column order: Discussion Area | Discussion points |
      Responsibility | Action flag | Due Date |
-     Remarks - <past dates>… | Remarks - <this meeting> | Status
+     Remark/Observation/Action (full dated trail in ONE column) | Status
    • zebra body rows + colour-coded Status text
    ============================================================ */
 /* mix a hex colour toward black (pct<0) or white (pct>0) → 'RRGGBB' */
@@ -296,135 +323,165 @@ const shadeHex = (hex, pct) => {
   }).join('').toUpperCase();
 };
 
-async function exportMeetingExcel(m, brandColor = '#000080') {
-  const thin = { style: 'thin', color: { rgb: 'FFD3D8E6' } };
-  const BORDER = { top: thin, bottom: thin, left: thin, right: thin };
+async function exportMeetingExcel(m, brandColor = '#374151') {
+  /* exceljs (loaded on demand, never in the main bundle) — needed for
+     rich text (BOLD dated remark headers inside one cell) and print setup
+     (landscape + title rows repeated on every printed page) */
+  const _ex = await import('exceljs');
+  const ExcelJS = _ex.default || _ex;
   const C = {
     brand: shadeHex(brandColor, 0),
     dark: shadeHex(brandColor, -0.25),
     soft: shadeHex(brandColor, 0.92),
-    zebra: shadeHex(brandColor, 0.96),
     ink: '1F2937',
     label: shadeHex(brandColor, -0.15),
   };
   const ST_COLOR = { completed: '059669', in_progress: 'B45309', pending: '64748B', overdue: 'F87171' };
+  const A = (hex) => ({ argb: `FF${hex}` });
+  const thin = { style: 'thin', color: A('D3D8E6') };
+  const BORDER = { top: thin, bottom: thin, left: thin, right: thin };
+  const fill = (hex) => ({ type: 'pattern', pattern: 'solid', fgColor: A(hex) });
   const S = {
-    title: { font: { bold: true, sz: 15, color: { rgb: 'FFFFFF' } }, alignment: { horizontal: 'center', vertical: 'center' }, fill: { fgColor: { rgb: C.brand } }, border: BORDER },
-    sub: { font: { sz: 10, color: { rgb: shadeHex(brandColor, 0.88) } }, alignment: { horizontal: 'center', vertical: 'center' }, fill: { fgColor: { rgb: C.dark } }, border: BORDER },
-    label: { font: { bold: true, sz: 10, color: { rgb: C.label } }, fill: { fgColor: { rgb: C.soft } }, border: BORDER, alignment: { vertical: 'center' } },
-    value: { font: { sz: 10, color: { rgb: C.ink } }, border: BORDER, alignment: { vertical: 'center', wrapText: true } },
-    head: { font: { bold: true, sz: 10, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: C.brand } }, border: BORDER, alignment: { horizontal: 'center', vertical: 'center', wrapText: true } },
+    title: { font: { bold: true, size: 15, color: A('FFFFFF') }, alignment: { horizontal: 'center', vertical: 'middle' }, fill: fill(C.brand) },
+    sub: { font: { size: 10, color: A(shadeHex(brandColor, 0.88)) }, alignment: { horizontal: 'center', vertical: 'middle' }, fill: fill(C.dark) },
+    label: { font: { bold: true, size: 10, color: A(C.label) }, fill: fill(C.soft), alignment: { vertical: 'middle' } },
+    value: { font: { size: 10, color: A(C.ink) }, alignment: { vertical: 'middle', wrapText: true } },
+    head: { font: { bold: true, size: 10, color: A('FFFFFF') }, fill: fill(C.brand), alignment: { horizontal: 'center', vertical: 'middle', wrapText: true } },
+    cell: { font: { size: 10, color: A(C.ink) }, alignment: { vertical: 'top', wrapText: true } },
+    cellC: (extraFont = {}) => ({ font: { size: 10, color: A(C.ink), ...extraFont }, alignment: { horizontal: 'center', vertical: 'top' } }),
   };
-  const cell = (alt) => ({ font: { sz: 10, color: { rgb: C.ink } }, border: BORDER, alignment: { vertical: 'top', wrapText: true }, ...(alt ? { fill: { fgColor: { rgb: C.zebra } } } : {}) });
-  const cellC = (alt, extraFont = {}) => ({ font: { sz: 10, color: { rgb: C.ink }, ...extraFont }, border: BORDER, alignment: { horizontal: 'center', vertical: 'top' }, ...(alt ? { fill: { fgColor: { rgb: C.zebra } } } : {}) });
-  const txt = (v, s) => ({ v: v ?? '', t: 's', s });
+
+  const wb = new ExcelJS.Workbook();
+  /* horizontal (landscape) print, scaled to one page wide */
+  const ws = wb.addWorksheet('MOM', {
+    pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+  });
+  const TOTAL = 7;
+  ws.columns = [{ width: 22 }, { width: 40 }, { width: 24 }, { width: 9 }, { width: 12 }, { width: 52 }, { width: 16 }];
+
+  const put = (r, c, v, s) => {
+    const cl = ws.getCell(r, c);
+    cl.value = v;
+    if (s.font) cl.font = s.font;
+    if (s.alignment) cl.alignment = s.alignment;
+    if (s.fill) cl.fill = s.fill;
+    cl.border = BORDER;
+    return cl;
+  };
+  const padRow = (r, s = S.value) => { for (let c = 1; c <= TOTAL; c++) if (ws.getCell(r, c).value == null) put(r, c, '', s); };
 
   const branchNames = m.branches?.length ? m.branches.map((b) => b.name || b.code).join(' + ') : (m.branchName || '');
   const heads = (m.heads || []).map((h) => String(h).trim()).filter(Boolean);
 
-  /* remark-history columns: one per unique past review date */
-  const histDates = [...new Set(m.rows.flatMap((r) => (r.prevRemarks || []).map((p) => p.date)))].sort();
-  const FIXED = 6; // Discussion Area … Due Date (incl. the head column)
-  const totalCols = Math.max(FIXED + histDates.length + 2, 8); // + current remark + Status (info block needs ≥ 8)
-
-  const aoa = []; const merges = [];
-  const push = (row) => { aoa.push(row); return aoa.length - 1; };
-  const pad = (row) => { while (row.length < totalCols) row.push(txt('', S.value)); return row; };
-
-  /* Rows 0–1 — merged title + summary band */
-  push(pad([txt('Minutes of Meeting', S.title)]));
-  merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } });
-  push(pad([txt(`${branchNames} · ${fmtDDMMYY(m.date)} · ${m.type || ''}`, S.sub)]));
-  merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } });
+  /* Rows 1–2 — merged title + summary band */
+  put(1, 1, 'Minutes of Meeting', S.title); padRow(1, S.title); ws.mergeCells(1, 1, 1, TOTAL); ws.getRow(1).height = 26;
+  put(2, 1, `${branchNames} · ${fmtDDMMYY(m.date)} · ${m.type || ''}`, S.sub); padRow(2, S.sub); ws.mergeCells(2, 1, 2, TOTAL); ws.getRow(2).height = 16;
 
   /* Info block: labels A, values B · Attendees C:F (numbered names, one
-     merged column) · legend G:H */
+     merged column) · single-column Action-Flag legend G */
   const info = [
     ['Date:', fmtDDMMYY(m.date)], ['Location:', m.location || ''],
     ['Branches:', branchNames], ['Meeting Type:', m.type || ''],
     ['Conducted By:', m.conductedBy || ''],
-    ['Meeting Head(s):', heads.join(', ')],
+    ['Meeting Head:', heads.join(', ')],
   ];
   const present = m.attendees.filter((a) => a.present);
   const blockRows = Math.max(info.length, present.length + 1, 3);
   for (let i = 0; i < blockRows; i++) {
-    const row = [];
-    row[0] = txt(info[i]?.[0] || '', info[i] ? S.label : S.value);
-    row[1] = txt(info[i]?.[1] || '', S.value);
+    const r = 3 + i;
+    put(r, 1, info[i]?.[0] || '', info[i] ? S.label : S.value);
+    put(r, 2, info[i]?.[1] || '', S.value);
     const attStyle = i === 0 ? S.label : S.value;
     const attText = i === 0
       ? 'Attendees:'
       : present[i - 1]
         ? `${i}. ${present[i - 1].name}${present[i - 1].branch ? ` (${present[i - 1].branch})` : ''}${present[i - 1].source === 'manual' ? '  (Manually added)' : ''}`
         : '';
-    row[2] = txt(attText, attStyle); row[3] = txt('', attStyle); row[4] = txt('', attStyle); row[5] = txt('', attStyle);
-    if (i === 0) { row[6] = txt('Action Flag', S.label); row[7] = txt('', S.label); }
-    else if (i === 1) { row[6] = txt('T', S.label); row[7] = txt('Task', S.value); }
-    else if (i === 2) { row[6] = txt('I', S.label); row[7] = txt('Information', S.value); }
-    else { row[6] = txt('', S.value); row[7] = txt('', S.value); }
-    const rIdx = push(pad(row));
-    merges.push({ s: { r: rIdx, c: 2 }, e: { r: rIdx, c: 5 } });                 // attendee column C:F
-    if (i === 0) merges.push({ s: { r: rIdx, c: 6 }, e: { r: rIdx, c: 7 } });    // "Action Flag" G:H
+    for (let c = 3; c <= 6; c++) put(r, c, c === 3 ? attText : '', attStyle);
+    ws.mergeCells(r, 3, r, 6);
+    if (i === 0) put(r, 7, 'Action Flag', S.label);
+    else if (i === 1) put(r, 7, 'T = Task', S.value);
+    else if (i === 2) put(r, 7, 'I = Information', S.value);
+    else put(r, 7, '', S.value);
   }
 
-  push(pad([]));                                                                  // spacer
+  const spacerRow = 3 + blockRows;
+  padRow(spacerRow);
 
-  /* Table header — requested column sequence, Status last */
-  const head = ['Discussion Area', 'Discussion points', 'Responsibility', 'Task Assigned By (Head)', 'Action flag', 'Due Date',
-    ...histDates.map((d) => `Remark/Observation/Action - ${fmtDDMMYY(d)}`), `Remark/Observation/Action - ${fmtDDMMYY(m.date)}`, 'Status'];
-  const headRow = head.map((h) => txt(h, S.head));
-  while (headRow.length < totalCols) headRow.push(txt('', S.head));
-  push(headRow);
+  /* Table header row — the ONLY row repeated on later printed pages (the
+     title band + info block print once, on page 1 only) */
+  const headerRow = spacerRow + 1;
+  ['Discussion Area', 'Discussion points', 'Responsibility', 'Action flag', 'Due Date', 'Remark/Observation/Action', 'Status']
+    .forEach((h, i) => put(headerRow, i + 1, h, S.head));
+  ws.pageSetup.printTitlesRow = `${headerRow}:${headerRow}`;
+  /* pages 2+ show the two title lines as a print page-header (page 1
+     already has the coloured bands in the sheet itself, so it stays clean) */
+  const hdrSub = `${branchNames} · ${fmtDDMMYY(m.date)} · ${m.type || ''}`.replace(/&/g, '&&');
+  const pageHdr = `&C&"Calibri,Bold"&14Minutes of Meeting\n&"Calibri,Regular"&9${hdrSub}`;
+  ws.headerFooter = { differentFirst: true, firstHeader: '', oddHeader: pageHdr, evenHeader: pageHdr };
 
-  /* Table body — carried rows first, then fresh; zebra shading. Consecutive
-     rows of the same Discussion Area are grouped: the area cell is MERGED
-     across its point-rows, exactly like the on-screen sheet, and the C/F
-     marker moves to the point text. */
+  /* Table body — carried rows first, then fresh. Consecutive rows of the
+     same Discussion Area are grouped: the area cell is MERGED across its
+     point-rows, exactly like the on-screen sheet, and the C/F marker moves
+     to the point text. */
   const ordered = [...m.rows.filter((r) => r.carried), ...m.rows.filter((r) => !r.carried)];
   const areaGroups = groupConsecutive(ordered, (r) => (r.area || '').trim().toLowerCase());
-  const bodyStart = aoa.length;
-  let ri = 0;
+  /* wrapped-line estimate for a cell: Excel does NOT auto-fit rows of a
+     generated file, so without explicit heights long remarks get clipped
+     (especially in print). ~(width-2) characters fit per line at 10pt. */
+  const estLines = (text, width) => String(text || '').split('\n')
+    .reduce((n, ln) => n + Math.max(1, Math.ceil(ln.length / Math.max(1, width - 4))), 0);
+  let r = headerRow;
   areaGroups.forEach((g) => {
-    if (g.items.length > 1) merges.push({ s: { r: bodyStart + ri, c: 0 }, e: { r: bodyStart + ri + g.items.length - 1, c: 0 } });
-    g.items.forEach((r) => {
-      const alt = false;                       // zebra shading removed — all rows white
-      const isT = r.flag === 'T';
-      const od = isT && r.status !== 'completed' && r.due && new Date(r.due) < today0();
-      const stKey = !isT ? null : od ? 'overdue' : r.status;
-      const areaStyle = { ...cell(alt), alignment: { vertical: 'center', horizontal: 'center', wrapText: true } };
-      const pointStyle = r.carried ? { ...cell(alt), font: { ...cell(alt).font, color: { rgb: '92400E' } } } : cell(alt);
-      const row = [
-        txt(r.area, areaStyle),
-        txt((r.carried ? '(C/F)  ' : '') + (r.point || ''), pointStyle),
-        txt(respArr(r.resp).join(', ') || (isT ? '' : '-'), cell(alt)),
-        txt(r.assignedBy || '-', cellC(alt)),
-        txt(r.flag, cellC(alt, { bold: true })),
-        txt(isT ? fmtDDMMYY(r.due) : '-', cellC(alt)),
-      ];
-      histDates.forEach((d) => {
-        const pr = (r.prevRemarks || []).find((p) => p.date === d);
-        row.push(txt(pr ? pr.text : '', cell(alt)));
+    const start = r + 1;
+    g.items.forEach((row) => {
+      r++;
+      const isT = row.flag === 'T';
+      const od = isT && row.status !== 'completed' && row.due && new Date(row.due) < today0();
+      const stKey = !isT ? null : od ? 'overdue' : row.status;
+      put(r, 1, row.area, { ...S.cell, alignment: { vertical: 'middle', horizontal: 'left', wrapText: true } });
+      put(r, 2, (row.carried ? '(C/F)  ' : '') + (row.point || ''), row.carried ? { ...S.cell, font: { ...S.cell.font, color: A('92400E') } } : S.cell);
+      put(r, 3, respArr(row.resp).join(', ') || (isT ? '' : '-'), S.cell);
+      put(r, 4, row.flag, S.cellC({ bold: true }));
+      put(r, 5, isT ? fmtDDMMYY(row.due) : '-', S.cellC());
+      /* the WHOLE remark trail in one cell — each entry's dated header line
+         ("date [status] by X") in BOLD, its remark text on the next line */
+      const entries = [...(row.prevRemarks || [])];
+      if ((row.remark || '').trim()) entries.push({ date: m.date, text: row.remark, status: row.status, by: heads[0] || m.conductedBy });
+      const runs = [];
+      let remarkPlain = '';
+      entries.forEach((p, ei) => {
+        const headLine = `${fmtDDMMYY(p.date)}${p.status ? ` [${STATUS[p.status]?.label || p.status}]` : ''}${p.by ? ` by ${p.by}` : ''}`;
+        runs.push({ text: (ei ? '\n\n' : '') + headLine, font: { bold: true, size: 10, color: A('475569') } });
+        if (p.text) runs.push({ text: `\n${p.text}`, font: { size: 10, color: A(C.ink) } });
+        remarkPlain += (ei ? '\n\n' : '') + headLine + (p.text ? `\n${p.text}` : '');
       });
-      row.push(txt(r.remark || '', cell(alt)));
-      row.push(txt(isT ? (od ? 'Overdue' : (STATUS[r.status]?.label || r.status)) : '-',
-        stKey ? cellC(alt, { bold: true, color: { rgb: ST_COLOR[stKey] || ST_COLOR.pending } }) : cellC(alt)));
-      push(row);
-      ri++;
+      put(r, 6, runs.length ? { richText: runs } : '', S.cell);
+      put(r, 7, isT ? (od ? 'Overdue' : (STATUS[row.status]?.label || row.status)) : '-',
+        stKey ? S.cellC({ bold: true, color: A(ST_COLOR[stKey] || ST_COLOR.pending) }) : S.cellC());
+      /* explicit row height = tallest wrapped cell, so print never clips */
+      const lines = Math.max(
+        estLines(row.area, 26),
+        estLines((row.carried ? '(C/F)  ' : '') + (row.point || ''), 40),
+        estLines(respArr(row.resp).join(', '), 24),
+        estLines(remarkPlain, 52),
+        1,
+      );
+      ws.getRow(r).height = lines * 13.8 + 4;
     });
+    if (g.items.length > 1) ws.mergeCells(start, 1, r, 1);
   });
 
-  const _xlsx = await import('xlsx-js-style');
-  const XLSX = _xlsx.utils ? _xlsx : (_xlsx.default || _xlsx);
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!merges'] = merges;
-  ws['!cols'] = [{ wch: 26 }, { wch: 40 }, { wch: 24 }, { wch: 20 }, { wch: 9 }, { wch: 12 },
-    ...histDates.map(() => ({ wch: 26 })), { wch: 28 }, { wch: 12 }];
-  ws['!rows'] = [{ hpt: 26 }, { hpt: 16 }];
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'MOM');
   const fileBase = (m.branches?.length ? m.branches.map((b) => b.name || b.code).join('_') : (m.branchName || 'Branch')).replace(/[^\w]+/g, '_');
-  XLSX.writeFile(wb, `MOM_${fileBase}_${m.date}.xlsx`);
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `MOM_${fileBase}_${m.date}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
 }
 
 /* ============================================================
@@ -518,6 +575,17 @@ function Dropdown({ trigger, children, panelClass = '', panelStyle, hover = fals
   );
 }
 /* previous remarks chips (the accumulating "Remarks - date" columns) */
+/* multi-line bullet text — every line is its own block with a hanging
+   indent, so when a bulleted line wraps, the wrapped text lines up after
+   the marker instead of sitting under the bullet */
+const BulletText = ({ text }) => (
+  <>
+    {String(text ?? '').split('\n').map((l, i) => (
+      <span key={i} className="block" style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap', ...(/^\s*[•●]/.test(l) ? { paddingLeft: '1.05em', textIndent: '-1.05em' } : {}) }}>{l}</span>
+    ))}
+  </>
+);
+
 const RemarkHistory = React.memo(({ list }) => !list?.length ? <span className="fs-10 text-gray-300">—</span> : (
   <div>
     {list.map((p, i) => {
@@ -530,7 +598,7 @@ const RemarkHistory = React.memo(({ list }) => !list?.length ? <span className="
             {p.by && <span className="fs-10 text-gray-400">by {p.by}</span>}
           </div>
           {p.text
-            ? <div className="fs-12 text-black mt-0.5 leading-snug" style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>{p.text}</div>
+            ? <div className="fs-12 text-black mt-0.5 leading-snug"><BulletText text={p.text} /></div>
             : <div className="fs-10 text-gray-400 mt-0.5 italic">no remark noted</div>}
         </div>
       );
@@ -575,24 +643,6 @@ const DualScroll = ({ className = 'overflow-x-auto kc-scroll', style, children }
   );
 };
 
-/* per-row head picker — the meeting head who assigns the task is also the
-   one responsible for it, so ONE choice covers both (headResp is kept
-   mirrored for the saved data). Values already saved on the row stay
-   selectable even if the head list changed since. */
-const HeadCell = ({ row, heads = [], onChange }) => {
-  const opts = [...new Set([...heads, row.assignedBy].filter(Boolean))];
-  return (
-    <select value={row.assignedBy || ''}
-      onChange={(e) => onChange({ assignedBy: e.target.value, headResp: e.target.value })}
-      title={row.assignedBy || 'Which meeting head assigned (and is responsible for) this task'}
-      className="w-full fs-11 text-gray-700 outline-none px-1 py-1 rounded cursor-pointer"
-      style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-      <option value="">— Select head —</option>
-      {opts.map((h) => <option key={h} value={h}>{h}</option>)}
-    </select>
-  );
-};
-
 /* ============================================================
    RESPONSIBILITY PICKER — multi-select of present attendees.
    Renders its dropdown with position:fixed so it is never
@@ -603,6 +653,13 @@ const RespPicker = ({ value = [], options = [], onChange, disabled }) => {
   const [pos, setPos] = useState(null);
   const btnRef = useRef(null);
   const popRef = useRef(null);
+  /* opens on CLICK; auto-closes shortly after the mouse leaves BOTH the box
+     and the panel (the grace delay lets the pointer cross the small gap
+     between them without closing) */
+  const closeTimer = useRef(null);
+  const cancelClose = () => { if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; } };
+  const scheduleClose = () => { cancelClose(); closeTimer.current = setTimeout(() => setOpen(false), 260); };
+  useEffect(() => cancelClose, []);            // clear a pending close on unmount
   const openIt = () => {
     if (disabled || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
@@ -636,6 +693,7 @@ const RespPicker = ({ value = [], options = [], onChange, disabled }) => {
   return (
     <>
       <button type="button" ref={btnRef} onClick={() => (open ? setOpen(false) : openIt())}
+        onMouseEnter={cancelClose} onMouseLeave={scheduleClose}
         className="w-full flex items-center justify-between gap-1 rounded px-1.5 py-1 fs-11 text-left transition hover:bg-[#f6f8fc]"
         style={{ minHeight: 30 }} title="Assign one or more attendees">
         {value.length === 0 ? (
@@ -654,6 +712,7 @@ const RespPicker = ({ value = [], options = [], onChange, disabled }) => {
       </button>
       {open && pos && (
         <div ref={popRef} className="fixed z-[80] rounded-xl border border-gray-200 bg-white shadow-2xl overflow-hidden"
+          onMouseEnter={cancelClose} onMouseLeave={scheduleClose}
           style={{ left: pos.left, top: pos.top, width: pos.width, ...(pos.up ? { transform: 'translateY(-100%)' } : {}) }}>
           <div className="px-2.5 py-1.5 fs-9 font-bold uppercase tracking-wide text-black border-b border-gray-100 flex items-center justify-between">
             <span>Assign responsibility</span>
@@ -692,7 +751,7 @@ const RespPicker = ({ value = [], options = [], onChange, disabled }) => {
   );
 };
 
-const FontScale = React.memo(() => <style>{`@keyframes livedot{0%,100%{opacity:1}50%{opacity:.35}} @keyframes pop{0%{transform:scale(.4)}70%{transform:scale(1.2)}100%{transform:scale(1)}} .kc-pop{animation:pop .18s ease-out} .kc-lift{transition:transform .15s ease,box-shadow .15s ease} .kc-lift:hover{transform:translateY(-1px);box-shadow:0 10px 22px -10px rgba(35,37,95,.35)} .kc-input{background:#f7f8fc;border:1.5px solid #e6e9f0;border-radius:10px;transition:border-color .15s,box-shadow .15s,background .15s} .kc-input:focus,.kc-input:focus-within{background:#fff;border-color:#2f3192;box-shadow:0 0 0 3px rgba(47,49,146,.10);outline:none} .kc-input::placeholder,.kc-input input::placeholder{font-size:10px;font-weight:500;color:#9ca3af} .kc-grid{background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px),repeating-linear-gradient(90deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px)} .kc-scroll::-webkit-scrollbar{height:6px;width:6px} .kc-scroll::-webkit-scrollbar-thumb{background:#d5d9e6;border-radius:8px} .kc-scroll::-webkit-scrollbar-thumb:hover{background:#bfc5d8} .kc-scroll::-webkit-scrollbar-track{background:transparent} .fs-9{font-size:9px;line-height:1.3} .fs-10{font-size:10px;line-height:1.35} .fs-11{font-size:11px;line-height:1.4} .fs-12{font-size:12px;line-height:1.45} .fs-13{font-size:13px;line-height:1.45} .mom-sheet td,.mom-sheet th{border:1px solid #cbd5e1} .mom-sheet thead th{text-align:center;vertical-align:middle} .mom-sheet input,.mom-sheet select,.mom-sheet textarea{background:transparent;border-radius:6px;transition:box-shadow .12s,background .12s} .mom-sheet input:hover,.mom-sheet select:hover,.mom-sheet textarea:hover{background:#f6f8fc} .mom-sheet input:focus,.mom-sheet select:focus,.mom-sheet textarea:focus{background:#fff;box-shadow:inset 0 0 0 1.5px ${BRAND}55} .mom-sheet tbody tr:nth-child(even){background:#fbfcfe}`}</style>);
+const FontScale = React.memo(() => <style>{`@keyframes livedot{0%,100%{opacity:1}50%{opacity:.35}} @keyframes pop{0%{transform:scale(.4)}70%{transform:scale(1.2)}100%{transform:scale(1)}} .kc-pop{animation:pop .18s ease-out} .kc-lift{transition:transform .15s ease,box-shadow .15s ease} .kc-lift:hover{transform:translateY(-1px);box-shadow:0 10px 22px -10px rgba(35,37,95,.35)} .kc-input{background:#f7f8fc;border:1.5px solid #e6e9f0;border-radius:10px;transition:border-color .15s,box-shadow .15s,background .15s} .kc-input:focus,.kc-input:focus-within{background:#fff;border-color:#2f3192;box-shadow:0 0 0 3px rgba(47,49,146,.10);outline:none} .kc-input::placeholder,.kc-input input::placeholder{font-size:10px;font-weight:500;color:#9ca3af} .kc-grid{background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px),repeating-linear-gradient(90deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px)} .kc-scroll::-webkit-scrollbar{height:6px;width:6px} .kc-scroll::-webkit-scrollbar-thumb{background:#d5d9e6;border-radius:8px} .kc-scroll::-webkit-scrollbar-thumb:hover{background:#bfc5d8} .kc-scroll::-webkit-scrollbar-track{background:transparent} .fs-9{font-size:9px;line-height:1.3} .fs-10{font-size:10px;line-height:1.35} .fs-11{font-size:11px;line-height:1.4} .fs-12{font-size:12px;line-height:1.45} .fs-13{font-size:13px;line-height:1.45} .mom-sheet td,.mom-sheet th{border:1px solid #cbd5e1} .mom-sheet thead th{text-align:center;vertical-align:middle} .mom-sheet input,.mom-sheet select,.mom-sheet textarea{background:transparent;border-radius:6px;transition:box-shadow .12s,background .12s} .mom-sheet input:hover,.mom-sheet select:hover,.mom-sheet textarea:hover{background:#f6f8fc} .mom-sheet input:focus,.mom-sheet select:focus,.mom-sheet textarea:focus{background:#fff;box-shadow:inset 0 0 0 1.5px ${BRAND}55} .mom-sheet tbody tr:nth-child(even){background:#fbfcfe} .mom-stickyhead thead th{background:#f1f3fb;box-shadow:inset 0 -1px 0 #cbd5e1}`}</style>);
 
 /* ============================================================
    MAIN COMPONENT
@@ -705,23 +764,45 @@ export default function MOMTracking() {
   const canExport = me?.role === 'master_admin' || me?.can_export === true;
   const role = me?.role || 'employee';
   const isMaster = role === 'master_admin';
+  const isBranchAdmin = role === 'branch_admin';
+  // Branch admins get the full authoring UI (new meeting / history / reports /
+  // employee report) but scoped to their access branches; employees only get
+  // their personal report.
+  const isMomAdmin = isMaster || isBranchAdmin;
+  // Branch codes a branch admin may see: active login branch + every
+  // branch-access row. null = master admin = all branches.
+  const accessCodes = useMemo(() => {
+    if (isMaster) return null;
+    const s = new Set();
+    if (me?.branch) s.add(me.branch);
+    (me?.branches || []).forEach((b) => { if (b?.branch) s.add(b.branch); });
+    return s;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me, isMaster]);
 
   const [master, setMaster] = useState(DEFAULT_MASTER);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
   const [meetingTypes, setMeetingTypes] = useState(DEFAULT_MEETING_TYPES);
   const [history, setHistory] = useState({});
-  // Non-master users (branch admin / employee) only get the personal report view.
-  const [view, setView] = useState(isMaster ? 'new' : 'mine');   // new | history | reports | mine
+  // Employees only get the personal report view; admins land on the sheet.
+  const [view, setView] = useState(isMomAdmin ? 'new' : 'mine');   // new | history | reports | mine
+  // History limited to the admin's access branches (master admin = everything).
+  const scopedHistory = useMemo(() => {
+    if (!accessCodes) return history;
+    const out = {};
+    Object.keys(history).forEach((c) => { if (accessCodes.has(c)) out[c] = history[c]; });
+    return out;
+  }, [history, accessCodes]);
   // flat, de-duplicated meeting list (history keys the same meeting under every branch)
   const allMeetings = useMemo(() => {
     const seen = new Map();
-    Object.values(history).forEach((list) => list.forEach((m) => { if (!seen.has(m.id)) seen.set(m.id, m); }));
+    Object.values(scopedHistory).forEach((list) => list.forEach((m) => { if (!seen.has(m.id)) seen.set(m.id, m); }));
     return [...seen.values()];
-  }, [history]);
-  // whose report the "mine" view shows: self by default; master admin can pick any employee
+  }, [scopedHistory]);
+  // whose report the "mine" view shows: self by default; admins can pick any employee they can see
   const selfPerson = useMemo(() => ({ name: me?.name, user_id: me?.user_id, branch: me?.branch, branch_name: me?.branch_name }), [me]);
   const [pickedEmp, setPickedEmp] = useState(null);
-  const reportPerson = (isMaster && pickedEmp) ? pickedEmp : selfPerson;
+  const reportPerson = (isMomAdmin && pickedEmp) ? pickedEmp : selfPerson;
 
   // Deep-link support: the ERP Sitemap opens a specific view or the masters
   // box via router state — navigate('/mom-tracking', { state: { openView:
@@ -732,7 +813,7 @@ export default function MOMTracking() {
   useEffect(() => {
     const s = routerLocation.state;
     if (!s) return;
-    if (s.openView && isMaster) setView(s.openView);
+    if (s.openView && isMomAdmin) setView(s.openView);
     if (s.openMasters && isMaster) setMasterOpen(true);
     if (s.openView || s.openMasters) {
       routerNavigate(routerLocation.pathname, { replace: true, state: null });
@@ -743,7 +824,11 @@ export default function MOMTracking() {
   const [confirm, setConfirm] = useState(null);
   const [confirmBusy, setConfirmBusy] = useState(false);  // async onYes running → spinner on the Yes button
   const [viewMtg, setViewMtg] = useState(null);
-  const [histBranch, setHistBranch] = useState(null);   // branch pre-selected when Reports jumps to History
+  // branch pre-selected when Reports jumps to History; branch admins start on
+  // their login branch instead of "All branches"
+  const [histBranch, setHistBranch] = useState(isMaster ? null : (me?.branch || null));
+  const [histFrom, setHistFrom] = useState('');          // MOM History meeting-date range — lives in the tab row
+  const [histTo, setHistTo] = useState('');
   const [histSource, setHistSource] = useState('loading'); // loading | api | error
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);      // sync guard — a double-click can fire before the disabled state renders
@@ -756,19 +841,24 @@ export default function MOMTracking() {
   const [empSource, setEmpSource] = useState('loading'); // loading | api | error
   useEffect(() => {
     let alive = true;
-    // Only master admin can (and needs to) list employees — the /users/employees
-    // endpoint 403s for branch admin / employee, so skip it entirely for them.
-    if (!isMaster || !me?.user_id || !API_BASE_URL) { setEmpSource('error'); return; }
+    // Master + branch admin can list employees (the endpoint 403s for plain
+    // employees, so skip it for them). The server already scopes a branch
+    // admin's list to their access branches; the accessCodes filter below is
+    // just a belt-and-braces client check.
+    if (!isMomAdmin || !me?.user_id || !API_BASE_URL) { setEmpSource('error'); return; }
     axios.get(`${API_BASE_URL}/users/employees`, { headers: { 'user-id': me.user_id } })
       .then((res) => {
         if (!alive) return;
         if (res.data?.success && Array.isArray(res.data.employees)) {
-          setEmployees(res.data.employees.filter((e) => !e.is_blocked));
+          let list = res.data.employees.filter((e) => !e.is_blocked);
+          if (accessCodes) list = list.filter((e) => accessCodes.has(e.branch));
+          setEmployees(list);
           setEmpSource('api');
         } else setEmpSource('error');
       })
       .catch(() => alive && setEmpSource('error'));
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
 
   /* a meeting is filed under EVERY branch it covers */
@@ -811,15 +901,25 @@ export default function MOMTracking() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* branch options: real branches from the employees API */
+  /* branch options: real branches from the employees API. A branch admin
+     ALWAYS gets every branch they hold access to — login branch included —
+     even when a branch has no (visible) employees, so the New Meeting,
+     History and Reports dropdowns list their full access set and nothing
+     else. */
   const branchOptions = useMemo(() => {
+    const seen = new Map();
     if (empSource === 'api' && employees.length) {
-      const seen = new Map();
       employees.forEach((e) => { if (e.branch && !seen.has(e.branch)) seen.set(e.branch, { code: e.branch, name: e.branch_name || e.branch, region: '' }); });
-      return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
     }
-    return [];
-  }, [empSource, employees]);
+    if (!isMaster && me) {
+      if (me.branch && !seen.has(me.branch)) seen.set(me.branch, { code: me.branch, name: me.branch_name || me.branch, region: '' });
+      (me.branches || []).forEach((b) => {
+        if (b?.branch && !seen.has(b.branch)) seen.set(b.branch, { code: b.branch, name: b.branch_name || b.branch, region: '' });
+      });
+    }
+    return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empSource, employees, isMaster, me]);
 
   /* ---- meeting setup (merged into the one-tab sheet screen) ---- */
   const [branches, setBranches] = useState([]);       // MULTI-select — one or more branches per meeting
@@ -831,34 +931,8 @@ export default function MOMTracking() {
   const [attendees, setAttendees] = useState([]);
   const [manualName, setManualName] = useState('');
   const [picked, setPicked] = useState(new Set());    // which master points to discuss
-  /* meeting heads — the logged-in conductor is the first head by default;
-     more heads can be picked from the attendees or typed in manually */
-  const [heads, setHeads] = useState(me?.name ? [me.name] : []);
-  const [manualHead, setManualHead] = useState('');
-  const toggleHead = (n) => {
-    /* the logged-in conductor is always a meeting head — can't be removed */
-    if (n === me?.name) return ping('You conduct this meeting — you always stay a meeting head', 'err');
-    setHeads((p) => p.includes(n) ? p.filter((x) => x !== n) : [...p, n]);
-  };
-  const removeHead = (n) => {
-    if (n === me?.name) return;
-    setHeads((p) => p.filter((x) => x !== n));
-  };
-  const addManualHead = () => {
-    const n = manualHead.trim();
-    if (!n) return;
-    if (heads.some((h) => h.toLowerCase() === n.toLowerCase())) return ping('Already a meeting head', 'err');
-    setHeads((p) => [...p, n]); setManualHead('');
-  };
-  /* head-picker options: the logged-in user + every listed attendee */
-  const headOptions = useMemo(() => {
-    const seen = new Set(); const out = [];
-    [me?.name, ...attendees.map((a) => a.name)].forEach((n) => {
-      if (!n || seen.has(n.toLowerCase())) return;
-      seen.add(n.toLowerCase()); out.push(n);
-    });
-    return out;
-  }, [me, attendees]);
+  /* meeting head — always (and only) the logged-in conductor */
+  const heads = useMemo(() => (me?.name ? [me.name] : []), [me]);
 
   const branchLabel = useMemo(() => branches.map((b) => b.name).join(' + '), [branches]);
 
@@ -885,37 +959,9 @@ export default function MOMTracking() {
   }, [history]);
 
   /* a master row on the sheet counts as "filled" once anything is typed
-     in it — unselecting its point would drop that data with the row */
+     in it — deleting its row (Action column) drops that data with the row */
   const rowFilled = (r) => !!(r && ((r.point || '').trim() || (r.remark || '').trim() || respArr(r.resp).length));
-  const togglePick = (p) => {
-    const on = picked.has(p.id);
-    if (on && rows.some((r) => r.masterId === p.id && rowFilled(r))) {
-      setConfirm({
-        title: 'Unselect this discussion point?',
-        meta: p.title,
-        note: 'This point already has data filled in on the meeting sheet. Unselecting it removes its row — everything typed in it will be lost. Tick it again before opening the sheet to get the data back.',
-        yesLabel: 'Yes, unselect',
-        onYes: () => { setPicked((s) => { const n = new Set(s); n.delete(p.id); return n; }); setConfirm(null); },
-      });
-      return;
-    }
-    setPicked((s) => { const n = new Set(s); if (on) n.delete(p.id); else n.add(p.id); return n; });
-  };
   const pickAll = () => setPicked(new Set(master.map((p) => p.id)));
-  const pickNone = () => {
-    const filled = rows.filter((r) => r.masterId && picked.has(r.masterId) && rowFilled(r)).length;
-    if (filled) {
-      setConfirm({
-        title: 'Clear all selected points?',
-        meta: `${filled} point${filled > 1 ? 's' : ''} already filled on the meeting sheet`,
-        note: 'Clearing the selection removes their rows from the sheet — everything typed in them will be lost.',
-        yesLabel: 'Yes, clear all',
-        onYes: () => { setPicked(new Set()); setConfirm(null); },
-      });
-      return;
-    }
-    setPicked(new Set());
-  };
 
   /* ---- meeting sheet (Step 2) ---- */
   const [rows, setRows] = useState([]);               // current discussion rows
@@ -932,6 +978,9 @@ export default function MOMTracking() {
   const moveCarryToRows = (id) => {
     const c = carry.find((x) => x.id === id);
     if (!c) return;
+    /* a task already marked completed is done — it never joins the new
+       discussion, it just gets recorded with this meeting's review */
+    if (c.status === 'completed') return ping('This task is completed — it can\'t be moved to the current discussion', 'err');
     setCarry((p) => p.filter((x) => x.id !== id));
     setRows((p) => {
       /* if the same Discussion Area is already on the sheet, the carried
@@ -952,69 +1001,133 @@ export default function MOMTracking() {
     const r = rows.find((x) => x.id === id);
     if (!r) return;
     setRows((p) => p.filter((x) => x.id !== id));
-    setCarry((p) => [...p, r]);
+    setCarry((p) => {
+      /* back to its ORIGINAL place in the pending list — the canonical
+         history order keeps same-area tasks together instead of dumping
+         the returned task at the bottom */
+      const order = new Map(collectCarry(history, branches.map((b) => b.code)).map((c, i) => [c.trackId, i]));
+      return [...p, r].sort((a, b) => (order.get(a.trackId) ?? Infinity) - (order.get(b.trackId) ?? Infinity));
+    });
     ping('Task moved back to the previous-meeting pending list');
   };
 
-  const ping = (msg, type = 'ok') => (type === 'err' ? toast.error(msg) : toast.success(msg));
+  /* MOM-only toast behaviour — ERROR messages do NOT auto-dismiss; they stay
+     on screen until the user clicks (or taps) anywhere. Success messages
+     auto-dismiss normally. A click clears any leftover messages, so a new
+     action's toast always starts fresh; leaving the page clears the rest so
+     other pages keep their normal toasts. */
+  const ping = (msg, type = 'ok') => (type === 'err'
+    ? toast.error(msg, { duration: Infinity })
+    : toast.success(msg));
+  useEffect(() => {
+    const clear = () => toast.dismiss();
+    document.addEventListener('mousedown', clear);
+    document.addEventListener('touchstart', clear);
+    return () => {
+      document.removeEventListener('mousedown', clear);
+      document.removeEventListener('touchstart', clear);
+      toast.dismiss();
+    };
+  }, []);
   const catColor = (n) => categories[n] || '#94a3b8';
 
   /* ---------- draft persistence (survives refresh / power cut) ----------
      The whole in-progress wizard — setup fields, branches, attendees,
-     picked points, sheet rows and carried-task edits — is mirrored into
-     localStorage while the user works, restored on the next visit, and
-     cleared when the minutes are saved (resetWizard). */
-  const DRAFT_KEY = `mom_draft_${me?.user_id || 'local'}`;
+     picked points, sheet rows and carried-task edits — is mirrored into the
+     database (mom_drafts, one row per user) while the user works, restored
+     on the next visit from ANY computer, and cleared when the minutes are
+     saved (resetWizard). Stale drafts (> 7 days) are dropped server-side. */
+  const DRAFT_KEY = `mom_draft_${me?.user_id || 'local'}`;   // legacy localStorage slot — migrated then removed
   const draftReady = useRef(false);          // don't overwrite the stored draft before it's been read
+  const [draftChecked, setDraftChecked] = useState(false);   // draft read finished (found or not) — gates the default point fill
+  const draftDirty = useRef(false);          // a draft row exists in the DB — skip pointless DELETEs otherwise
+  const restoreDraft = (d) => {
+    setBranches(d.branches || []);
+    setManualBranches(d.manualBranches || []);
+    if (d.mDate) setMDate(d.mDate);
+    setMLocation(d.mLocation || '');
+    setMType(d.mType || '');
+    setAttendees(d.attendees || []);
+    setPicked(new Set(d.picked || []));
+    setRows(d.rows || []);
+    setCarry(d.carry || []);
+    ping('Restored your unsaved meeting draft');
+  };
   useEffect(() => {
-    if (!isMaster) return;
-    try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (raw) {
-        const d = JSON.parse(raw);
-        const fresh = d && (!d.savedAt || Date.now() - d.savedAt < 7 * 86400000);   // drafts expire after 7 days
-        if (fresh && (d.branches?.length || d.rows?.length || d.mLocation || d.mType)) {
-          setBranches(d.branches || []);
-          setManualBranches(d.manualBranches || []);
-          if (d.mDate) setMDate(d.mDate);
-          setMLocation(d.mLocation || '');
-          setMType(d.mType || '');
-          setAttendees(d.attendees || []);
-          setPicked(new Set(d.picked || []));
-          if (d.heads?.length) setHeads(d.heads);
-          setRows(d.rows || []);
-          setCarry(d.carry || []);
-          ping('Restored your unsaved meeting draft');
-        } else {
-          localStorage.removeItem(DRAFT_KEY);
+    if (!isMomAdmin || !me?.user_id) { draftReady.current = true; setDraftChecked(true); return; }
+    axios.get(`${MOM_API}/draft`, { headers: authHeaders })
+      .then(({ data }) => {
+        const d = data?.draft;
+        if (d) draftDirty.current = true;
+        if (d && (d.branches?.length || d.rows?.length || d.mLocation || d.mType)) {
+          restoreDraft(d);
+          return;
         }
-      }
-    } catch { try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ } }
-    draftReady.current = true;
+        /* one-time migration: a draft saved by the old localStorage version
+           is restored once (the debounced save then mirrors it to the DB) */
+        try {
+          const raw = localStorage.getItem(DRAFT_KEY);
+          if (raw) {
+            const old = JSON.parse(raw);
+            const fresh = old && (!old.savedAt || Date.now() - old.savedAt < 7 * 86400000);
+            if (fresh && (old.branches?.length || old.rows?.length || old.mLocation || old.mType)) restoreDraft(old);
+            localStorage.removeItem(DRAFT_KEY);
+          }
+        } catch { try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ } }
+      })
+      .catch(() => { /* draft endpoint unreachable — start fresh, typing is still auto-saved once it's back */ })
+      .finally(() => { draftReady.current = true; setDraftChecked(true); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    if (!isMaster || !draftReady.current) return undefined;
-    const t = setTimeout(() => {                       // small debounce — don't write on every keystroke
-      try {
-        const hasData = branches.length || rows.length || carry.length || attendees.length
-          || picked.size || mLocation.trim() || mType.trim();
-        if (!hasData) { localStorage.removeItem(DRAFT_KEY); return; }
-        localStorage.setItem(DRAFT_KEY, JSON.stringify({
+    if (!isMomAdmin || !me?.user_id || !draftReady.current) return undefined;
+    const t = setTimeout(() => {                       // small debounce — don't hit the API on every keystroke
+      /* the untouched default sheet (all master points, nothing typed) is
+         NOT a draft — only real work is mirrored to the DB */
+      const hasData = branches.length || carry.length || attendees.length
+        || rows.some((r) => rowFilled(r) || r.flag === 'T' || (r.due || '').trim())
+        || mLocation.trim() || mType.trim();
+      if (!hasData) {
+        if (draftDirty.current) {
+          draftDirty.current = false;
+          axios.delete(`${MOM_API}/draft`, { headers: authHeaders }).catch(() => { /* offline — nothing to keep anyway */ });
+        }
+        return;
+      }
+      axios.put(`${MOM_API}/draft`, {
+        data: {
           branches, manualBranches, mDate, mLocation, mType, heads,
           attendees, picked: [...picked], rows, carry, savedAt: Date.now(),
-        }));
-      } catch { /* storage full / unavailable — draft simply not kept */ }
-    }, 400);
+        },
+      }, { headers: authHeaders })
+        .then(() => { draftDirty.current = true; })
+        .catch(() => { /* offline / server busy — next edit retries */ });
+    }, 800);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMaster, branches, manualBranches, mDate, mLocation, mType, heads, attendees, picked, rows, carry]);
+  }, [isMomAdmin, branches, manualBranches, mDate, mLocation, mType, heads, attendees, picked, rows, carry]);
+
+  /* ---------- default sheet: every master point on the table ----------
+     The discussion box starts EMPTY — nothing is pre-filled by default.
+     Only once the admin selects a branch (and the draft check is done, and
+     the real master list has arrived or its load failed) does an untouched
+     wizard get ALL points pre-selected. A restored draft or any filled row
+     skips this — the user's own state always wins. */
+  const autoPickDone = useRef(false);
+  useEffect(() => {
+    if (!isMomAdmin || !draftChecked || autoPickDone.current) return;
+    if (API_BASE_URL && histSource === 'loading') return;
+    if (!branches.length) return;          // sheet stays empty until a branch is chosen
+    autoPickDone.current = true;
+    if (!picked.size && !rows.some(rowFilled)) pickAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMomAdmin, draftChecked, histSource, master, branches]);
 
   /* header pills — latest state per tracked task, meetings counted once
      even when they cover several branches */
   const stats = useMemo(() => {
     const uniq = new Map();
-    Object.values(history).forEach((ms) => ms.forEach((m) => uniq.set(m.id, m)));
+    Object.values(scopedHistory).forEach((ms) => ms.forEach((m) => uniq.set(m.id, m)));
     let open = 0, overdue = 0;
     const seen = new Set();
     [...uniq.values()].sort((a, b) => (b.date || '').localeCompare(a.date || '')).forEach((m) => m.rows.forEach((r) => {
@@ -1023,19 +1136,19 @@ export default function MOMTracking() {
       if (r.status !== 'completed') { open++; if (isOverdue(r)) overdue++; }
     }));
     return { meetings: uniq.size, open, overdue };
-  }, [history]);
+  }, [scopedHistory]);
 
   /* branch list for the History dropdown in the tab row — real branches plus
      history-only (manually added) ones that still have meetings */
   const histAllBranches = useMemo(() => {
     const map = new Map(branchOptions.map((b) => [b.code, { ...b }]));
-    Object.keys(history).forEach((code) => {
-      if (map.has(code) || !(history[code] || []).length) return;
-      const m = history[code][0];
+    Object.keys(scopedHistory).forEach((code) => {
+      if (map.has(code) || !(scopedHistory[code] || []).length) return;
+      const m = scopedHistory[code][0];
       map.set(code, { code, name: m?.branches?.find((x) => x.code === code)?.name || m?.branchName || code, manual: true });
     });
     return [...map.values()];
-  }, [branchOptions, history]);
+  }, [branchOptions, scopedHistory]);
 
   /* employees belonging to one branch */
   const branchEmployees = (b) => {
@@ -1173,9 +1286,9 @@ export default function MOMTracking() {
   const togglePresent = (id) => setAttendees((p) => p.map((a) => a.id === id ? { ...a, present: !a.present } : a));
   const removeAttendee = (id) => setAttendees((p) => p.filter((a) => a.id !== id));
 
-  /* one-tab mode: ticking a master point adds its row to the sheet
-     instantly, unticking removes it (togglePick / pickNone warn first when
-     the row is filled). Rows already typed against a still-ticked point are
+  /* one-tab mode: every picked master point owns a row on the sheet (ALL
+     points are picked once a branch is selected; deleting a row via its
+     Action column unpicks the point). Rows already typed against a still-picked point are
      kept untouched; custom rows always survive. Skips the very first run so
      a restored draft's rows aren't wiped before its picked-set lands. */
   const rowSyncReady = useRef(false);
@@ -1216,17 +1329,20 @@ export default function MOMTracking() {
   }, [history]);
 
   const resetWizard = () => {
-    setBranches([]); setAttendees([]); setManualName(''); setPicked(new Set()); setShowAllAtt(false);
+    setBranches([]); setAttendees([]); setManualName(''); setShowAllAtt(false);
     setManualBranch('');
-    setHeads(me?.name ? [me.name] : []); setManualHead('');
     setMDate(iso(new Date())); setMLocation(''); setMType('');
     setRows([]); setCarry([]);
+    setPicked(new Set());                      // back to the empty sheet — points load again on branch select
+    autoPickDone.current = false;
+    if (me?.user_id) axios.delete(`${MOM_API}/draft`, { headers: authHeaders }).catch(() => { /* offline — stale draft expires in 7 days anyway */ });
     try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ }
   };
   /* the top-bar Reset button — warns before wiping the whole wizard */
   const askReset = () => {
-    const hasData = branches.length || rows.length || carry.length || attendees.length
-      || picked.size || mLocation.trim() || mType.trim();
+    /* the untouched default sheet doesn't count as data — reset silently */
+    const hasData = branches.length || carry.length || attendees.length
+      || rows.some(rowFilled) || mLocation.trim() || mType.trim();
     if (!hasData) { resetWizard(); return; }
     setConfirm({
       title: 'Reset this meeting?',
@@ -1295,7 +1411,13 @@ export default function MOMTracking() {
       onYes: () => { delRow(r.id); setConfirm(null); },
     });
   };
+  /* master points not yet on the sheet — the only Discussion Areas a new
+     row can take; when none are left the Add-row footer disappears */
+  const unpickedMaster = useMemo(() => master.filter((p) => !picked.has(p.id)), [master, picked]);
+  const hasBlankRow = rows.some((r) => !r.masterId && !(r.area || '').trim());
   const addRow = () => {
+    /* one pending row at a time — pick its Discussion Area first, then add more */
+    if (hasBlankRow) { ping('Select a discussion area for the new row first', 'err'); return; }
     const defCat = newCat || Object.keys(categories)[0] || '';
     setRows((p) => [...p, { id: uid(), trackId: uid('t'), masterId: null, area: '', category: defCat, point: '', resp: [], due: '', flag: 'I', status: 'pending', remark: '', originDate: mDate, prevRemarks: [] }]);
   };
@@ -1316,6 +1438,12 @@ export default function MOMTracking() {
      land on the full carry list by id) */
   const [carryStatusF, setCarryStatusF] = useState([]);   // ['pending','overdue',…]
   const [carryCatF, setCarryCatF] = useState([]);         // category names
+
+  /* discussion-table sorting — click the Category / Discussion Area header
+     to sort its GROUPS A→Z, again for Z→A, again for the natural (master)
+     order. Display-only: the underlying rows state keeps its order, so the
+     points↔rows sync and editing by id are untouched. */
+  const { sort: sheetSort, toggle: toggleSheetSort } = useSort();
 
   /* dual scrollbar for the carried-tasks table — a thin phantom bar on top
      mirrors the real container so users can scroll right without first
@@ -1344,6 +1472,65 @@ export default function MOMTracking() {
       window.removeEventListener('resize', syncPhantomWidth);
     };
   });
+  /* keep each sheet box's WHOLE top — its title bar (with counts / filters /
+     export), the thin left–right scrollbar and the table's column-title row —
+     visible while the PAGE scrolls over the box. position:sticky can't
+     escape the horizontal-scroll wrapper, so the block is offset by the
+     scrolled amount instead; once the box's bottom passes, the block
+     scrolls away with it (no fixed heights, natural table size). */
+  useEffect(() => {
+    /* semi-transparent header tints must turn solid while floating over
+       rows — blend the computed colour with the theme's surface colour
+       (white in light mode, #171a20 in dark) and cache it per theme */
+    const isDark = () => document.documentElement.classList.contains('dark');
+    const solidBg = (el) => {
+      const base = isDark() ? [23, 26, 32] : [255, 255, 255];
+      const m = getComputedStyle(el).backgroundColor.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/);
+      if (!m) return isDark() ? '#171a20' : '#fff';
+      const a = m[4] === undefined ? 1 : parseFloat(m[4]);
+      const ch = (v, i) => Math.round(v * a + base[i] * (1 - a));
+      return `rgb(${ch(+m[1], 0)}, ${ch(+m[2], 1)}, ${ch(+m[3], 2)})`;
+    };
+    const apply = () => {
+      [carryMainScrollRef.current, mainScrollRef.current].forEach((c) => {
+        if (!c) return;
+        const thead = c.querySelector('thead');
+        const box = c.parentElement;
+        if (!thead || !box) return;
+        const pre = [];                          // everything in the box above the table wrapper
+        for (let el = c.previousElementSibling; el; el = el.previousElementSibling) pre.push(el);
+        const preH = pre.reduce((s, el) => s + el.offsetHeight, 0);
+        const headH = thead.offsetHeight || 0;
+        const boxRect = box.getBoundingClientRect();
+        const off = Math.min(Math.max(0, -boxRect.top), Math.max(0, boxRect.height - (preH + headH)));
+        pre.forEach((el) => {
+          const t = off ? `translateY(${off}px)` : '';
+          if (el.style.transform !== t) el.style.transform = t;
+          el.style.position = off ? 'relative' : '';
+          el.style.zIndex = off ? '40' : '';
+          if (off) {
+            const theme = isDark() ? 'd' : 'l';
+            if (el.dataset.pinbgTheme !== theme) {           // theme switched — recompute the solid colour
+              el.dataset.pinbgTheme = theme;
+              el.style.backgroundColor = '';
+              el.dataset.pinbg = solidBg(el);
+            }
+            if (!el.dataset.pinbg) el.dataset.pinbg = solidBg(el);
+            el.style.backgroundColor = el.dataset.pinbg;
+          } else el.style.backgroundColor = '';
+        });
+        thead.querySelectorAll('th').forEach((th) => {
+          th.style.position = 'relative';
+          th.style.top = `${off}px`;
+          th.style.zIndex = off ? '30' : '';
+        });
+      });
+    };
+    apply();
+    window.addEventListener('scroll', apply, true);
+    window.addEventListener('resize', apply);
+    return () => { window.removeEventListener('scroll', apply, true); window.removeEventListener('resize', apply); };
+  }, []);
   const toggleIn = (setter) => (v) => setter((p) => p.includes(v) ? p.filter((x) => x !== v) : [...p, v]);
   const toggleCarryStatus = toggleIn(setCarryStatusF);
   const toggleCarryCat = toggleIn(setCarryCatF);
@@ -1371,8 +1558,32 @@ export default function MOMTracking() {
     if (!mType.trim()) return ping('Set the meeting type (pick one or type your own)', 'err');
     if (!attendees.some((a) => a.present)) return ping('Mark at least one attendee as present', 'err');
     if (unassigned) return ping(`${unassigned} Task row(s) have no Responsibility — assign someone or switch them to "I"`, 'err');
-    if (taskCount === 0 && infoCount === 0 && carry.length === 0)
-      return ping('Nothing recorded yet — note at least one point or assign a task', 'err');
+    /* a row that is a Task (or has people assigned) MUST say what was
+       discussed — an empty Discussion point is never accepted */
+    const emptyPoint = rows.filter((r) => (r.flag === 'T' || respArr(r.resp).length) && !(r.point || '').trim());
+    if (emptyPoint.length) {
+      const areas = [...new Set(emptyPoint.map((r) => r.area || '—'))].join(', ');
+      Swal.fire({
+        icon: 'warning',
+        title: 'Discussion point is empty',
+        html: `<div style="font-size:13px;line-height:1.7">${emptyPoint.length} row${emptyPoint.length > 1 ? 's have' : ' has'} a task / responsibility assigned but <b>no Discussion point written</b>:<br/><b>${areas}</b><br/><br/>Write what was discussed / decided in the point box, or switch the row back to "I" and clear it.</div>`,
+        confirmButtonColor: '#2f3192',
+        confirmButtonText: 'OK, got it',
+      });
+      return undefined;
+    }
+    /* nothing on the sheet — no Discussion Area / Point filled in, no task
+       assigned and no carried task reviewed → block the finalize */
+    if (taskCount === 0 && infoCount === 0 && carry.length === 0) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Nothing to finalize',
+        html: '<div style="font-size:13px;line-height:1.7">No discussion has been recorded yet.<br/>Write at least one <b>Discussion Point</b> (or assign a task) on the meeting sheet before finalizing the minutes.</div>',
+        confirmButtonColor: '#2f3192',
+        confirmButtonText: 'OK, got it',
+      });
+      return undefined;
+    }
     setConfirm({
       title: 'Finalize minutes?',
       meta: `${branchLabel} · ${fmt(mDate)} · ${mType}`,
@@ -1397,7 +1608,6 @@ export default function MOMTracking() {
           rows: allRows.map((r) => ({
             trackId: r.trackId, masterId: r.masterId ?? null, area: r.area, category: r.category,
             point: r.point || '', resp: respArr(r.resp),
-            assignedBy: r.assignedBy || '', headResp: r.headResp || '',
             due: r.due || '', flag: r.flag,
             status: r.status, remark: r.remark || '', originDate: r.originDate || r.srcDate || '',
             carried: !!r.carried, prevRemarks: r.prevRemarks || [],
@@ -1452,9 +1662,10 @@ export default function MOMTracking() {
     updatePoint: (id, data) => axios.put(`${MOM_API}/master-points/${id}`, data, { headers: authHeaders }),
     deletePoint: (id) => axios.delete(`${MOM_API}/master-points/${id}`, { headers: authHeaders }),
     addMeetingType: (name) => axios.post(`${MOM_API}/meeting-types`, { name }, { headers: authHeaders }).then((r) => r.data.item),
+    updateMeetingType: (id, name) => axios.put(`${MOM_API}/meeting-types/${id}`, { name }, { headers: authHeaders }),
     deleteMeetingType: (id) => axios.delete(`${MOM_API}/meeting-types/${id}`, { headers: authHeaders }),
     addCategory: (name, color) => axios.post(`${MOM_API}/categories`, { name, color }, { headers: authHeaders }),
-    updateCategory: (name, color) => axios.put(`${MOM_API}/categories/${encodeURIComponent(name)}`, { color }, { headers: authHeaders }),
+    updateCategory: (name, data) => axios.put(`${MOM_API}/categories/${encodeURIComponent(name)}`, data, { headers: authHeaders }),
     deleteCategory: (name) => axios.delete(`${MOM_API}/categories/${encodeURIComponent(name)}`, { headers: authHeaders }),
   } : null;
 
@@ -1503,7 +1714,7 @@ export default function MOMTracking() {
         {/* ===== VIEW TABS ===== */}
         <div className="kc-in flex items-center justify-between gap-2 mb-4 flex-wrap">
           <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm w-fit max-sm:max-w-full max-sm:overflow-x-auto">
-            {(isMaster
+            {(isMomAdmin
               ? [{ k: 'new', label: 'New meeting', icon: Zap }, { k: 'history', label: 'MOM History', icon: FileText }, { k: 'reports', label: 'Reports', icon: BarChart3 }, { k: 'mine', label: 'Employee report', icon: Users }]
               : [{ k: 'mine', label: 'My MOM', icon: Users }]
             ).map((t) => (
@@ -1512,17 +1723,34 @@ export default function MOMTracking() {
               </button>
             ))}
           </div>
-          {isMaster && view === 'history' && (
-            <select value={histBranch || '__all__'} onChange={(e) => setHistBranch(e.target.value)}
-              className="kc-input px-2 py-1.5 fs-12 font-bold text-gray-800 bg-white shadow-sm"
-              title="Filter MOM History by branch" style={{ maxWidth: '16rem' }}>
-              <option value="__all__">All branches - {stats.meetings}</option>
-              {histAllBranches.map((b) => (
-                <option key={b.code} value={b.code}>{b.name} - {(history[b.code] || []).length}{b.manual ? ' · manual' : ''}</option>
-              ))}
-            </select>
+          {isMomAdmin && view === 'history' && (
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* meeting-date range — scopes the KPI boxes, list, drill-downs & exports */}
+              <span className="kc-input flex items-center gap-1.5 px-2 py-1 bg-white shadow-sm" title="Show meetings held on or after this date">
+                <span className="fs-9 font-bold uppercase text-gray-400">From</span>
+                <input type="date" value={histFrom} max={histTo || undefined} onChange={(e) => setHistFrom(e.target.value)} className="fs-11 font-semibold text-gray-700 outline-none bg-transparent" />
+              </span>
+              <span className="kc-input flex items-center gap-1.5 px-2 py-1 bg-white shadow-sm" title="Show meetings held on or before this date">
+                <span className="fs-9 font-bold uppercase text-gray-400">To</span>
+                <input type="date" value={histTo} min={histFrom || undefined} onChange={(e) => setHistTo(e.target.value)} className="fs-11 font-semibold text-gray-700 outline-none bg-transparent" />
+              </span>
+              {(histFrom || histTo) && (
+                <button type="button" onClick={() => { setHistFrom(''); setHistTo(''); }}
+                  className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 fs-10 font-bold text-gray-500 hover:text-red-400 hover:bg-red-50 shadow-sm" title="Clear the date filter">
+                  Clear
+                </button>
+              )}
+              <select value={histBranch || '__all__'} onChange={(e) => setHistBranch(e.target.value)}
+                className="kc-input px-2 py-1.5 fs-12 font-bold text-gray-800 bg-white shadow-sm"
+                title="Filter MOM History by branch" style={{ maxWidth: '16rem' }}>
+                <option value="__all__">{isMaster ? 'All branches' : 'All my branches'} - {stats.meetings}</option>
+                {histAllBranches.map((b) => (
+                  <option key={b.code} value={b.code}>{b.name} - {(history[b.code] || []).length}{b.manual ? ' · manual' : ''}</option>
+                ))}
+              </select>
+            </div>
           )}
-          {isMaster && view === 'new' && (
+          {isMomAdmin && view === 'new' && (
             <button onClick={askReset} title="Clear the whole meeting and start over"
               className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 fs-12 font-semibold transition shadow-sm"
               style={{ background: 'rgba(248,113,113,0.10)', borderColor: 'rgba(248,113,113,0.35)', color: '#ef4444' }}
@@ -1556,8 +1784,10 @@ export default function MOMTracking() {
                   {canExport && <button onClick={exportDraft} className="export-btn kc-lift inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 fs-11 font-semibold" style={{ borderColor: '#dfe3f2', color: INK }}><Upload size={13} /> Export Excel</button>}
                 </div>
               </div>
-              {/* meta grid — narrow Date, wider Location / Branch(es) / Type, all editable in place */}
-              <div className="grid grid-cols-2 lg:grid-cols-[0.6fr_1.1fr_1fr_1fr_1.2fr] divide-x divide-gray-100 border-b border-gray-100 max-sm:grid-cols-1">
+              {/* meta grid — 2 rows × 4 boxes sharing ONE column template so the
+                  boxes line up: narrow first column (Date / Meeting heads),
+                  the other three equal. Row 1: Date · Location · Branch(es) · Type */}
+              <div className="grid grid-cols-2 lg:grid-cols-[0.55fr_1fr_1fr_1fr] divide-x divide-gray-100 border-b border-gray-100 max-sm:grid-cols-1">
                 {/* Date */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
@@ -1628,12 +1858,16 @@ export default function MOMTracking() {
                           ? <>last meeting across selected: <b className="text-gray-600">{fmt(lastAcross)}</b>{carryPreview > 0 && <span className="ml-1.5 rounded-full px-1.5 py-0.5 font-bold" style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171' }}>{carryPreview} open task{carryPreview > 1 ? 's' : ''} carry forward</span>}</>
                           : 'employees of selected branches auto-load as attendees'}
                       </div>
-                      <div className="flex items-center gap-1.5 px-2.5 py-2 border-t border-gray-100" style={{ background: '#fafafc' }}>
-                        <Building2 size={12} className="text-gray-400 flex-shrink-0" />
-                        <input value={manualBranch} onChange={(e) => setManualBranch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addManualBranch()}
-                          placeholder="Branch not on the list? Add manually…" className="kc-input flex-1 fs-11 text-gray-700 outline-none min-w-0 px-2 py-1" />
-                        <button onClick={addManualBranch} className="rounded-lg px-2.5 py-1 fs-10 font-bold text-white flex-shrink-0" style={{ background: BRAND }}>Add</button>
-                      </div>
+                      {/* Manual branch entry is master-only — a branch admin can only
+                          run meetings for the branches they hold access to */}
+                      {isMaster && (
+                        <div className="flex items-center gap-1.5 px-2.5 py-2 border-t border-gray-100" style={{ background: '#fafafc' }}>
+                          <Building2 size={12} className="text-gray-400 flex-shrink-0" />
+                          <input value={manualBranch} onChange={(e) => setManualBranch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addManualBranch()}
+                            placeholder="Branch not on the list? Add manually…" className="kc-input flex-1 fs-11 text-gray-700 outline-none min-w-0 px-2 py-1" />
+                          <button onClick={addManualBranch} className="rounded-lg px-2.5 py-1 fs-10 font-bold text-white flex-shrink-0" style={{ background: BRAND }}>Add</button>
+                        </div>
+                      )}
                     </Dropdown>
                   </div>
                 </div>
@@ -1702,63 +1936,22 @@ export default function MOMTracking() {
                     })()}
                   </div>
                 </div>
-                {/* Meeting heads — the logged-in conductor plus any other head(s) */}
+              </div>
+              {/* ---- row 2: meeting heads · attendees · add employee / guest · legend
+                   (same column template as row 1 so the columns align) ---- */}
+              <div className="grid grid-cols-2 lg:grid-cols-[0.55fr_1fr_1fr_1fr] divide-x divide-gray-100 max-sm:grid-cols-1">
+                {/* Meeting head — always the logged-in conductor (read-only);
+                    the tooltip carries the full name when it's too long */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
                     <div className="fs-9 font-bold uppercase tracking-wide text-black pb-1">Meeting heads</div>
-                    <Dropdown panelClass="w-72 max-w-[90vw]"
-                      trigger={({ open, toggle }) => (
-                        <button type="button" onClick={toggle}
-                          className="kc-input mt-0.5 w-full flex items-center justify-between gap-1.5 px-2 py-1 fs-12 font-semibold text-gray-800 text-left"
-                          title={heads.length ? heads.join(', ') : 'Select one or more meeting heads'}
-                          style={open ? { borderColor: BRAND, background: '#fff', boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}}>
-                          <span className="truncate flex-1 min-w-0" style={!heads.length ? { color: '#9ca3af', fontWeight: 500, fontSize: '10px' } : {}}>
-                            {heads.length ? heads.join(', ') : 'Select heads…'}
-                          </span>
-                          <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
-                        </button>
-                      )}>
-                      <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-black border-b border-gray-100 flex items-center justify-between gap-2">
-                        <span>Meeting heads — one or more</span>
-                        <span className="rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: INK }}>{heads.length}</span>
-                      </div>
-                      <div className="max-h-52 overflow-y-auto kc-scroll py-1">
-                        {[...new Set([...headOptions, ...heads])].map((n) => {
-                          const on = heads.includes(n);
-                          const isSelf = n === me?.name;
-                          return (
-                            <div key={n} role="button" tabIndex={0} onClick={() => toggleHead(n)}
-                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleHead(n); } }}
-                              className={`w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50 ${isSelf ? 'cursor-default' : 'cursor-pointer'}`}
-                              title={isSelf ? 'You conduct this meeting — always a meeting head' : (on ? 'Untick to remove as head' : 'Tick to make a meeting head')}>
-                              <span className="h-4 w-4 rounded border flex items-center justify-center flex-shrink-0" style={on ? { background: isSelf ? '#9ca3af' : BRAND, borderColor: isSelf ? '#9ca3af' : BRAND } : { borderColor: '#cfcfe0' }}>
-                                {on && <Check size={11} color="#fff" className="kc-pop" />}
-                              </span>
-                              <span className={`fs-11 flex-1 min-w-0 truncate text-gray-700 ${on ? 'font-semibold' : ''}`}>{n}</span>
-                              {isSelf
-                                ? <span className="fs-9 font-bold rounded-full px-1.5 py-0.5 flex-shrink-0" style={{ background: BRAND_SOFT, color: INK }}>you</span>
-                                : on && (
-                                  <button type="button" onClick={(e) => { e.stopPropagation(); removeHead(n); }}
-                                    className="flex-shrink-0 rounded-lg p-1 text-gray-300 hover:text-red-400 hover:bg-red-50" title="Remove this meeting head">
-                                    <Trash2 size={12} />
-                                  </button>
-                                )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <div className="flex items-center gap-1.5 px-2.5 py-2 border-t border-gray-100" style={{ background: '#fafafc' }}>
-                        <Crown size={12} className="text-gray-400 flex-shrink-0" />
-                        <input value={manualHead} onChange={(e) => setManualHead(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addManualHead()}
-                          placeholder="Head not on the list? Add manually…" className="kc-input flex-1 fs-11 text-gray-700 outline-none min-w-0 px-2 py-1" />
-                        <button onClick={addManualHead} className="rounded-lg px-2.5 py-1 fs-10 font-bold text-white flex-shrink-0" style={{ background: BRAND }}>Add</button>
-                      </div>
-                    </Dropdown>
+                    <div className="kc-input mt-0.5 w-full flex items-center gap-1.5 px-2 py-1" title={me?.name || ''}>
+                      <Crown size={12} className="text-gray-400 flex-shrink-0" />
+                      <span className="truncate flex-1 min-w-0 fs-12 font-semibold text-gray-800">{me?.name || '—'}</span>
+                      <span className="fs-9 font-bold rounded-full px-1.5 py-0.5 flex-shrink-0" style={{ background: BRAND_SOFT, color: INK }}>you</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-              {/* ---- row 2: attendees · add employee / guest · points to discuss · legend ---- */}
-              <div className="grid grid-cols-2 lg:grid-cols-[1.1fr_1fr_1.2fr_0.7fr] divide-x divide-gray-100 max-sm:grid-cols-1">
                 {/* Attendees — count in the box, full list (present toggles) in the dropdown */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
@@ -1817,49 +2010,6 @@ export default function MOMTracking() {
                     </div>
                   </div>
                 </div>
-                {/* Points to discuss — ticking a point adds its row to the sheet instantly */}
-                <div className="px-3 py-2 flex items-center gap-2 min-w-0">
-                  <div className="min-w-0 flex-1">
-                    <div className="fs-9 font-bold uppercase tracking-wide text-black pb-1">Points to discuss</div>
-                    <Dropdown hover panelClass="w-80 max-w-[90vw]"
-                      trigger={({ open, toggle }) => (
-                        <button type="button" onClick={toggle}
-                          className="kc-input mt-0.5 w-full flex items-center justify-between gap-1.5 px-2 py-1 fs-12 font-semibold text-gray-800 text-left"
-                          style={open ? { borderColor: BRAND, background: '#fff', boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}}>
-                          <span className="truncate flex-1" style={!picked.size ? { color: '#9ca3af', fontWeight: 500, fontSize: '10px' } : {}}>
-                            {picked.size ? `${picked.size} of ${master.length} selected` : 'Select master points…'}
-                          </span>
-                          <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
-                        </button>
-                      )}>
-                  <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-black border-b border-gray-100 flex items-center justify-between gap-2">
-                    <span>Master discussion areas</span>
-                    <span className="flex items-center gap-1 normal-case tracking-normal">
-                      <button type="button" onClick={pickAll} className="fs-10 font-bold hover:underline" style={{ color: BRAND }}>Select all</button>
-                      <span className="text-gray-300">·</span>
-                      <button type="button" onClick={pickNone} className="fs-10 font-bold hover:underline" style={{ color: BRAND }}>Clear</button>
-                    </span>
-                  </div>
-                  <div className="max-h-60 overflow-y-auto kc-scroll py-1">
-                    {master.map((p) => {
-                      const on = picked.has(p.id);
-                      return (
-                        <button key={p.id} type="button" onClick={() => togglePick(p)} className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50">
-                          <span className="h-4 w-4 rounded border flex items-center justify-center flex-shrink-0" style={on ? { background: BRAND, borderColor: BRAND } : { borderColor: '#cfcfe0' }}>
-                            {on && <Check size={11} color="#fff" className="kc-pop" />}
-                          </span>
-                          <span className={`fs-11 flex-1 min-w-0 truncate text-gray-700 ${on ? 'font-semibold' : ''}`} title={p.title}>{p.title}</span>
-                          <span className="fs-9 font-medium px-1.5 py-0.5 rounded flex-shrink-0" style={{ color: 'var(--mom-chip-fg)', background: 'var(--mom-chip-bg)' }}>{p.category}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="px-3 py-1.5 border-t border-gray-100 fs-10 text-gray-400" style={{ background: '#fafbfd' }}>
-                    ticked points appear as rows on the sheet below — untick removes the row (warns if filled)
-                  </div>
-                    </Dropdown>
-                  </div>
-                </div>
                 {/* Action-flag legend */}
                 <div className="px-3 py-2 flex items-center gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
@@ -1889,11 +2039,11 @@ export default function MOMTracking() {
                       <button type="button" onClick={() => {
                         const gs = groupConsecutive(shownCarry, (c) => (c.area || '').trim().toLowerCase());
                         exportTableExcel('MOM_pending_tasks',
-                          ['Sr. No.', 'Discussion Area', 'Discussion Points', 'Responsibility', 'Assigned by (Head)', 'Flag', 'Due Date', 'Previous remarks', 'Remark — this meeting', 'Status'],
+                          ['Sr. No.', 'Discussion Area', 'Discussion Points', 'Responsibility', 'Flag', 'Due Date', 'Previous remarks', 'Remark — this meeting', 'Status'],
                           gs.flatMap((g, gIdx) => g.items.map((c) => [
-                            gIdx + 1, c.area, c.point || '', respArr(c.resp).join(', '), c.assignedBy || '', c.flag, c.due ? fmtDDMMYY(c.due) : '', remarksText(c.prevRemarks), c.remark || '', STATUS[c.status]?.label || c.status,
+                            gIdx + 1, c.area, c.point || '', respArr(c.resp).join(', '), c.flag, c.due ? fmtDDMMYY(c.due) : '', remarksText(c.prevRemarks), c.remark || '', STATUS[c.status]?.label || c.status,
                           ])),
-                          { mergeCols: [0, 1], groupSizes: gs.map((g) => g.items.length) }).catch(() => toast.error('Could not generate the Excel file'));
+                          { mergeCols: [0, 1], leftCols: [1], groupSizes: gs.map((g) => g.items.length) }).catch(() => toast.error('Could not generate the Excel file'));
                       }}
                         className={XL_BTN} title="Download this pending-tasks table as Excel">
                         <Upload size={11} /> Export Excel
@@ -1943,19 +2093,20 @@ export default function MOMTracking() {
                     ))}
                   </div>
                 </div>
-                <div ref={carryTopScrollRef} className="overflow-x-auto kc-scroll" style={{ overflowY: 'hidden' }}>
+                {/* thin left–right scrollbar — tinted like the header row below so
+                     the title bar, scrollbar and column titles read as ONE block */}
+                <div ref={carryTopScrollRef} className="overflow-x-auto kc-scroll" style={{ overflowY: 'hidden', height: 8, background: '#f1f3fb' }}>
                   <div style={{ width: CARRY_MINW, height: 1 }} />
                 </div>
                 <div ref={carryMainScrollRef} className="overflow-x-auto kc-scroll rounded-b-2xl">
-                  <table className="mom-sheet w-full fs-12" style={{ borderCollapse: 'collapse', minWidth: CARRY_MINW }}>
+                  <table className="mom-sheet mom-stickyhead w-full fs-12" style={{ borderCollapse: 'collapse', minWidth: CARRY_MINW }}>
                     <thead>
                       <tr style={{ background: '#f1f3fb', color: INK }}>
                         <th className="px-1 py-2 fs-10 font-bold" style={{ width: '2.6rem' }} title="Tick to move the task into the current-meeting discussion">Discuss</th>
                         <th className="px-1 py-2 fs-11 font-bold" style={{ width: '2rem' }}>Sr. No.</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '10rem' }}>Discussion Area</th>
+                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '8rem' }}>Discussion Area</th>
                         <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '12rem' }}>Discussion Points</th>
                         <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7rem' }}>Responsibility</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '6.5rem' }}>Assigned by (Head)</th>
                         <th className="px-1 py-2 fs-10 font-bold" style={{ width: '3rem' }}>Flag</th>
                         <th className="px-1 py-2 fs-11 font-bold" style={{ width: '6rem' }}>Due Date</th>
                         <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '18rem' }}>Previous remarks</th>
@@ -1965,7 +2116,7 @@ export default function MOMTracking() {
                     </thead>
                     <tbody>
                       {shownCarry.length === 0 && (
-                        <tr><td colSpan={11} className="px-3 py-5 text-center fs-12 text-gray-400">No carried tasks match the current status / category filter.</td></tr>
+                        <tr><td colSpan={10} className="px-3 py-5 text-center fs-12 text-gray-400">No carried tasks match the current status / category filter.</td></tr>
                       )}
                       {groupConsecutive(shownCarry, (c) => (c.area || '').toLowerCase()).flatMap((g, gIdx) => g.items.map((c, gi) => {
                         const od = c.due ? daysFromDue(c.due) : 0;
@@ -1974,17 +2125,18 @@ export default function MOMTracking() {
                           <tr key={c.id} className={c.status === 'completed' ? 'opacity-60' : ''}>
                             <td className="px-1 py-2 text-center">
                               <input type="checkbox" checked={false} onChange={() => moveCarryToRows(c.id)}
-                                className="h-4 w-4 cursor-pointer align-middle" style={{ accentColor: BRAND }}
-                                title="Tick to move this task into the current-meeting discussion table below" />
+                                disabled={c.status === 'completed'}
+                                className={`h-4 w-4 align-middle ${c.status === 'completed' ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`} style={{ accentColor: BRAND }}
+                                title={c.status === 'completed' ? 'Completed — this task can\'t be moved to the current discussion' : 'Tick to move this task into the current-meeting discussion table below'} />
                             </td>
                             {gi === 0 && <td rowSpan={g.items.length} className="px-1 py-2 text-center text-black align-middle">{gIdx + 1}</td>}
-                            {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 align-middle text-center">
+                            {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 align-middle text-left">
                               <span className="font-semibold text-black">{c.area}</span>
                             </td>}
                             <td className="px-2 py-2">
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 {c.point
-                                  ? <span className={`fs-11 text-black ${c.status === 'completed' ? 'line-through' : ''}`} style={{ whiteSpace: 'pre-wrap' }}>{c.point}</span>
+                                  ? <span className={`fs-11 text-black min-w-0 flex-1 ${c.status === 'completed' ? 'line-through' : ''}`}><BulletText text={c.point} /></span>
                                   : <span className="fs-11 text-gray-300">—</span>}
                                 {isOd && <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 fs-9 font-semibold" style={{ background: STATUS.overdue.soft, color: STATUS.overdue.color }}><AlertTriangle size={9} /> {od}d overdue</span>}
                               </div>
@@ -2000,16 +2152,19 @@ export default function MOMTracking() {
                                 </div>
                               ) : <span className="fs-11 text-gray-300">—</span>}
                             </td>
-                            <td className="px-2 py-2 text-center fs-11 text-black" title='Read-only — tick "Discuss" to edit this on the current-meeting sheet'>{c.assignedBy || <span className="text-gray-300">—</span>}</td>
                             <td className="px-2 py-2 text-center"><FlagChip f={c.flag} small /></td>
                             <td className="px-2 py-2 text-center fs-11 text-black" title='Read-only — tick "Discuss" to edit this on the current-meeting sheet'>{c.due ? fmt(c.due) : <span className="text-gray-300">—</span>}</td>
                             <td className="px-2 py-2"><RemarkHistory list={c.prevRemarks} /></td>
                             <td className="px-1 py-1 mom-fill">
-                              <textarea rows={1} value={c.remark}
-                                ref={(el) => el && autoGrow(el)}
-                                onChange={(e) => { autoGrow(e.target); updCarry(c.id, { remark: e.target.value }); }}
-                                onKeyDown={(e) => handleBulletKeys(e, c.remark, (v) => updCarry(c.id, { remark: v }))}
-                                placeholder="Remark for this meeting…" className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded resize-none overflow-hidden" style={{ minHeight: '2rem' }} /></td>
+                              {/* today's remark gets the same dated header as the history trail */}
+                              {(c.remark || '').trim() && (
+                                <div className="px-1.5 pt-1 flex items-center gap-1.5 flex-wrap">
+                                  <span className="fs-10 font-bold" style={{ color: '#475569' }}>{fmtDDMMYY(mDate)}</span>
+                                  <span className="rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: INK }}>this meeting</span>
+                                  <span className="fs-10 text-gray-400">by {me?.name}</span>
+                                </div>
+                              )}
+                              <BulletEditor value={c.remark} onChange={(v) => updCarry(c.id, { remark: v })} placeholder="Remark for this meeting…" /></td>
                             <td className="px-1 py-1">
                               <select value={c.status} onChange={(e) => updCarry(c.id, { status: e.target.value })}
                                 className="w-full fs-11 font-semibold outline-none px-1 py-1.5 rounded-lg cursor-pointer"
@@ -2029,30 +2184,34 @@ export default function MOMTracking() {
             {/* ---- SECTION B · current discussion table (carried tasks arrive
                  here via the "Discuss" checkbox on the pending list above) ---- */}
             <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-              <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 flex-wrap gap-2">
+              <div className="flex items-center justify-between px-3 py-2.5 flex-wrap gap-2">
                 <div className="flex items-center gap-2">
                   <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: SHEET_SOFT }}><ListChecks size={15} style={{ color: SHEET_DARK }} /></span>
                   <span className="fs-13 font-bold text-gray-800">Discussion — current meeting</span>
                 </div>
                 <span className="fs-10 text-gray-400">{rows.filter((r) => r.flag === 'T').length} tasks · {infoCount} info</span>
               </div>
-              <div ref={topScrollRef} onScroll={() => { if (mainScrollRef.current && topScrollRef.current) mainScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft; }} className="overflow-x-auto kc-scroll border-b border-gray-50" style={{ height: 10 }}>
+              {/* thin left–right scrollbar — tinted like the header row below so
+                   the title bar, scrollbar and column titles read as ONE block */}
+              <div ref={topScrollRef} onScroll={() => { if (mainScrollRef.current && topScrollRef.current) mainScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft; }} className="overflow-x-auto kc-scroll" style={{ overflowY: 'hidden', height: 8, background: '#f1f3fb' }}>
                 <div style={{ width: SHEET_MINW, height: 1 }} />
               </div>
               <div ref={mainScrollRef} onScroll={() => { if (mainScrollRef.current && topScrollRef.current) topScrollRef.current.scrollLeft = mainScrollRef.current.scrollLeft; }} className="overflow-x-auto kc-scroll">
-                <table className="mom-sheet w-full fs-12" style={{ borderCollapse: 'collapse', minWidth: SHEET_MINW }}>
+                <table className="mom-sheet mom-stickyhead w-full fs-12" style={{ borderCollapse: 'collapse', minWidth: SHEET_MINW }}>
                   <thead>
                     <tr style={{ background: '#f1f3fb', color: INK }}>
+                      <th className="px-1 py-2 fs-11 font-bold" style={{ width: '2.75rem' }}>Action</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '2.8rem' }}>Sr.no</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '12rem' }}>Discussion Area</th>
+                      <SortTh label="Category" sortKey="category" sort={sheetSort} onSort={toggleSheetSort}
+                        className="px-2 py-2 fs-11 font-bold" style={{ width: '5rem' }} />
+                      <SortTh label="Discussion Area" sortKey="area" sort={sheetSort} onSort={toggleSheetSort}
+                        className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '9rem' }} />
                       <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '15rem' }}>Discussion points</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8rem' }}>Responsibility</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7.75rem' }}>Assigned by (Head)</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '5rem' }}>Action flag</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8.5rem' }}>Due Date</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '16rem' }}>Remark/Observation/Action</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '6.5rem' }}>Status</th>
-                      <th className="px-1 py-2 fs-11 font-bold" style={{ width: '3.5rem' }}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2060,13 +2219,47 @@ export default function MOMTracking() {
                       /* consecutive rows of the same Discussion Area are grouped —
                          the area cell is drawn ONCE (rowSpan) with its Discussion
                          Points stacked beside it, one sheet row per point */
-                      const groups = groupConsecutive(rows, sheetGroupKey).map((g) => ({ key: g.key, rows: g.items }));
+                      let groups = groupConsecutive(rows, sheetGroupKey).map((g) => ({ key: g.key, rows: g.items }));
+                      /* header sort — reorders whole GROUPS (a group's points stay
+                         together); blank values always land last, either way */
+                      if (sheetSort) {
+                        const get = sheetSort.key === 'category' ? (g) => g.rows[0]?.category : (g) => g.rows[0]?.area;
+                        const dir = sheetSort.dir === 'desc' ? -1 : 1;
+                        groups = groups.slice().sort((x, y) => {
+                          const a = get(x), b = get(y);
+                          const ea = String(a ?? '').trim() === '', eb = String(b ?? '').trim() === '';
+                          if (ea && eb) return 0;
+                          if (ea) return 1;
+                          if (eb) return -1;
+                          return dir * compareValues(a, b);
+                        });
+                      }
                       return groups.flatMap((g, gIdx) => g.rows.map((r, gi) => {
                       const isT = r.flag === 'T';
                       return (
                         <tr key={r.id}>
+                          <td className="px-1 py-2">
+                            <div className="flex items-center justify-center gap-1.5">
+                              {/* carried tasks are never deleted from here — they can only
+                                   be shifted back to the pending list above */}
+                              {r.carried ? (
+                                <button onClick={() => returnRowToCarry(r.id)} className="text-gray-700 hover:text-amber-600" title="Shift back to the previous-meeting pending list (top)">
+                                  <CornerUpRight size={14} strokeWidth={2.25} />
+                                </button>
+                              ) : (
+                                <button onClick={() => askDelRow(r)} className="text-gray-700 hover:text-red-500" title="Remove row">
+                                  <Trash2 size={14} strokeWidth={2.25} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
                           {gi === 0 && <td rowSpan={g.rows.length} className="px-2 py-2 text-center text-gray-500 align-middle">{gIdx + 1}</td>}
                           {gi === 0 && <td rowSpan={g.rows.length} className="px-2 py-2 align-middle text-center">
+                            {(r.masterId === null && !r.area)
+                              ? <span className="fs-11 text-gray-300">—</span>
+                              : <span className="fs-11 text-black">{r.category || '—'}</span>}
+                          </td>}
+                          {gi === 0 && <td rowSpan={g.rows.length} className="px-2 py-2 align-middle text-left">
                             {(r.masterId === null && !r.area) ? (
                               <>
                                 <select value="" onChange={(e) => assignMasterToRow(r.id, e.target.value)}
@@ -2082,12 +2275,9 @@ export default function MOMTracking() {
                                 <div className="fs-9 mt-0.5 font-medium text-gray-400">from master points only</div>
                               </>
                             ) : (
-                              <>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-semibold text-gray-800">{r.area}</span>
-                                </div>
-                                <div className="fs-11 mt-0.5 font-bold text-gray-600">{r.category}</div>
-                              </>
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-semibold text-gray-800">{r.area}</span>
+                              </div>
                             )}
                           </td>}
                           <td className="px-1 py-1 align-top mom-fill">
@@ -2096,12 +2286,7 @@ export default function MOMTracking() {
                                 <span className="fs-9 font-bold rounded px-1 py-0.5" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Carried forward from a previous meeting">C/F · raised {fmt(r.originDate || r.srcDate)}</span>
                               </div>
                             )}
-                            <textarea rows={1} value={r.point}
-                              ref={(el) => el && autoGrow(el)}
-                              onChange={(e) => { autoGrow(e.target); updRow(r.id, { point: e.target.value }); }}
-                              onKeyDown={(e) => handleBulletKeys(e, r.point, (v) => updRow(r.id, { point: v }))}
-                              placeholder="What was discussed / decided…"
-                              className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded resize-none overflow-hidden" style={{ minHeight: '2rem' }} />
+                            <BulletEditor value={r.point} onChange={(v) => updRow(r.id, { point: v })} placeholder="What was discussed / decided…" />
                             {gi === g.rows.length - 1 && !!r.area && (
                               <button onClick={() => addPointRow(r.id)}
                                 className="mb-1 ml-1.5 inline-flex items-center gap-1 fs-10 font-bold rounded-lg px-1.5 py-0.5"
@@ -2114,7 +2299,6 @@ export default function MOMTracking() {
                           <td className="px-1 py-1">
                             <RespPicker value={respArr(r.resp)} options={respOptions} onChange={(v) => updRow(r.id, { resp: v })} />
                           </td>
-                          <td className="px-1 py-1"><HeadCell row={r} heads={heads} onChange={(patch) => updRow(r.id, patch)} /></td>
                           <td className="px-2 py-2 text-center"><FlagToggle value={r.flag} onChange={(f) => updRow(r.id, { flag: f })} /></td>
                           <td className="px-1 py-1">
                             {isT
@@ -2123,11 +2307,15 @@ export default function MOMTracking() {
                           </td>
                           <td className="px-1 py-1 mom-fill">
                             {r.carried && r.prevRemarks?.length > 0 && <div className="px-1.5 pt-1"><RemarkHistory list={r.prevRemarks} /></div>}
-                            <textarea rows={1} value={r.remark}
-                              ref={(el) => el && autoGrow(el)}
-                              onChange={(e) => { autoGrow(e.target); updRow(r.id, { remark: e.target.value }); }}
-                              onKeyDown={(e) => handleBulletKeys(e, r.remark, (v) => updRow(r.id, { remark: v }))}
-                              placeholder="Remark…" className="no-ring w-full fs-11 text-gray-700 outline-none px-1.5 py-1.5 rounded resize-none overflow-hidden" style={{ minHeight: '2rem' }} />
+                            {/* today's remark gets the same dated header as the history trail */}
+                            {(r.remark || '').trim() && (
+                              <div className="px-1.5 pt-1 flex items-center gap-1.5 flex-wrap" style={r.carried && r.prevRemarks?.length ? { borderTop: '1px solid #e4e7f2' } : undefined}>
+                                <span className="fs-10 font-bold" style={{ color: '#475569' }}>{fmtDDMMYY(mDate)}</span>
+                                <span className="rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: INK }}>this meeting</span>
+                                <span className="fs-10 text-gray-400">by {me?.name}</span>
+                              </div>
+                            )}
+                            <BulletEditor value={r.remark} onChange={(v) => updRow(r.id, { remark: v })} placeholder="Remark…" />
                           </td>
                           <td className="px-1 py-1">
                             {isT ? (
@@ -2136,40 +2324,37 @@ export default function MOMTracking() {
                               </select>
                             ) : <div className="text-center fs-11 text-gray-300">—</div>}
                           </td>
-                          <td className="px-1 py-2">
-                            <div className="flex items-center justify-center gap-1.5">
-                              {r.carried && (
-                                <button onClick={() => returnRowToCarry(r.id)} className="text-gray-700 hover:text-amber-600" title="Shift back to the previous-meeting pending list (top)">
-                                  <CornerUpRight size={14} strokeWidth={2.25} />
-                                </button>
-                              )}
-                              <button onClick={() => askDelRow(r)} className="text-gray-700 hover:text-red-500" title="Remove row">
-                                <Trash2 size={14} strokeWidth={2.25} />
-                              </button>
-                            </div>
-                          </td>
                         </tr>
                       );
                       }));
                     })()}
-                    {rows.length === 0 && <tr><td colSpan={10} className="px-3 text-center fs-12 text-gray-400" style={{ height: '7rem', verticalAlign: 'middle' }}>No rows — add a discussion area below{carry.length > 0 ? ', or tick "Discuss" on a pending task above' : ''}.</td></tr>}
-                    {/* add custom row — button lives in the Discussion Area column so the
-                         last row keeps the full sheet grid lines */}
+                    {rows.length === 0 && <tr><td colSpan={10} className="px-3 text-center fs-12 text-gray-400" style={{ height: '7rem', verticalAlign: 'middle' }}>
+                      {branches.length === 0
+                        ? 'Select branch(es) above — the master discussion points load once a branch is chosen.'
+                        : `No rows — add a discussion area below${carry.length > 0 ? ', or tick "Discuss" on a pending task above' : ''}.`}
+                    </td></tr>}
+                    {/* add custom row — shown only while master points are still
+                         available; button lives in the Discussion Area column so
+                         the last row keeps the full sheet grid lines */}
+                    {unpickedMaster.length > 0 && (
                     <tr style={{ background: '#fafbfd' }}>
+                      <td />
                       <td className="px-2 py-2 text-center text-gray-300">{groupConsecutive(rows, sheetGroupKey).length + 1}</td>
+                      <td />
                       <td className="p-0">
                         <button onClick={addRow} type="button"
                           className="mom-addrow w-full flex items-center justify-start gap-1.5 px-3 py-2 fs-11 font-bold transition hover:bg-[#eef2ff]"
-                          style={{ color: BRAND, background: 'transparent', border: 'none' }}
-                          title="Pick the new row's Discussion Area from the master points (only points not already on the sheet are listed)">
+                          style={hasBlankRow ? { color: '#9ca3af', background: 'transparent', border: 'none', cursor: 'not-allowed' } : { color: BRAND, background: 'transparent', border: 'none' }}
+                          title={hasBlankRow ? 'Select a discussion area for the pending row first' : 'Pick the new row\'s Discussion Area from the master points (only points not already on the sheet are listed)'}>
                           <Plus size={14} /> Add row
                         </button>
                       </td>
                       <td className="px-2 py-2">
-                        <span className="fs-10 font-normal text-gray-400 max-sm:hidden">— pick its Discussion Area from the master points</span>
+                        <span className="fs-10 font-normal text-gray-400 max-sm:hidden">{hasBlankRow ? '— select the pending row\'s Discussion Area to add more' : '— select its Discussion Area from the master points'}</span>
                       </td>
-                      <td /><td /><td /><td /><td /><td /><td />
+                      <td /><td /><td /><td /><td />
                     </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -2189,15 +2374,15 @@ export default function MOMTracking() {
         )}
 
         {/* ===== HISTORY ===== */}
-        {view === 'history' && <HistoryView history={history} branches={branchOptions} onView={setViewMtg} onDelete={deleteMeeting} canDelete={histSource === 'api' && me?.role === 'master_admin'} canExport={canExport} onExport={doExport} source={histSource} initialCode={histBranch} />}
+        {view === 'history' && <HistoryView history={scopedHistory} branches={branchOptions} onView={setViewMtg} onDelete={deleteMeeting} canDelete={histSource === 'api' && me?.role === 'master_admin'} canExport={canExport} onExport={doExport} source={histSource} initialCode={histBranch} fromD={histFrom} toD={histTo} />}
 
         {/* ===== REPORTS ===== */}
-        {view === 'reports' && <ReportsView history={history} branches={branchOptions} canExport={canExport} onView={setViewMtg} onOpenBranch={(code) => { setHistBranch(code); setView('history'); }} />}
+        {view === 'reports' && <ReportsView history={scopedHistory} branches={branchOptions} canExport={canExport} onView={setViewMtg} onOpenBranch={(code) => { setHistBranch(code); setView('history'); }} />}
 
         {/* ===== MY MOM / EMPLOYEE REPORT ===== */}
         {view === 'mine' && (
           <div className="kc-in space-y-3">
-            {isMaster && (
+            {isMomAdmin && (
               <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-3 flex items-center gap-2 flex-wrap">
                 <span className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: BRAND_SOFT }}><Users size={15} style={{ color: INK }} /></span>
                 <span className="fs-12 font-bold text-gray-700">Employee report</span>
@@ -2357,10 +2542,9 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
               <thead>
                 <tr style={{ background: '#f1f3fb', color: INK }}>
                   <th className="px-1 py-2 fs-11 font-bold" style={{ width: '2.4rem' }}>Sr.no</th>
-                  <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '10rem' }}>Discussion Area</th>
+                  <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '8rem' }}>Discussion Area</th>
                   <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '11rem' }}>Discussion points</th>
                   <th className="px-2 py-2 fs-11 font-bold" style={{ width: '9rem' }}>Responsibility</th>
-                  <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8rem' }}>Assigned by (Head)</th>
                   <th className="px-1 py-2 fs-10 font-bold" style={{ width: '3rem' }}>Flag</th>
                   <th className="px-1 py-2 fs-11 font-bold" style={{ width: '6rem' }}>Due Date</th>
                   <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '19rem' }}>Remarks (history)</th>
@@ -2372,10 +2556,10 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
                 {groupConsecutive(ordered, (r) => (r.area || '').toLowerCase()).flatMap((g, gIdx) => g.items.map((r, gi) => (
                   <tr key={r.id}>
                     {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 text-center text-black align-middle">{gIdx + 1}</td>}
-                    {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 align-middle text-center"><span className="font-semibold text-black">{r.area}</span></td>}
-                    <td className="px-2 py-2 text-black" style={{ whiteSpace: 'pre-wrap' }}>
+                    {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 align-middle text-left"><span className="font-semibold text-black">{r.area}</span></td>}
+                    <td className="px-2 py-2 text-black">
                       {r.carried && <span className="fs-9 font-bold mr-1" style={{ color: '#b45309' }} title="Carried forward from a previous meeting">C/F</span>}
-                      {r.point || <span className="text-gray-300">—</span>}
+                      {r.point ? <BulletText text={r.point} /> : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-2 py-2">
                       {respArr(r.resp).length ? (
@@ -2388,11 +2572,10 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
                         </div>
                       ) : <span className="text-gray-300">—</span>}
                     </td>
-                    <td className="px-2 py-2 text-center text-black">{r.assignedBy || <span className="text-gray-300">—</span>}</td>
                     <td className="px-2 py-2 text-center"><FlagChip f={r.flag} small /></td>
                     <td className="px-2 py-2 text-center text-black">{r.flag === 'T' ? fmt(r.due) : '—'}</td>
                     <td className="px-2 py-2"><RemarkHistory list={r.prevRemarks} /></td>
-                    <td className="px-2 py-2 text-black" style={{ whiteSpace: 'pre-wrap' }}>{r.remark || <span className="text-gray-300">—</span>}</td>
+                    <td className="px-2 py-2 text-black">{r.remark ? <BulletText text={r.remark} /> : <span className="text-gray-300">—</span>}</td>
                     <td className="px-2 py-2 text-center"><StatusBadge r={r} /></td>
                   </tr>
                 )))}
@@ -2409,7 +2592,7 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
 /* ============================================================
    HISTORY VIEW — branch sidebar + searchable, sortable table
    ============================================================ */
-function HistoryView({ history, branches, onView, onDelete, canDelete, canExport, onExport, source, initialCode }) {
+function HistoryView({ history, branches, onView, onDelete, canDelete, canExport, onExport, source, initialCode, fromD = '', toD = '' }) {
   /* the sidebar also lists branches that ONLY exist in history
      (e.g. manually added ones) */
   const allBranches = useMemo(() => {
@@ -2432,15 +2615,22 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
   const [typeF, setTypeF] = useState('all');
   const [asc, setAsc] = useState(false);
   useEffect(() => { setQ(''); setTypeF('all'); }, [code]);
+  /* meeting-date range (From/To in the tab row) — scopes the KPI cards,
+     the meetings table, the drill-downs and the Excel exports all at once */
+  const inRange = (m) => (!fromD || (m.date || '') >= fromD) && (!toD || (m.date || '') <= toD);
 
-  /* every meeting once (multi-branch meetings are filed under each branch) */
+  /* every meeting once (multi-branch meetings are filed under each branch);
+     same-day meetings tie-break on id so "latest" is deterministic */
   const allMeetingsList = useMemo(() => {
     const seen = new Map();
     Object.values(history).forEach((ms) => ms.forEach((m) => { if (!seen.has(m.id)) seen.set(m.id, m); }));
-    return [...seen.values()].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    return [...seen.values()].sort((a, b) => (b.date || '').localeCompare(a.date || '') || ((b.id || 0) - (a.id || 0)));
   }, [history]);
+  /* the date-scoped list every count and table below works from */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const datedList = useMemo(() => allMeetingsList.filter(inRange), [allMeetingsList, fromD, toD]);
 
-  const meetings = code === ALL_CODE ? allMeetingsList : (history[code] || []);
+  const meetings = (code === ALL_CODE ? datedList : (history[code] || []).filter(inRange));
   const types = useMemo(() => [...new Set(meetings.map((m) => m.type).filter(Boolean))], [meetings]);
   const shown = useMemo(() => meetings
     .filter((m) => (typeF === 'all' || m.type === typeF)
@@ -2449,26 +2639,33 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
     .sort((a, b) => asc ? (a.date || '').localeCompare(b.date || '') : (b.date || '').localeCompare(a.date || '')),
   [meetings, q, typeF, asc]);
 
-  /* KPI stats — tasks are attributed to the branch(es) of their RESPONSIBLE
-     people (same rule as Reports), scoped to the branch picked in the dropdown */
-  const rowCodes = useMemo(() => makeRowBranchCodes(buildBranchNameToCode(allBranches, allMeetingsList)), [allBranches, allMeetingsList]);
+  /* KPI stats — tasks are attributed to the branch(es) the MEETING covers
+     (same rule as Reports), scoped to the branch picked in the dropdown */
+  const rowCodes = rowBranchCodes;
   const scopeStats = useMemo(() => {
     const inBranch = (r, m) => code === ALL_CODE || rowCodes(r, m).has(code);
-    const seen = new Set();
-    let tasks = 0, done = 0, wip = 0, pending = 0, overdue = 0, info = 0;
-    allMeetingsList.forEach((m) => m.rows.forEach((r) => {
+    /* one entry per tracked task: its LATEST state (datedList is newest
+       first) plus the UNION of branches of every meeting that discussed
+       it — a carried task counts for each branch it was reviewed in */
+    const tracked = new Map();
+    let info = 0;
+    datedList.forEach((m) => m.rows.forEach((r) => {
       if (r.flag !== 'T') { if (inBranch(r, m)) info++; return; }
-      if (seen.has(r.trackId)) return;            // latest state per tracked task
-      seen.add(r.trackId);
-      if (!inBranch(r, m)) return;
+      let t = tracked.get(r.trackId);
+      if (!t) { t = { r, codes: new Set() }; tracked.set(r.trackId, t); }   // first hit = latest state
+      rowCodes(r, m).forEach((c) => t.codes.add(c));
+    }));
+    let tasks = 0, done = 0, wip = 0, pending = 0, overdue = 0;
+    tracked.forEach(({ r, codes }) => {
+      if (code !== ALL_CODE && !codes.has(code)) return;
       tasks++;
       if (r.status === 'completed') done++;
       else if (isOverdue(r)) overdue++;
       else if (r.status === 'in_progress') wip++;
       else pending++;
-    }));
+    });
     return { meetings: meetings.length, tasks, info, wip, pending, done, overdue, completion: tasks ? Math.round(done / tasks * 100) : 0 };
-  }, [allMeetingsList, meetings.length, code, rowCodes]);
+  }, [datedList, meetings.length, code, rowCodes]);
 
   /* drill-down box — opened by clicking a KPI count */
   const [drill, setDrill] = useState(null);   // { filter }
@@ -2476,27 +2673,29 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
   const selBranchName = code === ALL_CODE ? 'All branches' : (allBranches.find((b) => b.code === code)?.name || code);
   const drillRows = useMemo(() => {
     if (!drill) return [];
-    /* same responsibility-based attribution as the KPI counts */
+    /* same attribution as the KPI counts — latest state per tracked task,
+       shown under every branch whose meetings discussed it */
     const inBranch = (r, m) => code === ALL_CODE || rowCodes(r, m).has(code);
     const out = [];
     if (drill.filter === 'info') {
-      allMeetingsList.forEach((m) => m.rows.forEach((r) => { if (r.flag === 'I' && inBranch(r, m)) out.push({ ...r, meeting: m }); }));
+      datedList.forEach((m) => m.rows.forEach((r) => { if (r.flag === 'I' && inBranch(r, m)) out.push({ ...r, meeting: m }); }));
       return out;
     }
-    const seen = new Set();
-    allMeetingsList.forEach((m) => m.rows.forEach((r) => {
-      if (r.flag !== 'T' || seen.has(r.trackId)) return;
-      seen.add(r.trackId);                        // latest state per tracked task
-      if (!inBranch(r, m)) return;
-      out.push({ ...r, meeting: m });
+    const tracked = new Map();
+    datedList.forEach((m) => m.rows.forEach((r) => {
+      if (r.flag !== 'T') return;
+      let t = tracked.get(r.trackId);
+      if (!t) { t = { row: { ...r, meeting: m }, codes: new Set() }; tracked.set(r.trackId, t); }   // first hit = latest state
+      rowCodes(r, m).forEach((c) => t.codes.add(c));
     }));
+    tracked.forEach(({ row, codes }) => { if (code === ALL_CODE || codes.has(code)) out.push(row); });
     return out.filter((t) =>
       drill.filter === 'done' ? t.status === 'completed'
         : drill.filter === 'overdue' ? isOverdue(t)
           : drill.filter === 'wip' ? (t.status === 'in_progress' && !isOverdue(t))
             : drill.filter === 'pending' ? (t.status === 'pending' && !isOverdue(t))
               : true);
-  }, [drill, code, allMeetingsList, rowCodes]);
+  }, [drill, code, datedList, rowCodes]);
   const KPI_COLS = [
     { key: 'meetings', label: 'Meetings', icon: CalendarDays, color: BRAND },
     { key: 'tasks', label: 'Tasks', icon: ListChecks, color: BRAND },
@@ -2588,7 +2787,7 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
             <table className="mom-sheet w-full fs-12" style={{ borderCollapse: 'collapse', minWidth: '62rem' }}>
               <thead>
                 <tr className="text-center text-black">
-                  {[['Date'], ['Meeting type & location'], ['Conducted by'], ['Attendees'], ['Tasks'], ['Progress'], ['Action']].map(([h], i) => (
+                  {[['Date'], ['Meeting type & location'], ['Branch'], ['Conducted by'], ['Attendees'], ['Tasks'], ['Progress'], ['Action']].map(([h], i) => (
                     <th key={i} className="sticky top-0 z-10 px-3 py-2 fs-10 font-bold uppercase tracking-wide" style={{ background: '#f7f8fc' }}>{h}</th>
                   ))}
                 </tr>
@@ -2601,6 +2800,7 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
                   const over = tasks.filter((r) => isOverdue(r)).length;
                   const pr = progress(m);
                   const presentN = m.attendees.filter((a) => a.present).map((a) => a.name);
+                  const brName = m.branches?.length ? m.branches.map((b) => b.name || b.code).join(' + ') : (m.branchName || m.branchCode || '—');
                   return (
                     <tr key={m.id}>
                       <td className="px-3 py-2.5 text-center whitespace-nowrap">
@@ -2615,6 +2815,9 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
                           <MapPin size={9} className="flex-shrink-0" />
                           <span className="truncate min-w-0">{m.location || '—'}</span>
                         </div>
+                      </td>
+                      <td className="px-3 py-2.5 text-center">
+                        <span className="fs-11 font-semibold text-gray-700 inline-block truncate align-middle" style={{ maxWidth: '10rem' }} title={brName}>{brName}</span>
                       </td>
                       <td className="px-3 py-2.5"><div className="flex items-center gap-1.5"><Avatar name={m.conductedBy} size={20} /><span className="fs-11 text-gray-700 truncate" style={{ maxWidth: '8rem' }}>{m.conductedBy}</span></div></td>
                       <td className="px-3 py-2.5"><div className="flex items-center gap-1.5 min-w-0" title={presentN.join(', ')}><span className="fs-11 text-gray-700 truncate" style={{ maxWidth: '13rem' }}>{presentN.join(', ') || '—'}</span><span className="fs-9 text-gray-400 flex-shrink-0">({presentN.length})</span></div></td>
@@ -2652,7 +2855,7 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
             <div className="px-4 py-3 flex items-center justify-between gap-2 flex-wrap border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
               <div className="min-w-0">
                 <div className="text-base font-bold text-gray-800 truncate">{selBranchName} — {DRILL_LABEL[drill.filter]}</div>
-                <div className="fs-10 text-black">{drillRows.length} row{drillRows.length === 1 ? '' : 's'} · latest state per tracked task{code !== ALL_CODE ? ' · counted here because a responsible employee belongs to this branch' : ''} · click View to open the meeting sheet · click the Meetings box above to go back to the list</div>
+                <div className="fs-10 text-black">{drillRows.length} row{drillRows.length === 1 ? '' : 's'} · latest state per tracked task{code !== ALL_CODE ? " · counted here because this branch's meetings discussed it" : ''} · click View to open the meeting sheet · click the Meetings box above to go back to the list</div>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 {canExport && drillRows.length > 0 && (
@@ -2660,14 +2863,14 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
                     const gs = groupConsecutive(drillRows, (t) => (t.area || '').toLowerCase());
                     const isAll = code === ALL_CODE;
                     exportTableExcel(`MOM_${(DRILL_LABEL[drill.filter] || 'report').replace(/\s+/g, '_')}`,
-                      ['Sr. No.', ...(isAll ? ['Branch'] : []), 'Discussion Area', 'Discussion Points', 'Category', 'Assigned by (Head)', 'Assigned to', 'Meeting', 'Due Date', 'Status', 'Remarks'],
+                      ['Sr. No.', ...(isAll ? ['Branch'] : []), 'Discussion Area', 'Discussion Points', 'Category', 'Assigned to', 'Meeting', 'Due Date', 'Status', 'Remarks'],
                       gs.flatMap((g, gIdx) => g.items.map((t) => {
                         const rem = [...(t.prevRemarks || [])];
-                        if (t.remark?.trim()) rem.push({ date: t.meeting.date, text: t.remark, status: t.status, by: t.assignedBy || (t.meeting.heads || [])[0] || t.meeting.conductedBy });
+                        if (t.remark?.trim()) rem.push({ date: t.meeting.date, text: t.remark, status: t.status, by: (t.meeting.heads || [])[0] || t.meeting.conductedBy });
                         const brName = t.meeting.branches?.length ? t.meeting.branches.map((b) => b.name || b.code).join(', ') : (t.meeting.branchName || t.meeting.branchCode || '');
-                        return [gIdx + 1, ...(isAll ? [brName] : []), t.area, t.point || '', t.category || '', t.assignedBy || '', respArr(t.resp).join(', '), `${t.meeting.type || 'Meeting'} · ${fmtDDMMYY(t.meeting.date)}`, t.due ? fmtDDMMYY(t.due) : '', isOverdue(t) ? 'Overdue' : (STATUS[t.status]?.label || t.status), remarksText(rem)];
+                        return [gIdx + 1, ...(isAll ? [brName] : []), t.area, t.point || '', t.category || '', respArr(t.resp).join(', '), `${t.meeting.type || 'Meeting'} · ${fmtDDMMYY(t.meeting.date)}`, t.due ? fmtDDMMYY(t.due) : '', isOverdue(t) ? 'Overdue' : (STATUS[t.status]?.label || t.status), remarksText(rem)];
                       })),
-                      { mergeCols: isAll ? [0, 2] : [0, 1], groupSizes: gs.map((g) => g.items.length) }).catch(() => toast.error('Could not generate the Excel file'));
+                      { mergeCols: isAll ? [0, 2] : [0, 1], leftCols: [isAll ? 2 : 1], groupSizes: gs.map((g) => g.items.length) }).catch(() => toast.error('Could not generate the Excel file'));
                   }}
                     className={XL_BTN} title="Download this report as Excel">
                     <Upload size={11} /> Export Excel
@@ -2681,10 +2884,9 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
                     <tr style={{ background: '#f1f3fb', color: INK }}>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '2.6rem' }}>Sr. No.</th>
                       {code === ALL_CODE && <th className="px-2 py-2 fs-11 font-bold" style={{ width: '9rem' }}>Branch</th>}
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '9rem' }}>Discussion Area</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '8rem' }}>Discussion Area</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '11rem' }}>Discussion Points</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7rem' }}>Category</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '10rem' }}>Assigned by (Head)</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ width: '5.5rem' }}>Category</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '12rem' }}>Assigned to</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '12rem' }}>Meeting</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7.5rem' }}>Due Date</th>
@@ -2693,27 +2895,26 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
                     </tr>
                   </thead>
                   <tbody>
-                    {drillRows.length === 0 && <tr><td colSpan={code === ALL_CODE ? 11 : 10} className="px-3 py-6 text-center fs-12 text-gray-400">No rows in this bucket.</td></tr>}
+                    {drillRows.length === 0 && <tr><td colSpan={code === ALL_CODE ? 10 : 9} className="px-3 py-6 text-center fs-12 text-gray-400">No rows in this bucket.</td></tr>}
                     {groupConsecutive(drillRows, (t) => (t.area || '').toLowerCase()).flatMap((g, gIdx) => g.items.map((t, gi) => {
                       /* all remarks on this task — carried history plus the one
                          from its latest meeting — each with date, status and head */
                       const remarks = [...(t.prevRemarks || [])];
-                      if (t.remark?.trim()) remarks.push({ date: t.meeting.date, text: t.remark, status: t.status, by: t.assignedBy || (t.meeting.heads || [])[0] || t.meeting.conductedBy });
+                      if (t.remark?.trim()) remarks.push({ date: t.meeting.date, text: t.remark, status: t.status, by: (t.meeting.heads || [])[0] || t.meeting.conductedBy });
                       const brName = t.meeting.branches?.length ? t.meeting.branches.map((b) => b.name || b.code).join(', ') : (t.meeting.branchName || t.meeting.branchCode || '—');
                       return (
                         <tr key={`${t.meeting.id}-${t.trackId || t.id || gi}`}>
                           {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 text-center text-black align-middle">{gIdx + 1}</td>}
                           {code === ALL_CODE && <td className="px-2 py-2 text-center fs-11 text-black">{brName}</td>}
-                          {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 align-middle text-center">
+                          {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 align-middle text-left">
                             <div className="font-semibold text-black">{t.area}</div>
                           </td>}
                           <td className="px-2 py-2">
                             {t.carried && <span className="fs-9 font-bold rounded px-1 py-0.5 mr-1" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Carried forward from a previous meeting">C/F</span>}
-                            {t.point ? <div className="fs-11 text-black inline" style={{ whiteSpace: 'pre-wrap' }}>{t.point}</div> : <span className="text-gray-300">—</span>}
+                            {t.point ? <div className="fs-11 text-black"><BulletText text={t.point} /></div> : <span className="text-gray-300">—</span>}
                             <div className="fs-9 text-gray-400 mt-0.5">raised {fmt(t.originDate)}</div>
                           </td>
                           <td className="px-2 py-2 text-center text-black">{t.category || '—'}</td>
-                          <td className="px-2 py-2 text-center text-black">{t.assignedBy || <span className="text-gray-300">—</span>}</td>
                           <td className="px-2 py-2">
                             {respArr(t.resp).length ? (
                               <div className="flex items-center gap-1 flex-wrap">
@@ -2962,10 +3163,10 @@ function PersonReport({ meetings, person, canExport, onExport, onView }) {
                   ['Sr. No.', 'Discussion Area', 'Discussion Points', 'Remarks', 'Category', 'Owners', 'Meeting', 'Due Date', 'Status'],
                   gs.flatMap((g, gIdx) => g.items.map((t) => {
                     const rem = [...(t.prevRemarks || [])];
-                    if (t.remark?.trim()) rem.push({ date: t.meetingDate, text: t.remark, status: t.status, by: t.assignedBy || (t.meeting?.heads || [])[0] || t.meeting?.conductedBy });
+                    if (t.remark?.trim()) rem.push({ date: t.meetingDate, text: t.remark, status: t.status, by: (t.meeting?.heads || [])[0] || t.meeting?.conductedBy });
                     return [gIdx + 1, t.area, t.point || '', remarksText(rem), t.category || '', respArr(t.resp).join(', '), `${t.meetingType || 'Meeting'} · ${fmtDDMMYY(t.meetingDate)}`, t.due ? fmtDDMMYY(t.due) : '', data.isOd(t) ? 'Overdue' : (STATUS[t.status]?.label || t.status)];
                   })),
-                  { mergeCols: [0, 1], groupSizes: gs.map((g) => g.items.length) }).catch(() => toast.error('Could not generate the Excel file'));
+                  { mergeCols: [0, 1], leftCols: [1], groupSizes: gs.map((g) => g.items.length) }).catch(() => toast.error('Could not generate the Excel file'));
               }}
                 className={XL_BTN} title="Download this table as Excel">
                 <Upload size={11} /> Export Excel
@@ -2996,11 +3197,11 @@ function PersonReport({ meetings, person, canExport, onExport, onView }) {
                 /* all remarks on this task — carried history plus the one from
                    its latest meeting — each with date, status and by whom */
                 const remarks = [...(t.prevRemarks || [])];
-                if (t.remark?.trim()) remarks.push({ date: t.meetingDate, text: t.remark, status: t.status, by: t.assignedBy || (t.meeting?.heads || [])[0] || t.meeting?.conductedBy });
+                if (t.remark?.trim()) remarks.push({ date: t.meetingDate, text: t.remark, status: t.status, by: (t.meeting?.heads || [])[0] || t.meeting?.conductedBy });
                 return (
                   <tr key={t.trackId} className="border-t border-gray-50 align-top">
                     {gi === 0 && <td rowSpan={g.items.length} className="px-3 py-2 text-center text-black align-middle">{gIdx + 1}</td>}
-                    {gi === 0 && <td rowSpan={g.items.length} className="px-3 py-2 align-middle text-center"><div className="font-semibold text-black" style={{ minWidth: '9rem' }}>{t.area}</div></td>}
+                    {gi === 0 && <td rowSpan={g.items.length} className="px-3 py-2 align-middle text-left"><div className="font-semibold text-black" style={{ minWidth: '8rem' }}>{t.area}</div></td>}
                     <td className="px-3 py-2">{t.point ? <div className="fs-12 text-black" style={{ minWidth: '12rem', maxWidth: '18rem', whiteSpace: 'pre-wrap' }}>{t.point}</div> : <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-2">
                       {remarks.length === 0 ? <span className="text-gray-300">—</span> : (
@@ -3054,24 +3255,30 @@ function ReportsView({ history, branches, canExport, onView, onOpenBranch }) {
     /* multi-branch meetings are filed under several branches — count each once */
     const uniq = new Map();
     Object.values(history).forEach((ms) => ms.forEach((m) => { if (!uniq.has(m.id)) uniq.set(m.id, m); }));
-    const all = [...uniq.values()].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    /* same-day meetings tie-break on id so "latest state" is deterministic */
+    const all = [...uniq.values()].sort((a, b) => (b.date || '').localeCompare(a.date || '') || ((b.id || 0) - (a.id || 0)));
     const scoped = all.filter(inScope);          // meetings held for/covering the scope branch
 
-    /* tasks are attributed to the branch(es) of their RESPONSIBLE people —
-       a task owned by employees of two branches counts for both branches */
-    const rowCodes = makeRowBranchCodes(buildBranchNameToCode(allBranches, all));
+    /* tasks are attributed to the branch(es) the MEETING covers — a joint
+       meeting held for two branches counts its rows for both branches */
+    const rowCodes = rowBranchCodes;
     const inBranch = (r, m) => scope === 'all' || rowCodes(r, m).has(scope);
 
-    const seen = new Set(); const latestAll = [];
+    /* one entry per tracked task: its LATEST state ('all' is newest first)
+       plus the UNION of branches of every meeting that discussed it — a
+       carried task counts for each branch it was reviewed in */
+    const tracked = new Map();
     let info = 0;
     all.forEach((m) => {
       m.rows.forEach((r) => {
         if (r.flag !== 'T') { if (inBranch(r, m)) info++; return; }
-        if (seen.has(r.trackId)) return;
-        seen.add(r.trackId); latestAll.push({ r, m });
+        let t = tracked.get(r.trackId);
+        if (!t) { t = { r, codes: new Set() }; tracked.set(r.trackId, t); }   // first hit = latest state
+        rowCodes(r, m).forEach((c) => t.codes.add(c));
       });
     });
-    const latest = latestAll.filter(({ r, m }) => inBranch(r, m)).map((x) => x.r);
+    const latestAll = [...tracked.values()];
+    const latest = latestAll.filter(({ codes }) => scope === 'all' || codes.has(scope)).map((x) => x.r);
     const completed = latest.filter((r) => r.status === 'completed').length;
     const overRows = latest.filter((r) => isOverdue(r));
     const inProg = latest.filter((r) => r.status === 'in_progress' && !isOverdue(r)).length;
@@ -3105,10 +3312,10 @@ function ReportsView({ history, branches, canExport, onView, onOpenBranch }) {
     const aging = [{ name: '1–7 d', v: 0 }, { name: '8–14 d', v: 0 }, { name: '15–30 d', v: 0 }, { name: '30+ d', v: 0 }];
     overRows.forEach((r) => { const dd = daysFromDue(r.due); aging[dd <= 7 ? 0 : dd <= 14 ? 1 : dd <= 30 ? 2 : 3].v++; });
 
-    /* completion % per branch — same responsibility-based attribution */
+    /* completion % per branch — same meeting-branch attribution */
     const per = new Map((scope === 'all' ? allBranches : allBranches.filter((b) => b.code === scope))
       .map((b) => [b.code, { name: b.name, done: 0, tot: 0 }]));
-    latestAll.forEach(({ r, m }) => rowCodes(r, m).forEach((c) => {
+    latestAll.forEach(({ r, codes }) => codes.forEach((c) => {
       const s = per.get(c); if (!s) return;
       s.tot++; if (r.status === 'completed') s.done++;
     }));
@@ -3293,6 +3500,9 @@ function MasterModal({ master, setMaster, categories, setCategories, meetingType
   const [newColor, setNewColor] = useState(NEW_CAT_COLORS[0]);
   const [newType, setNewType] = useState('');
   const [busyAdd, setBusyAdd] = useState(false);   // an Add request is in flight → spinner on the button
+  const [editPt, setEditPt] = useState(null);      // point id being edited inline
+  const [editCat, setEditCat] = useState(null);    // { old, value } while renaming a category
+  const [editType, setEditType] = useState(null);  // { id, value } while renaming a meeting type
 
   const fail = (e, msg) => ping(e?.response?.data?.detail || msg, 'err');
 
@@ -3338,7 +3548,25 @@ function MasterModal({ master, setMaster, categories, setCategories, meetingType
   };
   const setCatColor = (n, v) => setCategories((c) => ({ ...c, [n]: v }));
   const commitColor = (n) => {
-    if (persist) persist.updateCategory(n, categories[n]).catch((e) => fail(e, 'Could not save the colour'));
+    if (persist) persist.updateCategory(n, { color: categories[n] }).catch((e) => fail(e, 'Could not save the colour'));
+  };
+  const commitCatRename = async () => {
+    if (!editCat) return;
+    const { old, value } = editCat; const next = value.trim();
+    setEditCat(null);
+    if (!next || next === old) return;
+    if (categories[next]) return ping('Category already exists', 'err');
+    try {
+      if (persist) await persist.updateCategory(old, { name: next });
+      setCategories((c) => {
+        const out = {};
+        Object.entries(c).forEach(([k, v]) => { out[k === old ? next : k] = v; });
+        return out;
+      });
+      setMaster((p) => p.map((x) => x.category === old ? { ...x, category: next } : x));
+      if (cat === old) setCat(next);
+      ping('Category renamed');
+    } catch (e) { fail(e, 'Could not rename the category'); }
   };
   const removeCat = async (n) => {
     const rest = catKeys.filter((k) => k !== n);
@@ -3364,6 +3592,19 @@ function MasterModal({ master, setMaster, categories, setCategories, meetingType
       setNewType(''); ping('Meeting type added');
     } catch (e) { fail(e, 'Could not add the meeting type'); }
     finally { setBusyAdd(false); }
+  };
+  const commitTypeRename = async () => {
+    if (!editType) return;
+    const { id, value } = editType; const n = value.trim();
+    setEditType(null);
+    const cur = meetingTypes.find((t) => t.id === id);
+    if (!n || !cur || n === cur.name) return;
+    if (meetingTypes.some((t) => t.id !== id && t.name.toLowerCase() === n.toLowerCase())) return ping('Meeting type already exists', 'err');
+    try {
+      if (persist) await persist.updateMeetingType(id, n);
+      setMeetingTypes((p) => p.map((t) => t.id === id ? { ...t, name: n } : t));
+      ping('Meeting type renamed');
+    } catch (e) { fail(e, 'Could not rename the meeting type'); }
   };
   const removeType = async (t) => {
     try {
@@ -3399,9 +3640,14 @@ function MasterModal({ master, setMaster, categories, setCategories, meetingType
             <div className="flex-1 overflow-y-auto p-2.5">
               {master.map((p) => (
                 <div key={p.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50">
-                  <input value={p.title} onChange={(e) => rename(p.id, e.target.value)} onBlur={() => commitTitle(p.id)} className="flex-1 fs-12 text-gray-800 bg-transparent outline-none border-b border-transparent focus:border-gray-200 py-0.5" />
-                  <select value={p.category} onChange={(e) => recat(p.id, e.target.value)} className="rounded-md border border-gray-200 px-1.5 py-1 fs-11 font-bold text-gray-600 bg-white outline-none">{catKeys.map((c) => <option key={c}>{c}</option>)}</select>
-                  <button onClick={() => remove(p.id)} className="text-black hover:text-red-500 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+                  {editPt === p.id ? (
+                    <input autoFocus value={p.title} onChange={(e) => rename(p.id, e.target.value)} onBlur={() => { commitTitle(p.id); setEditPt(null); }} onKeyDown={(e) => e.key === 'Enter' && e.target.blur()} className="flex-1 min-w-0 fs-12 text-gray-800 bg-transparent outline-none border-b border-gray-300 py-0.5" />
+                  ) : (
+                    <span className="flex-1 min-w-0 fs-12 text-gray-800 truncate py-0.5" title={p.title}>{p.title}</span>
+                  )}
+                  <button onClick={() => setEditPt(editPt === p.id ? null : p.id)} title="Edit" className="text-black hover:text-blue-600 p-1"><Pencil className="h-3.5 w-3.5" /></button>
+                  <select value={p.category} onChange={(e) => recat(p.id, e.target.value)} title={p.category} className="rounded-md border border-gray-200 px-1.5 py-1 fs-11 font-bold text-gray-600 bg-white outline-none">{catKeys.map((c) => <option key={c}>{c}</option>)}</select>
+                  <button onClick={() => remove(p.id)} title="Delete" className="text-black hover:text-red-500 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               ))}
             </div>
@@ -3419,11 +3665,17 @@ function MasterModal({ master, setMaster, categories, setCategories, meetingType
             <div className="flex-1 overflow-y-auto p-2.5">
               {catKeys.map((name) => {
                 const used = master.filter((p) => p.category === name).length;
+                const editing = editCat?.old === name;
                 return (
                   <div key={name} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-gray-50">
-                    <span className="flex-1 fs-12 font-medium text-gray-800">{name}</span>
-                    <span className="fs-10 text-gray-400">{used} point{used === 1 ? '' : 's'}</span>
-                    <button onClick={() => removeCat(name)} className="text-black hover:text-red-500 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+                    {editing ? (
+                      <input autoFocus value={editCat.value} onChange={(e) => setEditCat({ old: name, value: e.target.value })} onBlur={commitCatRename} onKeyDown={(e) => e.key === 'Enter' && e.target.blur()} className="flex-1 min-w-0 fs-12 font-medium text-gray-800 bg-transparent outline-none border-b border-gray-300 py-0.5" />
+                    ) : (
+                      <span className="flex-1 min-w-0 fs-12 font-medium text-gray-800 truncate" title={name}>{name}</span>
+                    )}
+                    <span className="fs-10 text-gray-400 whitespace-nowrap">{used} point{used === 1 ? '' : 's'}</span>
+                    <button onClick={() => setEditCat(editing ? null : { old: name, value: name })} title="Rename" className="text-black hover:text-blue-600 p-1"><Pencil className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => removeCat(name)} title="Delete" className="text-black hover:text-red-500 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
                   </div>
                 );
               })}
@@ -3441,12 +3693,20 @@ function MasterModal({ master, setMaster, categories, setCategories, meetingType
             </div>
             <div className="flex-1 overflow-y-auto p-2.5">
               {meetingTypes.length === 0 && <div className="px-3 py-6 text-center fs-11 text-gray-400">No meeting types yet — add one above.</div>}
-              {meetingTypes.map((t) => (
-                <div key={t.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-gray-50">
-                  <span className="flex-1 fs-12 font-medium text-gray-800">{t.name}</span>
-                  <button onClick={() => removeType(t)} className="text-black hover:text-red-500 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
-                </div>
-              ))}
+              {meetingTypes.map((t) => {
+                const editing = editType?.id === t.id;
+                return (
+                  <div key={t.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-gray-50">
+                    {editing ? (
+                      <input autoFocus value={editType.value} onChange={(e) => setEditType({ id: t.id, value: e.target.value })} onBlur={commitTypeRename} onKeyDown={(e) => e.key === 'Enter' && e.target.blur()} className="flex-1 min-w-0 fs-12 font-medium text-gray-800 bg-transparent outline-none border-b border-gray-300 py-0.5" />
+                    ) : (
+                      <span className="flex-1 min-w-0 fs-12 font-medium text-gray-800 truncate" title={t.name}>{t.name}</span>
+                    )}
+                    <button onClick={() => setEditType(editing ? null : { id: t.id, value: t.name })} title="Rename" className="text-black hover:text-blue-600 p-1"><Pencil className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => removeType(t)} title="Delete" className="text-black hover:text-red-500 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+                  </div>
+                );
+              })}
             </div>
             <div className="px-4 py-2.5 border-t border-gray-100 flex items-center justify-between max-md:flex-wrap max-md:gap-2">
               <span className="fs-10 text-gray-400">These types appear in the Meeting-type dropdown on New meeting</span>

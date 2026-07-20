@@ -25,6 +25,13 @@ const Chip = React.memo(({ a }) => {
 });
 const numSort = (arr) => arr.slice().sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0));
 
+// Commissioning dates arrive as 'YYYY-MM-DD' — render them as '02 Jan 2026'.
+const fmtDMY = (iso) => {
+    if (!iso) return '';
+    const d = new Date(String(iso).length === 10 ? `${iso}T00:00:00` : iso);
+    return isNaN(d.getTime()) ? String(iso) : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
 // Asset KVA can arrive as "30", "30.0" or "30 KVA" — the master stores the bare
 // number. Asset rows use "0" to mean "not rated", which is not a real KVA, so it
 // is treated as blank rather than prefilled onto a record.
@@ -59,6 +66,7 @@ const ErrorBox = ({ msg, onRetry }) => (
 /* ===================================================================== */
 const PanelStyles = () => (
     <style>{`.qm-scroll{scrollbar-width:thin;scrollbar-color:#c7c9e0 transparent}.qm-scroll::-webkit-scrollbar{height:6px;width:6px}.qm-scroll::-webkit-scrollbar-thumb{background:#c7c9e0;border-radius:9999px}
+.msm-modal input::placeholder{font-size:10.5px;font-style:italic;color:#8f96a3;font-family:inherit}
 .kit-wrap{display:grid;grid-template-rows:0fr;transition:grid-template-rows .32s cubic-bezier(.4,0,.2,1)}
 .kit-wrap.kit-open{grid-template-rows:1fr}
 .kit-inner{overflow:hidden;min-height:0}
@@ -66,7 +74,7 @@ const PanelStyles = () => (
 .kit-open .kit-content{opacity:1;transform:none;transition-delay:.05s}`}</style>
 );
 
-const MaintenanceScheduleMaster = ({ onBack, initialTab, initialTabNonce, embedded = false }) => {
+const MaintenanceScheduleMaster = ({ onBack, initialTab, initialTabNonce, embedded = false, onMasterChanged }) => {
     const [tab, setTab] = useState(initialTab || 'master');
 
     // Keep following the requested tab when the panel is already mounted and a
@@ -86,10 +94,10 @@ const MaintenanceScheduleMaster = ({ onBack, initialTab, initialTabNonce, embedd
 
     const body = (
         <>
-            {tab === 'master' && <MasterData />}
-            {tab === 'service' && <MasterOfService />}
-            {tab === 'import' && <ImportData />}
-            {tab === 'mapping' && <AppMapping />}
+            {tab === 'master' && <MasterData onMasterChanged={onMasterChanged} />}
+            {tab === 'service' && <MasterOfService onMasterChanged={onMasterChanged} />}
+            {tab === 'import' && <ImportData onMasterChanged={onMasterChanged} />}
+            {tab === 'mapping' && <AppMapping onMasterChanged={onMasterChanged} />}
         </>
     );
 
@@ -142,7 +150,7 @@ const MaintenanceScheduleMaster = ({ onBack, initialTab, initialTabNonce, embedd
 };
 
 /* ----------------------------- Master Data ----------------------------- */
-const MasterData = () => {
+const MasterData = ({ onMasterChanged }) => {
     const [rows, setRows] = useState([]);
     const [services, setServices] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -210,16 +218,29 @@ const MasterData = () => {
     }, [rows, services]);
     const existingCodes = useMemo(() => new Set(rows.map((a) => a.appCode)), [rows]);
 
+    // Field-scoped search: default App Code; picking another field searches only
+    // it. "Part / Kit" keeps the old across-all-part-lines behaviour.
+    const SEARCH_FIELDS = [
+        { key: 'appCode', label: 'App Code', match: (a, q) => a.appCode.toLowerCase().includes(q) },
+        { key: 'engineModel', label: 'Engine Model', match: (a, q) => (a.engineModel || '').toLowerCase().includes(q) },
+        { key: 'segment', label: 'Segment', match: (a, q) => (a.segment || '').toLowerCase().includes(q) },
+        { key: 'kva', label: 'KVA Rating', match: (a, q) => (a.kva || '').toLowerCase().includes(q) },
+        { key: 'emission', label: 'Emission Norm', match: (a, q) => (a.emission || '').toLowerCase().includes(q) },
+        {
+            key: 'part', label: 'Part / Kit', match: (a, q) => a.parts.some((p) =>
+                (p.partNumber || '').toLowerCase().includes(q) || (p.partDesc || '').toLowerCase().includes(q) ||
+                (p.altPartNo || '').toLowerCase().includes(q) || (p.altDesc || '').toLowerCase().includes(q)),
+        },
+    ];
+    const [searchField, setSearchField] = useState('appCode');
+
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
         if (!q) return rows;
-        return rows.filter((a) =>
-            a.appCode.toLowerCase().includes(q) || (a.engineModel || '').toLowerCase().includes(q) ||
-            (a.kva || '').toLowerCase().includes(q) ||
-            a.parts.some((p) =>
-                (p.partNumber || '').toLowerCase().includes(q) || (p.partDesc || '').toLowerCase().includes(q) ||
-                (p.altPartNo || '').toLowerCase().includes(q) || (p.altDesc || '').toLowerCase().includes(q)));
-    }, [query, rows]);
+        const matcher = (SEARCH_FIELDS.find((f) => f.key === searchField) || SEARCH_FIELDS[0]).match;
+        return rows.filter((a) => matcher(a, q));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [query, rows, searchField]);
 
     // Only the application-code columns sort. The part and kit columns can't:
     // their row order is what the kit merges are built from, so reordering them
@@ -255,6 +276,27 @@ const MasterData = () => {
 
     const selCodes = Object.keys(sel).filter((k) => sel[k]);
 
+    // Second horizontal scrollbar ABOVE the sheet, kept in lockstep with the
+    // sheet's own one, so the wide table can be panned without first scrolling
+    // to the bottom. The spacer is sized to the sheet's real scroll width.
+    const topScrollRef = useRef(null);
+    const sheetScrollRef = useRef(null);
+    const [sheetW, setSheetW] = useState(0);
+    useEffect(() => {
+        const el = sheetScrollRef.current;
+        if (!el) return;
+        const measure = () => setSheetW(el.scrollWidth);
+        measure();
+        const ro = new ResizeObserver(measure);
+        ro.observe(el);
+        if (el.firstElementChild) ro.observe(el.firstElementChild);
+        return () => ro.disconnect();
+    }, [sheet]);
+    const mirrorScroll = (from, to) => () => {
+        if (from.current && to.current && to.current.scrollLeft !== from.current.scrollLeft)
+            to.current.scrollLeft = from.current.scrollLeft;
+    };
+
     const exportXlsx = (codes) => {
         const list = codes ? rows.filter((a) => codes.includes(a.appCode)) : rows;
         const aoa = [ORIG_HEADERS];
@@ -282,6 +324,7 @@ const MasterData = () => {
             toast.success('Deleted');
             await load();
             loadPending(); // the code is pending again now
+            onMasterChanged?.(); // host page badge (App codes count) stays live
         } catch (e) { toast.error(e.message || 'Could not delete'); }
     };
 
@@ -292,6 +335,7 @@ const MasterData = () => {
         toast.success(isEdit ? 'Updated' : 'Added');
         await load();
         loadPending(); // a newly added code drops off the pending list
+        onMasterChanged?.(); // host page badge (App codes count) stays live
     };
 
     if (loading) return <Loading />;
@@ -302,15 +346,21 @@ const MasterData = () => {
             {/* Toolbar */}
             <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
 
-                {/* Left side - Search */}
-                <div className="relative max-sm:w-full">
-                    <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <input
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        placeholder="Search code, engine, KVA or part"
-                        className="w-56 sm:w-72 rounded-lg border border-gray-200 bg-white pl-8 pr-3 py-2 text-[13px] outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 text-black transition max-sm:w-full"
-                    />
+                {/* Left side - Search (field-scoped) */}
+                <div className="flex items-center gap-2 max-sm:w-full">
+                    <select value={searchField} onChange={(e) => setSearchField(e.target.value)} title="Search field"
+                        className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[12px] text-gray-700 outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition">
+                        {SEARCH_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                    </select>
+                    <div className="relative max-sm:flex-1">
+                        <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <input
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                            placeholder={`Search ${(SEARCH_FIELDS.find((f) => f.key === searchField) || SEARCH_FIELDS[0]).label.toLowerCase()}`}
+                            className="w-56 sm:w-72 rounded-lg border border-gray-200 bg-white pl-8 pr-3 py-1.5 text-[13px] outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 text-black transition max-sm:w-full"
+                        />
+                    </div>
                 </div>
 
                 {/* Right side - Actions */}
@@ -323,7 +373,7 @@ const MasterData = () => {
                         <>
                             <button
                                 onClick={() => setSel({})}
-                                className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[12px] font-medium text-gray-600 hover:bg-gray-50 transition"
+                                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-[12px] font-medium text-gray-600 hover:bg-gray-50 transition"
                             >
                                 Clear
                             </button>
@@ -331,7 +381,7 @@ const MasterData = () => {
                             {canExportExcel() && (
                                 <button
                                     onClick={() => exportXlsx(selCodes)}
-                                    className="export-btn inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-2 text-[12px] font-semibold text-white transition"
+                                    className="export-btn inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-[12px] font-semibold text-white transition"
                                 >
                                     <ArrowUpTrayIcon className="h-4 w-4" /> Export selected
                                 </button>
@@ -342,7 +392,7 @@ const MasterData = () => {
                     {canExportExcel() && (
                         <button
                             onClick={() => exportXlsx(null)}
-                            className="export-btn inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-2 text-[12px] font-semibold text-white transition"
+                            className="export-btn inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-[12px] font-semibold text-white transition"
                         >
                             <ArrowUpTrayIcon className="h-4 w-4" /> Export all
                         </button>
@@ -352,14 +402,14 @@ const MasterData = () => {
                         onClick={doRefresh}
                         disabled={refreshing}
                         title="Refresh"
-                        className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500 hover:bg-gray-50 transition disabled:opacity-50"
+                        className="rounded-lg border border-gray-200 bg-white p-1.5 text-gray-500 hover:bg-gray-50 transition disabled:opacity-50"
                     >
                         <ArrowPathIcon className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
                     </button>
 
                     <button
                         onClick={() => setEditing(null)}
-                        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-white transition hover:opacity-90"
+                        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90"
                         style={{ backgroundColor: themeColor }}
                     >
                         <PlusIcon className="h-4 w-4" /> Add Application Code
@@ -374,13 +424,17 @@ const MasterData = () => {
                 <div className="rounded-2xl border border-dashed border-gray-300 bg-white py-16 text-center text-gray-400 text-[13px]">{rows.length === 0 ? 'No records yet — add one or import a file.' : 'No records match.'}</div>
             ) : (
                 <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm">
-                    <div className="overflow-auto qm-scroll max-h-[70vh]">
+                    {/* Top scrollbar — a spacer as wide as the sheet, mirrored with it */}
+                    <div ref={topScrollRef} onScroll={mirrorScroll(topScrollRef, sheetScrollRef)} className="overflow-x-auto overflow-y-hidden qm-scroll border-b border-gray-100">
+                        <div style={{ width: sheetW }} className="h-px" />
+                    </div>
+                    <div ref={sheetScrollRef} onScroll={mirrorScroll(sheetScrollRef, topScrollRef)} className="overflow-auto qm-scroll max-h-[70vh]">
                         <table className="master-sheet-table min-w-[1580px] w-full text-[12px]">
                             <thead className="sticky top-0 z-10">
                                 {/* Two-tier header: "Qty" and "Action" appear under both Part
                                     Details and Kit Details, so the group row tells them apart. */}
                                 <tr className="bg-gray-100 text-[10px] font-bold text-black uppercase tracking-wider">
-                                    <th rowSpan={2} className="px-2 py-2 border border-gray-200 bg-gray-100 w-9 text-center">
+                                    <th rowSpan={2} className="px-2 py-1 border border-gray-200 bg-gray-100 w-9 text-center">
                                         <span
                                             onClick={() => {
                                                 const allOn = shown.length > 0 && shown.every((a) => sel[a.appCode]);
@@ -392,35 +446,35 @@ const MasterData = () => {
                                             {shown.length > 0 && shown.every((a) => sel[a.appCode]) && <CheckIcon className="h-3 w-3" style={{ color: themeColor }} />}
                                         </span>
                                     </th>
-                                    <th rowSpan={2} className="px-2 py-2 border border-gray-200 bg-gray-100 w-11 text-center">Sr.</th>
-                                    <th colSpan={6} className="px-3 py-1.5 border border-gray-200 bg-gray-100 text-center">Application Code</th>
-                                    <th colSpan={5} className="px-3 py-1.5 border border-gray-200 bg-indigo-100 text-center" style={{ color: themeColor }}>Part Details</th>
-                                    <th colSpan={4} className="px-3 py-1.5 border border-gray-200 bg-amber-100 text-center text-amber-800">Kit Details</th>
-                                    <th rowSpan={2} className="px-3 py-2 border border-gray-200 bg-gray-100 w-24 text-center">Actions</th>
+                                    <th rowSpan={2} className="px-2 py-1 border border-gray-200 bg-gray-100 w-11 text-center">Sr.</th>
+                                    <th colSpan={6} className="px-3 py-1 border border-gray-200 bg-gray-100 text-center">Application Code</th>
+                                    <th colSpan={5} className="px-3 py-1 border border-gray-200 bg-indigo-100 text-center" style={{ color: themeColor }}>Part Details</th>
+                                    <th colSpan={4} className="px-3 py-1 border border-gray-200 bg-amber-100 text-center text-amber-800">Kit Details</th>
+                                    <th rowSpan={2} className="px-3 py-1 border border-gray-200 bg-gray-100 w-24 text-center">Actions</th>
                                 </tr>
                                 <tr className="bg-gray-50 text-[10px] font-semibold text-black uppercase tracking-wider">
-                                    <SortTh label="Segment" sortKey="segment" sort={sort} onSort={toggle} className="px-3 py-2 border border-gray-200 bg-gray-50 text-center" />
-                                    <SortTh label="App Code" sortKey="appCode" sort={sort} onSort={toggle} className="px-3 py-2 border border-gray-200 bg-gray-50 text-center" />
-                                    <SortTh label="System App Code" sortKey="systemAppCode" sort={sort} onSort={toggle} className="px-3 py-2 border border-gray-200 bg-gray-50 text-center" />
-                                    <SortTh label="Engine Model" sortKey="engineModel" sort={sort} onSort={toggle} className="px-3 py-2 border border-gray-200 bg-gray-50 text-center" />
-                                    <SortTh label="KVA" sortKey="kva" sort={sort} onSort={toggle} className="px-3 py-2 border border-gray-200 bg-gray-50 text-center" />
-                                    <SortTh label="Emission" sortKey="emission" sort={sort} onSort={toggle} className="px-3 py-2 border border-gray-200 bg-gray-50 text-center" />
-                                    <th className="px-3 py-2 border border-gray-200 bg-indigo-50 text-center">Part Number</th>
-                                    <th className="px-3 py-2 border border-gray-200 bg-indigo-50 text-center">Part Description</th>
-                                    <th className="px-3 py-2 border border-gray-200 bg-indigo-50 text-center">Qty</th>
-                                    <th className="px-3 py-2 border border-gray-200 bg-indigo-50 text-center">Action</th>
-                                    <th className="px-3 py-2 border border-gray-200 bg-indigo-50 text-center">Svc Hrs</th>
-                                    <th className="px-3 py-2 border border-gray-200 bg-amber-50 text-center">Kit Number</th>
-                                    <th className="px-3 py-2 border border-gray-200 bg-amber-50 text-center">Kit Description</th>
-                                    <th className="px-3 py-2 border border-gray-200 bg-amber-50 text-center">Qty</th>
-                                    <th className="px-3 py-2 border border-gray-200 bg-amber-50 text-center">Action</th>
+                                    <SortTh label="Segment" sortKey="segment" sort={sort} onSort={toggle} className="px-3 py-1 border border-gray-200 bg-gray-50 text-center" />
+                                    <SortTh label="App Code" sortKey="appCode" sort={sort} onSort={toggle} className="px-3 py-1 border border-gray-200 bg-gray-50 text-center" />
+                                    <SortTh label="System App Code" sortKey="systemAppCode" sort={sort} onSort={toggle} className="px-3 py-1 border border-gray-200 bg-gray-50 text-center" />
+                                    <SortTh label="Engine Model" sortKey="engineModel" sort={sort} onSort={toggle} className="px-3 py-1 border border-gray-200 bg-gray-50 text-center" />
+                                    <SortTh label="KVA" sortKey="kva" sort={sort} onSort={toggle} className="px-3 py-1 border border-gray-200 bg-gray-50 text-center" />
+                                    <SortTh label="Emission" sortKey="emission" sort={sort} onSort={toggle} className="px-3 py-1 border border-gray-200 bg-gray-50 text-center" />
+                                    <th className="px-3 py-1 border border-gray-200 bg-indigo-50 text-center">Part Number</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-indigo-50 text-center">Part Description</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-indigo-50 text-center">Qty</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-indigo-50 text-center">Action</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-indigo-50 text-center">Svc Hrs</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Kit Number</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Kit Description</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Qty</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Action</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {sheet.map(({ app: a, lines, kitAt }, ai) => {
                                     const on = !!sel[a.appCode];
                                     const span = lines.length;
-                                    const appTd = `px-3 py-2 border border-gray-200 align-middle ${on ? 'bg-indigo-50/50' : 'bg-white'}`;
+                                    const appTd = `px-3 py-1 border border-gray-200 align-middle ${on ? 'bg-indigo-50/50' : 'bg-white'}`;
                                     return lines.map((p, i) => {
                                         const kit = kitAt[i];
                                         // Close the whole application code off with a heavy rule. The
@@ -443,7 +497,7 @@ const MasterData = () => {
                                                         <td rowSpan={span} style={BLOCK_END} className={`${appTd} text-center font-mono font-semibold text-gray-500`}>{ai + 1}</td>
                                                         <td rowSpan={span} style={BLOCK_END} className={`${appTd} text-center text-gray-600`}>{a.segment || '—'}</td>
                                                         <td rowSpan={span} style={BLOCK_END} className={`${appTd} text-center`}>
-                                                            <span className="inline-flex min-w-[104px] items-center justify-center font-mono font-bold text-[12px] bg-[#1b2026] text-white px-2 py-1 rounded-md whitespace-nowrap">{a.appCode}</span>
+                                                            <span className="inline-flex min-w-[104px] items-center justify-center font-mono font-bold text-[12px] bg-[#1b2026] text-white px-2 py-0.5 rounded-md whitespace-nowrap">{a.appCode}</span>
                                                         </td>
                                                         <td rowSpan={span} style={BLOCK_END} className={`${appTd} text-center font-mono text-gray-600 whitespace-nowrap`}>{a.systemAppCode || '—'}</td>
                                                         <td rowSpan={span} style={BLOCK_END} className={`${appTd} font-mono text-gray-700 whitespace-nowrap`}>{a.engineModel || '—'}</td>
@@ -453,19 +507,19 @@ const MasterData = () => {
                                                 )}
 
                                                 {/* --- Part line: one row each, never merged --- */}
-                                                <td style={partEnd} className="px-3 py-1.5 border border-gray-200 font-mono text-gray-800 whitespace-nowrap">{p?.partNumber || '—'}</td>
-                                                <td style={partEnd} className="px-3 py-1.5 border border-gray-200 text-gray-700 min-w-[240px]">{p?.partDesc || '—'}</td>
-                                                <td style={partEnd} className="px-3 py-1.5 border border-gray-200 text-center">{p?.qty || '—'}</td>
-                                                <td style={partEnd} className="px-3 py-1.5 border border-gray-200 text-center"><Chip a={p?.action} /></td>
-                                                <td style={partEnd} className="px-3 py-1.5 border border-gray-200 text-center font-mono" title={p ? partService(services, p).name : ''}>{p?.serviceHours || '—'}</td>
+                                                <td style={partEnd} className="px-3 py-1 border border-gray-200 font-mono text-gray-800 whitespace-nowrap">{p?.partNumber || '—'}</td>
+                                                <td style={partEnd} className="px-3 py-1 border border-gray-200 text-gray-700 min-w-[240px]">{p?.partDesc || '—'}</td>
+                                                <td style={partEnd} className="px-3 py-1 border border-gray-200 text-center">{p?.qty || '—'}</td>
+                                                <td style={partEnd} className="px-3 py-1 border border-gray-200 text-center"><Chip a={p?.action} /></td>
+                                                <td style={partEnd} className="px-3 py-1 border border-gray-200 text-center font-mono" title={p ? partService(services, p).name : ''}>{p?.serviceHours || '—'}</td>
 
                                                 {/* --- Kit block: merged down the part rows that share one kit --- */}
                                                 {kit && (
                                                     <>
-                                                        <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1.5 border border-gray-200 font-mono text-gray-600 align-middle whitespace-nowrap bg-amber-50/20">{kit.p?.altPartNo || '—'}</td>
-                                                        <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1.5 border border-gray-200 text-gray-600 align-middle min-w-[200px] bg-amber-50/20">{kit.p?.altDesc || '—'}</td>
-                                                        <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1.5 border border-gray-200 text-center text-gray-600 align-middle bg-amber-50/20">{kit.p?.altQty || '—'}</td>
-                                                        <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1.5 border border-gray-200 text-center align-middle bg-amber-50/20"><Chip a={kit.p?.altAction} /></td>
+                                                        <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 font-mono text-gray-600 align-middle whitespace-nowrap bg-amber-50/20">{kit.p?.altPartNo || '—'}</td>
+                                                        <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-gray-600 align-middle min-w-[200px] bg-amber-50/20">{kit.p?.altDesc || '—'}</td>
+                                                        <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center text-gray-600 align-middle bg-amber-50/20">{kit.p?.altQty || '—'}</td>
+                                                        <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center align-middle bg-amber-50/20"><Chip a={kit.p?.altAction} /></td>
                                                     </>
                                                 )}
 
@@ -508,11 +562,16 @@ const MasterData = () => {
    The menu is rendered fixed-position from the field's screen rect, so it is never
    clipped by a scrolling/overflow parent (e.g. the parts table) and follows the
    field if the modal body scrolls. */
-const Combo = ({ value, onChange, options, placeholder, mono, fieldCls }) => {
+const Combo = ({ value, onChange, options, placeholder, mono, fieldCls, pickOnly, disabled }) => {
     const [open, setOpen] = useState(false);
     const [pos, setPos] = useState(null);
     const wrapRef = useRef(null);
     const inputRef = useRef(null);
+    // Hover open/close: entering the field (or its menu — a DOM child, so it
+    // keeps the hover) opens the list; leaving closes it after a short grace
+    // period so crossing the small gap to the menu doesn't shut it.
+    const hoverT = useRef(null);
+    useEffect(() => () => clearTimeout(hoverT.current), []);
 
     const measure = () => {
         const el = inputRef.current;
@@ -523,7 +582,7 @@ const Combo = ({ value, onChange, options, placeholder, mono, fieldCls }) => {
         const up = spaceBelow < maxH + 8 && r.top > spaceBelow;
         setPos({ left: r.left, width: r.width, up, top: r.bottom + 4, bottom: window.innerHeight - r.top + 4 });
     };
-    const openNow = () => { measure(); setOpen(true); };
+    const openNow = () => { if (disabled) return; measure(); setOpen(true); };
 
     useEffect(() => {
         if (!open) return;
@@ -539,21 +598,28 @@ const Combo = ({ value, onChange, options, placeholder, mono, fieldCls }) => {
         };
     }, [open]);
 
+    const hoverOpen = () => { if (disabled) return; clearTimeout(hoverT.current); openNow(); };
+    const hoverClose = () => { clearTimeout(hoverT.current); hoverT.current = setTimeout(() => setOpen(false), 220); };
+
     return (
-        <div className="relative" ref={wrapRef}>
+        <div className="relative" ref={wrapRef} onMouseEnter={hoverOpen} onMouseLeave={hoverClose}>
             <input
                 ref={inputRef}
-                className={`${fieldCls} ${mono ? 'font-mono' : ''}`}
+                className={`${fieldCls} ${mono ? 'font-mono' : ''} ${pickOnly ? 'cursor-pointer' : ''} ${disabled ? 'bg-gray-100 text-gray-500 cursor-not-allowed opacity-80' : ''}`}
                 style={{ paddingRight: 26 }}
                 value={value}
                 placeholder={placeholder}
-                onChange={(e) => { onChange(e.target.value); open ? measure() : openNow(); }}
+                readOnly={pickOnly || disabled}
+                disabled={disabled}
+                onChange={(e) => { if (pickOnly || disabled) return; onChange(e.target.value); open ? measure() : openNow(); }}
                 onFocus={openNow}
             />
-            <button type="button" tabIndex={-1} onClick={() => (open ? setOpen(false) : openNow())}
-                className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600">
-                <ChevronDownIcon className={`h-4 w-4 transition ${open ? 'rotate-180' : ''}`} />
-            </button>
+            {!disabled && (
+                <button type="button" tabIndex={-1} onClick={() => (open ? setOpen(false) : openNow())}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600">
+                    <ChevronDownIcon className={`h-4 w-4 transition ${open ? 'rotate-180' : ''}`} />
+                </button>
+            )}
             {open && pos && options.length > 0 && (
                 <div className="fixed z-[300] max-h-[184px] overflow-auto rounded-lg border border-gray-200 bg-white shadow-xl py-1"
                     style={{ left: pos.left, width: pos.width, minWidth: 96, ...(pos.up ? { bottom: pos.bottom } : { top: pos.top }) }}>
@@ -579,6 +645,9 @@ const AppCodeSuggest = ({ value, onChange, onPick, remaining, disabled, fieldCls
     const [pos, setPos] = useState(null);
     const wrapRef = useRef(null);
     const inputRef = useRef(null);
+    // Same hover open/close behaviour as Combo.
+    const hoverT = useRef(null);
+    useEffect(() => () => clearTimeout(hoverT.current), []);
 
     const measure = () => {
         const el = inputRef.current;
@@ -614,14 +683,17 @@ const AppCodeSuggest = ({ value, onChange, onPick, remaining, disabled, fieldCls
         ).slice(0, 60);
     }, [remaining, value]);
 
+    const hoverOpen = () => { clearTimeout(hoverT.current); openNow(); };
+    const hoverClose = () => { clearTimeout(hoverT.current); hoverT.current = setTimeout(() => setOpen(false), 220); };
+
     return (
-        <div className="relative" ref={wrapRef}>
+        <div className="relative" ref={wrapRef} onMouseEnter={hoverOpen} onMouseLeave={hoverClose}>
             <input
                 ref={inputRef}
                 className={`${fieldCls} font-mono`}
                 value={value}
                 disabled={disabled}
-                placeholder="e.g. 6H.8439 — or pick a pending code"
+                placeholder="e.g. 6H.8439 or select"
                 onChange={(e) => { onChange(e.target.value); open ? measure() : openNow(); }}
                 onFocus={openNow}
             />
@@ -661,7 +733,7 @@ const AppCodeSuggest = ({ value, onChange, onPick, remaining, disabled, fieldCls
 };
 
 /* ------------- App Mapping (Asset Detailed codes vs master) ------------- */
-const AppMapping = () => {
+const AppMapping = ({ onMasterChanged }) => {
     const [map, setMap] = useState(null);       // { uniqueAssetCodes, uploadedCount, remainingCount, remaining[] }
     const [rows, setRows] = useState([]);       // master rows — for modal dropdown options + duplicate check
     const [services, setServices] = useState([]);
@@ -697,29 +769,106 @@ const AppMapping = () => {
         };
     }, [rows, services]);
     const existingCodes = useMemo(() => new Set(rows.map((a) => a.appCode)), [rows]);
-
-    // Which stat card is open: 'all' | 'uploaded' | 'remaining' (default).
-    const [view, setView] = useState('remaining');
-    const VIEWS = {
-        all: { title: 'All Application Codes', empty: 'No asset application codes found.' },
-        uploaded: { title: 'Uploaded Application Codes', empty: 'No asset code has been uploaded to the master yet.' },
-        remaining: { title: 'Remaining Application Codes', empty: 'No remaining codes match your search.' },
+    // Full master record (with parts) keyed by normalized code — the Edit button
+    // needs the complete record to open the form in edit mode.
+    const masterByCode = useMemo(() => {
+        const m = new Map();
+        rows.forEach((a) => m.set(String(a.appCode || '').trim().toLowerCase(), a));
+        return m;
+    }, [rows]);
+    const [editing, setEditing] = useState(null); // master record being edited
+    const [viewing, setViewing] = useState(null);  // master record being previewed (read-only)
+    const openEdit = (r) => {
+        const rec = masterByCode.get(String(r.appCode || '').trim().toLowerCase());
+        if (rec) setEditing(rec);
+    };
+    const openView = (r) => {
+        const rec = masterByCode.get(String(r.appCode || '').trim().toLowerCase());
+        if (rec) setViewing(rec);
+    };
+    // Latest commissioning date + emission norm per asset code (from the mapping
+    // payload). Emission now comes from Asset Detailed's EMISSION NORM column.
+    const commissioningByCode = useMemo(() => {
+        const m = new Map();
+        (map?.codes || []).forEach((r) => m.set(String(r.appCode || '').trim().toLowerCase(), r.commissioning || ''));
+        return m;
+    }, [map]);
+    const assetEmissionByCode = useMemo(() => {
+        const m = new Map();
+        (map?.codes || []).forEach((r) => m.set(String(r.appCode || '').trim().toLowerCase(), r.emission || ''));
+        return m;
+    }, [map]);
+    const commissioningOf = (r) => commissioningByCode.get(String(r.appCode || '').trim().toLowerCase()) || '';
+    // Prefer the asset-data emission; fall back to the master record's emission.
+    const emissionOf = (r) => {
+        const k = String(r.appCode || '').trim().toLowerCase();
+        return assetEmissionByCode.get(k) || masterByCode.get(k)?.emission || '';
     };
 
-    // One list per view, sliced out of the single `codes` payload.
+    // Field-scoped search: default App Code; picking another field searches only it.
+    const SEARCH_FIELDS = [
+        { key: 'appCode', label: 'App Code', get: (r) => r.appCode },
+        { key: 'engineModel', label: 'Engine Model', get: (r) => r.engineModel },
+        { key: 'segment', label: 'Segment', get: (r) => r.segment },
+        { key: 'kva', label: 'KVA Rating', get: (r) => cleanKva(r.kva) },
+        { key: 'emission', label: 'Emission Norm', get: (r) => emissionOf(r) },
+        { key: 'commissioning', label: 'Commissioning Date', get: (r) => fmtDMY(commissioningOf(r)) },
+    ];
+    const [searchField, setSearchField] = useState('appCode');
+
+    // Which stat card is open: 'master' | 'uploaded' | 'notmatched' | 'remaining' | 'all' (default).
+    const [view, setView] = useState('all');
+    const VIEWS = {
+        master: { title: 'Total in Master', empty: 'No records in the master yet.' },
+        uploaded: { title: 'Matched in Master (Uploaded)', empty: 'No asset code has been uploaded to the master yet.' },
+        notmatched: { title: 'Not Matched — in master but not in asset data', empty: 'Every master code matches an asset application code.' },
+        remaining: { title: 'Remaining Application Codes', empty: 'No remaining codes match your search.' },
+        all: { title: 'All Application Codes', empty: 'No asset application codes found.' },
+    };
+
+    // One list per view. Asset-side views slice the `codes` payload; master-side
+    // views ('master' / 'notmatched') are the master records shaped like asset
+    // rows so the one table below renders them all the same way.
     const source = useMemo(() => {
         const all = map?.codes || [];
         if (view === 'uploaded') return all.filter((r) => r.uploaded);
         if (view === 'remaining') return all.filter((r) => !r.uploaded);
+        if (view === 'master' || view === 'notmatched') {
+            const assetBy = new Map(all.map((r) => [String(r.appCode || '').trim().toLowerCase(), r]));
+            const masterRows = rows.map((a) => {
+                const m = assetBy.get(String(a.appCode || '').trim().toLowerCase());
+                return {
+                    appCode: a.appCode, engineModel: a.engineModel, segment: a.segment,
+                    kva: a.kva, assets: m ? m.assets : 0, uploaded: !!m,
+                };
+            });
+            return view === 'notmatched' ? masterRows.filter((r) => !r.uploaded) : masterRows;
+        }
         return all;
-    }, [map, view]);
+    }, [map, rows, view]);
 
     const filtered = useMemo(() => {
         const t = q.trim().toLowerCase();
-        return t
-            ? source.filter((r) => [r.appCode, r.engineModel, r.segment, r.kva].some((v) => String(v || '').toLowerCase().includes(t)))
-            : source;
-    }, [source, q]);
+        if (!t) return source;
+        const getter = (SEARCH_FIELDS.find((f) => f.key === searchField) || SEARCH_FIELDS[0]).get;
+        return source.filter((r) => String(getter(r) || '').toLowerCase().includes(t));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [source, q, searchField, commissioningByCode, assetEmissionByCode, masterByCode]);
+
+    // A row is in the master (so editable) when the master-side view built it, or
+    // when the asset-side view flagged it as uploaded. Rows not in the master get
+    // the Add button instead.
+    const rowInMaster = (r) => view === 'master' || view === 'notmatched' || !!r.uploaded;
+
+    // Service-coverage columns (like the Service Coverage Matrix): one column per
+    // service hour; a code gets ✓ when its master record has parts for that
+    // service, ✗ otherwise (codes not in the master are all ✗).
+    const svcCols = useMemo(() => services.slice().sort((a, b) => (parseFloat(a.hours) || 0) - (parseFloat(b.hours) || 0)), [services]);
+    const svcCoverage = useMemo(() => {
+        const m = new Map();
+        rows.forEach((a) => m.set(String(a.appCode || '').trim().toLowerCase(), new Set(a.parts.map((p) => partService(services, p).id))));
+        return m;
+    }, [rows, services]);
 
     const { sort, toggle } = useSort();
     const remaining = useSortedRows(filtered, sort, {
@@ -727,29 +876,50 @@ const AppMapping = () => {
         engineModel: (r) => r.engineModel,
         segment: (r) => r.segment,
         kva: (r) => cleanKva(r.kva),
+        emission: (r) => emissionOf(r),
+        commissioning: (r) => commissioningOf(r),   // ISO 'YYYY-MM-DD' sorts lexically = chronologically
         assets: (r) => r.assets,
         uploaded: (r) => (r.uploaded ? 0 : 1),
     });
 
+    // Second horizontal scrollbar ABOVE the table, kept in lockstep with the
+    // table's own one, so the wide table can be panned left-to-right without
+    // first scrolling to the bottom. The spacer matches the table's scroll width.
+    const topScrollRef = useRef(null);
+    const bodyScrollRef = useRef(null);
+    const [tableW, setTableW] = useState(0);
+    useEffect(() => {
+        const el = bodyScrollRef.current;
+        if (!el) return;
+        const measure = () => setTableW(el.scrollWidth);
+        measure();
+        const ro = new ResizeObserver(measure);
+        ro.observe(el);
+        if (el.firstElementChild) ro.observe(el.firstElementChild);
+        return () => ro.disconnect();
+    }, [remaining, view, svcCols]);
+    const mirrorScroll = (from, to) => () => {
+        if (from.current && to.current && to.current.scrollLeft !== from.current.scrollLeft)
+            to.current.scrollLeft = from.current.scrollLeft;
+    };
+
     if (loading) return <Loading />;
     if (err) return <ErrorBox msg={err} onRetry={() => load(true)} />;
 
-    // Clicking a card opens that slice of the data in the table below. `sub` may be
-    // a node, so a card can carry more than one figure.
-    const stat = (id, label, sub, value, Icon, color, soft, hint) => {
+    // Clicking a card opens that slice of the data in the table below.
+    const stat = (id, label, value, Icon, color, soft, hint) => {
         const on = view === id;
         return (
             <button type="button" onClick={() => { setView(id); setQ(''); }}
                 title={hint || `Show ${label.toLowerCase()}`}
-                className={`rounded-xl border bg-white px-3 py-2 shadow-sm flex items-center gap-2.5 text-left transition ${on ? 'border-transparent' : 'border-gray-200 hover:border-gray-300'}`}
-                style={on ? { boxShadow: `0 0 0 2px ${color}`, background: soft } : undefined}>
-                <div className="h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: on ? '#fff' : soft }}>
-                    <Icon className="h-4 w-4" style={{ color }} />
+                className={`rounded-xl border bg-white px-3 py-2 shadow-sm flex items-center gap-2.5 text-left transition ${on ? '' : 'border-gray-200 hover:border-gray-300'}`}
+                style={on ? { borderColor: themeColor, boxShadow: `0 0 0 2px ${themeColor}`, background: themeSoft } : undefined}>
+                <div className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: on ? '#fff' : soft }}>
+                    <Icon className="h-3.5 w-3.5" style={{ color }} />
                 </div>
                 <div className="min-w-0">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400 truncate">{label}</div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-gray-600 truncate">{label}</div>
                     <div className="text-[17px] font-extrabold leading-tight" style={{ color }}>{value}</div>
-                    <div className="text-[9.5px] text-gray-400 truncate">{sub}</div>
                 </div>
             </button>
         );
@@ -758,17 +928,17 @@ const AppMapping = () => {
     return (
         <div>
             {/* Stat cards — each opens its slice of the data in the table below */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2.5">
-                {stat('all', 'Unique App Codes', 'in Customers Data Hub · Asset Detailed', map?.uniqueAssetCodes ?? 0, Squares2X2Icon, themeColor, themeSoft)}
-                {stat('uploaded', 'Uploaded', (
-                    <>
-                        <b className="text-gray-600">{map?.masterTotal ?? 0}</b> total in master
-                        <span className="text-gray-300 mx-1">·</span>
-                        <b className="text-gray-600">{map?.masterOnlyCount ?? 0}</b> not matched with this data
-                    </>
-                ), map?.uploadedCount ?? 0, CheckCircleIcon, '#15803d', 'rgba(21,128,61,.10)',
-                    `${map?.uploadedCount ?? 0} of the ${map?.masterTotal ?? 0} master codes are already uploaded — an app code in Asset Detailed matches them. The other ${map?.masterOnlyCount ?? 0} are in the master but match no app code in the asset data.`)}
-                {stat('remaining', 'Remaining', 'not uploaded to the master yet', map?.remainingCount ?? 0, ExclamationTriangleIcon, '#b45309', 'rgba(180,83,9,.10)')}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-2.5">
+                {stat('all', 'All Application Codes', map?.uniqueAssetCodes ?? 0, Squares2X2Icon, '#6d28d9', 'rgba(109,40,217,.10)',
+                    'Every unique app code found in Asset Detailed')}
+                {stat('remaining', 'Remaining', map?.remainingCount ?? 0, ExclamationTriangleIcon, '#b45309', 'rgba(180,83,9,.10)',
+                    'Asset app codes not added to the master yet')}
+                {stat('master', 'Total in Master', map?.masterTotal ?? rows.length, CircleStackIcon, themeColor, themeSoft,
+                    'Every application code currently stored in the master')}
+                {stat('uploaded', 'Match in Master', map?.uploadedCount ?? 0, CheckCircleIcon, '#15803d', 'rgba(21,128,61,.10)',
+                    'Master codes that match an app code in Asset Detailed')}
+                {stat('notmatched', 'Not Matched', map?.masterOnlyCount ?? 0, XMarkIcon, '#be123c', 'rgba(190,18,60,.10)',
+                    'Master codes that match no app code in the asset data')}
             </div>
 
             {/* The table follows whichever card is open */}
@@ -778,9 +948,14 @@ const AppMapping = () => {
                     <p className="text-[13px] font-bold text-gray-800">{VIEWS[view].title}</p>
                     <span className="text-[11px] text-gray-400 font-mono">{remaining.length} of {source.length}</span>
                     <div className="ml-auto flex items-center gap-2 max-sm:w-full">
+                        <select value={searchField} onChange={(e) => setSearchField(e.target.value)} title="Search field"
+                            className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[12px] text-gray-700 outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition">
+                            {SEARCH_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                        </select>
                         <div className="relative max-sm:flex-1">
                             <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search code, engine, KVA"
+                            <input value={q} onChange={(e) => setQ(e.target.value)}
+                                placeholder={`Search ${(SEARCH_FIELDS.find((f) => f.key === searchField) || SEARCH_FIELDS[0]).label.toLowerCase()}`}
                                 className="w-56 max-sm:w-full rounded-lg border border-gray-200 bg-white pl-8 pr-2.5 py-1.5 text-[12px] outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition" />
                         </div>
                         <button onClick={() => load(false)} title="Refresh"
@@ -799,8 +974,13 @@ const AppMapping = () => {
                 ) : remaining.length === 0 ? (
                     <div className="py-12 text-center text-[13px] text-gray-400">{q.trim() ? 'No codes match your search.' : VIEWS[view].empty}</div>
                 ) : (
-                    <div className="overflow-auto qm-scroll max-h-[62vh]">
-                        <table className="min-w-[760px] w-full border-collapse text-[12px]">
+                    <>
+                    {/* Top horizontal scrollbar — spacer as wide as the table, mirrored with it */}
+                    <div ref={topScrollRef} onScroll={mirrorScroll(topScrollRef, bodyScrollRef)} className="overflow-x-auto overflow-y-hidden qm-scroll border-b border-gray-100">
+                        <div style={{ width: tableW }} className="h-px" />
+                    </div>
+                    <div ref={bodyScrollRef} onScroll={mirrorScroll(bodyScrollRef, topScrollRef)} className="overflow-auto qm-scroll max-h-[62vh]">
+                        <table className="min-w-[980px] w-full border-collapse text-[12px]">
                             <thead className="sticky top-0 z-10">
                                 <tr className="bg-gray-50 text-[10px] sm:text-[11px] font-semibold text-black uppercase tracking-wider">
                                     <th className="px-3 py-2 border border-gray-200 bg-gray-50 text-center w-12">Sr.</th>
@@ -808,48 +988,70 @@ const AppMapping = () => {
                                     <SortTh label="Engine Model" sortKey="engineModel" sort={sort} onSort={toggle} className="px-3 py-2 border border-gray-200 bg-gray-50 text-center" />
                                     <SortTh label="Segment" sortKey="segment" sort={sort} onSort={toggle} className="px-3 py-2 border border-gray-200 bg-gray-50 text-center" />
                                     <SortTh label="KVA Rating" sortKey="kva" sort={sort} onSort={toggle} className="px-3 py-2 border border-gray-200 bg-gray-50 text-center" />
+                                    <SortTh label="Emission Norm" sortKey="emission" sort={sort} onSort={toggle} className="px-2 py-2 border border-gray-200 bg-gray-50 text-center whitespace-nowrap" />
+                                    <SortTh label="Commissioning Date" sortKey="commissioning" sort={sort} onSort={toggle} wrap className="px-2 py-2 border border-gray-200 bg-gray-50 text-center w-20" />
                                     <SortTh label="Assets" sortKey="assets" sort={sort} onSort={toggle} className="px-3 py-2 border border-gray-200 bg-gray-50 text-center" />
-                                    {view === 'all' && <SortTh label="Status" sortKey="uploaded" sort={sort} onSort={toggle} className="px-3 py-2 border border-gray-200 bg-gray-50 text-center w-28" />}
-                                    {view === 'remaining' && <th className="px-3 py-2 border border-gray-200 bg-gray-50 text-center">Action</th>}
+                                    {view !== 'remaining' && svcCols.map((c) => (
+                                        <th key={c.id} title={c.name} className="px-2 py-2 border border-gray-200 bg-gray-50 text-center whitespace-nowrap">{c.short}</th>
+                                    ))}
+                                    <th className="px-3 py-2 border border-gray-200 bg-gray-50 text-center w-24">Action</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {remaining.map((r, i) => (
                                     <tr key={r.appCode} className="hover:bg-indigo-50/40 transition">
                                         <td className="px-3 py-2 border border-gray-200 font-mono font-semibold text-gray-500 text-center">{i + 1}</td>
-                                        <td className="px-3 py-2 border border-gray-200 font-mono font-semibold text-gray-800 whitespace-nowrap">{r.appCode}</td>
+                                        <td className="px-3 py-2 border border-gray-200 font-mono font-semibold text-gray-800 whitespace-nowrap">
+                                            {rowInMaster(r) ? (
+                                                <button type="button" onClick={() => openView(r)}
+                                                    title="View this application code's parts / kits"
+                                                    className="font-mono font-semibold underline decoration-dotted underline-offset-2 hover:opacity-80"
+                                                    style={{ color: themeColor }}>
+                                                    {r.appCode}
+                                                </button>
+                                            ) : r.appCode}
+                                        </td>
                                         <td className="px-3 py-2 border border-gray-200 text-gray-600">{r.engineModel || '—'}</td>
                                         <td className="px-3 py-2 border border-gray-200 text-center text-gray-600">{r.segment || '—'}</td>
                                         <td className="px-3 py-2 border border-gray-200 text-center font-mono text-gray-600">{assetKva(r.kva) ? `${assetKva(r.kva)} KVA` : '—'}</td>
+                                        <td className="px-3 py-2 border border-gray-200 text-center text-gray-600 whitespace-nowrap">{emissionOf(r) || '—'}</td>
+                                        <td className="px-3 py-2 border border-gray-200 text-center font-mono text-gray-600 whitespace-nowrap">{commissioningOf(r) ? fmtDMY(commissioningOf(r)) : '—'}</td>
                                         <td className="px-3 py-2 border border-gray-200 text-center">
                                             <span className="inline-block min-w-[30px] rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ backgroundColor: themeSoft, color: themeColor }}>{r.assets}</span>
                                         </td>
-                                        {view === 'all' && (
-                                            <td className="px-3 py-2 border border-gray-200 text-center">
-                                                {r.uploaded
-                                                    ? <span className="inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase bg-emerald-50 text-emerald-700">Uploaded</span>
-                                                    : <span className="inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase bg-amber-50 text-amber-700">Remaining</span>}
-                                            </td>
-                                        )}
-                                        {view === 'remaining' && (
-                                            <td className="px-3 py-2 border border-gray-200 text-center">
+                                        {view !== 'remaining' && svcCols.map((c) => {
+                                            const ids = svcCoverage.get(String(r.appCode || '').trim().toLowerCase());
+                                            return (
+                                                <td key={c.id} className="px-2 py-2 border border-gray-200 text-center">
+                                                    {ids && ids.has(c.id)
+                                                        ? <span className="font-extrabold text-[15px] text-green-600">✓</span>
+                                                        : <span className="font-medium text-gray-300">✗</span>}
+                                                </td>
+                                            );
+                                        })}
+                                        <td className="px-3 py-2 border border-gray-200 text-center">
+                                            {rowInMaster(r) ? (
+                                                <button onClick={() => openEdit(r)}
+                                                    className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-[11.5px] font-semibold text-gray-700 transition hover:bg-gray-50 hover:border-gray-400">
+                                                    <PencilSquareIcon className="h-3.5 w-3.5" /> Edit
+                                                </button>
+                                            ) : (
                                                 <button onClick={() => setAdding(r)}
                                                     className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11.5px] font-semibold text-white transition hover:opacity-90"
                                                     style={{ backgroundColor: themeColor }}>
                                                     <PlusIcon className="h-3.5 w-3.5" /> Add
                                                 </button>
-                                            </td>
-                                        )}
+                                            )}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
                     </div>
+                    </>
                 )}
                 <div className="px-4 py-1.5 border-t border-gray-200 bg-white text-[10.5px] text-gray-400">
-                    Codes are compared case-insensitively. {view === 'remaining'
-                        ? 'Adding a code here opens the same Add Application Code form, prefilled from the asset data — complete the part lines and save.'
-                        : 'Open the Remaining card to add a code to the master.'}
+                    Codes are compared case-insensitively. Use <b className="font-semibold">Add</b> to bring an asset code into the master (prefilled from the asset data), or <b className="font-semibold">Edit</b> to change a code that is already in the master.
                 </div>
             </div>
 
@@ -858,7 +1060,8 @@ const AppMapping = () => {
                     prefill={{
                         appCode: adding.appCode, engineModel: adding.engineModel || '',
                         segment: assetSegment(adding.segment), kva: assetKva(adding.kva),
-                        systemAppCode: adding.appCode,
+                        emission: emissionOf(adding) || '',
+                        systemAppCode: adding.appCode ? `${adding.appCode}...` : '',
                     }}
                     opts={opts} existing={existingCodes} remaining={map?.remaining || []}
                     onClose={() => setAdding(null)}
@@ -866,7 +1069,31 @@ const AppMapping = () => {
                         await createAppCode(rec);
                         toast.success(`${rec.appCode} added to master`);
                         await load(false, true);
+                        onMasterChanged?.(); // host page badge (App codes count) stays live
                     }} />
+            )}
+
+            {editing && (
+                <AppFormModal
+                    initial={editing}
+                    opts={opts} existing={existingCodes} remaining={map?.remaining || []}
+                    onClose={() => setEditing(null)}
+                    onSave={async (rec) => {
+                        await updateAppCode(editing.appCode, rec);
+                        toast.success(`${rec.appCode} updated`);
+                        await load(false, true);
+                        onMasterChanged?.(); // host page badge / coverage stay live
+                    }} />
+            )}
+
+            {viewing && (
+                <AppViewModal
+                    record={viewing}
+                    services={services}
+                    emission={emissionOf(viewing)}
+                    commissioning={commissioningByCode.get(String(viewing.appCode || '').trim().toLowerCase()) || ''}
+                    onClose={() => setViewing(null)}
+                    onEdit={() => { const rec = viewing; setViewing(null); setEditing(rec); }} />
             )}
         </div>
     );
@@ -964,6 +1191,131 @@ const modelToParts = (parts, kits) => {
     });
 };
 
+/* ------------- Read-only preview of one master app code (from App Mapping) -------------
+   Uses the SAME sheet layout as the Master Data tab: the application-code columns
+   merge down the code's part rows, and a kit merges down the parts that share it. */
+const AppViewModal = ({ record, services = [], emission, commissioning, onClose, onEdit }) => {
+    const a = record || {};
+    const lines = (a.parts && a.parts.length) ? a.parts : [null];
+    // Same kit-block spans as the Master Data sheet: a part carrying kit data opens
+    // a block; each following part with no kit data of its own extends it.
+    const kitAt = {};
+    let start = 0;
+    lines.forEach((p, i) => {
+        if (i === 0 || (p && kitHasData(p))) { kitAt[i] = { p, span: 1 }; start = i; }
+        else kitAt[start].span++;
+    });
+    const span = lines.length;
+    const appTd = 'px-3 py-1 border border-gray-200 align-middle bg-white';
+
+    return (
+        <div className="fixed inset-0 z-[120] flex justify-center overflow-y-auto p-4 max-md:p-2" style={{ background: 'rgba(20,26,32,.55)' }}>
+            <div className="msm-modal bg-white rounded-2xl shadow-2xl w-full max-w-6xl my-auto max-xl:max-w-[95vw] overflow-hidden">
+                <div className="flex items-center gap-3 px-5 py-3 text-white max-md:px-3"
+                    style={{ background: `linear-gradient(120deg, ${themeColor} 0%, ${themeDark} 100%)` }}>
+                    <div className="h-8 w-8 rounded-lg flex items-center justify-center bg-white/15 flex-shrink-0">
+                        <DocumentTextIcon className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                        <h3 className="text-[15px] font-bold leading-tight">{a.appCode}</h3>
+                        <p className="text-[11px] text-white/70 leading-tight">Application code details — view only</p>
+                    </div>
+                    <div className="ml-auto flex items-center gap-2">
+                        <button onClick={onEdit}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-3 py-1.5 text-[12px] font-semibold transition">
+                            <PencilSquareIcon className="h-4 w-4" /> Edit
+                        </button>
+                        <button onClick={onClose} className="rounded-lg p-1 text-white/70 hover:bg-white/15 hover:text-white transition"><XMarkIcon className="h-5 w-5" /></button>
+                    </div>
+                </div>
+                <div className="px-5 py-4 max-h-[72vh] overflow-y-auto bg-gray-50/60 max-md:px-3">
+                    {/* Emission / Commissioning summary (not columns in the master sheet) */}
+                    <div className="mb-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-gray-600">
+                        <span><span className="font-semibold text-gray-500">Emission Norm:</span> {emission || a.emission || '—'}</span>
+                        <span><span className="font-semibold text-gray-500">Commissioning Date:</span> {commissioning ? fmtDMY(commissioning) : '—'}</span>
+                        <span><span className="font-semibold text-gray-500">Part Lines:</span> {a.parts?.length || 0}</span>
+                    </div>
+                    {/* Master-sheet-format table for this single code */}
+                    <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto qm-scroll shadow-sm">
+                        <table className="master-sheet-table min-w-[1180px] w-full text-[12px]">
+                            <thead>
+                                <tr className="bg-gray-100 text-[10px] font-bold text-black uppercase tracking-wider">
+                                    <th rowSpan={2} className="px-2 py-1 border border-gray-200 bg-gray-100 w-11 text-center">Sr.</th>
+                                    <th colSpan={5} className="px-3 py-1 border border-gray-200 bg-gray-100 text-center">Application Code</th>
+                                    <th colSpan={5} className="px-3 py-1 border border-gray-200 bg-indigo-100 text-center" style={{ color: themeColor }}>Part Details</th>
+                                    <th colSpan={4} className="px-3 py-1 border border-gray-200 bg-amber-100 text-center text-amber-800">Kit Details</th>
+                                </tr>
+                                <tr className="bg-gray-50 text-[10px] font-semibold text-black uppercase tracking-wider">
+                                    <th className="px-3 py-1 border border-gray-200 bg-gray-50 text-center">Segment</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-gray-50 text-center">App Code</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-gray-50 text-center">System App Code</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-gray-50 text-center">Engine Model</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-gray-50 text-center">KVA</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-indigo-50 text-center">Part Number</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-indigo-50 text-center">Part Description</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-indigo-50 text-center">Qty</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-indigo-50 text-center">Action</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-indigo-50 text-center">Svc Hrs</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Kit Number</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Kit Description</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Qty</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {lines.map((p, i) => {
+                                    const kit = kitAt[i];
+                                    const last = i === lines.length - 1;
+                                    const partEnd = last ? BLOCK_END : undefined;
+                                    const kitEnd = kit && i + kit.span === lines.length ? BLOCK_END : undefined;
+                                    return (
+                                        <tr key={i} className="hover:bg-indigo-50/30 transition">
+                                            {i === 0 && (
+                                                <>
+                                                    <td rowSpan={span} style={BLOCK_END} className={`${appTd} text-center font-mono font-semibold text-gray-500`}>1</td>
+                                                    <td rowSpan={span} style={BLOCK_END} className={`${appTd} text-center text-gray-600`}>{a.segment || '—'}</td>
+                                                    <td rowSpan={span} style={BLOCK_END} className={`${appTd} text-center`}>
+                                                        <span className="inline-flex min-w-[104px] items-center justify-center font-mono font-bold text-[12px] bg-[#1b2026] text-white px-2 py-0.5 rounded-md whitespace-nowrap">{a.appCode}</span>
+                                                    </td>
+                                                    <td rowSpan={span} style={BLOCK_END} className={`${appTd} text-center font-mono text-gray-600 whitespace-nowrap`}>{a.systemAppCode || '—'}</td>
+                                                    <td rowSpan={span} style={BLOCK_END} className={`${appTd} font-mono text-gray-700 whitespace-nowrap`}>{a.engineModel || '—'}</td>
+                                                    <td rowSpan={span} style={BLOCK_END} className={`${appTd} text-center text-gray-600 whitespace-nowrap`}>{a.kva ? `${cleanKva(a.kva)} KVA` : '—'}</td>
+                                                </>
+                                            )}
+                                            <td style={partEnd} className="px-3 py-1 border border-gray-200 font-mono text-gray-800 whitespace-nowrap">{p?.partNumber || '—'}</td>
+                                            <td style={partEnd} className="px-3 py-1 border border-gray-200 text-gray-700 min-w-[240px]">{p?.partDesc || '—'}</td>
+                                            <td style={partEnd} className="px-3 py-1 border border-gray-200 text-center">{p?.qty || '—'}</td>
+                                            <td style={partEnd} className="px-3 py-1 border border-gray-200 text-center"><Chip a={p?.action} /></td>
+                                            <td style={partEnd} className="px-3 py-1 border border-gray-200 text-center font-mono" title={p ? partService(services, p).name : ''}>{p?.serviceHours || '—'}</td>
+                                            {kit && (
+                                                <>
+                                                    <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 font-mono text-gray-600 align-middle whitespace-nowrap bg-amber-50/20">{kit.p?.altPartNo || '—'}</td>
+                                                    <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-gray-600 align-middle min-w-[200px] bg-amber-50/20">{kit.p?.altDesc || '—'}</td>
+                                                    <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center text-gray-600 align-middle bg-amber-50/20">{kit.p?.altQty || '—'}</td>
+                                                    <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center align-middle bg-amber-50/20"><Chip a={kit.p?.altAction} /></td>
+                                                </>
+                                            )}
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="px-1 pt-1.5 text-[10.5px] text-gray-400">
+                        Application-code and kit cells span their part rows, the same way the master file merges them.
+                    </div>
+                </div>
+                <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-200 bg-white max-md:px-3">
+                    <button onClick={onClose} className="rounded-lg border border-gray-300 bg-white px-4 py-1.5 text-[12px] font-semibold text-gray-700 hover:bg-gray-50 transition">Close</button>
+                    <button onClick={onEdit} className="inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: themeColor }}>
+                        <PencilSquareIcon className="h-4 w-4" /> Edit this code
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClose, onSave }) => {
     const isEdit = !!initial;
 
@@ -973,12 +1325,15 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
     // the full mandatory validation still runs before anything is committed.
     // prefill (App Mapping "Add") seeds a NEW record's header from asset data;
     // it is ignored in edit mode.
+    // System App Code for a NEW record is always the App Code with '...' appended
+    // (e.g. 04.1341 -> 04.1341...) — never hand-typed. Edit mode keeps the stored value.
+    const sysOf = (code) => (code ? `${code}...` : '');
     const makeInitialHdr = () => ({
         appCode: initial?.appCode || prefill?.appCode || '',
         segment: initial?.segment || prefill?.segment || 'PG',
         kva: initial?.kva || prefill?.kva || (opts.kvaOpts[0] || ''),
         engineModel: initial?.engineModel || prefill?.engineModel || '',
-        systemAppCode: initial?.systemAppCode || prefill?.systemAppCode || '',
+        systemAppCode: initial ? (initial.systemAppCode || '') : sysOf(prefill?.appCode || ''),
         emission: initial?.emission || prefill?.emission || 'CPCB IV+',
     });
     // Rebuild the kit-centric editing model from the stored part lines. Pure and
@@ -1001,12 +1356,27 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
     const nextUid = () => `p${++uidRef.current}`;
 
     const [hdr, setHdr] = useState(makeInitialHdr);
+    // When the header was filled from asset data — either the App Mapping "Add"
+    // (prefill) or picking a pending code from the dropdown — Segment / KVA /
+    // Engine Model / Emission / App Code are locked (read-only). "Change" unlocks.
+    const [assetLocked, setAssetLocked] = useState(!isEdit && !!prefill);
     const [model, setModel] = useState(makeInitialModel);
     const { parts, kits } = model;
     const setParts = (fn) => setModel((m) => ({ ...m, parts: typeof fn === 'function' ? fn(m.parts) : fn }));
     const [checked, setChecked] = useState({}); // part __uid -> selected, for "Add kit"
     const [saving, setSaving] = useState(false);
     const [pendingDraft, setPendingDraft] = useState(null); // a found draft awaiting Restore/Discard
+    // Guided flow: 'build' (header + parts + kit Q&A) -> 'review' (sheet preview) -> save.
+    const [stage, setStage] = useState('build');
+    // Kit Q&A step, strictly in order:
+    //   'ask'     — "Do you want to add a Kit?" Yes/No
+    //   'pick'    — select the part codes that form the kit, then OK
+    //   'details' — "Please add kit details" (Kit Number/Description/Qty/Action)
+    //   -> back to 'ask' ("Do you want to add another kit?") and so on
+    //   'store'   — "Do you want to store in master?" Yes -> review
+    //   'idle'    — declined; a small "+ Add a kit" re-opens the flow
+    const [kitStep, setKitStep] = useState('ask');
+    const [currentKitId, setCurrentKitId] = useState(null); // the kit whose details are being filled
 
     // On open, offer to restore a saved draft (only if it differs from the default form).
     useEffect(() => {
@@ -1057,12 +1427,13 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
     const loosePartsList = parts.filter((p) => !p.__kitId);
     const checkedUids = loosePartsList.filter((p) => checked[p.__uid]).map((p) => p.__uid);
 
-    // Group the ticked parts into one new kit, dropping any kit left with no parts.
+    // Group the ticked parts into one new kit, dropping any kit left with no
+    // parts. Returns the new kit's id so the flow can open its details form.
     const addKitFromChecked = () => {
-        if (!checkedUids.length) return;
+        if (!checkedUids.length) return null;
         const take = new Set(checkedUids);
+        const id = `k${Date.now().toString(36)}`;
         setModel((m) => {
-            const id = `k${Date.now().toString(36)}`;
             const nextParts = m.parts.map((p) => (take.has(p.__uid) ? { ...p, __kitId: id } : p));
             const used = new Set(nextParts.map((p) => p.__kitId).filter(Boolean));
             return {
@@ -1071,6 +1442,7 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
             };
         });
         setChecked({});
+        return id;
     };
     // Ungroup: its parts go back to being loose.
     const removeKit = (id) => setModel((m) => ({
@@ -1089,12 +1461,12 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
         return { parts: nextParts, kits: m.kits.filter((k) => used.has(k.__id)) };
     });
 
-    const sel = 'w-full rounded-md border border-gray-200 px-1.5 py-1 text-[12px] bg-white outline-none focus:ring-1 focus:ring-indigo-200';
-    const inp = 'w-full rounded-md border border-gray-200 px-1.5 py-1 text-[12px] bg-white outline-none focus:ring-1 focus:ring-indigo-200';
-    const kitInp = 'w-full rounded-md border border-indigo-200/70 bg-white px-2 py-1 text-[12px] outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 transition';
-    const kitLbl = 'block text-center text-[9.5px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5';
-    const field = 'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-[13px] text-black outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition';
-    const label = 'block text-[12px] font-semibold text-gray-700 mb-1';
+    const sel = 'w-full rounded-md border border-gray-300 px-1.5 py-1 text-[12px] text-black bg-white outline-none focus:ring-1 focus:ring-indigo-200';
+    const inp = 'w-full rounded-md border border-gray-300 px-1.5 py-1 text-[12px] text-black bg-white outline-none focus:ring-1 focus:ring-indigo-200';
+    const kitInp = 'w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-[12px] text-black outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 transition';
+    const kitLbl = 'block text-center text-[9.5px] font-bold uppercase tracking-wide text-gray-700 mb-0.5';
+    const field = 'w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-[13px] text-black outline-none focus:border-gray-400 focus:ring-2 focus:ring-indigo-100 transition';
+    const label = 'block text-[12px] font-bold text-gray-800 mb-1';
 
     // Everything is mandatory. A part line is "complete" only when all five fields
     // are filled; a new line can't be added (and nothing saved) until then.
@@ -1135,7 +1507,7 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
 
     return (
         <div className="fixed inset-0 z-[120] flex justify-center overflow-y-auto p-4 max-md:p-2" style={{ background: 'rgba(20,26,32,.55)' }}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl my-auto max-xl:max-w-[95vw] overflow-hidden">
+            <div className="msm-modal bg-white rounded-2xl shadow-2xl w-full max-w-6xl my-auto max-xl:max-w-[95vw] overflow-hidden">
                 <div className="flex items-center gap-3 px-5 py-3 text-white max-md:px-3"
                     style={{ background: `linear-gradient(120deg, ${themeColor} 0%, ${themeDark} 100%)` }}>
                     <div className="h-8 w-8 rounded-lg flex items-center justify-center bg-white/15 flex-shrink-0">
@@ -1165,130 +1537,104 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                             </button>
                         </div>
                     )}
+                    {stage === 'build' && (<>
                     {/* ---- Section: application code ---- */}
-                    <div className="rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm">
+                    <div className="rounded-xl border border-gray-300 bg-white p-3.5 shadow-sm">
                         <div className="flex items-center gap-2 mb-3">
                             <CircleStackIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
-                            <span className="text-[11px] uppercase tracking-wider font-bold text-gray-500">Application Code</span>
+                            <span className="text-[11px] uppercase tracking-wider font-bold text-black">Application Code</span>
                             <span className="h-px flex-1 bg-gray-100" />
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                             <div>
-                                <label className={label}>
-                                    App Code <span className="text-red-500">*</span>
-                                    {!isEdit && remaining.length > 0 && (
-                                        <span className="ml-1.5 font-normal text-[10.5px] text-gray-400">{remaining.length} pending code{remaining.length === 1 ? '' : 's'} to pick from</span>
+                                <label className={`${label} flex items-center gap-1.5`}>
+                                    <span>App Code <span className="text-red-500">*</span></span>
+                                    {!isEdit && assetLocked && (
+                                        <button type="button"
+                                            onClick={() => { setAssetLocked(false); setHdr((h) => ({ ...h, appCode: '', systemAppCode: '', engineModel: '', kva: (opts.kvaOpts[0] || ''), segment: 'PG', emission: 'CPCB IV+' })); }}
+                                            className="ml-auto font-normal text-[10.5px] text-[#2f3192] hover:underline">Change</button>
+                                    )}
+                                    {!isEdit && !assetLocked && remaining.length > 0 && (
+                                        <span className="ml-auto font-normal text-[10.5px] text-gray-600">{remaining.length} pending</span>
                                     )}
                                 </label>
                                 <AppCodeSuggest
                                     value={hdr.appCode}
-                                    disabled={isEdit}
+                                    disabled={isEdit || assetLocked}
                                     remaining={remaining}
-                                    fieldCls={`${field} ${isEdit ? 'opacity-60' : ''}`}
-                                    onChange={(v) => setHdr((h) => ({ ...h, appCode: v }))}
-                                    onPick={(r) => setHdr((h) => ({
-                                        ...h,
-                                        appCode: r.appCode,
-                                        // Prefill from the asset data, but never clobber something already typed.
-                                        engineModel: h.engineModel || r.engineModel || '',
-                                        segment: assetSegment(r.segment) || h.segment,
-                                        kva: assetKva(r.kva) || h.kva,
-                                        systemAppCode: h.systemAppCode || r.appCode,
-                                    }))}
+                                    fieldCls={`${field} ${(isEdit || assetLocked) ? 'bg-gray-100 text-gray-500 opacity-80' : ''}`}
+                                    onChange={(v) => setHdr((h) => ({ ...h, appCode: v, systemAppCode: sysOf(v) }))}
+                                    onPick={(r) => {
+                                        // Pending code picked -> fill everything from asset data and lock it.
+                                        setHdr((h) => ({
+                                            ...h,
+                                            appCode: r.appCode,
+                                            engineModel: r.engineModel || '',
+                                            segment: assetSegment(r.segment) || h.segment,
+                                            kva: assetKva(r.kva) || h.kva,
+                                            emission: r.emission || h.emission,
+                                            systemAppCode: sysOf(r.appCode),
+                                        }));
+                                        setAssetLocked(true);
+                                    }}
                                 />
                             </div>
                             <div><label className={label}>Segment <span className="text-red-500">*</span></label>
-                                <select className={field} value={hdr.segment} onChange={(e) => setHdr((h) => ({ ...h, segment: e.target.value }))}>
-                                    <option value="PG">PG</option>
-                                    <option value="Industrial">Industrial</option>
-                                </select></div>
+                                <Combo pickOnly disabled={assetLocked} value={hdr.segment} onChange={(v) => setHdr((h) => ({ ...h, segment: v }))} options={['PG', 'Industrial']} fieldCls={field} /></div>
                             <div><label className={label}>KVA Rating <span className="text-red-500">*</span></label>
-                                <Combo value={hdr.kva} onChange={(v) => setHdr((h) => ({ ...h, kva: v }))} options={opts.kvaOpts} placeholder="e.g. 30 (or type new)" mono fieldCls={field} /></div>
+                                <Combo disabled={assetLocked} value={hdr.kva} onChange={(v) => setHdr((h) => ({ ...h, kva: v }))} options={opts.kvaOpts} placeholder="e.g. 30 (or type new)" mono fieldCls={field} /></div>
                             <div><label className={label}>Engine Model <span className="text-red-500">*</span></label>
-                                <input className={`${field} font-mono`} value={hdr.engineModel} onChange={(e) => setHdr((h) => ({ ...h, engineModel: e.target.value }))} placeholder="e.g. 6K1080ETA 4G1" /></div>
+                                <input className={`${field} font-mono ${assetLocked ? 'bg-gray-100 text-gray-500 cursor-not-allowed opacity-80' : ''}`} value={hdr.engineModel} readOnly={assetLocked} onChange={(e) => setHdr((h) => ({ ...h, engineModel: e.target.value }))} placeholder="e.g. 6K1080ETA 4G1" /></div>
                             <div><label className={label}>System App Code <span className="text-red-500">*</span></label>
-                                <input className={`${field} font-mono`} value={hdr.systemAppCode} onChange={(e) => setHdr((h) => ({ ...h, systemAppCode: e.target.value }))} placeholder="e.g. 3H.8902" /></div>
+                                <input className={`${field} font-mono ${!isEdit ? 'bg-gray-100 text-gray-500 cursor-not-allowed opacity-80' : ''}`} value={hdr.systemAppCode} readOnly={!isEdit} title={!isEdit ? 'Auto-set to the App Code with … appended' : undefined} onChange={(e) => setHdr((h) => ({ ...h, systemAppCode: e.target.value }))} placeholder="e.g. 3H.8902" /></div>
                             <div><label className={label}>Emission Norm <span className="text-red-500">*</span></label>
-                                <Combo value={hdr.emission} onChange={(v) => setHdr((h) => ({ ...h, emission: v }))} options={opts.emiOpts} placeholder="e.g. CPCB IV+ (or type new)" fieldCls={field} /></div>
+                                <Combo disabled={assetLocked} value={hdr.emission} onChange={(v) => setHdr((h) => ({ ...h, emission: v }))} options={opts.emiOpts} placeholder="e.g. CPCB IV+ (or type new)" fieldCls={field} /></div>
                         </div>
                     </div>
 
                     {/* ---- Section: service parts ---- */}
-                    <div className="rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm mt-3">
+                    <div className="rounded-xl border border-gray-300 bg-white p-3.5 shadow-sm mt-3">
                         <div className="flex items-center gap-2 mb-1 max-md:flex-wrap">
                             <WrenchScrewdriverIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
-                            <span className="text-[11px] uppercase tracking-wider font-bold text-gray-500">Service Parts <span className="text-red-500">*</span></span>
+                            <span className="text-[11px] uppercase tracking-wider font-bold text-black">Service Parts <span className="text-red-500">*</span></span>
                             <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold text-gray-500">{parts.length}</span>
                             <span className="h-px flex-1 bg-gray-100 max-md:hidden" />
-                            <div className="flex items-center gap-2 max-md:w-full">
-                                <button onClick={addKitFromChecked} disabled={!checkedUids.length}
-                                    title={checkedUids.length ? `Group the ${checkedUids.length} ticked part(s) into one kit` : 'Tick the parts that come in one kit first'}
-                                    className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-                                    style={{ backgroundColor: themeColor }}>
-                                    <PlusIcon className="h-3.5 w-3.5" /> Add Kit Number{checkedUids.length ? ` (${checkedUids.length})` : ''}
-                                </button>
-                                <button onClick={() => setParts((a) => [...a, blankPart(nextUid())])} disabled={!allPartsComplete}
-                                    title={allPartsComplete ? 'Add another part line' : 'Fill every field in the current part line(s) first'}
-                                    className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-[12px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
-                                    <PlusIcon className="h-3.5 w-3.5" /> Add part line
-                                </button>
-                            </div>
                         </div>
-                        <p className="text-[11px] text-gray-400 mb-2.5">Tick the parts that are supplied together as one kit, then press <b>Add Kit Number</b>. Parts you leave unticked stay loose and are supplied as-is.</p>
-                    <div className="border border-gray-200 rounded-lg overflow-x-auto qm-scroll">
+                        <p className="text-[11px] font-medium text-gray-700 mb-2.5">Add every part line first — you can group parts into kits in the step below.</p>
+                    <div className="border border-gray-300 rounded-lg overflow-x-auto qm-scroll">
                         <table className="min-w-[860px] w-full border-collapse">
                             <thead>
-                                <tr className="bg-gray-100/80 text-[9.5px] font-bold text-gray-500 uppercase tracking-wide border-b border-gray-200">
-                                    <th className="px-2 py-2 text-center w-9">
-                                        {(() => {
-                                            const allOn = loosePartsList.length > 0 && loosePartsList.every((p) => checked[p.__uid]);
-                                            if (!loosePartsList.length) return <span className="inline-flex h-[15px] w-[15px] items-center justify-center rounded border border-gray-200 bg-gray-100 align-middle" title="Every part is already in a kit" />;
-                                            return (
-                                                <span onClick={() => setChecked(allOn ? {} : Object.fromEntries(loosePartsList.map((p) => [p.__uid, true])))}
-                                                    title="Tick all loose parts / none"
-                                                    className="inline-flex h-[15px] w-[15px] cursor-pointer items-center justify-center rounded border border-gray-300 bg-white align-middle">
-                                                    {allOn && <CheckIcon className="h-2.5 w-2.5" style={{ color: themeColor }} />}
-                                                </span>
-                                            );
-                                        })()}
-                                    </th>
-                                    <th className="px-2 py-2 text-center">Part Number <span className="text-red-500">*</span></th><th className="px-2 py-2 text-center">Description <span className="text-red-500">*</span></th>
-                                    <th className="px-2 py-2 text-center w-16">Qty <span className="text-red-500">*</span></th><th className="px-2 py-2 text-center w-20">Action <span className="text-red-500">*</span></th>
-                                    <th className="px-2 py-2 text-center w-24">Svc Hrs <span className="text-red-500">*</span></th>
-                                    <th className="px-2 py-2 text-center w-24">Kit</th><th className="w-9" />
+                                <tr className="bg-gray-100/80 text-[9.5px] font-bold text-black uppercase tracking-wide border-b border-gray-200">
+                                    <th className="px-2 py-1.5 text-center w-44">Part Number <span className="text-red-500">*</span></th><th className="px-2 py-1.5 text-center">Description <span className="text-red-500">*</span></th>
+                                    <th className="px-2 py-1.5 text-center w-16">Qty <span className="text-red-500">*</span></th><th className="px-2 py-1.5 text-center w-20">Action <span className="text-red-500">*</span></th>
+                                    <th className="px-2 py-1.5 text-center w-24">Svc Hrs <span className="text-red-500">*</span></th>
+                                    {kits.length > 0 && <th className="px-2 py-1.5 text-center w-20">Kit</th>}
+                                    <th className="w-9" />
                                 </tr>
                             </thead>
                             <tbody>
                                 {parts.map((p, i) => {
                                     const kIdx = p.__kitId ? kits.findIndex((k) => k.__id === p.__kitId) : -1;
                                     const inKit = kIdx >= 0;
-                                    const on = !inKit && !!checked[p.__uid];
                                     return (
-                                        <tr key={p.__uid} className={`border-t border-gray-100 ${on ? 'bg-indigo-50/40' : inKit ? 'bg-amber-50/20' : ''}`}>
-                                            <td className="px-1.5 py-1 text-center">
-                                                {inKit ? (
-                                                    <span title={`Already in Kit ${kIdx + 1} — remove it from the kit to re-assign`}
-                                                        className="inline-flex h-[15px] w-[15px] cursor-not-allowed items-center justify-center rounded border border-gray-200 bg-gray-100 align-middle" />
-                                                ) : (
-                                                    <span onClick={() => setChecked((c) => ({ ...c, [p.__uid]: !c[p.__uid] }))}
-                                                        className={`inline-flex h-[15px] w-[15px] cursor-pointer items-center justify-center rounded border align-middle ${on ? 'bg-[#2f3192] border-[#2f3192]' : 'border-gray-300 bg-white'}`}>
-                                                        {on && <CheckIcon className="h-2.5 w-2.5 text-white" />}
-                                                    </span>
-                                                )}
-                                            </td>
+                                        <tr key={p.__uid} className={`border-t border-gray-100 ${inKit ? 'bg-amber-50/20' : ''}`}>
                                             <td className="px-1.5 py-1"><input className={`${inp} font-mono`} value={p.partNumber} onChange={(e) => setPart(i, 'partNumber', e.target.value)} /></td>
                                             <td className="px-1.5 py-1"><input className={inp} value={p.partDesc} onChange={(e) => setPart(i, 'partDesc', e.target.value)} /></td>
                                             <td className="px-1.5 py-1"><input className={`${inp} font-mono`} value={p.qty} onChange={(e) => setPart(i, 'qty', e.target.value)} /></td>
                                             <td className="px-1.5 py-1"><Combo value={p.action} onChange={(v) => setPart(i, 'action', v)} options={opts.actOpts} mono fieldCls={inp} /></td>
                                             <td className="px-1.5 py-1"><Combo value={p.serviceHours} onChange={(v) => setPart(i, 'serviceHours', v)} options={opts.hrsOpts} mono fieldCls={inp} /></td>
-                                            <td className="px-1.5 py-1 text-center">
-                                                {kIdx >= 0 ? (
-                                                    <button type="button" onClick={() => removeFromKit(p.__uid)} title="Take this part out of the kit"
-                                                        className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-1 text-[10.5px] font-bold text-amber-800 hover:bg-amber-100 transition">
-                                                        KIT {kIdx + 1} <XMarkIcon className="h-2.5 w-2.5" />
-                                                    </button>
-                                                ) : <span className="text-[10.5px] text-gray-300">loose</span>}
-                                            </td>
+                                            {kits.length > 0 && (
+                                                <td className="px-1.5 py-1 text-center">
+                                                    {inKit ? (
+                                                        <span title={`In Kit ${kIdx + 1}${kits[kIdx]?.number ? ` — ${kits[kIdx].number}` : ''}`}
+                                                            className="inline-flex items-center rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 whitespace-nowrap">
+                                                            KIT {kIdx + 1}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-[10.5px] font-semibold text-gray-600">loose</span>
+                                                    )}
+                                                </td>
+                                            )}
                                             <td className="px-1.5 py-1 text-center">
                                                 <button onClick={() => deletePart(p.__uid)} className="rounded-md border border-gray-200 p-1 text-gray-400 hover:text-red-600 hover:border-red-300 hover:bg-red-50">
                                                     <TrashIcon className="h-3.5 w-3.5" />
@@ -1297,41 +1643,181 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                                         </tr>
                                     );
                                 })}
-                                {parts.length === 0 && <tr><td colSpan={8} className="text-center text-gray-400 py-3 text-[12px]">No parts yet — add a line.</td></tr>}
+                                {parts.length === 0 && <tr><td colSpan={kits.length > 0 ? 7 : 6} className="text-center text-gray-400 py-3 text-[12px]">No parts yet — add a line.</td></tr>}
                             </tbody>
                         </table>
                     </div>
+                    <div className="mt-2">
+                        <button
+                            onClick={() => {
+                                if (!allPartsComplete) { toast.error('Please fill every field in the current part line first.'); return; }
+                                setParts((a) => [...a, blankPart(nextUid())]);
+                            }}
+                            title={allPartsComplete ? 'Add another part line' : 'Fill every field in the current part line(s) first'}
+                            className={`inline-flex items-center gap-1 rounded-lg border border-gray-400 bg-white px-2.5 py-0.5 text-[12px] font-bold text-gray-800 transition ${allPartsComplete ? 'hover:bg-gray-50' : 'cursor-not-allowed'}`}>
+                            <PlusIcon className="h-3.5 w-3.5" /> Add part line
+                        </button>
+                    </div>
                     </div>
 
-                    {/* ---- Section: kit details — the kits, plus every part in none of them ---- */}
-                    <div className="rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm mt-3">
-                        <div className="flex items-center gap-2 mb-2.5">
-                            <Squares2X2Icon className="h-3.5 w-3.5 text-amber-600" />
-                            <span className="text-[11px] uppercase tracking-wider font-bold text-gray-500">Kit Details</span>
-                            <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">{kits.length} kit{kits.length === 1 ? '' : 's'}</span>
-                            <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold text-gray-500">{loosePartsList.length} loose</span>
-                            <span className="h-px flex-1 bg-gray-100" />
-                        </div>
+                    {/* ---- Guided kit flow + the kits added so far (no standing section box) ---- */}
+                    <div className="mt-3">
 
-                    {kits.length === 0 && (
-                        <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/60 py-4 text-center text-[12px] text-gray-400 mb-1.5">
-                            No kits yet — tick the parts that come in one kit above and press <b>Add Kit Number</b>.
+                    {/* ---- Guided kit flow: ask -> pick parts -> fill kit details -> ask again ---- */}
+                    {allPartsComplete && loosePartsList.length > 0 && kitStep === 'ask' && (
+                        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50/40 px-3 py-2 mb-2">
+                            <span className="text-[13px] font-bold text-black">
+                                {kits.length ? 'Do you want to add another kit?' : 'Do you want to add a Kit?'}
+                            </span>
+                            <div className="ml-auto flex items-center gap-2">
+                                <button type="button" onClick={() => { setChecked({}); setKitStep('pick'); }}
+                                    className="rounded-lg px-3 py-1 text-[12px] font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: themeColor }}>
+                                    Yes
+                                </button>
+                                <button type="button" onClick={() => setKitStep('idle')}
+                                    className="rounded-lg border border-gray-400 bg-white px-3 py-1 text-[12px] font-semibold text-gray-800 hover:bg-gray-50 transition">
+                                    No
+                                </button>
+                            </div>
                         </div>
                     )}
-
+                    {allPartsComplete && loosePartsList.length > 0 && kitStep === 'pick' && (
+                        <div className="rounded-lg border border-indigo-200 bg-white px-3 py-2.5 mb-2">
+                            <div className="text-[11px] font-bold uppercase tracking-wide text-black mb-1.5">
+                                Select the parts that come together in this kit <span className="font-normal normal-case text-gray-600">— tick the rows, then press OK</span>
+                            </div>
+                            <div className="border border-gray-200 rounded-lg overflow-x-auto qm-scroll mb-2">
+                                <table className="min-w-[720px] w-full border-collapse text-[12px]">
+                                    <thead>
+                                        <tr className="bg-gray-100/80 text-[9.5px] font-bold text-black uppercase tracking-wide border-b border-gray-200">
+                                            <th className="px-2 py-1.5 text-center w-9">
+                                                {(() => {
+                                                    const allOn = loosePartsList.every((p) => checked[p.__uid]);
+                                                    return (
+                                                        <span onClick={() => setChecked(allOn ? {} : Object.fromEntries(loosePartsList.map((p) => [p.__uid, true])))}
+                                                            title="Select all / none"
+                                                            className="inline-flex h-[15px] w-[15px] cursor-pointer items-center justify-center rounded border border-gray-300 bg-white align-middle">
+                                                            {allOn && <CheckIcon className="h-2.5 w-2.5" style={{ color: themeColor }} />}
+                                                        </span>
+                                                    );
+                                                })()}
+                                            </th>
+                                            <th className="px-2 py-1.5 text-left w-44">Part Number</th>
+                                            <th className="px-2 py-1.5 text-left">Description</th>
+                                            <th className="px-2 py-1.5 text-center w-14">Qty</th>
+                                            <th className="px-2 py-1.5 text-center w-16">Action</th>
+                                            <th className="px-2 py-1.5 text-center w-20">Svc Hrs</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {loosePartsList.map((p) => {
+                                            const on = !!checked[p.__uid];
+                                            return (
+                                                <tr key={p.__uid} onClick={() => setChecked((c) => ({ ...c, [p.__uid]: !c[p.__uid] }))}
+                                                    className={`border-t border-gray-100 cursor-pointer transition ${on ? 'bg-indigo-50/60' : 'hover:bg-gray-50'}`}>
+                                                    <td className="px-2 py-1 text-center">
+                                                        <span className={`inline-flex h-[15px] w-[15px] items-center justify-center rounded border align-middle ${on ? 'bg-[#2f3192] border-[#2f3192]' : 'border-gray-300 bg-white'}`}>
+                                                            {on && <CheckIcon className="h-2.5 w-2.5 text-white" />}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-2 py-1 font-mono text-black whitespace-nowrap">{p.partNumber || '—'}</td>
+                                                    <td className="px-2 py-1 text-gray-900">{p.partDesc || '—'}</td>
+                                                    <td className="px-2 py-1 text-center text-gray-900">{p.qty || '—'}</td>
+                                                    <td className="px-2 py-1 text-center"><Chip a={p.action} /></td>
+                                                    <td className="px-2 py-1 text-center font-mono text-gray-900">{p.serviceHours || '—'}</td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[11px] font-medium text-gray-700">{checkedUids.length} part{checkedUids.length === 1 ? '' : 's'} selected</span>
+                                <div className="ml-auto flex items-center gap-2">
+                                    <button type="button" onClick={() => { setChecked({}); setKitStep('ask'); }}
+                                        className="rounded-lg border border-gray-400 bg-white px-3 py-1 text-[12px] font-semibold text-gray-800 hover:bg-gray-50 transition">
+                                        Cancel
+                                    </button>
+                                    <button type="button" disabled={!checkedUids.length}
+                                        onClick={() => { const id = addKitFromChecked(); if (id) { setCurrentKitId(id); setKitStep('details'); } }}
+                                        className="rounded-lg px-4 py-1 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed" style={{ backgroundColor: themeColor }}>
+                                        OK
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    {kitStep === 'details' && (() => {
+                        const k = kits.find((x) => x.__id === currentKitId);
+                        if (!k) return null;
+                        const members = parts.filter((p) => p.__kitId === k.__id);
+                        return (
+                            <div className="rounded-lg border border-indigo-200 bg-white px-3 py-2.5 mb-2">
+                                <div className="text-[13px] font-bold text-black mb-2">
+                                    Please add kit details <span className="text-[10.5px] font-normal text-gray-600">— for the {members.length} selected part{members.length === 1 ? '' : 's'}</span>
+                                </div>
+                                <div className="grid grid-cols-[.9fr_2.1fr_.4fr_.6fr] gap-2 max-md:grid-cols-2">
+                                    <div>
+                                        <label className={kitLbl}>Kit Number <span className="text-red-500">*</span></label>
+                                        <input className={`${kitInp} font-mono`} value={k.number} onChange={(e) => setKit(k.__id, 'number', e.target.value)} placeholder="e.g. 3H.019.11.0.SP" />
+                                    </div>
+                                    <div>
+                                        <label className={kitLbl}>Kit Description <span className="text-red-500">*</span></label>
+                                        <input className={kitInp} value={k.desc} onChange={(e) => setKit(k.__id, 'desc', e.target.value)} placeholder="e.g. 50 Hrs - A Check Maintenance Kit" />
+                                    </div>
+                                    <div>
+                                        <label className={kitLbl}>Qty <span className="text-red-500">*</span></label>
+                                        <input className={`${kitInp} font-mono text-center`} value={k.qty} onChange={(e) => setKit(k.__id, 'qty', e.target.value)} />
+                                    </div>
+                                    <div>
+                                        <label className={kitLbl}>Action <span className="text-red-500">*</span></label>
+                                        <Combo value={k.action} onChange={(v) => setKit(k.__id, 'action', v)} options={opts.actOpts} mono fieldCls={kitInp} />
+                                    </div>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1 mt-2">
+                                    <span className="text-[9.5px] font-bold uppercase tracking-wide text-gray-700 mr-0.5">Parts in this kit</span>
+                                    {members.map((p) => (
+                                        <span key={p.__uid} className="inline-flex items-center rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[12px] font-mono font-bold text-black">
+                                            {p.partNumber || '(unnamed part)'}
+                                        </span>
+                                    ))}
+                                    <button type="button" disabled={!kitComplete(k)}
+                                        title={kitComplete(k) ? 'Done — kit details complete' : 'Fill Kit Number, Description, Qty and Action first'}
+                                        onClick={() => { setCurrentKitId(null); setKitStep('ask'); }}
+                                        className="ml-auto rounded-lg px-4 py-1 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed" style={{ backgroundColor: themeColor }}>
+                                        OK
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })()}
+                    {allPartsComplete && loosePartsList.length > 0 && kitStep === 'idle' && (
+                        <button type="button" onClick={() => { setChecked({}); setKitStep('pick'); }}
+                            className="mb-2 inline-flex items-center gap-1 rounded-lg border border-dashed border-gray-400 bg-gray-50/60 px-2.5 py-1 text-[11.5px] font-bold text-gray-700 hover:bg-gray-100 transition">
+                            <PlusIcon className="h-3.5 w-3.5" /> Add a kit
+                        </button>
+                    )}
                     {kits.map((k, ki) => {
+                        // The kit currently in the "Please add kit details" step is edited
+                        // there — don't show it twice.
+                        if (kitStep === 'details' && k.__id === currentKitId) return null;
                         const members = parts.filter((p) => p.__kitId === k.__id);
                         return (
                             <div key={k.__id} className="rounded-lg border border-indigo-100 bg-indigo-50/50 px-2.5 py-2 mb-1.5">
                                 <div className="flex items-center gap-2 mb-1.5 max-md:flex-wrap">
-                                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#2f3192]">Kit {ki + 1}</span>
-                                    <span className="text-[10.5px] text-gray-500">covers {members.length} part{members.length === 1 ? '' : 's'}</span>
+                                    <span className="text-[11px] font-bold uppercase tracking-wider text-black">Kit {ki + 1}</span>
+                                    <span className="text-[10.5px] font-medium text-gray-700">covers {members.length} part{members.length === 1 ? '' : 's'}</span>
+                                    {!kitComplete(k) && (
+                                        <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                                            Please add kit details
+                                        </span>
+                                    )}
                                     <button type="button" onClick={() => removeKit(k.__id)}
                                         className="ml-auto rounded border border-red-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-red-500 hover:bg-red-50 transition">
                                         Remove kit
                                     </button>
                                 </div>
-                                <div className="grid grid-cols-[1.1fr_1.7fr_.45fr_.65fr] gap-2 max-md:grid-cols-2">
+                                <div className="grid grid-cols-[.9fr_2.1fr_.4fr_.6fr] gap-2 max-md:grid-cols-2">
                                     <div>
                                         <label className={kitLbl}>Kit Number <span className="text-red-500">*</span></label>
                                         <input className={`${kitInp} font-mono`} value={k.number} onChange={(e) => setKit(k.__id, 'number', e.target.value)} placeholder="e.g. 3H.019.11.0.SP" />
@@ -1353,7 +1839,7 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                                     <span className="text-[9.5px] font-semibold uppercase tracking-wide text-gray-400 mr-0.5">Parts in this kit</span>
                                     {members.length === 0 && <span className="text-[10.5px] text-gray-400">none — this kit will be dropped</span>}
                                     {members.map((p) => (
-                                        <span key={p.__uid} className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-white px-1 py-0.5 text-[10px] font-mono text-[#2f3192]">
+                                        <span key={p.__uid} className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-white px-1.5 py-0.5 text-[12px] font-mono font-bold text-[#2f3192]">
                                             {p.partNumber || '(unnamed part)'}
                                             <button type="button" onClick={() => removeFromKit(p.__uid)} title="Remove from this kit" className="text-gray-400 hover:text-red-600">
                                                 <XMarkIcon className="h-2.5 w-2.5" />
@@ -1365,54 +1851,123 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                         );
                     })}
 
-                    {/* Loose parts are supplied as-is, so the sheet lists each one against itself. */}
-                    {loosePartsList.length > 0 && (
-                        <div className="rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2.5">
-                            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
-                                Loose parts <span className="font-normal normal-case text-gray-400">— in no kit, supplied as-is (the sheet lists each against itself)</span>
-                            </div>
-                            <div className="overflow-x-auto qm-scroll">
-                                <table className="min-w-[520px] w-full border-collapse text-[11.5px]">
-                                    <thead>
-                                        <tr className="text-[9.5px] font-semibold text-gray-400 uppercase tracking-wide">
-                                            <th className="px-2 py-1 text-left">Kit Number</th><th className="px-2 py-1 text-left">Kit Description</th>
-                                            <th className="px-2 py-1 text-center w-14">Qty</th><th className="px-2 py-1 text-center w-16">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {loosePartsList.map((p) => (
-                                            <tr key={p.__uid} className="border-t border-gray-200/70">
-                                                <td className="px-2 py-1 font-mono text-gray-600">{p.partNumber || '—'}</td>
-                                                <td className="px-2 py-1 text-gray-600">{p.partDesc || '—'}</td>
-                                                <td className="px-2 py-1 text-center text-gray-600">{p.qty || '—'}</td>
-                                                <td className="px-2 py-1 text-center"><Chip a={p.action} /></td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    )}
                     </div>
+                    </>)}
 
-                    {!canSave && (
-                        <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
-                            <ExclamationTriangleIcon className="h-4 w-4 flex-shrink-0 text-red-500 mt-px" />
-                            <p className="text-[11.5px] font-medium text-red-700">
-                                All fields are required — fill every application-code field, every column in each part line, and every field on each kit.
-                            </p>
-                        </div>
-                    )}
+                    {/* ---- Stage: review — the record exactly as it will sit in Master Data ---- */}
+                    {stage === 'review' && (() => {
+                        const lines = modelToParts(parts, kits);
+                        // Same merge rule as the Master Data sheet: a row carrying kit data
+                        // starts a kit block; blank rows below it extend the block.
+                        const kitAt = {};
+                        let start = 0;
+                        lines.forEach((p, i) => {
+                            if (i === 0 || kitHasData(p)) { kitAt[i] = { p, span: 1 }; start = i; }
+                            else kitAt[start].span++;
+                        });
+                        const td = 'px-2.5 py-1 border border-gray-200';
+                        return (
+                            <div>
+                                <div className="mb-3 flex items-start gap-2 rounded-lg border border-indigo-200 bg-indigo-50/60 px-3 py-2">
+                                    <CheckCircleIcon className="h-4 w-4 flex-shrink-0 mt-px" style={{ color: themeColor }} />
+                                    <p className="text-[12px] font-medium text-gray-700">
+                                        <b>Please review this:</b> this is exactly how <b className="font-mono">{hdr.appCode}</b> will appear in Master Data — one row block per app code, like the master sheet.
+                                    </p>
+                                </div>
+                                <div className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm">
+                                    <div className="overflow-x-auto qm-scroll">
+                                        <table className="min-w-[1380px] w-full text-[11.5px]">
+                                            <thead>
+                                                <tr className="bg-gray-100 text-[9.5px] font-bold text-black uppercase tracking-wider">
+                                                    <th colSpan={6} className="px-2 py-1 border border-gray-200 bg-gray-100 text-center">Application Code</th>
+                                                    <th colSpan={5} className="px-2 py-1 border border-gray-200 bg-indigo-100 text-center" style={{ color: themeColor }}>Part Details</th>
+                                                    <th colSpan={4} className="px-2 py-1 border border-gray-200 bg-amber-100 text-center text-amber-800">Kit Details</th>
+                                                </tr>
+                                                <tr className="bg-gray-50 text-[9.5px] font-semibold text-black uppercase tracking-wider">
+                                                    {['Segment', 'App Code', 'System App Code', 'Engine Model', 'KVA', 'Emission'].map((h) => (
+                                                        <th key={h} className="px-2 py-1 border border-gray-200 bg-gray-50 text-center">{h}</th>
+                                                    ))}
+                                                    {['Part Number', 'Part Description', 'Qty', 'Action', 'Svc Hrs'].map((h) => (
+                                                        <th key={h} className="px-2 py-1 border border-gray-200 bg-indigo-50 text-center">{h}</th>
+                                                    ))}
+                                                    {['Kit Number', 'Kit Description', 'Qty', 'Action'].map((h) => (
+                                                        <th key={h} className="px-2 py-1 border border-gray-200 bg-amber-50 text-center">{h}</th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {lines.map((p, i) => {
+                                                    const kit = kitAt[i];
+                                                    return (
+                                                        <tr key={i}>
+                                                            {i === 0 && (
+                                                                <>
+                                                                    <td rowSpan={lines.length} className={`${td} text-center text-gray-600 align-middle`}>{hdr.segment}</td>
+                                                                    <td rowSpan={lines.length} className={`${td} text-center align-middle`}>
+                                                                        <span className="inline-flex items-center justify-center font-mono font-bold text-[11px] bg-[#1b2026] text-white px-2 py-0.5 rounded-md whitespace-nowrap">{hdr.appCode}</span>
+                                                                    </td>
+                                                                    <td rowSpan={lines.length} className={`${td} text-center font-mono text-gray-600 align-middle whitespace-nowrap`}>{hdr.systemAppCode}</td>
+                                                                    <td rowSpan={lines.length} className={`${td} font-mono text-gray-700 align-middle whitespace-nowrap`}>{hdr.engineModel}</td>
+                                                                    <td rowSpan={lines.length} className={`${td} text-center text-gray-600 align-middle whitespace-nowrap`}>{hdr.kva ? `${hdr.kva} KVA` : '—'}</td>
+                                                                    <td rowSpan={lines.length} className={`${td} text-center text-gray-600 align-middle whitespace-nowrap`}>{hdr.emission}</td>
+                                                                </>
+                                                            )}
+                                                            <td className={`${td} font-mono text-gray-800 whitespace-nowrap`}>{p.partNumber || '—'}</td>
+                                                            <td className={`${td} text-gray-700 min-w-[220px]`}>{p.partDesc || '—'}</td>
+                                                            <td className={`${td} text-center`}>{p.qty || '—'}</td>
+                                                            <td className={`${td} text-center`}><Chip a={p.action} /></td>
+                                                            <td className={`${td} text-center font-mono`}>{p.serviceHours || '—'}</td>
+                                                            {kit && (
+                                                                <>
+                                                                    <td rowSpan={kit.span} className={`${td} font-mono text-gray-600 align-middle whitespace-nowrap bg-amber-50/20`}>{kit.p.altPartNo || '—'}</td>
+                                                                    <td rowSpan={kit.span} className={`${td} text-gray-600 align-middle min-w-[180px] bg-amber-50/20`}>{kit.p.altDesc || '—'}</td>
+                                                                    <td rowSpan={kit.span} className={`${td} text-center text-gray-600 align-middle bg-amber-50/20`}>{kit.p.altQty || '—'}</td>
+                                                                    <td rowSpan={kit.span} className={`${td} text-center align-middle bg-amber-50/20`}><Chip a={kit.p.altAction} /></td>
+                                                                </>
+                                                            )}
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div className="px-3 py-1.5 border-t border-gray-200 bg-gray-50 text-[10.5px] font-medium text-gray-700">
+                                        {lines.length} part line{lines.length === 1 ? '' : 's'} · {kits.length} kit{kits.length === 1 ? '' : 's'} · {loosePartsList.length} loose. Application-code and kit cells span their part rows, exactly as in the master sheet.
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })()}
                 </div>
                 <div className="flex items-center gap-2 px-5 py-3 border-t border-gray-200 bg-white max-md:px-3 max-md:flex-wrap">
-                    <span className="text-[11px] text-gray-400 max-sm:hidden">
+                    <span className="text-[11px] font-semibold text-gray-700 max-sm:hidden">
                         {parts.length} part line{parts.length === 1 ? '' : 's'} · {kits.length} kit{kits.length === 1 ? '' : 's'} · {loosePartsList.length} loose
                     </span>
                     <div className="ml-auto flex items-center gap-2">
-                        <button onClick={onClose} disabled={saving} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[12px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
-                        <button onClick={save} disabled={saving || !canSave} className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed" style={{ backgroundColor: themeColor }}>
-                            {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Add to master')}
-                        </button>
+                        {stage === 'build' ? (
+                            <>
+                                <span className="text-[13px] font-bold text-black">Do you want to store in master?</span>
+                                <button
+                                    onClick={() => {
+                                        if (!canSave) { toast.error('Please fill every required field first.'); return; }
+                                        setStage('review');
+                                    }}
+                                    title={canSave ? 'Review the record before it is saved' : 'Fill every required field first'}
+                                    className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-[12px] font-bold text-white transition hover:opacity-90 ${canSave ? '' : 'cursor-not-allowed'}`} style={{ backgroundColor: themeColor }}>
+                                    Yes <ChevronRightIcon className="h-3.5 w-3.5" />
+                                </button>
+                                <button onClick={onClose} disabled={saving} className="rounded-lg border border-gray-400 bg-white px-3 py-1.5 text-[12px] font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+                            </>
+                        ) : (
+                            <>
+                                <button onClick={() => setStage('build')} disabled={saving} className="rounded-lg border border-gray-400 bg-white px-3 py-1.5 text-[12px] font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50">
+                                    Back — edit
+                                </button>
+                                <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed" style={{ backgroundColor: themeColor }}>
+                                    <CheckCircleIcon className="h-4 w-4" /> {saving ? 'Saving…' : 'Save in Master'}
+                                </button>
+                            </>
+                        )}
                     </div>
                 </div>
             </div>
@@ -1421,7 +1976,7 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
 };
 
 /* ----------------------------- Master of Service ----------------------------- */
-const MasterOfService = () => {
+const MasterOfService = ({ onMasterChanged }) => {
     const [services, setServices] = useState([]);
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -1458,6 +2013,7 @@ const MasterOfService = () => {
             await renameService(s.id, value.trim()); // s.id is the service key (sv500, ...)
             toast.success('Renamed');
             await load();
+            onMasterChanged?.(); // service names feed the host page's coverage tab
         } catch (e) { toast.error(e.message || 'Could not rename'); }
     };
 
@@ -1493,7 +2049,7 @@ const MasterOfService = () => {
 
 /* ----------------------------- Import Data (replace + confirm) ----------------------------- */
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, '');
-const ImportData = () => {
+const ImportData = ({ onMasterChanged }) => {
     const [preview, setPreview] = useState(null); // {items, news, reps, fname, sheet}
     const [openRows, setOpenRows] = useState({}); // which preview app-codes are expanded
     const [existing, setExisting] = useState(new Set());
@@ -1607,6 +2163,7 @@ const ImportData = () => {
             setOpenRows({});
             if (fileRef.current) fileRef.current.value = '';
             await loadExisting();
+            onMasterChanged?.(); // host page badge (App codes count) stays live
         } catch (e) {
             toast.error(e.message || 'Upload failed', { id: t });
         } finally { setBusy(false); }

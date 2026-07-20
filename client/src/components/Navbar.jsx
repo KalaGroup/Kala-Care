@@ -6,6 +6,7 @@ import axios from 'axios';
 import SitemapModal from './SitemapModal';
 import { prefetchRoute } from '../routePrefetch';
 import { applyTheme } from '../theme';
+import { canAccessPartDetail, canAccessMom } from '../utils/pagePermission';
 
 import {
   Bars3Icon,
@@ -371,6 +372,15 @@ function Navbar({ children }) {
   const isMasterOrITAdmin = user?.role === 'master_admin';
   const isMasterAdmin = user?.role === 'master_admin';
   const isEmployee = user?.role === 'employee';
+
+  // Per-user page permissions (granted by Master Admin from Profile).
+  const canSeePartDetail = canAccessPartDetail(user);
+  const canSeeMom = canAccessMom(user);
+  // Inside Part Detail Info: master admin gets both pages; everyone else
+  // only the Quotation Template.
+  const visiblePartDetailItems = isMasterAdmin
+    ? partDetailItems
+    : partDetailItems.filter((i) => i.path === '/maintenance-schedule');
 
   // Terminology Modal Component - Compact version
   const TerminologyModal = () => {
@@ -925,7 +935,9 @@ function Navbar({ children }) {
         name: 'MOM Tracking',
         icon: ClipboardDocumentListIcon,
         description: 'Minutes of Meeting tracking',
-        allowedRoles: ['master_admin']
+        // any role — but only when Master Admin granted the page (can_access_mom)
+        allowedRoles: ['master_admin', 'branch_admin', 'employee'],
+        requiresMomAccess: true
       },
       {
         path: '/knowledge-book',
@@ -946,6 +958,7 @@ function Navbar({ children }) {
 
     return allOtherPagesItems.filter(item =>
       item.allowedRoles.includes(user?.role)
+      && (!item.requiresMomAccess || canSeeMom)
     );
   };
 
@@ -1746,9 +1759,10 @@ function Navbar({ children }) {
                 )
               )}
 
-              {/* Part Detail Info — visible ONLY to master/IT admin.
-                  Branch admin and employee do not see this section at all. */}
-              {isMasterOrITAdmin && (
+              {/* Part Detail Info — shown only when Master Admin granted the
+                  page (can_access_part_detail). Master admin sees both pages;
+                  everyone else only the Quotation Template. */}
+              {canSeePartDetail && (
                 sidebarOpen ? (
                   <div className="mt-1">
                     <button
@@ -1783,7 +1797,7 @@ function Navbar({ children }) {
                     <div className={`nav-dd-wrap ${(partInfoDropdownOpen || isPartInfoActive()) ? 'nav-dd-open' : ''}`}>
                       <div className="nav-dd-inner">
                         <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
-                        {partDetailItems.map((item) => (
+                        {visiblePartDetailItems.map((item) => (
                           <NavLink
                             key={item.path}
                             to={item.path}
@@ -1835,7 +1849,7 @@ function Navbar({ children }) {
 
                     {/* Hover the icon to reveal this submenu; hidden otherwise. */}
                     <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
-                        {partDetailItems.map((item) => (
+                        {visiblePartDetailItems.map((item) => (
                           <NavLink
                             key={item.path}
                             to={item.path}

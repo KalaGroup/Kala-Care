@@ -58,16 +58,16 @@ const SortIcon = ({ active, dir }) => (
 
 /* A sortable <th>. Pass the same `sort` / `onSort` from useSort to every header
    in one table. `align` positions the label + arrows within the cell. */
-export const SortTh = ({ label, sortKey, sort, onSort, className = '', align = 'center', title, rowSpan, colSpan }) => {
+export const SortTh = ({ label, sortKey, sort, onSort, className = '', style, align = 'center', title, rowSpan, colSpan, wrap = false }) => {
     const active = sort?.key === sortKey;
     const dirLabel = !active ? 'A–Z' : sort.dir === 'asc' ? 'Z–A' : 'natural order';
     return (
-        <th className={className} title={title} rowSpan={rowSpan} colSpan={colSpan}>
+        <th className={className} style={style} title={title} rowSpan={rowSpan} colSpan={colSpan}>
             <button type="button" onClick={() => onSort(sortKey)}
                 title={`Sort by ${label} — ${dirLabel}`}
                 className={`inline-flex w-full items-center gap-1 select-none transition hover:opacity-70 ${align === 'left' ? 'justify-start' : 'justify-center'}`}
                 style={active ? { color: THEME } : undefined}>
-                <span className="truncate">{label}</span>
+                <span className={wrap ? 'whitespace-normal break-words leading-tight text-center' : 'truncate'}>{label}</span>
                 <SortIcon active={active} dir={sort?.dir} />
             </button>
         </th>

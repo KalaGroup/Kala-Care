@@ -25,6 +25,9 @@ class User(Base):
     is_blocked = Column(Boolean, default=False)
     can_export = Column(Boolean, default=False)
     can_access_expense = Column(Boolean, default=False)
+    # Per-user page visibility, granted by Master Admin from the Profile page.
+    can_access_part_detail = Column(Boolean, default=False)  # Part Detail Info pages
+    can_access_mom = Column(Boolean, default=False)          # MOM Tracking page
     theme = Column(String(10), nullable=True, default="light")  # 'light' | 'dark' — UI preference, applied on login
     created_at = Column(DateTime(timezone=True), default=now_ist)
     updated_at = Column(DateTime(timezone=True), onupdate=now_ist)

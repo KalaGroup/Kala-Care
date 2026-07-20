@@ -141,6 +141,13 @@ async def app_mapping(
     return {"success": True, **mc.app_mapping(db)}
 
 
+@router.get("/asset-commissioning")
+async def asset_commissioning(db: Session = Depends(get_db)):
+    """Latest commissioning date per app code (any signed-in user). Feeds the
+    Service Applicability coverage tab, which is not Master-Admin-only."""
+    return {"success": True, "items": mc.asset_commissioning(db)}
+
+
 # ---------------- SEARCH ACTIVITY ---------------- #
 
 @router.get("/activity")

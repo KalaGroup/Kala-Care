@@ -9,7 +9,7 @@ from app.database import SessionLocal
 from app.controllers import mom_controller as mc
 from app.schemas.mom_schema import (
     MeetingIn, MasterPointIn, MasterPointUpdate, CategoryIn, CategoryUpdate,
-    MeetingTypeIn,
+    MeetingTypeIn, MeetingTypeUpdate, DraftIn,
 )
 from app.models.user_model import User, UserRole
 
@@ -129,6 +129,54 @@ async def delete_meeting(
     return {"success": True}
 
 
+# ---------------- MEETING DRAFT (auto-saved wizard state) ---------------- #
+
+@router.get("/draft")
+async def get_draft(
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """The caller's own auto-saved meeting draft (or null). One per user."""
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user-id header required")
+    _require_role(db, user_id, user_role, ADMIN_ROLES,
+                  "Only admins can use meeting drafts")
+    return {"success": True, "draft": mc.get_draft(db, user_id)}
+
+
+@router.put("/draft")
+async def save_draft(
+    payload: DraftIn,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Upsert the caller's draft — the client mirrors the wizard state here
+    (debounced) while the user types."""
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user-id header required")
+    _require_role(db, user_id, user_role, ADMIN_ROLES,
+                  "Only admins can use meeting drafts")
+    mc.save_draft(db, user_id, payload.data)
+    return {"success": True}
+
+
+@router.delete("/draft")
+async def delete_draft(
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Drop the caller's draft — used on Reset and after the minutes are saved."""
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user-id header required")
+    _require_role(db, user_id, user_role, ADMIN_ROLES,
+                  "Only admins can use meeting drafts")
+    mc.delete_draft(db, user_id)
+    return {"success": True}
+
+
 # ---------------- MASTER POINTS ---------------- #
 
 @router.post("/master-points")
@@ -183,6 +231,19 @@ async def create_meeting_type(
     return {"success": True, "item": mc.create_meeting_type(db, payload.name, created_by=user_id)}
 
 
+@router.put("/meeting-types/{type_id}")
+async def update_meeting_type(
+    type_id: int,
+    payload: MeetingTypeUpdate,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_role(db, user_id, user_role, MASTER_ROLES,
+                  "Only the Master Admin can edit meeting types")
+    return {"success": True, "item": mc.update_meeting_type(db, type_id, payload.name)}
+
+
 @router.delete("/meeting-types/{type_id}")
 async def delete_meeting_type(
     type_id: int,
@@ -220,7 +281,7 @@ async def update_category(
 ):
     _require_role(db, user_id, user_role, MASTER_ROLES,
                   "Only the Master Admin can edit categories")
-    return {"success": True, "item": mc.update_category(db, name, payload.color)}
+    return {"success": True, "item": mc.update_category(db, name, color=payload.color, new_name=payload.name)}
 
 
 @router.delete("/categories/{name}")

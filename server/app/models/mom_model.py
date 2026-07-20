@@ -39,6 +39,22 @@ class MomMeetingType(Base):
     created_at = Column(DateTime, default=now_ist)
 
 
+class MomDraft(Base):
+    """Auto-saved in-progress meeting draft — ONE per user.
+
+    The whole wizard state (branches, attendees, picked points, sheet rows,
+    carried-task edits …) is mirrored here as a JSON blob while the user
+    works, so a refresh / power cut never loses typing.  Deleted when the
+    minutes are finalized or the wizard is reset; stale drafts (> 7 days)
+    are discarded on read."""
+    __tablename__ = "mom_drafts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(64), unique=True, nullable=False, index=True)
+    data = Column(UnicodeText, nullable=False, default="")           # JSON blob of the wizard state
+    saved_at = Column(DateTime, default=now_ist, onupdate=now_ist)
+
+
 class MomMeeting(Base):
     """
     One finalized meeting sheet.
@@ -120,8 +136,6 @@ class MomRow(Base):
     # Devanagari names etc. intact — plain Text (VARCHAR) turns them into "?"
     point = Column(UnicodeText, nullable=False, default="")
     responsibility = Column(UnicodeText, nullable=True)              # JSON list of names (legacy: plain string)
-    assigned_by = Column(String(120), nullable=True)                 # meeting head who assigned the task
-    head_resp = Column(String(120), nullable=True)                   # meeting head responsible for the task
     due_date = Column(Date, nullable=True)
     flag = Column(String(1), nullable=False, default="I")            # T | I
     status = Column(String(20), nullable=False, default="pending")   # pending | in_progress | completed

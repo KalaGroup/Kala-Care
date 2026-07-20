@@ -101,7 +101,14 @@ class UserController:
         if admin_user.role == UserRole.MASTER_ADMIN:
             return True
         elif admin_user.role == UserRole.BRANCH_ADMIN:
-            return target_user.branch == admin_user.branch
+            # A branch admin may hold access to several branches (primary +
+            # user_branch_access rows) — they see users of ALL those branches.
+            access = {admin_user.branch}
+            try:
+                access |= {ba.branch for ba in (admin_user.branch_accesses or [])}
+            except Exception:
+                pass
+            return target_user.branch in access
         return False
     
     @staticmethod
@@ -504,7 +511,45 @@ class UserController:
         db.commit()
         db.refresh(employee)
         return employee
-    
+
+    @staticmethod
+    def toggle_page_access(db: Session, employee_id: int, admin_user_id: str, page: str, allowed: bool):
+        """Grant/revoke access to the Part Detail Info or MOM Tracking pages.
+        Master Admin only; the initial admin can never be locked out."""
+        admin = db.query(User).filter(User.user_id == admin_user_id).first()
+        if not admin or admin.role not in [UserRole.MASTER_ADMIN]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only Master Admin can change page access"
+            )
+
+        if page not in ("part_detail", "mom"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown page — expected 'part_detail' or 'mom'"
+            )
+
+        employee = db.query(User).filter(User.id == employee_id).first()
+        if not employee:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Employee not found"
+            )
+
+        if employee.user_id == INITIAL_ADMIN_ID and not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="The initial master admin always keeps page access"
+            )
+
+        if page == "part_detail":
+            employee.can_access_part_detail = allowed
+        else:
+            employee.can_access_mom = allowed
+        db.commit()
+        db.refresh(employee)
+        return employee
+
     @staticmethod
     def create_or_update_bulk_users(db: Session, users_data, admin_user_id: str):
         """Create new users or update existing ones based on user_id"""

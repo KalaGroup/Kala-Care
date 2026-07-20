@@ -86,7 +86,13 @@ print("Tables created/updated successfully!")
 
 # Ensure performance indexes for the hot list/dashboard queries. Idempotent
 # (IF NOT EXISTS) — after the first run this is a fast no-op on every startup.
-from app.performance_indexes import ensure_performance_indexes
+from app.performance_indexes import ensure_performance_indexes, ensure_schema
+# Top up columns the models expect but create_all can't add to existing tables
+# (e.g. asset_detailed.emission_norm), backfilling from extra_data on first add.
+try:
+    ensure_schema(engine)
+except Exception as e:
+    print(f"[schema] skipped: {e}")
 try:
     ensure_performance_indexes(engine)
 except Exception as e:

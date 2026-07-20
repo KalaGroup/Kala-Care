@@ -180,10 +180,14 @@ function Layout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Refresh user from server once per app load so permission changes
-  // (like can_access_expense) reflect without requiring re-login.
+  // Refresh user from server once per login/app load so permission changes
+  // (can_access_expense, can_access_part_detail, can_access_mom, …) reflect
+  // without requiring re-login. Keyed on the user id so it also fires right
+  // after a fresh login (the [] version only ran on the initial page load,
+  // which at /login had no user yet — permissions then only appeared after a
+  // manual refresh).
   useEffect(() => {
-    if (!user) return;
+    if (!user?.user_id) return;
     const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
     fetch(`${API_BASE_URL}/users/profile`, {
       headers: { 'user-id': user.user_id }
@@ -192,20 +196,22 @@ function Layout() {
       .then(data => {
         if (data.success && data.user) {
           const stored = JSON.parse(sessionStorage.getItem('user') || '{}');
+          // Spread stored FIRST so client-only session fields (session_id,
+          // theme, primary_branch, active branch switch) survive the merge;
+          // the server payload then updates names/roles/permissions.
           const merged = {
+            ...stored,
             ...data.user,
             branches: stored.branches || [],
             branch: stored.branch || data.user.branch,
-            branch_name: stored.branch_name || data.user.branch_name,
-            primary_branch: stored.primary_branch,
-            primary_branch_name: stored.primary_branch_name
+            branch_name: stored.branch_name || data.user.branch_name
           };
           sessionStorage.setItem('user', JSON.stringify(merged));
         }
       })
       .catch(() => { /* ignore */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user?.user_id]);
 
   // key={location.pathname}: React Router runs navigations inside
   // startTransition, so when the target page's chunk isn't loaded yet React

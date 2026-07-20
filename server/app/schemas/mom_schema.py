@@ -32,8 +32,6 @@ class RowIn(BaseModel):
     # multi-person responsibility — a list of names; a plain string is still
     # accepted for backward compatibility and treated as a one-person list
     resp: Optional[Union[List[str], str]] = []
-    assignedBy: Optional[str] = ""           # meeting head who assigned the task
-    headResp: Optional[str] = ""             # meeting head responsible for the task
     due: Optional[str] = ""                  # 'YYYY-MM-DD' (Tasks only)
     flag: Optional[str] = "I"                # T | I  (I may have resp, never a due date)
     status: Optional[str] = "pending"
@@ -73,10 +71,23 @@ class MeetingTypeIn(BaseModel):
     name: str
 
 
+class MeetingTypeUpdate(BaseModel):
+    name: str
+
+
 class CategoryIn(BaseModel):
     name: str
     color: Optional[str] = "#64748b"
 
 
 class CategoryUpdate(BaseModel):
-    color: str
+    color: Optional[str] = None
+    name: Optional[str] = None               # new name when renaming
+
+
+class DraftIn(BaseModel):
+    """Auto-saved wizard draft — the whole client-side state as one JSON blob.
+    Stored and returned verbatim, so the client shape can evolve freely."""
+    data: dict
+
+    model_config = {"extra": "ignore"}

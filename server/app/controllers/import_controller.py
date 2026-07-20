@@ -56,7 +56,7 @@ FILE_KNOWN_COLUMNS = {
     'Asset Detailed Report': [
         'ZONE NAME', 'SD ID', 'SD NAME', 'BRANCH ID', 'BRANCH NAME', 'DISTRICT',
         'ASSET NUMBER', 'COMMISSIONING DATE', 'INSTALLATION DATE', 'GOEM OEM',
-        'APPLICATION CODE', 'ENGINE SERIAL NO', 'ENGINE MODEL', 'ACCOUNT NAME',
+        'APPLICATION CODE', 'EMISSION NORM', 'ENGINE SERIAL NO', 'ENGINE MODEL', 'ACCOUNT NAME',
         'CUSTOMER NAME', 'CONTACT PHONE NUMBER', 'CONTACT EMAIL ID',
         'WARRANTY EXPIRY DATE', 'INSTALLATION SITE ADDRESS', 'PRODUCT SEGMENT',
         'SEGMENT', 'CUSTOMER SEGMENT', 'ASSET OPERATIONAL STATUS', 'KRM NUMBER',
@@ -1309,6 +1309,7 @@ class ImportController:
                         'installation_date': self.parse_date(row.get('INSTALLATION DATE')),
                         'goem_oem': self.truncate_string(row.get('GOEM OEM'), 200),
                         'application_code': self.truncate_string(row.get('APPLICATION CODE'), 200),
+                        'emission_norm': self.truncate_string(row.get('EMISSION NORM'), 100),
                         'engine_serial_no': engine_serial_no,
                         'engine_model': self.truncate_string(row.get('ENGINE MODEL'), 200),
                         'account_name': self.truncate_string(row.get('ACCOUNT NAME')),

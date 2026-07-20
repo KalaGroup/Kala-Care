@@ -94,6 +94,9 @@ export const getActivity = (limit = 1000) => jget(`/maintenance/activity?limit=$
 // App Mapping — Asset Detailed app codes vs the Part Detail master (master_admin).
 // -> { uniqueAssetCodes, uploadedCount, remainingCount, remaining:[{appCode, engineModel, segment, kva, assets}], masterTotal }
 export const getAppMapping = () => jget('/maintenance/app-mapping');
+// Latest commissioning date per app code (any signed-in user) — used by the
+// Service Applicability coverage tab. -> [{ appCode, commissioning:'YYYY-MM-DD' }]
+export const getAssetCommissioning = () => jget('/maintenance/asset-commissioning').then((d) => d.items || []);
 // Fire-and-forget: a look-up should never block or error the UI.
 export const logActivity = (appCode) => {
     try {
