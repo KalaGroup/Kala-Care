@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Text, UnicodeText, Boolean, Date, DateTime,
-    ForeignKey, func,
+    ForeignKey, LargeBinary, func,
 )
 from sqlalchemy.orm import relationship
 
@@ -88,6 +88,43 @@ class MomMeeting(Base):
         "MomRow", back_populates="meeting",
         cascade="all, delete-orphan", order_by="MomRow.position",
     )
+
+
+class MomFolder(Base):
+    """A folder in the MOM "Master Folder" file store (Master Admin only).
+
+    Holds any reference files (Word / Excel / CSV / PDF / image) the Master Admin
+    keeps alongside the MOM register. Deleting a folder cascades its files."""
+    __tablename__ = "mom_folders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)
+    created_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, onupdate=now_ist)
+
+    files = relationship(
+        "MomFile", back_populates="folder",
+        cascade="all, delete-orphan", order_by="MomFile.created_at.desc()",
+    )
+
+
+class MomFile(Base):
+    """A file uploaded into a MOM folder. The bytes live in `data` (like the
+    Knowledge Bank), so nothing depends on a filesystem path."""
+    __tablename__ = "mom_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    folder_id = Column(Integer, ForeignKey("mom_folders.id", ondelete="CASCADE"), nullable=False, index=True)
+    original_name = Column(String(300), nullable=False)
+    content_type = Column(String(150), nullable=True)
+    data = Column(LargeBinary, nullable=True)                    # the file bytes
+    kind = Column(String(20), nullable=False, default="other")   # image|pdf|word|excel|csv|other
+    size_bytes = Column(Integer, nullable=True)
+    uploaded_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=now_ist)
+
+    folder = relationship("MomFolder", back_populates="files")
 
 
 class MomAttendee(Base):

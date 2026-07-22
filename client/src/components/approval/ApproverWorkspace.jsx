@@ -1,0 +1,121 @@
+/* Shared workspace for the three approver views (Branch Admin / HOD / COO):
+   a "Pending My Approval" queue + an "All Applications" tracking tab, with
+   the same filters and the shared detail modal for approve / reject. */
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import toast from 'react-hot-toast';
+import { RotateCcw, Search, Inbox, ListChecks } from 'lucide-react';
+import { getApplications, errText } from './approvalApi';
+import {
+    ApplicationsTable, ApplicationDetailModal, CreateApplicationModal,
+    SummaryCards, TypeTabs, STATUS_META, BRAND,
+} from './ApprovalShared';
+import ApprovalReports from './ApprovalReports';
+
+export default function ApproverWorkspace({ pendingStatus, pendingLabel, headerActions = null }) {
+    const [apps, setApps] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [tab, setTab] = useState('pending');       // pending | all
+    const [selected, setSelected] = useState(null);
+    const [editDraft, setEditDraft] = useState(null); // own drafts open in the editor
+    const [cardView, setCardView] = useState(null);   // clicked summary card -> records popup
+    const [typeFilter, setTypeFilter] = useState('discounting');  // Discounting table opens by default
+    const [statusFilter, setStatusFilter] = useState('');
+    const [search, setSearch] = useState('');
+
+    const load = useCallback(async () => {
+        setLoading(true);
+        try {
+            const data = await getApplications();
+            setApps(data.applications || []);
+        } catch (err) {
+            toast.error(errText(err, 'Failed to load applications'));
+        } finally { setLoading(false); }
+    }, []);
+
+    useEffect(() => { load(); }, [load]);
+
+    const pending = useMemo(() => apps.filter(a => a.status === pendingStatus), [apps, pendingStatus]);
+
+    const visible = useMemo(() => {
+        const base = tab === 'pending' ? pending : apps;
+        return base.filter(a =>
+            a.request_type === typeFilter &&
+            (tab === 'pending' || !statusFilter || a.status === statusFilter) &&
+            (!search || [a.app_no, a.customer_name, a.invoice_no, a.sr_no, a.created_by_name].some(
+                v => (v || '').toLowerCase().includes(search.toLowerCase())))
+        );
+    }, [apps, pending, tab, typeFilter, statusFilter, search]);
+
+    const tabBtn = (key, label, icon, count) => (
+        <button onClick={() => setTab(key)}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold border transition-colors ${tab === key
+                ? 'text-white border-transparent shadow-sm'
+                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+            style={tab === key ? { background: BRAND } : undefined}>
+            {icon} {label}
+            {count > 0 && (
+                <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${tab === key ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'}`}>
+                    {count}
+                </span>
+            )}
+        </button>
+    );
+
+    return (
+        <div>
+            <SummaryCards apps={apps}
+                onCardClick={(key, label) => setCardView({ status: key === 'all' ? '' : key, label })} />
+
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+                {tabBtn('pending', pendingLabel, <Inbox size={14} />, pending.length)}
+                {tabBtn('all', 'All Applications', <ListChecks size={14} />, 0)}
+                {headerActions}
+
+                <div className="ml-auto">
+                    <TypeTabs value={typeFilter} onChange={setTypeFilter} />
+                </div>
+
+                <div className="relative">
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…"
+                        className="pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-xs w-56 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                </div>
+                {tab === 'all' && (
+                    <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+                        className="border border-gray-300 rounded-lg px-2.5 py-2 text-xs bg-white">
+                        <option value="">All Statuses</option>
+                        {Object.entries(STATUS_META).map(([v, m]) => <option key={v} value={v}>{m.label}</option>)}
+                    </select>
+                )}
+                <button onClick={load} title="Refresh"
+                    className="p-2 rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-50">
+                    <RotateCcw size={13} />
+                </button>
+            </div>
+
+            {loading
+                ? <div className="py-16 text-center text-sm text-gray-400">Loading applications…</div>
+                : <ApplicationsTable apps={visible} type={typeFilter}
+                    onOpen={app => app.status === 'draft' ? setEditDraft(app) : setSelected(app)}
+                    emptyText={tab === 'pending' ? 'Nothing waiting for your approval' : 'No applications found'} />}
+
+            {editDraft && (
+                <CreateApplicationModal draft={editDraft}
+                    onClose={() => setEditDraft(null)} onCreated={load} />
+            )}
+            {cardView && (
+                <ApprovalReports initialStatus={cardView.status} title={`${cardView.label} Records`}
+                    onClose={() => setCardView(null)} />
+            )}
+            {selected && (
+                <ApplicationDetailModal
+                    app={selected}
+                    canAct={selected.status === pendingStatus}
+                    canDelete={false}
+                    onClose={() => setSelected(null)}
+                    onChanged={load}
+                />
+            )}
+        </div>
+    );
+}

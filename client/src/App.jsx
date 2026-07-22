@@ -28,6 +28,7 @@ const CustomerEng2 = lazy(routeImporters['/customer-engagement-2']);
 const Expense = lazy(routeImporters['/expense']);
 const ExDashboard = lazy(routeImporters['/expense-dashboard']);
 const MOMTracking = lazy(routeImporters['/mom-tracking']);
+const ApprovalApplication = lazy(routeImporters['/approval-application']);
 const SalseANDFinance = lazy(routeImporters['/sales-finance']);
 const KnowledgeBook = lazy(routeImporters['/knowledge-book']);
 //added by nik
@@ -49,6 +50,7 @@ const ROUTE_PREFETCHERS = [
   routeImporters['/maintenance-schedule'],
   routeImporters['/maintenance-reports'],
   routeImporters['/mom-tracking'],
+  routeImporters['/approval-application'],
   routeImporters['/sales-finance'],
   routeImporters['/import'],
 ];
@@ -130,6 +132,18 @@ const canAccessExpensePages = (user) => {
   }
 
   return false;
+};
+
+// Approval Application page — per-user permission (can_access_approval)
+// granted by Master Admin from the Profile page edit modal. Sessions created
+// before the column existed fall back to master_admin only (same rule as the
+// other page-permission flags in utils/pagePermission.js).
+const canAccessApprovalPage = (user) => {
+  if (!user) return false;
+  if (user.can_access_approval === undefined || user.can_access_approval === null) {
+    return user.role === 'master_admin';
+  }
+  return user.can_access_approval === true;
 };
 
 // MODIFIED: ProtectedRoute with custom condition support
@@ -267,6 +281,16 @@ function Layout() {
       <Route path="/mom-tracking" element={
         <ProtectedRoute allowedRoles={['master_admin', 'branch_admin', 'employee']}>
           <MOMTracking />
+        </ProtectedRoute>
+      } />
+
+      {/* Approval Application Page - any role, gated by can_access_approval */}
+      <Route path="/approval-application" element={
+        <ProtectedRoute
+          allowedRoles={['master_admin', 'branch_admin', 'employee']}
+          customCheck={canAccessApprovalPage}
+        >
+          <ApprovalApplication />
         </ProtectedRoute>
       } />
 

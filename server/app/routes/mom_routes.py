@@ -1,12 +1,15 @@
 import asyncio
+import mimetypes
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Form
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.database import SessionLocal
 from app.controllers import mom_controller as mc
+from app.controllers import mom_files_controller as mf
 from app.schemas.mom_schema import (
     MeetingIn, MasterPointIn, MasterPointUpdate, CategoryIn, CategoryUpdate,
     MeetingTypeIn, MeetingTypeUpdate, DraftIn,
@@ -295,3 +298,124 @@ async def delete_category(
                   "Only the Master Admin can edit categories")
     result = mc.delete_category(db, name)
     return {"success": True, **result}
+
+
+# ---------------- MASTER FOLDER: FILE STORE (master_admin only) ---------------- #
+
+@router.get("/folders")
+async def list_folders(
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_role(db, user_id, user_role, MASTER_ROLES,
+                  "Only the Master Admin can open the master folder")
+    return {"success": True, "folders": mf.list_folders(db)}
+
+
+@router.post("/folders")
+async def create_folder(
+    name: str = Form(...),
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_role(db, user_id, user_role, MASTER_ROLES,
+                  "Only the Master Admin can create folders")
+    return {"success": True, "folder": mf.create_folder(db, name, created_by=user_id)}
+
+
+@router.put("/folders/{folder_id}")
+async def rename_folder(
+    folder_id: int,
+    name: str = Form(...),
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_role(db, user_id, user_role, MASTER_ROLES,
+                  "Only the Master Admin can rename folders")
+    return {"success": True, "folder": mf.rename_folder(db, folder_id, name)}
+
+
+@router.delete("/folders/{folder_id}")
+async def delete_folder(
+    folder_id: int,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_role(db, user_id, user_role, MASTER_ROLES,
+                  "Only the Master Admin can delete folders")
+    mf.delete_folder(db, folder_id)
+    return {"success": True}
+
+
+@router.get("/folders/{folder_id}/files")
+async def list_folder_files(
+    folder_id: int,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_role(db, user_id, user_role, MASTER_ROLES,
+                  "Only the Master Admin can open the master folder")
+    return {"success": True, "files": mf.list_files(db, folder_id)}
+
+
+@router.post("/files")
+async def upload_files(
+    folder_id: int = Form(...),
+    files: list[UploadFile] = File(...),
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_role(db, user_id, user_role, MASTER_ROLES,
+                  "Only the Master Admin can upload files")
+    saved = await mf.save_files(db, folder_id, files, uploaded_by=user_id)
+    return {"success": True, "files": saved}
+
+
+@router.delete("/files/{file_id}")
+async def delete_file(
+    file_id: int,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_role(db, user_id, user_role, MASTER_ROLES,
+                  "Only the Master Admin can delete files")
+    mf.delete_file(db, file_id)
+    return {"success": True}
+
+
+# View / download are unauthenticated so the browser's <img>/<a>/<iframe> can
+# load them directly (same pattern as the Knowledge Bank); the folder UI that
+# exposes these ids is only ever rendered for the Master Admin.
+@router.get("/files/{file_id}/view")
+async def view_file(file_id: int, db: Session = Depends(get_db)):
+    row = mf.get_file(db, file_id)
+    if row.data is None:
+        raise HTTPException(status_code=404, detail="File data is missing")
+    media_type = row.content_type or mimetypes.guess_type(row.original_name or "")[0] or "application/octet-stream"
+    return Response(content=row.data, media_type=media_type)
+
+
+@router.get("/files/{file_id}/download")
+async def download_file(file_id: int, db: Session = Depends(get_db)):
+    row = mf.get_file(db, file_id)
+    if row.data is None:
+        raise HTTPException(status_code=404, detail="File data is missing")
+    media_type = row.content_type or mimetypes.guess_type(row.original_name or "")[0] or "application/octet-stream"
+    filename = (row.original_name or "download").replace('"', "")
+    return Response(content=row.data, media_type=media_type,
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.get("/folders/{folder_id}/download")
+async def download_folder(folder_id: int, db: Session = Depends(get_db)):
+    name, buffer = mf.build_folder_zip(db, folder_id)
+    safe = (name or "folder").replace('"', "").strip() or "folder"
+    return StreamingResponse(buffer, media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{safe}.zip"'})

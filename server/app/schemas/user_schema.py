@@ -1,3 +1,4 @@
+import re
 from pydantic import BaseModel, Field, validator
 from typing import Optional, List
 from datetime import datetime
@@ -22,7 +23,16 @@ class UserCreate(UserBase):
     can_export: bool = False
     can_access_expense: bool = False
     mobile_number: Optional[str] = None  # ADDED: Mobile number field
-    
+    email: Optional[str] = None          # approval notification email
+
+    @validator('email')
+    def validate_email(cls, v):
+        if v:
+            v = v.strip()
+            if v and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', v):
+                raise ValueError('Invalid email address')
+        return v or None
+
     @validator('user_id')
     def validate_user_id(cls, v):
         if len(v) < 8:
@@ -51,12 +61,21 @@ class UserUpdate(BaseModel):
     branch: Optional[str] = None
     branch_name: Optional[str] = None
     mobile_number: Optional[str] = None  # ADDED: Mobile number field
+    email: Optional[str] = None          # approval notification email
     password: Optional[str] = None
     role: Optional[UserRole] = None
     is_blocked: Optional[bool] = None
     can_export: Optional[bool] = None
     can_access_expense: Optional[bool] = None
-    
+
+    @validator('email')
+    def validate_email(cls, v):
+        if v:
+            v = v.strip()
+            if v and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', v):
+                raise ValueError('Invalid email address')
+        return v or None
+
     @validator('password')
     def validate_password(cls, v):
         if v and len(v) > 72:
@@ -77,8 +96,17 @@ class UserProfileUpdate(BaseModel):
     branch: Optional[str] = None
     branch_name: Optional[str] = None
     mobile_number: Optional[str] = None  # ADDED: Mobile number field for profile update
+    email: Optional[str] = None          # approval notification email
     password: Optional[str] = None
-    
+
+    @validator('email')
+    def validate_email(cls, v):
+        if v:
+            v = v.strip()
+            if v and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', v):
+                raise ValueError('Invalid email address')
+        return v or None
+
     @validator('password')
     def validate_password(cls, v):
         if v and len(v) > 72:

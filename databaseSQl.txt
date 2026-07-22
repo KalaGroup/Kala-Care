@@ -11,3 +11,323 @@ WHERE extra_data IS NOT NULL
   AND ISJSON(extra_data) = 1
   AND JSON_VALUE(extra_data, '$."EMISSION NORM"') IS NOT NULL;
 GO
+
+-- ============================================================
+-- APPROVAL APPLICATION PAGE (2026-07)
+-- New tables (approval_rights, approval_applications,
+-- approval_attachments) are created automatically by the server
+-- on startup (Base.metadata.create_all). The users column below
+-- is also added automatically on startup via ensure_schema();
+-- run it manually only if you prefer SSMS.
+-- ============================================================
+
+-- Per-user page visibility flag, granted from Profile -> Edit Employee
+IF COL_LENGTH('dbo.users', 'can_access_approval') IS NULL
+    ALTER TABLE dbo.users ADD can_access_approval BIT NOT NULL
+        CONSTRAINT DF_users_can_access_approval DEFAULT 0;
+GO
+
+
+UPDATE users
+SET can_access_approval = '1'
+WHERE user_id = 'kala000001';
+-- Approval Application form update (2026-07): type-specific fields.
+-- Also applied automatically on server startup via ensure_schema().
+IF COL_LENGTH('dbo.approval_applications', 'quotation_no') IS NULL
+    ALTER TABLE dbo.approval_applications ADD quotation_no NVARCHAR(100) NULL;
+GO
+IF COL_LENGTH('dbo.approval_applications', 'discount_percent') IS NULL
+    ALTER TABLE dbo.approval_applications ADD discount_percent FLOAT NULL;
+GO
+IF COL_LENGTH('dbo.approval_applications', 'credit_days') IS NULL
+    ALTER TABLE dbo.approval_applications ADD credit_days INT NULL;
+GO
+-- Expense applications have no customer, so allow NULL
+ALTER TABLE dbo.approval_applications ALTER COLUMN customer_name NVARCHAR(255) NULL;
+GO
+
+-- Approval Application (2026-07): expense type master table
+-- (approval_expense_types) is created automatically on server startup.
+-- App No format changed to DIS/2025-26/01 (per type, per financial year);
+-- old APL-xxxxxx numbers on existing rows are kept as-is.
+
+-- ============================================================
+-- APPROVAL APPLICATION — FULL TABLE DDL (2026-07)
+-- These 4 tables are created automatically on server startup
+-- (Base.metadata.create_all). Run below in SSMS only if you want
+-- to create them manually / on a fresh DB without starting the app.
+-- All statements are idempotent (skip if table already exists).
+-- ============================================================
+
+-- 1) Rights master: which approval level a user acts at
+IF OBJECT_ID('dbo.approval_rights', 'U') IS NULL
+CREATE TABLE dbo.approval_rights (
+    id              INT IDENTITY(1,1) PRIMARY KEY,
+    user_id         NVARCHAR(50)  NOT NULL,
+    user_name       NVARCHAR(100) NULL,
+    branch          NVARCHAR(20)  NULL,
+    level           NVARCHAR(20)  NOT NULL DEFAULT 'user',  -- user|branch|hod|coo
+    granted_by      NVARCHAR(50)  NULL,
+    granted_by_name NVARCHAR(100) NULL,
+    created_at      DATETIME      NULL,
+    updated_at      DATETIME      NULL,
+    CONSTRAINT UQ_approval_rights_user UNIQUE (user_id)
+);
+GO
+
+-- 2) Applications (includes the newer columns: quotation_no,
+--    discount_percent, credit_days; customer_name is NULLable
+--    because Expense applications carry no customer)
+IF OBJECT_ID('dbo.approval_applications', 'U') IS NULL
+CREATE TABLE dbo.approval_applications (
+    id                    INT IDENTITY(1,1) PRIMARY KEY,
+    app_no                NVARCHAR(30)  NULL,          -- DIS/2025-26/01 style
+    category              NVARCHAR(30)  NOT NULL,      -- spares|services|spares_services
+    request_type          NVARCHAR(20)  NOT NULL,      -- discounting|credit|expense
+    branch                NVARCHAR(20)  NOT NULL,
+    branch_name           NVARCHAR(100) NULL,
+    customer_name         NVARCHAR(255) NULL,
+    instance_id           NVARCHAR(100) NULL,
+    sr_no                 NVARCHAR(100) NULL,
+    invoice_no            NVARCHAR(100) NULL,
+    delivery_challan      NVARCHAR(100) NULL,
+    quotation_no          NVARCHAR(100) NULL,
+    quotation_amount      FLOAT         NULL,
+    discount_percent      FLOAT         NULL,          -- discounting only
+    credit_days           INT           NULL,          -- credit only
+    expense_amount        FLOAT         NULL,          -- expense only
+    expense_type          NVARCHAR(100) NULL,          -- expense only (from master)
+    payment_mode          NVARCHAR(50)  NULL,          -- legacy, no longer used
+    description           NVARCHAR(MAX) NULL,          -- Purpose of Approval
+    remark                NVARCHAR(MAX) NULL,
+    status                NVARCHAR(20)  NOT NULL DEFAULT 'pending_branch',
+    created_by            NVARCHAR(50)  NOT NULL,
+    created_by_name       NVARCHAR(100) NULL,
+    created_by_level      NVARCHAR(20)  NULL,
+    branch_action_by      NVARCHAR(50)  NULL,
+    branch_action_by_name NVARCHAR(100) NULL,
+    branch_action_at      DATETIME      NULL,
+    branch_action_remark  NVARCHAR(MAX) NULL,
+    hod_action_by         NVARCHAR(50)  NULL,
+    hod_action_by_name    NVARCHAR(100) NULL,
+    hod_action_at         DATETIME      NULL,
+    hod_action_remark     NVARCHAR(MAX) NULL,
+    coo_action_by         NVARCHAR(50)  NULL,
+    coo_action_by_name    NVARCHAR(100) NULL,
+    coo_action_at         DATETIME      NULL,
+    coo_action_remark     NVARCHAR(MAX) NULL,
+    rejected_by           NVARCHAR(50)  NULL,
+    rejected_by_name      NVARCHAR(100) NULL,
+    rejected_at_level     NVARCHAR(20)  NULL,          -- branch|hod|coo
+    rejected_at           DATETIME      NULL,
+    rejected_remark       NVARCHAR(MAX) NULL,
+    created_at            DATETIME      NULL,
+    updated_at            DATETIME      NULL,
+    CONSTRAINT UQ_approval_applications_app_no UNIQUE (app_no)
+);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_approval_applications_branch' AND object_id = OBJECT_ID('dbo.approval_applications'))
+    CREATE NONCLUSTERED INDEX IX_approval_applications_branch ON dbo.approval_applications (branch);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_approval_applications_status' AND object_id = OBJECT_ID('dbo.approval_applications'))
+    CREATE NONCLUSTERED INDEX IX_approval_applications_status ON dbo.approval_applications (status);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_approval_applications_created_by' AND object_id = OBJECT_ID('dbo.approval_applications'))
+    CREATE NONCLUSTERED INDEX IX_approval_applications_created_by ON dbo.approval_applications (created_by);
+GO
+
+-- 3) Attachments (file bytes stored in DB, deleted with the application)
+IF OBJECT_ID('dbo.approval_attachments', 'U') IS NULL
+CREATE TABLE dbo.approval_attachments (
+    id             INT IDENTITY(1,1) PRIMARY KEY,
+    application_id INT           NOT NULL,
+    original_name  NVARCHAR(255) NOT NULL,
+    content_type   NVARCHAR(120) NULL,
+    size_bytes     INT           NULL,
+    data           VARBINARY(MAX) NULL,
+    uploaded_by    NVARCHAR(50)  NULL,
+    created_at     DATETIME      NULL,
+    CONSTRAINT FK_approval_attachments_app FOREIGN KEY (application_id)
+        REFERENCES dbo.approval_applications (id) ON DELETE CASCADE
+);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_approval_attachments_app' AND object_id = OBJECT_ID('dbo.approval_attachments'))
+    CREATE NONCLUSTERED INDEX IX_approval_attachments_app ON dbo.approval_attachments (application_id);
+GO
+
+-- 4) Expense type master (dropdown values, managed from the COO view)
+IF OBJECT_ID('dbo.approval_expense_types', 'U') IS NULL
+CREATE TABLE dbo.approval_expense_types (
+    id              INT IDENTITY(1,1) PRIMARY KEY,
+    name            NVARCHAR(100) NOT NULL,
+    created_by      NVARCHAR(50)  NULL,
+    created_by_name NVARCHAR(100) NULL,
+    created_at      DATETIME      NULL,
+    CONSTRAINT UQ_approval_expense_types_name UNIQUE (name)
+);
+GO
+
+-- FIX (2026-07): drafts have app_no = NULL, but SQL Server unique indexes
+-- treat NULL as a value, so a second draft failed with a duplicate-key error.
+-- Replace the plain unique index/constraint with a FILTERED unique index that
+-- only applies to numbered applications. Applied automatically on startup.
+IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_approval_applications_app_no'
+           AND object_id = OBJECT_ID('dbo.approval_applications') AND is_unique = 1)
+    DROP INDEX ix_approval_applications_app_no ON dbo.approval_applications;
+GO
+IF EXISTS (SELECT 1 FROM sys.key_constraints WHERE name = 'UQ_approval_applications_app_no'
+           AND parent_object_id = OBJECT_ID('dbo.approval_applications'))
+    ALTER TABLE dbo.approval_applications DROP CONSTRAINT UQ_approval_applications_app_no;
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_approval_applications_app_no'
+               AND object_id = OBJECT_ID('dbo.approval_applications'))
+    CREATE UNIQUE NONCLUSTERED INDEX UX_approval_applications_app_no
+        ON dbo.approval_applications (app_no) WHERE app_no IS NOT NULL;
+GO
+
+-- ============================================================
+-- AUTHORITY MATRIX (2026-07) — all applied automatically on
+-- server startup (create_all + ensure_schema). SSMS reference:
+-- ============================================================
+
+-- Per-approver authority limits on approval_rights
+IF COL_LENGTH('dbo.approval_rights', 'max_discount_percent') IS NULL
+    ALTER TABLE dbo.approval_rights ADD max_discount_percent FLOAT NULL;
+GO
+IF COL_LENGTH('dbo.approval_rights', 'max_credit_days') IS NULL
+    ALTER TABLE dbo.approval_rights ADD max_credit_days INT NULL;
+GO
+IF COL_LENGTH('dbo.approval_rights', 'max_expense_amount') IS NULL
+    ALTER TABLE dbo.approval_rights ADD max_expense_amount FLOAT NULL;
+GO
+
+-- Per-employee approval chain rules (skip Branch Admin / HOD steps)
+IF OBJECT_ID('dbo.approval_employee_rules', 'U') IS NULL
+CREATE TABLE dbo.approval_employee_rules (
+    id              INT IDENTITY(1,1) PRIMARY KEY,
+    user_id         NVARCHAR(50)  NOT NULL,
+    user_name       NVARCHAR(100) NULL,
+    branch          NVARCHAR(20)  NULL,
+    require_branch  BIT           NULL DEFAULT 1,
+    require_hod     BIT           NULL DEFAULT 1,
+    updated_by      NVARCHAR(50)  NULL,
+    updated_by_name NVARCHAR(100) NULL,
+    created_at      DATETIME      NULL,
+    updated_at      DATETIME      NULL,
+    CONSTRAINT UQ_approval_employee_rules_user UNIQUE (user_id)
+);
+GO
+
+-- HOD category approver map (spares / services / spares_services)
+IF OBJECT_ID('dbo.approval_hod_categories', 'U') IS NULL
+CREATE TABLE dbo.approval_hod_categories (
+    id         INT IDENTITY(1,1) PRIMARY KEY,
+    category   NVARCHAR(30)  NOT NULL,
+    user_id    NVARCHAR(50)  NULL,
+    user_name  NVARCHAR(100) NULL,
+    updated_by NVARCHAR(50)  NULL,
+    created_at DATETIME      NULL,
+    updated_at DATETIME      NULL,
+    CONSTRAINT UQ_approval_hod_categories_cat UNIQUE (category)
+);
+GO
+
+-- Per expense type, per approver amount limits (Authority Matrix tab).
+-- Created automatically on server startup; SSMS reference:
+IF OBJECT_ID('dbo.approval_expense_type_limits', 'U') IS NULL
+CREATE TABLE dbo.approval_expense_type_limits (
+    id              INT IDENTITY(1,1) PRIMARY KEY,
+    expense_type_id INT           NOT NULL,
+    user_id         NVARCHAR(50)  NOT NULL,
+    user_name       NVARCHAR(100) NULL,
+    max_amount      FLOAT         NULL,
+    updated_by      NVARCHAR(50)  NULL,
+    created_at      DATETIME      NULL,
+    updated_at      DATETIME      NULL,
+    CONSTRAINT UQ_apv_exp_type_user UNIQUE (expense_type_id, user_id),
+    CONSTRAINT FK_apv_exp_type FOREIGN KEY (expense_type_id)
+        REFERENCES dbo.approval_expense_types (id) ON DELETE CASCADE
+);
+GO
+
+-- HOD category approvers: MULTIPLE approvers per category (2026-07).
+-- Applied automatically on startup; SSMS reference:
+DECLARE @uq NVARCHAR(256);
+SELECT TOP 1 @uq = name FROM sys.key_constraints
+WHERE parent_object_id = OBJECT_ID('dbo.approval_hod_categories') AND type = 'UQ';
+IF @uq IS NOT NULL EXEC('ALTER TABLE dbo.approval_hod_categories DROP CONSTRAINT [' + @uq + ']');
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_apv_hod_cat_user'
+               AND object_id = OBJECT_ID('dbo.approval_hod_categories'))
+    CREATE UNIQUE NONCLUSTERED INDEX UX_apv_hod_cat_user
+        ON dbo.approval_hod_categories (category, user_id) WHERE user_id IS NOT NULL;
+GO
+
+-- APPROVAL APPLICATION PERFORMANCE (2026-07) — hot list-path indexes.
+-- Applied automatically on startup via performance_indexes; SSMS reference:
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_created_id' AND object_id = OBJECT_ID('dbo.approval_applications'))
+    CREATE NONCLUSTERED INDEX IX_apv_apps_created_id ON dbo.approval_applications (created_at DESC, id DESC);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_creator_created' AND object_id = OBJECT_ID('dbo.approval_applications'))
+    CREATE NONCLUSTERED INDEX IX_apv_apps_creator_created ON dbo.approval_applications (created_by, created_at DESC);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_branch_created' AND object_id = OBJECT_ID('dbo.approval_applications'))
+    CREATE NONCLUSTERED INDEX IX_apv_apps_branch_created ON dbo.approval_applications (branch, created_at DESC);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_type_status' AND object_id = OBJECT_ID('dbo.approval_applications'))
+    CREATE NONCLUSTERED INDEX IX_apv_apps_type_status ON dbo.approval_applications (request_type, status);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_attach_app_meta' AND object_id = OBJECT_ID('dbo.approval_attachments'))
+    CREATE NONCLUSTERED INDEX IX_apv_attach_app_meta ON dbo.approval_attachments (application_id)
+        INCLUDE (original_name, content_type, size_bytes, uploaded_by, created_at);
+GO
+
+-- SOFT DELETE (2026-07): Profile -> Delete Employee now marks the user
+-- deleted (hidden everywhere, cannot log in) instead of removing the row,
+-- so all history (MOM, followups, expenses, approval trails) keeps its
+-- person. Column added automatically on startup; SSMS reference:
+IF COL_LENGTH('dbo.users', 'is_deleted') IS NULL
+    ALTER TABLE dbo.users ADD is_deleted BIT NOT NULL
+        CONSTRAINT DF_users_is_deleted DEFAULT 0;
+GO
+
+-- Per-employee approver exclusions (2026-07): "this employee's records must
+-- never go to this approver". Created automatically on startup; SSMS ref:
+IF OBJECT_ID('dbo.approval_approver_exclusions', 'U') IS NULL
+CREATE TABLE dbo.approval_approver_exclusions (
+    id          INT IDENTITY(1,1) PRIMARY KEY,
+    employee_id NVARCHAR(50) NOT NULL,
+    approver_id NVARCHAR(50) NOT NULL,
+    created_by  NVARCHAR(50) NULL,
+    created_at  DATETIME     NULL,
+    CONSTRAINT UQ_apv_excl_emp_app UNIQUE (employee_id, approver_id)
+);
+GO
+
+-- FIX (2026-07): approver exclusions are CATEGORY-wise. Adds the category
+-- column, drops the old 2-column unique constraint, clears legacy rows and
+-- enforces uniqueness per (employee, approver, category).
+-- Applied automatically on startup; SSMS reference:
+IF COL_LENGTH('dbo.approval_approver_exclusions', 'category') IS NULL
+    ALTER TABLE dbo.approval_approver_exclusions ADD category NVARCHAR(30) NULL;
+GO
+DECLARE @xq NVARCHAR(256);
+SELECT TOP 1 @xq = name FROM sys.key_constraints
+WHERE parent_object_id = OBJECT_ID('dbo.approval_approver_exclusions')
+  AND type = 'UQ' AND name <> 'uq_apv_excl_emp_app_cat';
+IF @xq IS NOT NULL EXEC('ALTER TABLE dbo.approval_approver_exclusions DROP CONSTRAINT [' + @xq + ']');
+GO
+DELETE FROM dbo.approval_approver_exclusions WHERE category IS NULL;
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_apv_excl_emp_app_cat'
+               AND object_id = OBJECT_ID('dbo.approval_approver_exclusions'))
+    CREATE UNIQUE NONCLUSTERED INDEX UX_apv_excl_emp_app_cat
+        ON dbo.approval_approver_exclusions (employee_id, approver_id, category)
+        WHERE category IS NOT NULL;
+GO
+
+-- Employee email for approval notifications (2026-07). Added automatically
+-- on startup; SSMS reference:
+IF COL_LENGTH('dbo.users', 'email') IS NULL
+    ALTER TABLE dbo.users ADD email NVARCHAR(255) NULL;
+GO

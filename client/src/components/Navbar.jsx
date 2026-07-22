@@ -6,7 +6,7 @@ import axios from 'axios';
 import SitemapModal from './SitemapModal';
 import { prefetchRoute } from '../routePrefetch';
 import { applyTheme } from '../theme';
-import { canAccessPartDetail, canAccessMom } from '../utils/pagePermission';
+import { canAccessPartDetail, canAccessMom, canAccessApproval } from '../utils/pagePermission';
 
 import {
   Bars3Icon,
@@ -33,6 +33,7 @@ import {
   BanknotesIcon,
   BookOpenIcon,
   BuildingOffice2Icon,
+  CheckBadgeIcon,
   EyeIcon,
   PencilSquareIcon,
   DocumentTextIcon
@@ -376,6 +377,7 @@ function Navbar({ children }) {
   // Per-user page permissions (granted by Master Admin from Profile).
   const canSeePartDetail = canAccessPartDetail(user);
   const canSeeMom = canAccessMom(user);
+  const canSeeApproval = canAccessApproval(user);
   // Inside Part Detail Info: master admin gets both pages; everyone else
   // only the Quotation Template.
   const visiblePartDetailItems = isMasterAdmin
@@ -947,6 +949,15 @@ function Navbar({ children }) {
         allowedRoles: ['master_admin', 'branch_admin', 'employee']
 
       },
+      {
+        path: '/approval-application',
+        name: 'Approval Application',
+        icon: CheckBadgeIcon,
+        description: 'Discounting / Credit / Expense approvals (Branch → HOD → COO)',
+        // any role — but only when Master Admin granted the page (can_access_approval)
+        allowedRoles: ['master_admin', 'branch_admin', 'employee'],
+        requiresApprovalAccess: true
+      },
       // {
       //   path: '/sales-finance',
       //   name: 'Sales',
@@ -959,6 +970,7 @@ function Navbar({ children }) {
     return allOtherPagesItems.filter(item =>
       item.allowedRoles.includes(user?.role)
       && (!item.requiresMomAccess || canSeeMom)
+      && (!item.requiresApprovalAccess || canSeeApproval)
     );
   };
 

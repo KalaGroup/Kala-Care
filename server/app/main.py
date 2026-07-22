@@ -48,7 +48,8 @@ from app.routes import (
     salesBM_routes,
     knowledge_book_routes,
     maintenance_routes,
-    mom_routes
+    mom_routes,
+    approval_routes
 )
 
 # ---------------- LOAD ENV ---------------- #
@@ -66,6 +67,7 @@ from app.models import login_activity_model
 from app.models.user_model import User, UserBranchAccess
 from app.models import maintenance_model
 from app.models import mom_model
+from app.models import approval_application_model
 from app.time_utils import now_ist
 
 # ---------------- CREATE UPLOAD DIRECTORIES ---------------- #
@@ -287,6 +289,7 @@ app.include_router(salesBM_routes.router, prefix="/api")
 app.include_router(knowledge_book_routes.router, prefix="/api")
 app.include_router(maintenance_routes.router, prefix="/api")
 app.include_router(mom_routes.router, prefix="/api")
+app.include_router(approval_routes.router, prefix="/api")
 
 # ---------------- ROOT ---------------- #
 

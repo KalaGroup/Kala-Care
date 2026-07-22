@@ -258,6 +258,8 @@ const Campaign = () => {
   const [selectedCampaignForModal, setSelectedCampaignForModal] = useState(null);
   // true → the modal shows only admin-added assets (Admin Added button)
   const [followupModalAdminOnly, setFollowupModalAdminOnly] = useState(false);
+  // true → the modal shows only user-added assets = View All − Admin Added (User Added button)
+  const [followupModalUserOnly, setFollowupModalUserOnly] = useState(false);
 
   // ⚡ Asset-transfer picker: when the chosen product already has active drives,
   // the user picks which of them to pull assets from (and inactivate).
@@ -460,12 +462,20 @@ const Campaign = () => {
     description: ''
   });
 
-  const openFollowupModal = (campaign, e, adminOnly = false) => {
+  const openFollowupModal = (campaign, e, adminOnly = false, userOnly = false) => {
     e.stopPropagation();
     setFollowupModalAdminOnly(adminOnly);
+    setFollowupModalUserOnly(userOnly);
     setSelectedCampaignForModal(campaign);
     setShowFollowupModal(true);
   };
+
+  // User Added badge = exact difference between the View All and Admin Added badges
+  const userAddedCount = (campaign) => Math.max(
+    0,
+    (campaign.asset_numbers?.length || 0) + (campaignCounts[campaign.id]?.completed || 0)
+      - (campaign.admin_asset_numbers?.length || 0)
+  );
 
   const toggleTransferStatus = (value) => {
     setSelectedTransferStatuses(prev =>
@@ -5529,6 +5539,16 @@ const Campaign = () => {
                               </span>
                             </button>
                             <button
+                              onClick={(e) => openFollowupModal(campaign, e, false, true)}
+                              className="px-2 py-1 text-[10px] font-medium text-white bg-[#2f3192] rounded-md hover:bg-[#2f3192]/90 transition-all whitespace-nowrap"
+                              title="View only user-added assets (View All minus Admin Added)"
+                            >
+                              User Added
+                              <span className="ml-1 px-1 rounded bg-white/25 tabular-nums">
+                                {userAddedCount(campaign)}
+                              </span>
+                            </button>
+                            <button
                               onClick={(e) => openEditModal(campaign, e)}
                               className="p-1 rounded-md hover:bg-gray-100 transition-all"
                               title="Edit drive"
@@ -5670,6 +5690,17 @@ const Campaign = () => {
                         </span>
                       </button>
 
+                      <button
+                        onClick={(e) => openFollowupModal(campaign, e, false, true)}
+                        className="px-2 py-1 text-xs font-medium text-white bg-[#2f3192] rounded-md hover:bg-[#2f3192]/90 transition-all whitespace-nowrap"
+                        title="View only user-added assets (View All minus Admin Added)"
+                      >
+                        User Added
+                        <span className="ml-1 px-1 rounded bg-white/25 text-[10px] tabular-nums">
+                          {userAddedCount(campaign)}
+                        </span>
+                      </button>
+
                       <div className="flex items-center gap-3">
                         <div className="flex items-center gap-1 text-sm text-black" title="Pending Follow-ups">
                           <UserGroupIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
@@ -5775,10 +5806,12 @@ const Campaign = () => {
             setShowFollowupModal(false);
             setSelectedCampaignForModal(null);
             setFollowupModalAdminOnly(false);
+            setFollowupModalUserOnly(false);
           }}
           campaign={selectedCampaignForModal}
           apiBaseUrl={API_BASE_URL}
           adminOnly={followupModalAdminOnly}
+          userOnly={followupModalUserOnly}
         />
       </Suspense>
 

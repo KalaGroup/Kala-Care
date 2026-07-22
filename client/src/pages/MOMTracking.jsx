@@ -15,6 +15,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
 import { SortTh, useSort, compareValues } from '../components/TableSort';
+import MomFiles from '../components/MomFiles';
 // xlsx-js-style is heavy (~140kB gzip) and only needed when a user actually
 // exports to Excel — loaded on demand inside exportMeetingExcel() so it never
 // weighs down the initial MOM page load (esp. for employees who only view).
@@ -80,7 +81,7 @@ const CARRY_MINW = '98rem';
 
 /* ============================================================
    MASTER DISCUSSION AREAS (editable via "Master setup")
-   These pre-fill the Discussion Area column of every new sheet.
+   These feed the Discussion Area picker ("Add row") on every new sheet.
    ============================================================ */
 const DEFAULT_MASTER = [
   { id: 'm1', title: 'Sales target vs achievement (MTD)', category: 'Sales' },
@@ -821,6 +822,7 @@ export default function MOMTracking() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routerLocation.state]);
   const [masterOpen, setMasterOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);      // Master Folder file store
   const [confirm, setConfirm] = useState(null);
   const [confirmBusy, setConfirmBusy] = useState(false);  // async onYes running → spinner on the Yes button
   const [viewMtg, setViewMtg] = useState(null);
@@ -961,7 +963,6 @@ export default function MOMTracking() {
   /* a master row on the sheet counts as "filled" once anything is typed
      in it — deleting its row (Action column) drops that data with the row */
   const rowFilled = (r) => !!(r && ((r.point || '').trim() || (r.remark || '').trim() || respArr(r.resp).length));
-  const pickAll = () => setPicked(new Set(master.map((p) => p.id)));
 
   /* ---- meeting sheet (Step 2) ---- */
   const [rows, setRows] = useState([]);               // current discussion rows
@@ -1039,7 +1040,6 @@ export default function MOMTracking() {
      saved (resetWizard). Stale drafts (> 7 days) are dropped server-side. */
   const DRAFT_KEY = `mom_draft_${me?.user_id || 'local'}`;   // legacy localStorage slot — migrated then removed
   const draftReady = useRef(false);          // don't overwrite the stored draft before it's been read
-  const [draftChecked, setDraftChecked] = useState(false);   // draft read finished (found or not) — gates the default point fill
   const draftDirty = useRef(false);          // a draft row exists in the DB — skip pointless DELETEs otherwise
   const restoreDraft = (d) => {
     setBranches(d.branches || []);
@@ -1054,7 +1054,7 @@ export default function MOMTracking() {
     ping('Restored your unsaved meeting draft');
   };
   useEffect(() => {
-    if (!isMomAdmin || !me?.user_id) { draftReady.current = true; setDraftChecked(true); return; }
+    if (!isMomAdmin || !me?.user_id) { draftReady.current = true; return; }
     axios.get(`${MOM_API}/draft`, { headers: authHeaders })
       .then(({ data }) => {
         const d = data?.draft;
@@ -1076,13 +1076,13 @@ export default function MOMTracking() {
         } catch { try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ } }
       })
       .catch(() => { /* draft endpoint unreachable — start fresh, typing is still auto-saved once it's back */ })
-      .finally(() => { draftReady.current = true; setDraftChecked(true); });
+      .finally(() => { draftReady.current = true; });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     if (!isMomAdmin || !me?.user_id || !draftReady.current) return undefined;
     const t = setTimeout(() => {                       // small debounce — don't hit the API on every keystroke
-      /* the untouched default sheet (all master points, nothing typed) is
+      /* an untouched sheet (nothing typed) is
          NOT a draft — only real work is mirrored to the DB */
       const hasData = branches.length || carry.length || attendees.length
         || rows.some((r) => rowFilled(r) || r.flag === 'T' || (r.due || '').trim())
@@ -1107,21 +1107,10 @@ export default function MOMTracking() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMomAdmin, branches, manualBranches, mDate, mLocation, mType, heads, attendees, picked, rows, carry]);
 
-  /* ---------- default sheet: every master point on the table ----------
-     The discussion box starts EMPTY — nothing is pre-filled by default.
-     Only once the admin selects a branch (and the draft check is done, and
-     the real master list has arrived or its load failed) does an untouched
-     wizard get ALL points pre-selected. A restored draft or any filled row
-     skips this — the user's own state always wins. */
-  const autoPickDone = useRef(false);
-  useEffect(() => {
-    if (!isMomAdmin || !draftChecked || autoPickDone.current) return;
-    if (API_BASE_URL && histSource === 'loading') return;
-    if (!branches.length) return;          // sheet stays empty until a branch is chosen
-    autoPickDone.current = true;
-    if (!picked.size && !rows.some(rowFilled)) pickAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMomAdmin, draftChecked, histSource, master, branches]);
+  /* ---------- default sheet ----------
+     The discussion box starts EMPTY and stays empty — master points are
+     never pre-filled. The admin adds Discussion Areas one by one via the
+     "Add row" footer (picked from the master list). */
 
   /* header pills — latest state per tracked task, meetings counted once
      even when they cover several branches */
@@ -1286,8 +1275,8 @@ export default function MOMTracking() {
   const togglePresent = (id) => setAttendees((p) => p.map((a) => a.id === id ? { ...a, present: !a.present } : a));
   const removeAttendee = (id) => setAttendees((p) => p.filter((a) => a.id !== id));
 
-  /* one-tab mode: every picked master point owns a row on the sheet (ALL
-     points are picked once a branch is selected; deleting a row via its
+  /* one-tab mode: every picked master point owns a row on the sheet (points
+     are picked manually via "Add row"; deleting a row via its
      Action column unpicks the point). Rows already typed against a still-picked point are
      kept untouched; custom rows always survive. Skips the very first run so
      a restored draft's rows aren't wiped before its picked-set lands. */
@@ -1333,8 +1322,7 @@ export default function MOMTracking() {
     setManualBranch('');
     setMDate(iso(new Date())); setMLocation(''); setMType('');
     setRows([]); setCarry([]);
-    setPicked(new Set());                      // back to the empty sheet — points load again on branch select
-    autoPickDone.current = false;
+    setPicked(new Set());                      // back to the empty sheet
     if (me?.user_id) axios.delete(`${MOM_API}/draft`, { headers: authHeaders }).catch(() => { /* offline — stale draft expires in 7 days anyway */ });
     try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ }
   };
@@ -1705,6 +1693,16 @@ export default function MOMTracking() {
               {isMaster && (
                 <button onClick={() => setMasterOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1.5 text-[12px] font-medium transition">
                   <ListChecks className="h-3.5 w-3.5" /> Master setup
+                </button>
+              )}
+              {isMaster && (
+                <button onClick={() => setFilesOpen(true)} title="Master Folder — reference file store"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1.5 text-[12px] font-medium transition flex-shrink-0">
+                  <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2.5 6.2c0-1 .8-1.7 1.7-1.7h4.8c.5 0 1 .2 1.3.6l1.1 1.3h8.4c1 0 1.7.8 1.7 1.7v9.4c0 1-.8 1.7-1.7 1.7H4.2c-1 0-1.7-.8-1.7-1.7V6.2Z" fill="#E0A50C" />
+                    <path d="M2.5 9.3h19v8.3c0 1-.8 1.7-1.7 1.7H4.2c-1 0-1.7-.8-1.7-1.7V9.3Z" fill="#F6C23E" />
+                  </svg>
+                  Master Folder
                 </button>
               )}
             </div>
@@ -2104,7 +2102,7 @@ export default function MOMTracking() {
                       <tr style={{ background: '#f1f3fb', color: INK }}>
                         <th className="px-1 py-2 fs-10 font-bold" style={{ width: '2.6rem' }} title="Tick to move the task into the current-meeting discussion">Discuss</th>
                         <th className="px-1 py-2 fs-11 font-bold" style={{ width: '2rem' }}>Sr. No.</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '8rem' }}>Discussion Area</th>
+                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '12rem', minWidth: '12rem' }}>Discussion Area</th>
                         <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '12rem' }}>Discussion Points</th>
                         <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7rem' }}>Responsibility</th>
                         <th className="px-1 py-2 fs-10 font-bold" style={{ width: '3rem' }}>Flag</th>
@@ -2205,7 +2203,7 @@ export default function MOMTracking() {
                       <SortTh label="Category" sortKey="category" sort={sheetSort} onSort={toggleSheetSort}
                         className="px-2 py-2 fs-11 font-bold" style={{ width: '5rem' }} />
                       <SortTh label="Discussion Area" sortKey="area" sort={sheetSort} onSort={toggleSheetSort}
-                        className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '9rem' }} />
+                        className="px-2 py-2 fs-11 font-bold" style={{ width: '12rem', minWidth: '12rem' }} />
                       <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '15rem' }}>Discussion points</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8rem' }}>Responsibility</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '5rem' }}>Action flag</th>
@@ -2330,7 +2328,7 @@ export default function MOMTracking() {
                     })()}
                     {rows.length === 0 && <tr><td colSpan={10} className="px-3 text-center fs-12 text-gray-400" style={{ height: '7rem', verticalAlign: 'middle' }}>
                       {branches.length === 0
-                        ? 'Select branch(es) above — the master discussion points load once a branch is chosen.'
+                        ? 'Select branch(es) above, then add discussion areas using the "Add row" button below.'
                         : `No rows — add a discussion area below${carry.length > 0 ? ', or tick "Discuss" on a pending task above' : ''}.`}
                     </td></tr>}
                     {/* add custom row — shown only while master points are still
@@ -2402,6 +2400,9 @@ export default function MOMTracking() {
 
       {/* ===== MASTER SETUP MODAL ===== */}
       {masterOpen && <MasterModal master={master} setMaster={setMaster} categories={categories} setCategories={setCategories} meetingTypes={meetingTypes} setMeetingTypes={setMeetingTypes} persist={persist} onClose={() => setMasterOpen(false)} ping={ping} />}
+
+      {/* ===== MASTER FOLDER (file store — master admin only) ===== */}
+      {filesOpen && isMaster && <MomFiles apiBase={MOM_API} authHeaders={authHeaders} brand={BRAND} brandDark={BRAND_DARK} onClose={() => setFilesOpen(false)} />}
 
       {/* ===== VIEW MEETING (sheet replica) ===== */}
       {viewMtg && <MeetingSheetModal data={viewMtg} categories={categories} canExport={canExport} onExport={doExport} onClose={() => setViewMtg(null)} />}
@@ -2639,6 +2640,22 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
     .sort((a, b) => asc ? (a.date || '').localeCompare(b.date || '') : (b.date || '').localeCompare(a.date || '')),
   [meetings, q, typeF, asc]);
 
+  /* Lazy rendering: paint the first chunk of meeting rows immediately and mount
+     the rest as the sentinel scrolls into view. Filters, sort and export still
+     operate on the FULL list — only how many rows are in the DOM at once changes. */
+  const HIST_CHUNK = 40;
+  const [histCount, setHistCount] = useState(HIST_CHUNK);
+  const histMoreRef = useRef(null);
+  useEffect(() => { setHistCount(HIST_CHUNK); }, [code, q, typeF, asc, fromD, toD]);
+  useEffect(() => {
+    const ob = new IntersectionObserver((es) => {
+      if (es[0].isIntersecting) setHistCount((n) => (n < shown.length ? Math.min(n + HIST_CHUNK, shown.length) : n));
+    }, { threshold: 0.1 });
+    if (histMoreRef.current) ob.observe(histMoreRef.current);
+    return () => ob.disconnect();
+  }, [shown.length]);
+  const shownRows = useMemo(() => shown.slice(0, histCount), [shown, histCount]);
+
   /* KPI stats — tasks are attributed to the branch(es) the MEETING covers
      (same rule as Reports), scoped to the branch picked in the dropdown */
   const rowCodes = rowBranchCodes;
@@ -2793,7 +2810,7 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
                 </tr>
               </thead>
               <tbody>
-                {shown.map((m) => {
+                {shownRows.map((m) => {
                   const tasks = taskRows(m);
                   const done = tasks.filter((r) => r.status === 'completed').length;
                   const open = tasks.length - done;
@@ -2804,7 +2821,10 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
                   return (
                     <tr key={m.id}>
                       <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                        <span className="fs-12 font-bold" style={{ color: BRAND }}>{fmtDDMMYY(m.date).replaceAll('/', '-')}</span>
+                        <button type="button" onClick={() => onView(m)} title="View this meeting's sheet"
+                          className="fs-12 font-bold cursor-pointer hover:underline bg-transparent border-none p-0" style={{ color: BRAND }}>
+                          {fmtDDMMYY(m.date).replaceAll('/', '-')}
+                        </button>
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="fs-12 font-bold text-gray-800 flex items-center gap-1.5 flex-wrap min-w-0">
@@ -2843,6 +2863,11 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
                     </tr>
                   );
                 })}
+                {histCount < shown.length && (
+                  <tr ref={histMoreRef}>
+                    <td colSpan={8} className="py-3 text-center fs-11 text-gray-400">Loading more… ({histCount}/{shown.length})</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </DualScroll>
@@ -3506,6 +3531,15 @@ function MasterModal({ master, setMaster, categories, setCategories, meetingType
 
   const fail = (e, msg) => ping(e?.response?.data?.detail || msg, 'err');
 
+  /* the add / edit boxes grow with their text so long discussion areas
+     stay fully visible instead of scrolling inside a one-line input */
+  const autoGrow = (el) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  };
+  const addBoxRef = useRef(null);
+
   const add = async () => {
     const t = title.trim(); if (!t) return;
     setBusyAdd(true);
@@ -3514,7 +3548,9 @@ function MasterModal({ master, setMaster, categories, setCategories, meetingType
         const item = await persist.addPoint(t, cat);
         setMaster((p) => [...p, { id: String(item.id), title: item.title, category: item.category }]);
       } else setMaster((p) => [...p, { id: uid('m'), title: t, category: cat }]);
-      setTitle(''); ping('Master point added');
+      setTitle('');
+      if (addBoxRef.current) addBoxRef.current.style.height = 'auto';
+      ping('Master point added');
     } catch (e) { fail(e, 'Could not add the point'); }
     finally { setBusyAdd(false); }
   };
@@ -3619,7 +3655,7 @@ function MasterModal({ master, setMaster, categories, setCategories, meetingType
         <div className="mom-view-head px-4 py-3 flex items-center justify-between rounded-t-2xl border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
           <div>
             <div className="text-sm font-bold text-gray-800">Master setup</div>
-            <div className="fs-10 text-gray-400">Discussion areas pre-filled into every new meeting sheet</div>
+            <div className="fs-10 text-gray-400">Discussion areas available to add on every new meeting sheet</div>
           </div>
           <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100"><X className="h-4 w-4" /></button>
         </div>
@@ -3633,7 +3669,11 @@ function MasterModal({ master, setMaster, categories, setCategories, meetingType
         {tab === 'points' ? (
           <>
             <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 max-sm:flex-wrap" style={{ background: '#fafafc' }}>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder="Add a new discussion area…" className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 fs-12 outline-none" />
+              <textarea ref={addBoxRef} value={title} rows={1}
+                onChange={(e) => { setTitle(e.target.value); autoGrow(e.target); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); add(); } }}
+                placeholder="Add a new discussion area…"
+                className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 fs-12 outline-none resize-none overflow-hidden" />
               <select value={cat} onChange={(e) => setCat(e.target.value)} className="rounded-lg border border-gray-200 px-2 py-1.5 fs-12 bg-white outline-none">{catKeys.map((c) => <option key={c}>{c}</option>)}</select>
               <button onClick={add} disabled={busyAdd} className="rounded-lg px-3 py-1.5 fs-12 font-semibold text-white inline-flex items-center gap-1 disabled:opacity-60" style={{ background: BRAND }}>{busyAdd ? <span className="h-3 w-3 rounded-full animate-spin" style={{ border: '2px solid rgba(255,255,255,0.35)', borderTopColor: '#fff' }} /> : <Plus className="h-3.5 w-3.5" />} {busyAdd ? 'Adding…' : 'Add'}</button>
             </div>
@@ -3641,7 +3681,11 @@ function MasterModal({ master, setMaster, categories, setCategories, meetingType
               {master.map((p) => (
                 <div key={p.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50">
                   {editPt === p.id ? (
-                    <input autoFocus value={p.title} onChange={(e) => rename(p.id, e.target.value)} onBlur={() => { commitTitle(p.id); setEditPt(null); }} onKeyDown={(e) => e.key === 'Enter' && e.target.blur()} className="flex-1 min-w-0 fs-12 text-gray-800 bg-transparent outline-none border-b border-gray-300 py-0.5" />
+                    <textarea autoFocus value={p.title} rows={1} ref={autoGrow}
+                      onChange={(e) => { rename(p.id, e.target.value); autoGrow(e.target); }}
+                      onBlur={() => { commitTitle(p.id); setEditPt(null); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } }}
+                      className="flex-1 min-w-0 fs-12 text-gray-800 bg-transparent outline-none border-b border-gray-300 py-0.5 resize-none overflow-hidden" />
                   ) : (
                     <span className="flex-1 min-w-0 fs-12 text-gray-800 truncate py-0.5" title={p.title}>{p.title}</span>
                   )}

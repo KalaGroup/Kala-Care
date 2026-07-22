@@ -10,7 +10,7 @@ import {
     FaChevronDown, FaChevronUp, FaTimes, FaSave, FaPlus, FaCheck,
     FaUser, FaKey, FaUsers, FaUserTie, FaCog,
     FaCheckCircle, FaExclamationCircle, FaBan, FaFileExport, FaUpload,
-    FaEye, FaEyeSlash, FaEllipsisV, FaCalendarAlt, FaPhone
+    FaEye, FaEyeSlash, FaEllipsisV, FaCalendarAlt, FaPhone, FaEnvelope
 } from 'react-icons/fa';
 import { MdOutlineUpdate } from "react-icons/md";
 import { CiImport } from "react-icons/ci";
@@ -986,6 +986,7 @@ const Profile = () => {
         branch: '',
         branch_name: '',
         mobile_number: '',
+        email: '',
         password: '',
         role: 'employee'
     });
@@ -1336,7 +1337,7 @@ const Profile = () => {
                     timer: 2000
                 });
                 setShowAddModal(false);
-                setFormData({ name: '', user_id: '', branch: '', branch_name: '', mobile_number: '', password: '', role: 'employee' });
+                setFormData({ name: '', user_id: '', branch: '', branch_name: '', mobile_number: '', email: '', password: '', role: 'employee' });
                 fetchEmployees();
             }
         } catch (err) {
@@ -1666,6 +1667,7 @@ const Profile = () => {
             branch: editingUser.branch,
             branch_name: editingUser.branch_name,
             mobile_number: editingUser.mobile_number,
+            email: editingUser.email ?? '',
             password: editingUser.password || undefined,
             role: editingUser.role,
             is_blocked: editingUser.is_blocked,
@@ -2022,7 +2024,7 @@ const Profile = () => {
     // Grant/revoke the Part Detail Info or MOM Tracking pages for a user.
     // Master Admin only; page is 'part_detail' | 'mom'.
     const handleTogglePageAccess = async (id, page, currentStatus) => {
-        const label = page === 'part_detail' ? 'Part Detail Info' : 'MOM Tracking';
+        const label = { part_detail: 'Part Detail Info', approval: 'Approval Application' }[page] || 'MOM Tracking';
         if (!isMasterAdmin) {
             Swal.fire({
                 title: 'Access Denied',
@@ -2051,7 +2053,10 @@ const Profile = () => {
                 await fetchEmployees();
 
                 if (editingUser && editingUser.id === id) {
-                    const field = page === 'part_detail' ? 'can_access_part_detail' : 'can_access_mom';
+                    const field = {
+                        part_detail: 'can_access_part_detail',
+                        approval: 'can_access_approval'
+                    }[page] || 'can_access_mom';
                     setEditingUser({ ...editingUser, [field]: !currentStatus });
                 }
             }
@@ -2704,14 +2709,16 @@ const Profile = () => {
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Employee</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">User ID</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Mobile</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Email</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Branch Code</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Branch Name</th>
-                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Role</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 min-w-[140px]">Role</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Status</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Export</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Expense</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Part Detail Info</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">MOM Tracking</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Approval Application</th>
                                                         {!isRestrictedUser && (
                                                             <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap">Actions</th>
                                                         )}
@@ -2720,7 +2727,7 @@ const Profile = () => {
                                                 <tbody className="bg-white divide-y divide-gray-200">
                                                     {loading ? (
                                                         <tr>
-                                                            <td colSpan={isRestrictedUser ? 12 : 13} className="px-2 py-4 text-center">
+                                                            <td colSpan={isRestrictedUser ? 14 : 15} className="px-2 py-4 text-center">
                                                                 <div className="flex flex-col items-center justify-center space-y-2">
                                                                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#2f3192]"></div>
                                                                     <p className="text-xs text-black">Loading employees...</p>
@@ -2748,6 +2755,9 @@ const Profile = () => {
                                                                     <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200">
                                                                         {emp.mobile_number ? highlightText(emp.mobile_number, searchTerm) : '-'}
                                                                     </td>
+                                                                    <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200">
+                                                                        {emp.email ? highlightText(emp.email, searchTerm) : '-'}
+                                                                    </td>
                                                                     <td className="px-2 py-1 text-center border-r border-gray-200">
                                                                         <span className="px-1 py-0.5 bg-gray-100 text-black rounded text-xs">
                                                                             {highlightText(emp.branch, searchTerm)}
@@ -2757,7 +2767,7 @@ const Profile = () => {
                                                                         {emp.branch_name ? highlightText(emp.branch_name, searchTerm) : '-'}
                                                                     </td>
                                                                     <td className="px-2 py-1 text-center border-r border-gray-200">
-                                                                        <span className={`px-1 py-0.5 rounded text-xs font-medium ${getRoleColor(emp.role)} text-black`}>
+                                                                        <span className={`px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${getRoleColor(emp.role)} text-black`}>
                                                                             {getRoleDisplayName(emp.role)}
                                                                         </span>
                                                                     </td>
@@ -2800,6 +2810,13 @@ const Profile = () => {
                                                                             <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />
                                                                         )}
                                                                     </td>
+                                                                    <td className="px-2 py-1 text-center border-r border-gray-200">
+                                                                        {emp.user_id === MASTER_ADMIN_ID || emp.can_access_approval ? (
+                                                                            <FaCheck className="inline-block text-sm text-green-500" title={emp.user_id === MASTER_ADMIN_ID ? 'Always Allowed' : 'Allowed'} />
+                                                                        ) : (
+                                                                            <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />
+                                                                        )}
+                                                                    </td>
                                                                     {!isRestrictedUser && (
                                                                         <td className="px-2 py-1 text-center">
                                                                             <div className="flex items-center justify-center gap-1">
@@ -2826,7 +2843,7 @@ const Profile = () => {
                                                             ))
                                                     ) : (
                                                         <tr>
-                                                            <td colSpan={isRestrictedUser ? 12 : 13} className="px-2 py-6 text-center text-black">
+                                                            <td colSpan={isRestrictedUser ? 14 : 15} className="px-2 py-6 text-center text-black">
                                                                 <div className="flex flex-col items-center gap-1">
                                                                     <FaUsers className="w-5 h-5 text-gray-300" />
                                                                     <p className="text-xs">No employees found</p>
@@ -2844,7 +2861,7 @@ const Profile = () => {
                                                     )}
                                                     {visibleEmployeeCount < filteredEmployees.length && (
                                                         <tr ref={employeeLoadMoreRef}>
-                                                            <td colSpan={isRestrictedUser ? 12 : 13} className="py-3 text-center text-xs text-gray-400">
+                                                            <td colSpan={isRestrictedUser ? 14 : 15} className="py-3 text-center text-xs text-gray-400">
                                                                 Loading more... ({visibleEmployeeCount}/{filteredEmployees.length})
                                                             </td>
                                                         </tr>
@@ -3010,6 +3027,22 @@ const Profile = () => {
                                         placeholder="Enter mobile number"
                                         value={formData.mobile_number}
                                         onChange={(e) => setFormData({ ...formData, mobile_number: e.target.value })}
+                                        className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent text-black"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs text-black mb-1">Email</label>
+                                <div className="relative">
+                                    <FaEnvelope className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
+                                    <input
+                                        type="email"
+                                        placeholder="Enter email address"
+                                        value={formData.email}
+                                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                        pattern="[^@\s]+@[^@\s]+\.[^@\s]+"
+                                        title="Enter a valid email address"
                                         className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent text-black"
                                     />
                                 </div>
@@ -3206,6 +3239,22 @@ const Profile = () => {
                                                 placeholder="Enter mobile number"
                                                 value={editingUser.mobile_number || ''}
                                                 onChange={(e) => setEditingUser({ ...editingUser, mobile_number: e.target.value })}
+                                                className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent text-black"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs text-black mb-1">Email</label>
+                                        <div className="relative">
+                                            <FaEnvelope className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
+                                            <input
+                                                type="email"
+                                                placeholder="Enter email address"
+                                                value={editingUser.email || ''}
+                                                onChange={(e) => setEditingUser({ ...editingUser, email: e.target.value })}
+                                                pattern="[^@\s]+@[^@\s]+\.[^@\s]+"
+                                                title="Enter a valid email address"
                                                 className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent text-black"
                                             />
                                         </div>
@@ -3448,6 +3497,29 @@ const Profile = () => {
                                             </div>
                                         )}
 
+                                        {isMasterAdmin && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id && (
+                                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg max-sm:flex-wrap max-sm:gap-2">
+                                                <div className="flex items-center space-x-3">
+                                                    <FaBuilding className={`text-sm ${editingUser.can_access_approval ? 'text-emerald-500' : 'text-gray-400'}`} />
+                                                    <div>
+                                                        <p className="text-xs font-medium text-black">Approval Application Access</p>
+                                                        <p className="text-xs text-black">Show the Approval Application page (view depends on rights given in its Rights Master)</p>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleTogglePageAccess(editingUser.id, 'approval', editingUser.can_access_approval)}
+                                                    disabled={loading}
+                                                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${editingUser.can_access_approval
+                                                        ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                        } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                >
+                                                    {editingUser.can_access_approval ? 'Revoke' : 'Grant'}
+                                                </button>
+                                            </div>
+                                        )}
+
                                         {canDeleteEmployee && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id && (
                                             <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg border border-red-100 max-sm:flex-wrap max-sm:gap-2">
                                                 <div className="flex items-center space-x-3">
@@ -3520,7 +3592,7 @@ const Profile = () => {
                                 Upload an Excel or CSV file with the following columns:
                             </p>
                             <div className="bg-gray-50 p-2.5 rounded-lg text-xs overflow-x-auto">
-                                <p className="font-mono whitespace-nowrap">ECode, EmpName, Branch Code, Branch Name, Sim Number</p>
+                                <p className="font-mono whitespace-nowrap">ECode, EmpName, Branch Code, Branch Name, Sim Number, Password, Email</p>
                             </div>
                         </div>
 

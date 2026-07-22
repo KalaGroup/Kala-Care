@@ -20,14 +20,20 @@ class User(Base):
     branch = Column(String(20), nullable=False)          # primary branch code
     branch_name = Column(String(100), nullable=False)    # primary branch name
     mobile_number = Column(String(15), nullable=True)
+    email = Column(String(255), nullable=True)   # approval notifications go here
     password = Column(String(255), nullable=False)
     role = Column(Enum(UserRole), default=UserRole.EMPLOYEE)
     is_blocked = Column(Boolean, default=False)
+    # Soft delete: "deleted" users stay in the DB so history (followups, MOM,
+    # expenses, approvals) keeps its person, but they are hidden everywhere
+    # and can never log in. Set by Profile -> Delete Employee.
+    is_deleted = Column(Boolean, default=False)
     can_export = Column(Boolean, default=False)
     can_access_expense = Column(Boolean, default=False)
     # Per-user page visibility, granted by Master Admin from the Profile page.
     can_access_part_detail = Column(Boolean, default=False)  # Part Detail Info pages
     can_access_mom = Column(Boolean, default=False)          # MOM Tracking page
+    can_access_approval = Column(Boolean, default=False)     # Approval Application page
     theme = Column(String(10), nullable=True, default="light")  # 'light' | 'dark' — UI preference, applied on login
     created_at = Column(DateTime(timezone=True), default=now_ist)
     updated_at = Column(DateTime(timezone=True), onupdate=now_ist)

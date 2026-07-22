@@ -218,6 +218,7 @@ const Login = () => {
                     can_access_expense: response.data.user.can_access_expense === true,  // <-- new
                     can_access_part_detail: response.data.user.can_access_part_detail === true,  // <-- page permission
                     can_access_mom: response.data.user.can_access_mom === true,                  // <-- page permission
+                    can_access_approval: response.data.user.can_access_approval === true,        // <-- page permission
                     session_id: response.data.user.session_id,  // <-- login session for logout tracking
                     theme: response.data.user.theme || 'light', // <-- saved UI theme (dark/light)
                     branches: branches                      // <-- all accessible branches

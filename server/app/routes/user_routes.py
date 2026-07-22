@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import pandas as pd
 import io
 import csv
+import re
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -103,6 +104,7 @@ def login(user_login: UserLogin, db: Session = Depends(get_db)):
                     "can_access_expense": user.can_access_expense,
                     "can_access_part_detail": bool(user.can_access_part_detail),
                     "can_access_mom": bool(user.can_access_mom),
+                    "can_access_approval": bool(user.can_access_approval),
                     "theme": user.theme or "light",
                     "session_id": session_id,
                     "branches": [
@@ -233,6 +235,14 @@ async def bulk_import_employees(
                 password_raw = row['Password']
                 password = str(password_raw).strip() if pd.notna(password_raw) and str(password_raw).strip() != '' else ''
 
+                # Optional Email column (basic validation; bad values are reported)
+                email = ''
+                if 'Email' in df.columns and pd.notna(row.get('Email')):
+                    email = str(row['Email']).strip()
+                    if email and email.lower() != 'nan' and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+                        errors.append(f"Row {index + 2}: Invalid email '{email}' — skipped the email")
+                        email = ''
+
                 # Validate required fields per row
                 if not ecode or ecode == 'nan':
                     errors.append(f"Row {index + 2}: ECode is missing")
@@ -259,6 +269,8 @@ async def bulk_import_employees(
                     existing_user.branch = branch_code
                     existing_user.branch_name = branch_name
                     existing_user.mobile_number = sim_number
+                    if email:
+                        existing_user.email = email
                     existing_user.password = UserController.hash_password(password)
                     updated_count += 1
                 else:
@@ -270,6 +282,7 @@ async def bulk_import_employees(
                         branch=branch_code,
                         branch_name=branch_name,
                         mobile_number=sim_number,
+                        email=email or None,
                         password=hashed_password,
                         role=UserRole.EMPLOYEE,
                         is_blocked=False,
@@ -327,8 +340,8 @@ def export_employees(
         writer = csv.writer(output)
         
         # Write header - Use S.No instead of ID
-        writer.writerow(['S.No', 'Employee Name', 'Employee Code', 'Branch Code', 'Branch Name', 'Mobile Number', 'Role', 'Blocked', 'Can Export'])
-        
+        writer.writerow(['S.No', 'Employee Name', 'Employee Code', 'Branch Code', 'Branch Name', 'Mobile Number', 'Email', 'Role', 'Blocked', 'Can Export'])
+
         # Write data with serial number starting from 1
         for idx, emp in enumerate(employees, start=1):
             writer.writerow([
@@ -338,6 +351,7 @@ def export_employees(
                 emp.branch,
                 emp.branch_name or '',
                 emp.mobile_number or '',
+                emp.email or '',
                 emp.role.value if hasattr(emp.role, 'value') else emp.role,
                 'Yes' if emp.is_blocked else 'No',
                 'Yes' if emp.can_export else 'No'
@@ -383,12 +397,14 @@ def get_all_employees(
                         "branch": emp.branch,
                         "branch_name": emp.branch_name,
                         "mobile_number": emp.mobile_number or '',  # Make sure this is included
+                        "email": emp.email or '',
                         "role": emp.role.value if hasattr(emp.role, 'value') else emp.role,
                         "is_blocked": emp.is_blocked,
                         "can_export": emp.can_export,
                         "can_access_expense": emp.can_access_expense,
                         "can_access_part_detail": bool(emp.can_access_part_detail),
                         "can_access_mom": bool(emp.can_access_mom),
+                        "can_access_approval": bool(emp.can_access_approval),
                         "password": emp.password if is_master else None
                     }
                     for emp in employees
@@ -597,7 +613,7 @@ def toggle_page_access(
         allowed = bool(body.get('allowed', False))
         updated = UserController.toggle_page_access(db, employee_id, user_id, page, allowed)
 
-        page_label = "Part Detail Info" if page == "part_detail" else "MOM Tracking"
+        page_label = {"part_detail": "Part Detail Info", "approval": "Approval Application"}.get(page, "MOM Tracking")
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
@@ -606,7 +622,8 @@ def toggle_page_access(
                 "employee": {
                     "id": updated.id,
                     "can_access_part_detail": bool(updated.can_access_part_detail),
-                    "can_access_mom": bool(updated.can_access_mom)
+                    "can_access_mom": bool(updated.can_access_mom),
+                    "can_access_approval": bool(updated.can_access_approval)
                 }
             }
         )
@@ -663,10 +680,16 @@ def get_profile(
     """Get user's own profile"""
     try:
         user = UserController.get_user_by_id(db, user_id)
-        if not user:
+        if not user or getattr(user, "is_deleted", False):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found"
+            )
+        # Blocked users' open sessions must not keep refreshing permissions
+        if user.is_blocked:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your account is blocked"
             )
         
         return JSONResponse(
@@ -685,6 +708,8 @@ def get_profile(
                     "can_access_expense": user.can_access_expense,
                     "can_access_part_detail": bool(user.can_access_part_detail),
                     "can_access_mom": bool(user.can_access_mom),
+                    "can_access_approval": bool(user.can_access_approval),
+                    "email": user.email or '',
                     "password": user.password
                 }
             }

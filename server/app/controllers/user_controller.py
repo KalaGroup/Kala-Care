@@ -168,6 +168,7 @@ class UserController:
             branch=user.branch,
             branch_name=user.branch_name,
             mobile_number=user.mobile_number,
+            email=getattr(user, 'email', None),
             password=hashed_password,
             role=user.role,
             is_blocked=user.is_blocked,
@@ -255,7 +256,7 @@ class UserController:
             UserController.initialize_admin_user(db)
     
         user = db.query(User).filter(User.user_id == user_id).first()
-        if not user or user.is_blocked:
+        if not user or user.is_blocked or getattr(user, "is_deleted", False):
             return None
     
         if not UserController.verify_password(password, user.password):
@@ -297,9 +298,9 @@ class UserController:
                 detail="Only admins can view employees"
             )
         
-        # Get all users
-        all_users = db.query(User).all()
-        
+        # Get all users (soft-deleted employees stay hidden everywhere)
+        all_users = db.query(User).filter(User.is_deleted == False).all()  # noqa: E712
+
         # Filter based on admin role
         filtered_users = []
         for user in all_users:
@@ -307,7 +308,7 @@ class UserController:
                 continue  # Skip the admin themselves
             if UserController.can_admin_see_user(admin, user):
                 filtered_users.append(user)
-        
+
         return filtered_users
     
     @staticmethod
@@ -376,6 +377,10 @@ class UserController:
             employee.branch = user_update.branch
         if user_update.branch_name is not None:
             employee.branch_name = user_update.branch_name
+        if user_update.mobile_number is not None:
+            employee.mobile_number = user_update.mobile_number or None
+        if user_update.email is not None:
+            employee.email = (user_update.email or '').strip() or None
         if user_update.password:
             employee.password = UserController.hash_password(user_update.password)
         if user_update.role and employee.user_id != INITIAL_ADMIN_ID:
@@ -438,10 +443,23 @@ class UserController:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot delete the master admin user"
             )
-        
-        
-        db.delete(employee)
+
+        # SOFT delete: keep the row so every module's history (MOM meetings,
+        # followups, expenses, approval trails) keeps its person. The user is
+        # hidden from all lists and can never log in again.
+        employee.is_deleted = True
+        employee.is_blocked = True
         db.commit()
+
+        # Approval Application clean-up: drop their approver configuration and
+        # forward any records that were waiting on them to the next authority.
+        try:
+            from app.controllers import approval_controller as _apv
+            _apv.cleanup_user_config(db, employee.user_id)
+            _apv.reroute_pending(db)
+        except Exception as e:
+            print(f"[approval] cleanup after delete skipped: {e}")
+
         return employee
     
     @staticmethod
@@ -476,6 +494,17 @@ class UserController:
         employee.is_blocked = block_status
         db.commit()
         db.refresh(employee)
+
+        # Approval Application: a blocked approver is unusable — forward any
+        # records waiting on them to the next authority (block is reversible,
+        # so their matrix configuration itself is kept).
+        if block_status:
+            try:
+                from app.controllers import approval_controller as _apv
+                _apv.reroute_pending(db)
+            except Exception as e:
+                print(f"[approval] reroute after block skipped: {e}")
+
         return employee
     
     @staticmethod
@@ -523,10 +552,10 @@ class UserController:
                 detail="Only Master Admin can change page access"
             )
 
-        if page not in ("part_detail", "mom"):
+        if page not in ("part_detail", "mom", "approval"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Unknown page — expected 'part_detail' or 'mom'"
+                detail="Unknown page — expected 'part_detail', 'mom' or 'approval'"
             )
 
         employee = db.query(User).filter(User.id == employee_id).first()
@@ -544,6 +573,8 @@ class UserController:
 
         if page == "part_detail":
             employee.can_access_part_detail = allowed
+        elif page == "approval":
+            employee.can_access_approval = allowed
         else:
             employee.can_access_mom = allowed
         db.commit()

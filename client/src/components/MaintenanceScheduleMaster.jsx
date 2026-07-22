@@ -882,6 +882,14 @@ const AppMapping = ({ onMasterChanged }) => {
         uploaded: (r) => (r.uploaded ? 0 : 1),
     });
 
+    // Lazy row rendering: only the first chunk mounts (the coverage columns make
+    // each row expensive); "Show more" reveals the rest. Resets when the data
+    // slice changes. Pure display concern — sorting/filtering logic untouched.
+    const ROWS_CHUNK = 100;
+    const [rowLimit, setRowLimit] = useState(ROWS_CHUNK);
+    useEffect(() => { setRowLimit(ROWS_CHUNK); }, [remaining]);
+    const visibleRows = rowLimit < remaining.length ? remaining.slice(0, rowLimit) : remaining;
+
     // Second horizontal scrollbar ABOVE the table, kept in lockstep with the
     // table's own one, so the wide table can be panned left-to-right without
     // first scrolling to the bottom. The spacer matches the table's scroll width.
@@ -998,7 +1006,7 @@ const AppMapping = ({ onMasterChanged }) => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {remaining.map((r, i) => (
+                                {visibleRows.map((r, i) => (
                                     <tr key={r.appCode} className="hover:bg-indigo-50/40 transition">
                                         <td className="px-3 py-2 border border-gray-200 font-mono font-semibold text-gray-500 text-center">{i + 1}</td>
                                         <td className="px-3 py-2 border border-gray-200 font-mono font-semibold text-gray-800 whitespace-nowrap">
@@ -1048,6 +1056,15 @@ const AppMapping = ({ onMasterChanged }) => {
                             </tbody>
                         </table>
                     </div>
+                    {remaining.length > rowLimit && (
+                        <div className="flex justify-center py-2 border-t border-gray-100 bg-white">
+                            <button onClick={() => setRowLimit((l) => l + ROWS_CHUNK)}
+                                className="px-4 py-1.5 rounded-lg text-[12px] font-semibold transition hover:opacity-90"
+                                style={{ backgroundColor: themeSoft, color: themeColor }}>
+                                Show more ({remaining.length - rowLimit} remaining)
+                            </button>
+                        </div>
+                    )}
                     </>
                 )}
                 <div className="px-4 py-1.5 border-t border-gray-200 bg-white text-[10.5px] text-gray-400">

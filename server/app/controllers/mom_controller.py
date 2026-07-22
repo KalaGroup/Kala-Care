@@ -3,7 +3,7 @@ from datetime import datetime, date, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.mom_model import (
     MomCategory, MomMasterPoint, MomMeetingType, MomMeeting, MomAttendee, MomRow,
@@ -205,9 +205,13 @@ def get_bootstrap(db: Session, created_by: str | None = None):
 #  meetings                                                           #
 # ------------------------------------------------------------------ #
 def list_meetings(db: Session, branch_code: str | None = None):
+    # selectinload eager-loads attendees and rows in ONE extra query each
+    # (ordered by the relationship's own order_by) instead of joinedload, which
+    # would multiply every meeting row by attendees × rows (a cartesian blow-up)
+    # and both bloat the payload and slow the query. Same data, far less work.
     q = (
         db.query(MomMeeting)
-        .options(joinedload(MomMeeting.attendees), joinedload(MomMeeting.rows))
+        .options(selectinload(MomMeeting.attendees), selectinload(MomMeeting.rows))
         .order_by(MomMeeting.date.desc(), MomMeeting.id.desc())
     )
     if branch_code:

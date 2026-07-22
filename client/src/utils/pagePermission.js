@@ -21,3 +21,4 @@ const allowed = (u, flag) => {
 
 export const canAccessPartDetail = (user) => allowed(readUser(user), 'can_access_part_detail');
 export const canAccessMom = (user) => allowed(readUser(user), 'can_access_mom');
+export const canAccessApproval = (user) => allowed(readUser(user), 'can_access_approval');

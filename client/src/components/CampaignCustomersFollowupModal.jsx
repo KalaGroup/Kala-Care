@@ -20,7 +20,10 @@ const statusLabel = (s) => {
 
 // adminOnly: show ONLY the assets the admin added via Drive Creation (create + edit),
 // excluding employee-pushed assets — used by the "Admin Added" button on each drive box.
-const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl, allReportCampaigns = null, adminOnly = false }) => {
+// userOnly: the exact difference View All − Admin Added — used by the "User Added"
+// button. Same view-all fetch; admin-added assets are filtered out on the frontend,
+// so the count always equals the difference between the two other buttons.
+const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl, allReportCampaigns = null, adminOnly = false, userOnly = false }) => {
     const [customers, setCustomers] = useState([]);
     const [campaignInfo, setCampaignInfo] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -105,28 +108,45 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
         return {};
     };
 
+    // User-Added view = View All − Admin Added: drop every customer whose
+    // instance_id is in the drive's admin_asset_numbers. Pure frontend filter
+    // over the already-fetched view-all data — no extra backend call.
+    const adminAssetSet = useMemo(
+        () => new Set(userOnly ? (campaign?.admin_asset_numbers || []) : []),
+        [campaign, userOnly]
+    );
+    const baseCustomers = useMemo(
+        () => (userOnly ? customers.filter(c => !adminAssetSet.has(c.instance_id)) : customers),
+        [customers, userOnly, adminAssetSet]
+    );
+    // Completed count within the user-only view (for header stats + export summary)
+    const userOnlyCompleted = useMemo(
+        () => (userOnly ? baseCustomers.filter(c => (c.last_status || '').toLowerCase() === 'completed').length : 0),
+        [baseCustomers, userOnly]
+    );
+
     // Unique flags from data for the dropdown (recompute only when data changes)
     const uniqueFlags = useMemo(
-        () => [...new Set(customers.map(c => c.latest_flag).filter(Boolean))],
-        [customers]
+        () => [...new Set(baseCustomers.map(c => c.latest_flag).filter(Boolean))],
+        [baseCustomers]
     );
 
     // Unique campaign names (all-report mode) for the campaign dropdown
     const uniqueCampaigns = useMemo(
-        () => [...new Set(customers.map(c => c.campaign_name).filter(Boolean))].sort(),
-        [customers]
+        () => [...new Set(baseCustomers.map(c => c.campaign_name).filter(Boolean))].sort(),
+        [baseCustomers]
     );
 
     // Unique last follow-up users for the user dropdown (recompute only when data changes)
     const uniqueUsers = useMemo(
-        () => [...new Set(customers.map(c => c.last_followup_user_name).filter(Boolean))].sort(),
-        [customers]
+        () => [...new Set(baseCustomers.map(c => c.last_followup_user_name).filter(Boolean))].sort(),
+        [baseCustomers]
     );
 
     // Filter customers — recompute only when data or a filter actually changes
     const filteredCustomers = useMemo(() => {
         const term = searchTerm.toLowerCase();
-        return customers.filter(customer => {
+        return baseCustomers.filter(customer => {
             const matchesSearch =
                 customer.customer_name?.toLowerCase().includes(term) ||
                 customer.instance_id?.toLowerCase().includes(term) ||
@@ -162,7 +182,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
 
             return matchesSearch && matchesStatus && matchesFlag && matchesCampaign && matchesUser && matchesDate;
         });
-    }, [customers, searchTerm, statusFilter, flagFilter, campaignFilter, userFilter, dateFrom, dateTo]);
+    }, [baseCustomers, searchTerm, statusFilter, flagFilter, campaignFilter, userFilter, dateFrom, dateTo]);
 
     // Header counts follow the applied filters: distinct drives among the
     // visible (filtered) rows, and the visible row count.
@@ -170,7 +190,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
         () => new Set(filteredCustomers.map(c => c.campaign_name).filter(Boolean)).size,
         [filteredCustomers]
     );
-    const isFiltered = filteredCustomers.length !== customers.length;
+    const isFiltered = filteredCustomers.length !== baseCustomers.length;
 
     // Any filter away from its default → show the Clear Filters button
     const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all' || flagFilter !== 'all'
@@ -330,13 +350,13 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
             wsData.push(['ALL CUSTOMERS WITH LAST FOLLOW-UP']);
             wsData.push([]);
         } else {
-            wsData.push([adminOnly ? 'DRIVE SUMMARY (ADMIN ADDED ONLY)' : 'DRIVE SUMMARY']);
+            wsData.push([adminOnly ? 'DRIVE SUMMARY (ADMIN ADDED ONLY)' : userOnly ? 'DRIVE SUMMARY (USER ADDED ONLY)' : 'DRIVE SUMMARY']);
             wsData.push(['Drive Name:', campaignInfo?.name || 'N/A']);
             wsData.push(['Service:', campaignInfo?.service || 'N/A']);
             wsData.push(['Status:', campaignInfo?.status || 'N/A']);
-            wsData.push(['Total Customers:', campaignInfo?.total_customers || 0]);
-            wsData.push(['Remaining:', campaignInfo?.remaining_count || 0]);
-            wsData.push(['Completed:', campaignInfo?.completed_count || 0]);
+            wsData.push(['Total Customers:', userOnly ? baseCustomers.length : (campaignInfo?.total_customers || 0)]);
+            wsData.push(['Remaining:', userOnly ? baseCustomers.length - userOnlyCompleted : (campaignInfo?.remaining_count || 0)]);
+            wsData.push(['Completed:', userOnly ? userOnlyCompleted : (campaignInfo?.completed_count || 0)]);
             wsData.push([]);
             wsData.push(['ALL CUSTOMERS WITH LAST FOLLOW-UP']);
             wsData.push([]);
@@ -386,7 +406,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
             { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 30 }, { wch: 40 }, { wch: 15 }, { wch: 15 }, { wch: 30 }
         ];
 
-        const baseName = (isAllReport ? 'all_campaigns' : (campaignInfo?.name?.replace(/\s/g, '_') || 'drive')) + (adminOnly ? '_admin_added' : '');
+        const baseName = (isAllReport ? 'all_campaigns' : (campaignInfo?.name?.replace(/\s/g, '_') || 'drive')) + (adminOnly ? '_admin_added' : userOnly ? '_user_added' : '');
         const filename = `${baseName}_customers_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
         XLSX.writeFile(wb, filename);
         setExportLoading(false);
@@ -529,6 +549,11 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                                             Admin Added
                                         </span>
                                     )}
+                                    {!isAllReport && userOnly && (
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-white text-[#2f3192] whitespace-nowrap flex-shrink-0">
+                                            User Added
+                                        </span>
+                                    )}
                                 </div>
                                 <div className="flex flex-wrap gap-1.5 sm:gap-2 text-white/80 text-[10px] sm:text-xs">
                                     {isAllReport ? (
@@ -570,7 +595,9 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                                                 <svg className="w-2 h-2 sm:w-2.5 sm:h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
                                                 </svg>
-                                                Total: {campaignInfo?.remaining_count + campaignInfo?.completed_count} | Remaining: {campaignInfo?.remaining_count || 0} | Completed: {campaignInfo?.completed_count || 0}
+                                                {userOnly
+                                                    ? <>Total: {baseCustomers.length} | Remaining: {baseCustomers.length - userOnlyCompleted} | Completed: {userOnlyCompleted}</>
+                                                    : <>Total: {campaignInfo?.remaining_count + campaignInfo?.completed_count} | Remaining: {campaignInfo?.remaining_count || 0} | Completed: {campaignInfo?.completed_count || 0}</>}
                                             </span>
                                         </>
                                     )}
@@ -744,7 +771,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                             {canExportExcel() && (
                             <button
                                 onClick={exportToExcel}
-                                disabled={exportLoading || customers.length === 0}
+                                disabled={exportLoading || baseCustomers.length === 0}
                                 className="export-btn px-3 py-1.5 bg-white text-[#2f3192] text-[11px] sm:text-xs font-semibold rounded-lg hover:bg-white/90 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-full sm:w-auto"
                             >
                                 {exportLoading ? (

@@ -17,6 +17,7 @@ export const routeImporters = {
   '/maintenance-schedule': () => import('./pages/MaintenanceSchedule'),
   '/maintenance-reports': () => import('./pages/MaintenanceReports'),
   '/mom-tracking': () => import('./pages/MOMTracking'),
+  '/approval-application': () => import('./pages/ApprovalApplication'),
   '/sales-finance': () => import('./pages/SalseANDFinance'),
   '/import': () => import('./pages/Import'),
 };
