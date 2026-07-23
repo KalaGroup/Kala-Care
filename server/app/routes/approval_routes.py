@@ -268,9 +268,10 @@ def set_expense_type_limit(body: dict, user_id: str = Header(...), db: Session =
 
 @router.post("/matrix/hod-category")
 def set_hod_category(body: dict, user_id: str = Header(...), db: Session = Depends(get_db)):
-    """Body: { category, user_ids: [...] } — replaces the approver list."""
+    """Body: { branch, category, user_ids: [...] } — replaces the approver
+    list for that branch's category."""
     user_ids = body.get("user_ids", body.get("user_id"))
-    res = ac.set_hod_category(db, user_id, body.get("category"), user_ids)
+    res = ac.set_hod_category(db, user_id, body.get("branch"), body.get("category"), user_ids)
     return {"success": True, "message": "HOD category approvers saved", **res}
 
 

@@ -250,14 +250,16 @@ def _usable_hod_ids(db: Session) -> set:
     ])
 
 
-def _has_hod_approver(db: Session, category: str, creator_id: str = None) -> bool:
-    """Is any USABLE HOD approver defined for this category? Category mappings
-    only count when the mapped person still holds HOD authority, is not
-    blocked / deleted and is not excluded for the record's creator+category."""
+def _has_hod_approver(db: Session, branch: str, category: str, creator_id: str = None) -> bool:
+    """Is any USABLE HOD approver defined for this BRANCH + category?
+    Mappings only count when the mapped person still holds HOD authority, is
+    not blocked / deleted and is not excluded for the record's creator+category.
+    No mapping rows for the branch+category = any HOD user may act."""
     hod_ids = _usable_hod_ids(db) - _exclusions_for(db, creator_id, category)
     if not hod_ids:
         return False
     mappings = db.query(ApprovalHODCategory).filter(
+        ApprovalHODCategory.branch == branch,
         ApprovalHODCategory.category == category,
         ApprovalHODCategory.user_id.isnot(None),
     ).all()
@@ -292,7 +294,7 @@ def _next_pending_status(db: Session, creator_user_id: str, branch: str, categor
                 return "pending_branch"
             skip_notes.append(("branch", "Skipped — no Branch Admin approver available for this branch"))
         elif lvl == "hod":
-            if _has_hod_approver(db, category, creator_user_id):
+            if _has_hod_approver(db, branch, category, creator_user_id):
                 return "pending_hod"
             skip_notes.append(("hod", "Skipped — no HOD approver available for this category"))
         else:
@@ -338,7 +340,7 @@ def reroute_pending(db: Session) -> int:
         ApprovalApplication.status == "pending_hod"
     ).all():
         rule = _employee_rule(db, app_row.created_by)
-        if rule["require_hod"] and _has_hod_approver(db, app_row.category, app_row.created_by):
+        if rule["require_hod"] and _has_hod_approver(db, app_row.branch, app_row.category, app_row.created_by):
             continue
         reason = ("Skipped — step no longer required by the Authority Matrix"
                   if not rule["require_hod"]
@@ -375,11 +377,13 @@ def _record_value(app_row):
 
 def _authority_limit(db: Session, user: User, app_row: ApprovalApplication):
     """The acting user's authorized limit for this application.
-    None = unlimited (rights masters and users without an explicit limit).
+    DEFAULT IS 0 — an approver with no limit set can approve nothing, so the
+    record forwards to the next level after their approval. Only the fixed
+    rights-master COOs are unlimited (None), so every record can finalize.
     For expense applications, a per-expense-type limit (Authority Matrix)
     overrides the approver's general expense limit."""
     if user.user_id in RIGHTS_MASTER_IDS:
-        return None
+        return None   # unlimited — the chain's guaranteed final stop
     right = db.query(ApprovalRight).filter(ApprovalRight.user_id == user.user_id).first()
 
     if app_row.request_type == "expense" and app_row.expense_type:
@@ -392,15 +396,16 @@ def _authority_limit(db: Session, user: User, app_row: ApprovalApplication):
                 ApprovalExpenseTypeLimit.user_id == user.user_id,
             ).first()
             if lim is not None:
-                return lim.max_amount   # may be NULL = unlimited for this type
+                return lim.max_amount if lim.max_amount is not None else 0
 
     if not right:
-        return None
-    return {
+        return 0
+    val = {
         "discounting": right.max_discount_percent,
         "credit": right.max_credit_days,
         "expense": right.max_expense_amount,
     }.get(app_row.request_type)
+    return val if val is not None else 0
 
 
 # ---------------- APP NUMBERING ---------------- #
@@ -516,11 +521,11 @@ def get_authority_matrix(db: Session, user_id: str):
     )
     rights = {r.user_id: r for r in db.query(ApprovalRight).all()}
     rules = {r.user_id: r for r in db.query(ApprovalEmployeeRule).all()}
-    # Multiple approvers per category: {category: [mapping, ...]}
+    # PER-BRANCH approvers per category: {branch: {category: [mapping, ...]}}
     hod_cats = {}
     for c in db.query(ApprovalHODCategory).all():
-        if c.user_id:
-            hod_cats.setdefault(c.category, []).append(c.to_dict())
+        if c.user_id and c.branch:
+            hod_cats.setdefault(c.branch, {}).setdefault(c.category, []).append(c.to_dict())
 
     # Per-user, per-expense-type authority amounts {user_id: {type_id: amount}}
     user_limits = {}
@@ -582,22 +587,43 @@ def get_authority_matrix(db: Session, user_id: str):
         for k, v in branch_approver_ids.items()
     }
 
-    # Which usable HOD(s) handle each category (assigned people, else any HOD)
+    # Which usable HOD(s) handle each branch+category (assigned people, else
+    # any HOD): {branch: {category: [{user_id, name}]}}
     hod_users = [u for u in out if u["level"] == "hod"]
     hod_ids = {u["user_id"] for u in hod_users}
     hod_name_by_id = {u["user_id"]: u["name"] for u in hod_users}
     hod_all = sorted(({"user_id": u["user_id"], "name": u["name"]} for u in hod_users),
                      key=lambda x: x["name"])
-    hod_by_category = {}
-    for cat in ("spares", "services", "spares_services"):
-        maps = hod_cats.get(cat, [])
-        if maps:
-            hod_by_category[cat] = sorted(
-                ({"user_id": m["user_id"], "name": hod_name_by_id.get(m["user_id"], m["user_name"] or m["user_id"])}
-                 for m in maps if m["user_id"] in hod_ids),
-                key=lambda x: x["name"])
-        else:
-            hod_by_category[cat] = hod_all
+    hod_by_branch = {}
+    for b in {u["branch"] for u in out if u["branch"]} | set(hod_cats.keys()):
+        per_cat = {}
+        for cat in ("spares", "services", "spares_services"):
+            maps = hod_cats.get(b, {}).get(cat, [])
+            if maps:
+                per_cat[cat] = sorted(
+                    ({"user_id": m["user_id"], "name": hod_name_by_id.get(m["user_id"], m["user_name"] or m["user_id"])}
+                     for m in maps if m["user_id"] in hod_ids),
+                    key=lambda x: x["name"])
+            else:
+                per_cat[cat] = hod_all
+        hod_by_branch[b] = per_cat
+
+    # Every member of every branch (primary + multi-branch access) — feeds the
+    # Employee Hierarchy tab (employee lists / BM candidates per branch)
+    name_by_id_all = {u["user_id"]: u["name"] for u in out}
+    member_ids = {}
+    for u in out:
+        if u["branch"]:
+            member_ids.setdefault(u["branch"], set()).add(u["user_id"])
+    if name_by_id_all:
+        for row in db.query(UserBranchAccess).filter(
+            UserBranchAccess.user_id.in_(list(name_by_id_all))
+        ).all():
+            member_ids.setdefault(row.branch, set()).add(row.user_id)
+    branch_members = {
+        b: sorted(({"user_id": i, "name": name_by_id_all[i]} for i in ids), key=lambda x: x["name"])
+        for b, ids in member_ids.items()
+    }
 
     # Per-employee, per-category exclusions {employee_id: {category: [ids]}}
     exclusions = {}
@@ -622,10 +648,11 @@ def get_authority_matrix(db: Session, user_id: str):
         "expense_types": expense_types,
         "chain_data": {
             "branch_approvers": branch_approvers,
-            "hod_by_category": hod_by_category,
+            "hod_by_branch": hod_by_branch,
             "coo_names": coo_names,
         },
         "exclusions": exclusions,
+        "branch_members": branch_members,
     }
 
 
@@ -831,10 +858,13 @@ def set_expense_type_limit(db: Session, admin_id: str, payload: dict):
     return row.to_dict()
 
 
-def set_hod_category(db: Session, admin_id: str, category: str, user_ids):
-    """Replace the HOD approver list for a category. Empty list = any HOD
-    user may act. Every person in the list can approve that category."""
+def set_hod_category(db: Session, admin_id: str, branch: str, category: str, user_ids):
+    """Replace the HOD approver list for ONE BRANCH's category. Empty list =
+    any HOD user may act for that branch+category."""
     admin = _require_coo(db, admin_id)
+    branch = (branch or "").strip()
+    if not branch:
+        raise HTTPException(status_code=400, detail="branch is required")
     if category not in ("spares", "services", "spares_services"):
         raise HTTPException(status_code=400, detail="Unknown category")
 
@@ -844,14 +874,18 @@ def set_hod_category(db: Session, admin_id: str, category: str, user_ids):
         user_ids = [user_ids]
     user_ids = [str(u).strip() for u in user_ids if u and str(u).strip()]
 
-    # replace-all semantics: current rows out, selected list in
-    db.query(ApprovalHODCategory).filter(ApprovalHODCategory.category == category).delete()
+    # replace-all semantics for THIS branch+category
+    db.query(ApprovalHODCategory).filter(
+        ApprovalHODCategory.branch == branch,
+        ApprovalHODCategory.category == category,
+    ).delete()
     rows = []
     for uid in dict.fromkeys(user_ids):   # de-dup, keep order
         target = db.query(User).filter(User.user_id == uid).first()
         if not target:
             raise HTTPException(status_code=404, detail=f"User {uid} not found")
         row = ApprovalHODCategory(
+            branch=branch,
             category=category,
             user_id=target.user_id,
             user_name=target.name,
@@ -1067,23 +1101,28 @@ def list_applications(db: Session, user_id: str, status_filter=None, request_typ
             (ApprovalApplication.created_by == user.user_id)
         )
     elif level == "hod":
-        # Category assignments scope the HOD's table: a category assigned to
-        # specific person(s) is visible ONLY to them. Unassigned categories are
-        # visible to every HOD. Own submissions / already-acted records stay.
-        # Blocked / deleted assignees are ignored.
+        # Branch+category assignments scope the HOD's table: a branch+category
+        # assigned to specific person(s) is visible ONLY to them. Unassigned
+        # combinations are visible to every HOD. Own submissions /
+        # already-acted records stay. Blocked / deleted assignees are ignored.
         all_maps = db.query(ApprovalHODCategory).filter(ApprovalHODCategory.user_id.isnot(None)).all()
         usable_map_ids = _usable_ids(db, [m.user_id for m in all_maps])
         assigned = {}
         for m in all_maps:
             if m.user_id in usable_map_ids:
-                assigned.setdefault(m.category, set()).add(m.user_id)
-        blocked = [cat for cat, uids in assigned.items() if user.user_id not in uids]
-        if blocked:
-            q = q.filter(
-                (~ApprovalApplication.category.in_(blocked)) |
-                (ApprovalApplication.created_by == user.user_id) |
-                (ApprovalApplication.hod_action_by == user.user_id)
-            )
+                assigned.setdefault((m.branch, m.category), set()).add(m.user_id)
+        blocked_pairs = [(b, c) for (b, c), uids in assigned.items() if user.user_id not in uids]
+        if blocked_pairs:
+            from sqlalchemy import and_, or_
+            blocked_cond = or_(*[
+                and_(ApprovalApplication.branch == b, ApprovalApplication.category == c)
+                for b, c in blocked_pairs
+            ])
+            q = q.filter(or_(
+                ~blocked_cond,
+                ApprovalApplication.created_by == user.user_id,
+                ApprovalApplication.hod_action_by == user.user_id,
+            ))
     # coo sees everything
 
     # Drafts are private — visible only to whoever is writing them
@@ -1180,6 +1219,7 @@ def approve_application(db: Session, user_id: str, app_id: int, remark=None):
     # deleted assignees are ignored (if none remain, any HOD may act).
     if acting == "hod":
         mappings = db.query(ApprovalHODCategory).filter(
+            ApprovalHODCategory.branch == app_row.branch,
             ApprovalHODCategory.category == app_row.category,
             ApprovalHODCategory.user_id.isnot(None),
         ).all()

@@ -22,8 +22,9 @@ const LEVEL_BADGES = {
 // Small popup showing the logged-in approver's own authority limits
 function MyLimitsModal({ access, onClose }) {
     const lim = access.limits || {};
+    // no limit set = 0 (approver forwards everything upward)
     const fmt = (v, unit = '') =>
-        (v === null || v === undefined || v === '') ? 'Unlimited'
+        (v === null || v === undefined || v === '') ? (unit === 'inr' ? '₹0' : `0${unit}`)
             : unit === 'inr' ? `₹${Number(v).toLocaleString('en-IN')}` : `${v}${unit}`;
     const Row = ({ label, value }) => (
         <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 last:border-0">
@@ -42,7 +43,7 @@ function MyLimitsModal({ access, onClose }) {
                 </div>
                 <div className="p-4 space-y-3">
                     <p className="text-[11px] text-gray-700">
-                        Records within these limits are finally approved by you; bigger values are
+                        Records within these limits are finally approved by you (0 = everything forwards); bigger values are
                         forwarded to the next level after your approval.
                     </p>
                     <div className="rounded-xl border border-gray-200 overflow-hidden">

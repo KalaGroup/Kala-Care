@@ -331,3 +331,22 @@ GO
 IF COL_LENGTH('dbo.users', 'email') IS NULL
     ALTER TABLE dbo.users ADD email NVARCHAR(255) NULL;
 GO
+
+-- HOD category approvers became PER-BRANCH (2026-07): each branch row in the
+-- Employee Hierarchy sets its own HOD approvers per category. Legacy
+-- company-wide rows (branch NULL) are cleared. Applied on startup; SSMS ref:
+IF COL_LENGTH('dbo.approval_hod_categories', 'branch') IS NULL
+    ALTER TABLE dbo.approval_hod_categories ADD branch NVARCHAR(20) NULL;
+GO
+IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_apv_hod_cat_user'
+           AND object_id = OBJECT_ID('dbo.approval_hod_categories'))
+    DROP INDEX UX_apv_hod_cat_user ON dbo.approval_hod_categories;
+GO
+DELETE FROM dbo.approval_hod_categories WHERE branch IS NULL;
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_apv_hod_br_cat_user'
+               AND object_id = OBJECT_ID('dbo.approval_hod_categories'))
+    CREATE UNIQUE NONCLUSTERED INDEX UX_apv_hod_br_cat_user
+        ON dbo.approval_hod_categories (branch, category, user_id)
+        WHERE user_id IS NOT NULL AND branch IS NOT NULL;
+GO

@@ -98,11 +98,13 @@ class ApprovalEmployeeRule(Base):
 
 class ApprovalHODCategory(Base):
     """Which HOD-level users approve each category (spares / services /
-    spares & services) at the HOD step. MULTIPLE rows per category are
-    allowed — any assigned person may approve. No rows = any HOD user."""
+    spares & services) at the HOD step — PER BRANCH. Multiple rows per
+    (branch, category) are allowed; any assigned person may approve. No rows
+    for a branch+category = any HOD user may act."""
     __tablename__ = "approval_hod_categories"
 
     id = Column(Integer, primary_key=True, index=True)
+    branch = Column(String(20), nullable=True, index=True)     # records of this branch
     category = Column(String(30), nullable=False, index=True)  # spares|services|spares_services
     user_id = Column(String(50), nullable=True)
     user_name = Column(String(100), nullable=True)
@@ -110,11 +112,12 @@ class ApprovalHODCategory(Base):
     created_at = Column(DateTime, default=now_ist)
     updated_at = Column(DateTime, onupdate=now_ist)
 
-    __table_args__ = (UniqueConstraint("category", "user_id", name="uq_apv_hod_cat_user"),)
+    __table_args__ = (UniqueConstraint("branch", "category", "user_id", name="uq_apv_hod_br_cat_user"),)
 
     def to_dict(self):
         return {
             "id": self.id,
+            "branch": self.branch,
             "category": self.category,
             "user_id": self.user_id,
             "user_name": self.user_name,

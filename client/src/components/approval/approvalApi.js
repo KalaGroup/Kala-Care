@@ -93,8 +93,8 @@ export const setApproverExclusion = (payload) =>
 export const setExpenseTypeLimit = (payload) =>
     axios.post(`${BASE}/matrix/expense-type-limit`, payload, { headers: authHeaders() }).then(r => r.data);
 
-export const setHodCategory = (category, userIds) =>
-    axios.post(`${BASE}/matrix/hod-category`, { category, user_ids: userIds }, { headers: authHeaders() }).then(r => r.data);
+export const setHodCategory = (branch, category, userIds) =>
+    axios.post(`${BASE}/matrix/hod-category`, { branch, category, user_ids: userIds }, { headers: authHeaders() }).then(r => r.data);
 
 export const approvalPdfUrl = (id) => `${BASE}/applications/${id}/pdf`;
 

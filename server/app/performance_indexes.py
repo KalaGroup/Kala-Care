@@ -152,8 +152,13 @@ INDEX_STATEMENTS = [
     # The table originally had a unique constraint on category alone (one
     # approver per category). Drop any UQ key constraint and enforce
     # uniqueness per (category, user) via a filtered unique index instead.
-    "DECLARE @uq NVARCHAR(256); SELECT TOP 1 @uq = name FROM sys.key_constraints WHERE parent_object_id = OBJECT_ID('dbo.approval_hod_categories') AND type = 'UQ'; IF @uq IS NOT NULL EXEC('ALTER TABLE dbo.approval_hod_categories DROP CONSTRAINT [' + @uq + ']');",
-    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_apv_hod_cat_user' AND object_id = OBJECT_ID('dbo.approval_hod_categories')) CREATE UNIQUE NONCLUSTERED INDEX UX_apv_hod_cat_user ON dbo.approval_hod_categories (category, user_id) WHERE user_id IS NOT NULL;",
+    "DECLARE @uq NVARCHAR(256); SELECT TOP 1 @uq = name FROM sys.key_constraints WHERE parent_object_id = OBJECT_ID('dbo.approval_hod_categories') AND type = 'UQ' AND name <> 'uq_apv_hod_br_cat_user'; IF @uq IS NOT NULL EXEC('ALTER TABLE dbo.approval_hod_categories DROP CONSTRAINT [' + @uq + ']');",
+    # --- HOD category approvers became PER-BRANCH ---
+    "IF COL_LENGTH('dbo.approval_hod_categories', 'branch') IS NULL ALTER TABLE dbo.approval_hod_categories ADD branch NVARCHAR(20) NULL;",
+    "IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_apv_hod_cat_user' AND object_id = OBJECT_ID('dbo.approval_hod_categories')) DROP INDEX UX_apv_hod_cat_user ON dbo.approval_hod_categories;",
+    # legacy company-wide rows (no branch) are cleared — assignments are per branch now
+    "DELETE FROM dbo.approval_hod_categories WHERE branch IS NULL;",
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_apv_hod_br_cat_user' AND object_id = OBJECT_ID('dbo.approval_hod_categories')) CREATE UNIQUE NONCLUSTERED INDEX UX_apv_hod_br_cat_user ON dbo.approval_hod_categories (branch, category, user_id) WHERE user_id IS NOT NULL AND branch IS NOT NULL;",
     # --- Approver exclusions became CATEGORY-wise: add the column, drop the old
     # 2-column unique constraint, clear legacy category-less rows, and enforce
     # uniqueness on (employee, approver, category) instead.
