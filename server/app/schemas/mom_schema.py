@@ -57,6 +57,23 @@ class MeetingIn(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class MeetingUpdateIn(BaseModel):
+    """Editing an already-finalized meeting from MOM History.
+
+    Only the current meeting's own details are editable — branch and conductor
+    are never changed here. Carried (past) rows are sent back untouched by the
+    client alongside the edited current rows, so nothing is lost. Every field
+    is optional so a partial update only touches what it sends."""
+    date: Optional[str] = None
+    location: Optional[str] = None
+    type: Optional[str] = None
+    heads: Optional[List[str]] = None
+    attendees: Optional[List[AttendeeIn]] = None
+    rows: Optional[List[RowIn]] = None
+
+    model_config = {"extra": "ignore"}
+
+
 class MasterPointIn(BaseModel):
     title: str
     category: Optional[str] = "Other"

@@ -55,6 +55,7 @@ class MaintenancePart(Base):
     alt_desc = Column(String(400), nullable=True)
     alt_qty = Column(String(20), nullable=True)
     alt_action = Column(String(10), nullable=True)
+    alt_service_hours = Column(String(20), nullable=True)
     service_hours = Column(String(20), nullable=True)
     consumable = Column(String(40), nullable=True)
     schedule = Column(String(120), nullable=True)

@@ -177,6 +177,11 @@ INDEX_STATEMENTS = [
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_type_status' AND object_id = OBJECT_ID('dbo.approval_applications')) CREATE NONCLUSTERED INDEX IX_apv_apps_type_status ON dbo.approval_applications (request_type, status);",
     # Attachment metadata fetch per application (selectinload IN (...) scan).
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_attach_app_meta' AND object_id = OBJECT_ID('dbo.approval_attachments')) CREATE NONCLUSTERED INDEX IX_apv_attach_app_meta ON dbo.approval_attachments (application_id) INCLUDE (original_name, content_type, size_bytes, uploaded_by, created_at);",
+    # --- L1..L5 hierarchy: stage approver lookups ---
+    # list_applications scopes L2/L3 viewers by the branches they approve for.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_stage_user_stage' AND object_id = OBJECT_ID('dbo.approval_stage_approvers')) CREATE NONCLUSTERED INDEX IX_apv_stage_user_stage ON dbo.approval_stage_approvers (user_id, stage) INCLUDE (branch);",
+    # _available_approvers resolves (branch, stage) on every routing decision.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_stage_branch_stage' AND object_id = OBJECT_ID('dbo.approval_stage_approvers')) CREATE NONCLUSTERED INDEX IX_apv_stage_branch_stage ON dbo.approval_stage_approvers (branch, stage) INCLUDE (user_id, user_name);",
 ]
 
 
@@ -203,6 +208,14 @@ def ensure_performance_indexes(engine):
 # re-upload. Idempotent: after the column exists, the whole entry is skipped.
 # ---------------------------------------------------------------------------
 COLUMN_STATEMENTS = [
+    {
+        # Kit-level Service Hours — the master file now carries a second
+        # "Service Hours" column after the kit's Action; the part's own
+        # service_hours keeps driving service mapping / coverage.
+        "name": "maintenance_parts.alt_service_hours",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.maintenance_parts') AND name = 'alt_service_hours'",
+        "add": "ALTER TABLE dbo.maintenance_parts ADD alt_service_hours NVARCHAR(20) NULL",
+    },
     {
         # Approval Application page visibility flag (granted from Profile).
         "name": "users.can_access_approval",
@@ -258,6 +271,175 @@ COLUMN_STATEMENTS = [
         "name": "approval_applications.customer_name (nullable)",
         "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'customer_name' AND is_nullable = 1",
         "add": "ALTER TABLE dbo.approval_applications ALTER COLUMN customer_name NVARCHAR(255) NULL",
+    },
+    # ------------------------------------------------------------------
+    # L1..L5 Approval Hierarchy migration (order matters — renames first,
+    # then new columns, then value migrations, then the stage-approver seed).
+    # Each entry is idempotent: once the new shape exists it is skipped.
+    # ------------------------------------------------------------------
+    {
+        "name": "approval_applications.branch_action_by -> l2_action_by",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l2_action_by'",
+        "add": "EXEC sp_rename 'dbo.approval_applications.branch_action_by', 'l2_action_by', 'COLUMN'",
+    },
+    {
+        "name": "approval_applications.branch_action_by_name -> l2_action_by_name",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l2_action_by_name'",
+        "add": "EXEC sp_rename 'dbo.approval_applications.branch_action_by_name', 'l2_action_by_name', 'COLUMN'",
+    },
+    {
+        "name": "approval_applications.branch_action_at -> l2_action_at",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l2_action_at'",
+        "add": "EXEC sp_rename 'dbo.approval_applications.branch_action_at', 'l2_action_at', 'COLUMN'",
+    },
+    {
+        "name": "approval_applications.branch_action_remark -> l2_action_remark",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l2_action_remark'",
+        "add": "EXEC sp_rename 'dbo.approval_applications.branch_action_remark', 'l2_action_remark', 'COLUMN'",
+    },
+    {
+        "name": "approval_applications.hod_action_by -> l4_action_by",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l4_action_by'",
+        "add": "EXEC sp_rename 'dbo.approval_applications.hod_action_by', 'l4_action_by', 'COLUMN'",
+    },
+    {
+        "name": "approval_applications.hod_action_by_name -> l4_action_by_name",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l4_action_by_name'",
+        "add": "EXEC sp_rename 'dbo.approval_applications.hod_action_by_name', 'l4_action_by_name', 'COLUMN'",
+    },
+    {
+        "name": "approval_applications.hod_action_at -> l4_action_at",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l4_action_at'",
+        "add": "EXEC sp_rename 'dbo.approval_applications.hod_action_at', 'l4_action_at', 'COLUMN'",
+    },
+    {
+        "name": "approval_applications.hod_action_remark -> l4_action_remark",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l4_action_remark'",
+        "add": "EXEC sp_rename 'dbo.approval_applications.hod_action_remark', 'l4_action_remark', 'COLUMN'",
+    },
+    {
+        "name": "approval_applications.coo_action_by -> l5_action_by",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l5_action_by'",
+        "add": "EXEC sp_rename 'dbo.approval_applications.coo_action_by', 'l5_action_by', 'COLUMN'",
+    },
+    {
+        "name": "approval_applications.coo_action_by_name -> l5_action_by_name",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l5_action_by_name'",
+        "add": "EXEC sp_rename 'dbo.approval_applications.coo_action_by_name', 'l5_action_by_name', 'COLUMN'",
+    },
+    {
+        "name": "approval_applications.coo_action_at -> l5_action_at",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l5_action_at'",
+        "add": "EXEC sp_rename 'dbo.approval_applications.coo_action_at', 'l5_action_at', 'COLUMN'",
+    },
+    {
+        "name": "approval_applications.coo_action_remark -> l5_action_remark",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l5_action_remark'",
+        "add": "EXEC sp_rename 'dbo.approval_applications.coo_action_remark', 'l5_action_remark', 'COLUMN'",
+    },
+    {
+        "name": "approval_applications.l3_action_by",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l3_action_by'",
+        "add": "ALTER TABLE dbo.approval_applications ADD l3_action_by NVARCHAR(50) NULL",
+    },
+    {
+        "name": "approval_applications.l3_action_by_name",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l3_action_by_name'",
+        "add": "ALTER TABLE dbo.approval_applications ADD l3_action_by_name NVARCHAR(100) NULL",
+    },
+    {
+        "name": "approval_applications.l3_action_at",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l3_action_at'",
+        "add": "ALTER TABLE dbo.approval_applications ADD l3_action_at DATETIME NULL",
+    },
+    {
+        "name": "approval_applications.l3_action_remark",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l3_action_remark'",
+        "add": "ALTER TABLE dbo.approval_applications ADD l3_action_remark NVARCHAR(MAX) NULL",
+    },
+    {
+        "name": "approval_applications.auto_approved",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'auto_approved'",
+        "add": "ALTER TABLE dbo.approval_applications ADD auto_approved BIT NOT NULL CONSTRAINT DF_apv_apps_auto_approved DEFAULT 0",
+    },
+    {
+        "name": "approval_applications.l4_approver_id",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l4_approver_id'",
+        "add": "ALTER TABLE dbo.approval_applications ADD l4_approver_id NVARCHAR(50) NULL",
+    },
+    {
+        "name": "approval_applications.l4_approver_name",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l4_approver_name'",
+        "add": "ALTER TABLE dbo.approval_applications ADD l4_approver_name NVARCHAR(100) NULL",
+    },
+    {
+        "name": "approval_applications.l5_approver_id",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l5_approver_id'",
+        "add": "ALTER TABLE dbo.approval_applications ADD l5_approver_id NVARCHAR(50) NULL",
+    },
+    {
+        "name": "approval_applications.l5_approver_name",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l5_approver_name'",
+        "add": "ALTER TABLE dbo.approval_applications ADD l5_approver_name NVARCHAR(100) NULL",
+    },
+    {
+        "name": "approval_employee_rules.require_branch -> require_l2",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_employee_rules') AND name = 'require_l2'",
+        "add": "EXEC sp_rename 'dbo.approval_employee_rules.require_branch', 'require_l2', 'COLUMN'",
+    },
+    {
+        "name": "approval_employee_rules.require_hod -> require_l4",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_employee_rules') AND name = 'require_l4'",
+        "add": "EXEC sp_rename 'dbo.approval_employee_rules.require_hod', 'require_l4', 'COLUMN'",
+    },
+    {
+        "name": "approval_employee_rules.require_l3",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_employee_rules') AND name = 'require_l3'",
+        "add": "ALTER TABLE dbo.approval_employee_rules ADD require_l3 BIT NOT NULL CONSTRAINT DF_apv_rules_require_l3 DEFAULT 1",
+    },
+    {
+        # legacy level names (user/branch/hod/coo) -> l1..l5
+        "name": "approval_rights.level values -> l1..l5",
+        "exists": "SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM dbo.approval_rights WHERE level IN ('user','branch','hod','coo'))",
+        "add": "UPDATE dbo.approval_rights SET level = CASE level WHEN 'user' THEN 'l1' WHEN 'branch' THEN 'l2' WHEN 'hod' THEN 'l4' WHEN 'coo' THEN 'l5' ELSE level END WHERE level IN ('user','branch','hod','coo')",
+    },
+    {
+        "name": "approval_applications.status values -> pending_l2/l4/l5",
+        "exists": "SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM dbo.approval_applications WHERE status IN ('pending_branch','pending_hod','pending_coo'))",
+        "add": "UPDATE dbo.approval_applications SET status = CASE status WHEN 'pending_branch' THEN 'pending_l2' WHEN 'pending_hod' THEN 'pending_l4' WHEN 'pending_coo' THEN 'pending_l5' ELSE status END WHERE status IN ('pending_branch','pending_hod','pending_coo')",
+    },
+    {
+        "name": "approval_applications.created_by_level values -> l1..l5",
+        "exists": "SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM dbo.approval_applications WHERE created_by_level IN ('user','branch','hod','coo'))",
+        "add": "UPDATE dbo.approval_applications SET created_by_level = CASE created_by_level WHEN 'user' THEN 'l1' WHEN 'branch' THEN 'l2' WHEN 'hod' THEN 'l4' WHEN 'coo' THEN 'l5' ELSE created_by_level END WHERE created_by_level IN ('user','branch','hod','coo')",
+    },
+    {
+        "name": "approval_applications.rejected_at_level values -> l2/l4/l5",
+        "exists": "SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM dbo.approval_applications WHERE rejected_at_level IN ('branch','hod','coo'))",
+        "add": "UPDATE dbo.approval_applications SET rejected_at_level = CASE rejected_at_level WHEN 'branch' THEN 'l2' WHEN 'hod' THEN 'l4' WHEN 'coo' THEN 'l5' ELSE rejected_at_level END WHERE rejected_at_level IN ('branch','hod','coo')",
+    },
+    {
+        # Stage approvers are chosen MANUALLY in the Employee Hierarchy tab —
+        # nothing is auto-assigned. Remove any rows an earlier auto-seed
+        # created (only seeded rows carry updated_by NULL; UI-made rows always
+        # store the admin who set them).
+        "name": "approval_stage_approvers remove auto-seeded rows",
+        "exists": "SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM dbo.approval_stage_approvers WHERE updated_by IS NULL)",
+        "add": "DELETE FROM dbo.approval_stage_approvers WHERE updated_by IS NULL",
+    },
+    {
+        # One-time seed: the five level rows (names + level-wise limits) of the
+        # Authority Limit tab. Limits start empty (= 0); the COO fills them in.
+        "name": "approval_level_configs default rows",
+        "exists": "SELECT 1 WHERE EXISTS (SELECT 1 FROM dbo.approval_level_configs)",
+        "add": (
+            "INSERT INTO dbo.approval_level_configs (level, display_name, created_at) VALUES "
+            "('l1', 'Employee', GETDATE()), "
+            "('l2', 'Approver', GETDATE()), "
+            "('l3', 'Approver', GETDATE()), "
+            "('l4', 'HOD', GETDATE()), "
+            "('l5', 'COO', GETDATE())"
+        ),
     },
     {
         "name": "asset_detailed.emission_norm",

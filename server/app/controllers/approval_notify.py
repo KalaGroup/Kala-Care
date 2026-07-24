@@ -70,9 +70,9 @@ def details_rows(app: dict):
         ("Quotation Number", app.get("quotation_no") or "-"),
         ("Quotation Amount", _fmt_amount(app.get("quotation_amount"))),
     ]
-    if app.get("request_type") == "discounting":
+    if app.get("request_type") in ("discounting", "discounting_credit"):
         rows.append(("Discounting %", f"{app['discount_percent']}%" if app.get("discount_percent") is not None else "-"))
-    if app.get("request_type") == "credit":
+    if app.get("request_type") in ("credit", "discounting_credit"):
         rows.append(("Credit Period", f"{app['credit_days']} days" if app.get("credit_days") is not None else "-"))
     if app.get("remark"):
         rows.append(("Remark", app.get("remark")))
@@ -91,12 +91,18 @@ def trail_rows(app: dict):
         else:
             out.append((label, "Skipped", "-", "-"))
 
-    line("Branch Admin Approval", app.get("branch_action_by_name"),
-         app.get("branch_action_at"), app.get("branch_action_remark"))
-    line("HOD Approval", app.get("hod_action_by_name"),
-         app.get("hod_action_at"), app.get("hod_action_remark"))
-    line("COO Approval (Final)", app.get("coo_action_by_name"),
-         app.get("coo_action_at"), app.get("coo_action_remark"))
+    if app.get("auto_approved"):
+        out.append(("Auto Approved",
+                    "Within the creator's own authority limit — no approver action needed",
+                    _fmt_dt(app.get("created_at")), "-"))
+    line("L2 Approval", app.get("l2_action_by_name"),
+         app.get("l2_action_at"), app.get("l2_action_remark"))
+    line("L3 Approval", app.get("l3_action_by_name"),
+         app.get("l3_action_at"), app.get("l3_action_remark"))
+    line("L4 (HOD) Approval", app.get("l4_action_by_name"),
+         app.get("l4_action_at"), app.get("l4_action_remark"))
+    line("L5 (COO) Approval (Final)", app.get("l5_action_by_name"),
+         app.get("l5_action_at"), app.get("l5_action_remark"))
     if app.get("status") == "rejected":
         level = (app.get("rejected_at_level") or "").upper()
         out.append((
@@ -135,36 +141,65 @@ def _email_html(app: dict, attachments):
     body_line = (f"Your approval application <b>{app.get('app_no')}</b> has been "
                  f"<b style='color:{outcome_color}'>{outcome}</b>."
                  + (f" Reason: <b>{app.get('rejected_remark') or '-'}</b>." if rejected else " Full details below."))
+    # Which stage finalized the record and by whom — includes the self /
+    # auto-approve case (set by the controller before sending). Rendered as a
+    # one-cell table so Outlook shows the tinted box correctly.
+    final_note = app.get("final_action_note")
+    note_bg = "#fef2f2" if rejected else "#ecfdf5"
+    final_line = (
+        f"<table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0'"
+        f" style='border-collapse:collapse;width:100%'><tr>"
+        f"<td bgcolor='{note_bg}' style='background:{note_bg};color:{outcome_color};"
+        f"font-size:13px;font-weight:bold;padding:8px 10px;border-radius:8px'>"
+        f"{final_note}</td></tr></table>"
+    ) if final_note else ""
+    # Table-based layout with everything inline-styled: Outlook desktop (Word
+    # rendering engine) ignores max-width/opacity on divs and breaks div
+    # layouts, so the whole mail is nested tables — renders the same in
+    # Outlook, Gmail and mobile clients (border-radius degrades gracefully).
     return f"""
-    <div style="font-family:Segoe UI,Arial,sans-serif;max-width:720px;margin:auto">
-      <div style="background:{head_bg};color:#fff;padding:14px 18px;border-radius:10px 10px 0 0">
-        <h2 style="margin:0;font-size:17px">Approval Application - {outcome}</h2>
-        <p style="margin:4px 0 0;font-size:12px;opacity:.85">{sub_line}</p>
-      </div>
-      <div style="border:1px solid #e5e7eb;border-top:0;padding:16px 18px;border-radius:0 0 10px 10px">
-        <p style="font-size:13px">Dear {app.get('created_by_name') or app.get('created_by')},</p>
-        <p style="font-size:13px">{body_line}</p>
-        <h3 style="font-size:14px;margin:14px 0 6px">Application Details</h3>
-        <table style="border-collapse:collapse;font-size:12.5px;width:100%">{det}</table>
-        <h3 style="font-size:14px;margin:14px 0 6px">Approval Flow</h3>
-        <table style="border-collapse:collapse;font-size:12.5px;width:100%">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+           style="border-collapse:collapse">
+      <tr><td align="center" style="padding:8px 0">
+        <table role="presentation" width="680" cellpadding="0" cellspacing="0" border="0"
+               style="border-collapse:collapse;width:680px;max-width:680px;font-family:Segoe UI,Arial,sans-serif">
           <tr>
-            <th style='padding:6px 10px;border:1px solid #e5e7eb;background:{BRAND};color:#fff'>Step</th>
-            <th style='padding:6px 10px;border:1px solid #e5e7eb;background:{BRAND};color:#fff'>Approved By / Note</th>
-            <th style='padding:6px 10px;border:1px solid #e5e7eb;background:{BRAND};color:#fff'>When</th>
-            <th style='padding:6px 10px;border:1px solid #e5e7eb;background:{BRAND};color:#fff'>Remark</th>
+            <td bgcolor="{head_bg}" style="background:{head_bg};color:#ffffff;padding:14px 18px;border-radius:10px 10px 0 0">
+              <h2 style="margin:0;font-size:17px;color:#ffffff">Approval Application - {outcome}</h2>
+              <p style="margin:4px 0 0;font-size:12px;color:#e5e7eb">{sub_line}</p>
+            </td>
           </tr>
-          {trail}
+          <tr>
+            <td style="border:1px solid #e5e7eb;border-top:0;padding:16px 18px;border-radius:0 0 10px 10px">
+              <p style="font-size:13px;margin:0 0 8px">Dear {app.get('created_by_name') or app.get('created_by')},</p>
+              <p style="font-size:13px;margin:0 0 8px">{body_line}</p>
+              {final_line}
+              <h3 style="font-size:14px;margin:14px 0 6px">Application Details</h3>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                     style="border-collapse:collapse;font-size:12.5px;width:100%">{det}</table>
+              <h3 style="font-size:14px;margin:14px 0 6px">Approval Flow</h3>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                     style="border-collapse:collapse;font-size:12.5px;width:100%">
+                <tr>
+                  <th bgcolor="{BRAND}" style='padding:6px 10px;border:1px solid #e5e7eb;background:{BRAND};color:#ffffff;text-align:left'>Step</th>
+                  <th bgcolor="{BRAND}" style='padding:6px 10px;border:1px solid #e5e7eb;background:{BRAND};color:#ffffff;text-align:left'>Approved By / Note</th>
+                  <th bgcolor="{BRAND}" style='padding:6px 10px;border:1px solid #e5e7eb;background:{BRAND};color:#ffffff;text-align:left'>When</th>
+                  <th bgcolor="{BRAND}" style='padding:6px 10px;border:1px solid #e5e7eb;background:{BRAND};color:#ffffff;text-align:left'>Remark</th>
+                </tr>
+                {trail}
+              </table>
+              <h3 style="font-size:14px;margin:14px 0 6px">Attached Documents</h3>
+              <ul style="font-size:12.5px;margin:4px 0;padding-left:20px">{files}</ul>
+              <p style="font-size:11px;color:#6b7280;margin:16px 0 0">This is an automated message from KALA Care - Approval Application.</p>
+            </td>
+          </tr>
         </table>
-        <h3 style="font-size:14px;margin:14px 0 6px">Attached Documents</h3>
-        <ul style="font-size:12.5px;margin:4px 0">{files}</ul>
-        <p style="font-size:11px;color:#6b7280;margin-top:16px">This is an automated message from KALA Care - Approval Application.</p>
-      </div>
-    </div>
+      </td></tr>
+    </table>
     """
 
 
-def _send_email(to_email: str, app: dict, attachments):
+def _send_email(to_email: str, app: dict, attachments, cc_emails=None):
     """attachments: list of (name, content_type, bytes)."""
     smtp_server = os.getenv("SMTP_SERVER")
     smtp_port = int(os.getenv("SMTP_PORT", 587))
@@ -175,11 +210,16 @@ def _send_email(to_email: str, app: dict, attachments):
         print("[approval-email] SMTP not configured or no recipient — skipped")
         return
 
+    # CC: everyone who approved along the trail + any manually added emails
+    cc_emails = [e for e in dict.fromkeys(cc_emails or []) if e and e != to_email]
+
     outcome = "REJECTED" if app.get("status") == "rejected" else "APPROVED"
     msg = MIMEMultipart()
     msg["Subject"] = f"{outcome}: {app.get('app_no')} — Approval Application"
     msg["From"] = from_email
     msg["To"] = to_email
+    if cc_emails:
+        msg["Cc"] = ", ".join(cc_emails)
     msg.attach(MIMEText(_email_html(app, attachments), "html", "utf-8"))
 
     for name, _ctype, data in attachments:
@@ -194,15 +234,15 @@ def _send_email(to_email: str, app: dict, attachments):
         server.starttls()
         server.login(smtp_username, smtp_password)
         server.send_message(msg)
-    print(f"[approval-email] sent {app.get('app_no')} -> {to_email}")
+    print(f"[approval-email] sent {app.get('app_no')} -> {to_email} (cc: {len(cc_emails)})")
 
 
-def send_final_approval_email_async(to_email: str, app: dict, attachments):
+def send_final_approval_email_async(to_email: str, app: dict, attachments, cc_emails=None):
     """Fire-and-forget so approving / rejecting never waits on SMTP.
     The outcome (approved / rejected) is read from the record's status."""
     def _run():
         try:
-            _send_email(to_email, app, attachments)
+            _send_email(to_email, app, attachments, cc_emails)
         except Exception:
             print("[approval-email] send failed:")
             traceback.print_exc()

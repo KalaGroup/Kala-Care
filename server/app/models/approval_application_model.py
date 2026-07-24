@@ -6,28 +6,105 @@ from sqlalchemy.orm import relationship, deferred
 from app.database import Base
 from app.time_utils import now_ist
 
-# The two fixed rights-master users. They always resolve to COO level, can open
-# the rights master panel, and never appear in the assignable-users dropdown.
+# The two fixed rights-master users. They always resolve to L5 (COO) level, can
+# open the rights master panel, and never appear in the assignable-users dropdown.
 RIGHTS_MASTER_IDS = ("kala000001", "31240002")
 
-# Approval levels (who the user acts as on the Approval Application page):
-#   user    -> employee view: create applications, track own
-#   branch  -> branch admin view: approve branch submissions + submit expense
-#   hod     -> HOD view: approve after branch level
-#   coo     -> COO view: final approval
-APPROVAL_LEVELS = ("user", "branch", "hod", "coo")
+# Approval levels — the Employee Hierarchy is a 5-stage ladder:
+#   l1 -> Employee (creates applications; a self limit auto-approves own records)
+#   l2 -> L2 approver (first branch-level approval stage)
+#   l3 -> L3 approver (second branch-level approval stage)
+#   l4 -> HOD (fixed for L4; assigned per branch PER CATEGORY)
+#   l5 -> COO (fixed for L5; the rights-master users, final fallback)
+APPROVAL_LEVELS = ("l1", "l2", "l3", "l4", "l5")
+
+# Legacy level names (pre-L1..L5 scheme) still tolerated when reading old rows.
+LEGACY_LEVEL_MAP = {"user": "l1", "branch": "l2", "hod": "l4", "coo": "l5"}
+
+# Branch code of the Head Office. HO members: see every branch in the create
+# form and CHOOSE their own L4/L5 approvers; HO never appears as a hierarchy row.
+HO_BRANCH = "HO"
 
 # Application statuses (the pending_* value names the level whose action is due).
 # 'draft' = saved by the creator, not yet submitted — visible only to them.
-APP_STATUSES = ("draft", "pending_branch", "pending_hod", "pending_coo", "approved", "rejected")
+APP_STATUSES = ("draft", "pending_l2", "pending_l3", "pending_l4", "pending_l5",
+                "approved", "rejected")
+
+# Default display names of the five levels — the COO can rename them from the
+# Authority Limit tab (ApprovalLevelConfig.display_name); the custom name shows
+# everywhere in the Approval Application.
+DEFAULT_LEVEL_NAMES = {
+    "l1": "Employee",
+    "l2": "Approver",
+    "l3": "Approver",
+    "l4": "HOD",
+    "l5": "COO",
+}
+
+
+class ApprovalLevelConfig(Base):
+    """One row per level (l1..l5): its display name and its authority limits.
+
+    LIMITS ARE LEVEL-WISE — every user holding the level gets the same
+    Max Discounting % / Max Credit Days / Max Expense Amount. NULL = 0
+    (nothing can be finalized at that level) except for the rights-master
+    COOs, who are always unlimited regardless of the l5 row."""
+    __tablename__ = "approval_level_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    level = Column(String(5), nullable=False, unique=True)   # l1..l5
+    display_name = Column(String(100), nullable=True)        # NULL = default name
+    max_discount_percent = Column(Float, nullable=True)
+    max_credit_days = Column(Integer, nullable=True)
+    max_expense_amount = Column(Float, nullable=True)
+    updated_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, onupdate=now_ist)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "level": self.level,
+            "display_name": self.display_name or DEFAULT_LEVEL_NAMES.get(self.level, self.level),
+            "max_discount_percent": self.max_discount_percent,
+            "max_credit_days": self.max_credit_days,
+            "max_expense_amount": self.max_expense_amount,
+        }
+
+
+class ApprovalLevelExpenseLimit(Base):
+    """Per level, per expense type amount limit. Overrides the level's general
+    max_expense_amount for THAT type; no row = the general limit applies."""
+    __tablename__ = "approval_level_expense_limits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    level = Column(String(5), nullable=False, index=True)    # l1..l5
+    expense_type_id = Column(
+        Integer, ForeignKey("approval_expense_types.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    max_amount = Column(Float, nullable=True)
+    updated_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, onupdate=now_ist)
+
+    __table_args__ = (UniqueConstraint("level", "expense_type_id", name="uq_apv_lvl_exp_type"),)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "level": self.level,
+            "expense_type_id": self.expense_type_id,
+            "max_amount": self.max_amount,
+        }
 
 
 class ApprovalRight(Base):
     """Which approval level a user acts at on the Approval Application page.
 
-    Maintained from the in-page Rights Master (visible only to the
-    RIGHTS_MASTER_IDS users). Users without a row fall back to their app role:
-    branch_admin -> 'branch', everyone else -> 'user'.
+    Users without a row are plain L1 employees. Levels l2/l3/l4 are granted by
+    the hierarchy builder (stage / HOD-category assignments); l5 is fixed to
+    the rights-master users.
     """
     __tablename__ = "approval_rights"
 
@@ -35,10 +112,12 @@ class ApprovalRight(Base):
     user_id = Column(String(50), nullable=False, unique=True, index=True)
     user_name = Column(String(100), nullable=True)
     branch = Column(String(20), nullable=True)
-    level = Column(String(20), nullable=False, default="user")  # user|branch|hod|coo
-    # Authority limits (Authority Matrix). NULL = unlimited for that metric.
-    # An approver whose limit covers the record's value FINALIZES it; a value
-    # beyond the limit escalates to the next level in the employee's chain.
+    level = Column(String(20), nullable=False, default="l1")  # l1|l2|l3|l4|l5
+    # Authority limits (Authority Matrix), for EVERY level — an L1 employee's
+    # own limit auto-approves their own records within it. An approver whose
+    # limit covers the record's value FINALIZES it; a value beyond the limit
+    # escalates to the next level in the chain. NULL = 0 (nothing) except for
+    # the rights masters, who are unlimited.
     max_discount_percent = Column(Float, nullable=True)   # discounting applications
     max_credit_days = Column(Integer, nullable=True)      # credit applications
     max_expense_amount = Column(Float, nullable=True)     # expense applications
@@ -64,11 +143,40 @@ class ApprovalRight(Base):
         }
 
 
+class ApprovalStageApprover(Base):
+    """Who approves at the L2 / L3 stages of ONE branch (Employee Hierarchy).
+
+    Multiple rows per (branch, stage) are allowed; any assigned person may act.
+    No rows for a branch+stage = the stage auto-skips for that branch.
+    L4 lives in ApprovalHODCategory (category-wise) and L5 is fixed (COO)."""
+    __tablename__ = "approval_stage_approvers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    branch = Column(String(20), nullable=False, index=True)
+    stage = Column(String(5), nullable=False, index=True)   # l2 | l3
+    user_id = Column(String(50), nullable=False, index=True)
+    user_name = Column(String(100), nullable=True)
+    updated_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, onupdate=now_ist)
+
+    __table_args__ = (UniqueConstraint("branch", "stage", "user_id", name="uq_apv_stage_br_st_user"),)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "branch": self.branch,
+            "stage": self.stage,
+            "user_id": self.user_id,
+            "user_name": self.user_name,
+        }
+
+
 class ApprovalEmployeeRule(Base):
     """Per-employee approval chain rules (Authority Matrix).
 
     Decides which steps an employee's applications must pass through:
-    skip Branch Admin and/or HOD when switched off. COO stays the final
+    skip L2 / L3 / L4 when switched off. L5 (COO) stays the final
     fallback for anything beyond the earlier approvers' authority."""
     __tablename__ = "approval_employee_rules"
 
@@ -76,8 +184,9 @@ class ApprovalEmployeeRule(Base):
     user_id = Column(String(50), nullable=False, unique=True, index=True)
     user_name = Column(String(100), nullable=True)
     branch = Column(String(20), nullable=True)
-    require_branch = Column(Boolean, default=True)   # Branch Admin approval needed?
-    require_hod = Column(Boolean, default=True)      # HOD approval needed?
+    require_l2 = Column(Boolean, default=True)   # L2 approval needed?
+    require_l3 = Column(Boolean, default=True)   # L3 approval needed?
+    require_l4 = Column(Boolean, default=True)   # L4 (HOD) approval needed?
     updated_by = Column(String(50), nullable=True)
     updated_by_name = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=now_ist)
@@ -89,18 +198,19 @@ class ApprovalEmployeeRule(Base):
             "user_id": self.user_id,
             "user_name": self.user_name,
             "branch": self.branch,
-            "require_branch": bool(self.require_branch),
-            "require_hod": bool(self.require_hod),
+            "require_l2": bool(self.require_l2),
+            "require_l3": bool(self.require_l3),
+            "require_l4": bool(self.require_l4),
             "updated_by": self.updated_by,
             "updated_by_name": self.updated_by_name,
         }
 
 
 class ApprovalHODCategory(Base):
-    """Which HOD-level users approve each category (spares / services /
-    spares & services) at the HOD step — PER BRANCH. Multiple rows per
+    """Which L4 (HOD) users approve each category (spares / services /
+    spares & services) at the L4 step — PER BRANCH. Multiple rows per
     (branch, category) are allowed; any assigned person may approve. No rows
-    for a branch+category = any HOD user may act."""
+    for a branch+category = any L4 user may act."""
     __tablename__ = "approval_hod_categories"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -205,8 +315,11 @@ class ApprovalExpenseTypeLimit(Base):
 
 
 class ApprovalApplication(Base):
-    """One approval application raised by an employee (or branch admin, for
-    expense) and pushed through Branch Admin -> HOD -> COO approval.
+    """One approval application raised by any user and pushed through the
+    L2 -> L3 -> L4 (HOD) -> L5 (COO) chain of its branch's hierarchy row.
+    Self-approval is removed: the creator never acts on their own record —
+    a value within the creator's OWN limit is auto-approved at submit.
+    HO-branch creators skip L2/L3 and pick their own L4 / L5 approvers.
 
     Discounting / Credit share the same columns; Expense additionally fills
     expense_amount / expense_type / payment_mode.
@@ -247,31 +360,46 @@ class ApprovalApplication(Base):
     description = Column(Text, nullable=True)
     remark = Column(Text, nullable=True)
 
-    status = Column(String(20), nullable=False, default="pending_branch", index=True)
+    status = Column(String(20), nullable=False, default="pending_l2", index=True)
 
     created_by = Column(String(50), nullable=False, index=True)
     created_by_name = Column(String(100), nullable=True)
     created_by_level = Column(String(20), nullable=True)  # level of creator at submit time
 
-    # Per-level approval audit trail
-    branch_action_by = Column(String(50), nullable=True)
-    branch_action_by_name = Column(String(100), nullable=True)
-    branch_action_at = Column(DateTime, nullable=True)
-    branch_action_remark = Column(Text, nullable=True)
+    # True when the record was approved at submit because its value was within
+    # the creator's OWN authority limit (self-approval replaced by auto-approve)
+    auto_approved = Column(Boolean, default=False)
 
-    hod_action_by = Column(String(50), nullable=True)
-    hod_action_by_name = Column(String(100), nullable=True)
-    hod_action_at = Column(DateTime, nullable=True)
-    hod_action_remark = Column(Text, nullable=True)
+    # HO-branch creators choose who approves their record at L4 / L5
+    l4_approver_id = Column(String(50), nullable=True)
+    l4_approver_name = Column(String(100), nullable=True)
+    l5_approver_id = Column(String(50), nullable=True)
+    l5_approver_name = Column(String(100), nullable=True)
 
-    coo_action_by = Column(String(50), nullable=True)
-    coo_action_by_name = Column(String(100), nullable=True)
-    coo_action_at = Column(DateTime, nullable=True)
-    coo_action_remark = Column(Text, nullable=True)
+    # Per-level approval audit trail (L2, L3, L4=HOD, L5=COO)
+    l2_action_by = Column(String(50), nullable=True)
+    l2_action_by_name = Column(String(100), nullable=True)
+    l2_action_at = Column(DateTime, nullable=True)
+    l2_action_remark = Column(Text, nullable=True)
+
+    l3_action_by = Column(String(50), nullable=True)
+    l3_action_by_name = Column(String(100), nullable=True)
+    l3_action_at = Column(DateTime, nullable=True)
+    l3_action_remark = Column(Text, nullable=True)
+
+    l4_action_by = Column(String(50), nullable=True)
+    l4_action_by_name = Column(String(100), nullable=True)
+    l4_action_at = Column(DateTime, nullable=True)
+    l4_action_remark = Column(Text, nullable=True)
+
+    l5_action_by = Column(String(50), nullable=True)
+    l5_action_by_name = Column(String(100), nullable=True)
+    l5_action_at = Column(DateTime, nullable=True)
+    l5_action_remark = Column(Text, nullable=True)
 
     rejected_by = Column(String(50), nullable=True)
     rejected_by_name = Column(String(100), nullable=True)
-    rejected_at_level = Column(String(20), nullable=True)  # branch | hod | coo
+    rejected_at_level = Column(String(20), nullable=True)  # l2 | l3 | l4 | l5
     rejected_at = Column(DateTime, nullable=True)
     rejected_remark = Column(Text, nullable=True)
 
@@ -311,18 +439,27 @@ class ApprovalApplication(Base):
             "created_by": self.created_by,
             "created_by_name": self.created_by_name,
             "created_by_level": self.created_by_level,
-            "branch_action_by": self.branch_action_by,
-            "branch_action_by_name": self.branch_action_by_name,
-            "branch_action_at": self.branch_action_at.isoformat() if self.branch_action_at else None,
-            "branch_action_remark": self.branch_action_remark,
-            "hod_action_by": self.hod_action_by,
-            "hod_action_by_name": self.hod_action_by_name,
-            "hod_action_at": self.hod_action_at.isoformat() if self.hod_action_at else None,
-            "hod_action_remark": self.hod_action_remark,
-            "coo_action_by": self.coo_action_by,
-            "coo_action_by_name": self.coo_action_by_name,
-            "coo_action_at": self.coo_action_at.isoformat() if self.coo_action_at else None,
-            "coo_action_remark": self.coo_action_remark,
+            "auto_approved": bool(self.auto_approved),
+            "l4_approver_id": self.l4_approver_id,
+            "l4_approver_name": self.l4_approver_name,
+            "l5_approver_id": self.l5_approver_id,
+            "l5_approver_name": self.l5_approver_name,
+            "l2_action_by": self.l2_action_by,
+            "l2_action_by_name": self.l2_action_by_name,
+            "l2_action_at": self.l2_action_at.isoformat() if self.l2_action_at else None,
+            "l2_action_remark": self.l2_action_remark,
+            "l3_action_by": self.l3_action_by,
+            "l3_action_by_name": self.l3_action_by_name,
+            "l3_action_at": self.l3_action_at.isoformat() if self.l3_action_at else None,
+            "l3_action_remark": self.l3_action_remark,
+            "l4_action_by": self.l4_action_by,
+            "l4_action_by_name": self.l4_action_by_name,
+            "l4_action_at": self.l4_action_at.isoformat() if self.l4_action_at else None,
+            "l4_action_remark": self.l4_action_remark,
+            "l5_action_by": self.l5_action_by,
+            "l5_action_by_name": self.l5_action_by_name,
+            "l5_action_at": self.l5_action_at.isoformat() if self.l5_action_at else None,
+            "l5_action_remark": self.l5_action_remark,
             "rejected_by": self.rejected_by,
             "rejected_by_name": self.rejected_by_name,
             "rejected_at_level": self.rejected_at_level,

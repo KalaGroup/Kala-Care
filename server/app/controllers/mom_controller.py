@@ -301,6 +301,84 @@ def create_meeting(db: Session, data: dict, conducted_by_id: str | None = None,
     return serialize_meeting(meeting)
 
 
+def update_meeting(db: Session, meeting_id: int, data: dict, editor_name: str = ""):
+    """Edit an already-finalized meeting (MOM History → Edit).
+
+    Only the meeting's own details, attendees and rows are updated — the
+    branch(es) and the original conductor are left exactly as they were.
+    Attendees and rows are fully replaced from the payload; the client sends
+    the carried (past) rows back unchanged along with the edited current rows,
+    so the full sheet is preserved. Row storage mirrors create_meeting() so
+    the saved shape stays identical."""
+    meeting = db.query(MomMeeting).filter(MomMeeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    if data.get("date") is not None:
+        mdate = _parse_date(data.get("date"))
+        if not mdate:
+            raise HTTPException(status_code=422, detail="A valid meeting date is mandatory")
+        meeting.date = mdate
+    if data.get("location") is not None:
+        meeting.location = (data.get("location") or "").strip()
+    if data.get("type") is not None:
+        meeting.type = (data.get("type") or "").strip()
+    if data.get("heads") is not None:
+        # the original conductor is always kept as the first head
+        heads = []
+        for h in [meeting.conducted_by, *(data.get("heads") or [])]:
+            h = str(h or "").strip()
+            if h and h not in heads:
+                heads.append(h)
+        meeting.heads = json.dumps(heads, ensure_ascii=False) if heads else None
+
+    mdate = meeting.date
+
+    # attendees — full replace (clear respects the delete-orphan cascade)
+    if data.get("attendees") is not None:
+        meeting.attendees.clear()
+        db.flush()
+        for att in data.get("attendees") or []:
+            name = (att.get("name") or "").strip()
+            if not name:
+                continue
+            meeting.attendees.append(MomAttendee(
+                name=name,
+                source=att.get("source") or "employee",
+                present=bool(att.get("present", True)),
+                user_id=att.get("user_id"),
+                branch=(att.get("branch") or None),
+            ))
+
+    # rows — full replace (client resends carried + current + new)
+    if data.get("rows") is not None:
+        meeting.rows.clear()
+        db.flush()
+        for pos, row in enumerate(data.get("rows") or []):
+            flag = "T" if row.get("flag") == "T" else "I"
+            resp = _normalize_resp(row.get("resp"))
+            meeting.rows.append(MomRow(
+                position=pos,
+                track_id=(row.get("trackId") or f"t{meeting.id}-{pos}"),
+                master_id=row.get("masterId"),
+                area=(row.get("area") or "").strip() or "—",
+                category=row.get("category") or "Other",
+                point=row.get("point") or "",
+                responsibility=json.dumps(resp, ensure_ascii=False) if resp else None,
+                due_date=_parse_date(row.get("due")) if flag == "T" else None,
+                flag=flag,
+                status=row.get("status") or "pending",
+                remark=row.get("remark") or "",
+                origin_date=_parse_date(row.get("originDate")) or mdate,
+                carried=bool(row.get("carried")),
+                prev_remarks=json.dumps(row.get("prevRemarks") or [], ensure_ascii=False),
+            ))
+
+    db.commit()
+    db.refresh(meeting)
+    return serialize_meeting(meeting)
+
+
 def delete_meeting(db: Session, meeting_id: int):
     meeting = db.query(MomMeeting).filter(MomMeeting.id == meeting_id).first()
     if not meeting:

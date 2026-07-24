@@ -1,352 +1,226 @@
--- 1) Add the new column (only if it doesn't already exist)
-IF COL_LENGTH('dbo.asset_detailed', 'emission_norm') IS NULL
-    ALTER TABLE dbo.asset_detailed ADD emission_norm NVARCHAR(100) NULL;
-GO
+-- ============================================================================
+-- APPROVAL APPLICATION — L1..L5 EMPLOYEE HIERARCHY MIGRATION (SQL Server)
+-- ============================================================================
+-- The old scheme {Employee, BM, HOD, COO} becomes a 5-stage ladder:
+--   L1 = Employee (creator; own records AUTO-APPROVE within their own limit)
+--   L2 = first branch approval stage        (per-branch assignees)
+--   L3 = second branch approval stage       (per-branch assignees)
+--   L4 = HOD  (FIXED for L4; per branch PER CATEGORY: spares / services /
+--              spares & services)
+--   L5 = COO  (FIXED for L5; the rights-master users — final fallback)
+--
+-- NOTE: the server applies ALL of this automatically on startup
+-- (app/performance_indexes.py -> ensure_schema / ensure_performance_indexes).
+-- This script is the same migration for manual execution in SSMS.
+-- Every statement is idempotent — safe to run more than once.
+-- ============================================================================
 
--- 2) Backfill emission from the old dynamic extra_data JSON
---    (fills the values you already imported, before the column existed)
-UPDATE dbo.asset_detailed
-SET emission_norm = LEFT(JSON_VALUE(extra_data, '$."EMISSION NORM"'), 100)
-WHERE extra_data IS NOT NULL
-  AND ISJSON(extra_data) = 1
-  AND JSON_VALUE(extra_data, '$."EMISSION NORM"') IS NOT NULL;
-GO
+-- ----------------------------------------------------------------------------
+-- 1) NEW TABLE: approval_stage_approvers  (L2 / L3 assignees per branch)
+--    (created automatically by SQLAlchemy create_all; kept here for SSMS use)
+-- ----------------------------------------------------------------------------
+IF OBJECT_ID('dbo.approval_stage_approvers') IS NULL
+BEGIN
+    CREATE TABLE dbo.approval_stage_approvers (
+        id          INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        branch      NVARCHAR(20)  NOT NULL,
+        stage       NVARCHAR(5)   NOT NULL,          -- 'l2' | 'l3'
+        user_id     NVARCHAR(50)  NOT NULL,
+        user_name   NVARCHAR(100) NULL,
+        updated_by  NVARCHAR(50)  NULL,
+        created_at  DATETIME      NULL,
+        updated_at  DATETIME      NULL,
+        CONSTRAINT uq_apv_stage_br_st_user UNIQUE (branch, stage, user_id)
+    );
+END;
 
--- ============================================================
--- APPROVAL APPLICATION PAGE (2026-07)
--- New tables (approval_rights, approval_applications,
--- approval_attachments) are created automatically by the server
--- on startup (Base.metadata.create_all). The users column below
--- is also added automatically on startup via ensure_schema();
--- run it manually only if you prefer SSMS.
--- ============================================================
+-- ----------------------------------------------------------------------------
+-- 2) approval_applications — rename the per-level audit-trail columns
+--    branch_* -> l2_*   |   hod_* -> l4_*   |   coo_* -> l5_*
+-- ----------------------------------------------------------------------------
+IF COL_LENGTH('dbo.approval_applications', 'l2_action_by') IS NULL AND COL_LENGTH('dbo.approval_applications', 'branch_action_by') IS NOT NULL
+    EXEC sp_rename 'dbo.approval_applications.branch_action_by', 'l2_action_by', 'COLUMN';
+IF COL_LENGTH('dbo.approval_applications', 'l2_action_by_name') IS NULL AND COL_LENGTH('dbo.approval_applications', 'branch_action_by_name') IS NOT NULL
+    EXEC sp_rename 'dbo.approval_applications.branch_action_by_name', 'l2_action_by_name', 'COLUMN';
+IF COL_LENGTH('dbo.approval_applications', 'l2_action_at') IS NULL AND COL_LENGTH('dbo.approval_applications', 'branch_action_at') IS NOT NULL
+    EXEC sp_rename 'dbo.approval_applications.branch_action_at', 'l2_action_at', 'COLUMN';
+IF COL_LENGTH('dbo.approval_applications', 'l2_action_remark') IS NULL AND COL_LENGTH('dbo.approval_applications', 'branch_action_remark') IS NOT NULL
+    EXEC sp_rename 'dbo.approval_applications.branch_action_remark', 'l2_action_remark', 'COLUMN';
 
--- Per-user page visibility flag, granted from Profile -> Edit Employee
-IF COL_LENGTH('dbo.users', 'can_access_approval') IS NULL
-    ALTER TABLE dbo.users ADD can_access_approval BIT NOT NULL
-        CONSTRAINT DF_users_can_access_approval DEFAULT 0;
-GO
+IF COL_LENGTH('dbo.approval_applications', 'l4_action_by') IS NULL AND COL_LENGTH('dbo.approval_applications', 'hod_action_by') IS NOT NULL
+    EXEC sp_rename 'dbo.approval_applications.hod_action_by', 'l4_action_by', 'COLUMN';
+IF COL_LENGTH('dbo.approval_applications', 'l4_action_by_name') IS NULL AND COL_LENGTH('dbo.approval_applications', 'hod_action_by_name') IS NOT NULL
+    EXEC sp_rename 'dbo.approval_applications.hod_action_by_name', 'l4_action_by_name', 'COLUMN';
+IF COL_LENGTH('dbo.approval_applications', 'l4_action_at') IS NULL AND COL_LENGTH('dbo.approval_applications', 'hod_action_at') IS NOT NULL
+    EXEC sp_rename 'dbo.approval_applications.hod_action_at', 'l4_action_at', 'COLUMN';
+IF COL_LENGTH('dbo.approval_applications', 'l4_action_remark') IS NULL AND COL_LENGTH('dbo.approval_applications', 'hod_action_remark') IS NOT NULL
+    EXEC sp_rename 'dbo.approval_applications.hod_action_remark', 'l4_action_remark', 'COLUMN';
 
+IF COL_LENGTH('dbo.approval_applications', 'l5_action_by') IS NULL AND COL_LENGTH('dbo.approval_applications', 'coo_action_by') IS NOT NULL
+    EXEC sp_rename 'dbo.approval_applications.coo_action_by', 'l5_action_by', 'COLUMN';
+IF COL_LENGTH('dbo.approval_applications', 'l5_action_by_name') IS NULL AND COL_LENGTH('dbo.approval_applications', 'coo_action_by_name') IS NOT NULL
+    EXEC sp_rename 'dbo.approval_applications.coo_action_by_name', 'l5_action_by_name', 'COLUMN';
+IF COL_LENGTH('dbo.approval_applications', 'l5_action_at') IS NULL AND COL_LENGTH('dbo.approval_applications', 'coo_action_at') IS NOT NULL
+    EXEC sp_rename 'dbo.approval_applications.coo_action_at', 'l5_action_at', 'COLUMN';
+IF COL_LENGTH('dbo.approval_applications', 'l5_action_remark') IS NULL AND COL_LENGTH('dbo.approval_applications', 'coo_action_remark') IS NOT NULL
+    EXEC sp_rename 'dbo.approval_applications.coo_action_remark', 'l5_action_remark', 'COLUMN';
 
-UPDATE users
-SET can_access_approval = '1'
-WHERE user_id = 'kala000001';
--- Approval Application form update (2026-07): type-specific fields.
--- Also applied automatically on server startup via ensure_schema().
-IF COL_LENGTH('dbo.approval_applications', 'quotation_no') IS NULL
-    ALTER TABLE dbo.approval_applications ADD quotation_no NVARCHAR(100) NULL;
-GO
-IF COL_LENGTH('dbo.approval_applications', 'discount_percent') IS NULL
-    ALTER TABLE dbo.approval_applications ADD discount_percent FLOAT NULL;
-GO
-IF COL_LENGTH('dbo.approval_applications', 'credit_days') IS NULL
-    ALTER TABLE dbo.approval_applications ADD credit_days INT NULL;
-GO
--- Expense applications have no customer, so allow NULL
-ALTER TABLE dbo.approval_applications ALTER COLUMN customer_name NVARCHAR(255) NULL;
-GO
+-- ----------------------------------------------------------------------------
+-- 3) approval_applications — NEW columns
+--    L3 audit trail (brand-new stage), auto-approve flag, and the L4/L5
+--    approvers an HO-branch creator chooses on the create form.
+-- ----------------------------------------------------------------------------
+IF COL_LENGTH('dbo.approval_applications', 'l3_action_by') IS NULL
+    ALTER TABLE dbo.approval_applications ADD l3_action_by NVARCHAR(50) NULL;
+IF COL_LENGTH('dbo.approval_applications', 'l3_action_by_name') IS NULL
+    ALTER TABLE dbo.approval_applications ADD l3_action_by_name NVARCHAR(100) NULL;
+IF COL_LENGTH('dbo.approval_applications', 'l3_action_at') IS NULL
+    ALTER TABLE dbo.approval_applications ADD l3_action_at DATETIME NULL;
+IF COL_LENGTH('dbo.approval_applications', 'l3_action_remark') IS NULL
+    ALTER TABLE dbo.approval_applications ADD l3_action_remark NVARCHAR(MAX) NULL;
+IF COL_LENGTH('dbo.approval_applications', 'auto_approved') IS NULL
+    ALTER TABLE dbo.approval_applications ADD auto_approved BIT NOT NULL CONSTRAINT DF_apv_apps_auto_approved DEFAULT 0;
+IF COL_LENGTH('dbo.approval_applications', 'l4_approver_id') IS NULL
+    ALTER TABLE dbo.approval_applications ADD l4_approver_id NVARCHAR(50) NULL;
+IF COL_LENGTH('dbo.approval_applications', 'l4_approver_name') IS NULL
+    ALTER TABLE dbo.approval_applications ADD l4_approver_name NVARCHAR(100) NULL;
+IF COL_LENGTH('dbo.approval_applications', 'l5_approver_id') IS NULL
+    ALTER TABLE dbo.approval_applications ADD l5_approver_id NVARCHAR(50) NULL;
+IF COL_LENGTH('dbo.approval_applications', 'l5_approver_name') IS NULL
+    ALTER TABLE dbo.approval_applications ADD l5_approver_name NVARCHAR(100) NULL;
 
--- Approval Application (2026-07): expense type master table
--- (approval_expense_types) is created automatically on server startup.
--- App No format changed to DIS/2025-26/01 (per type, per financial year);
--- old APL-xxxxxx numbers on existing rows are kept as-is.
+-- ----------------------------------------------------------------------------
+-- 4) approval_employee_rules — rename the chain flags and add the L3 flag
+--    require_branch -> require_l2   |   require_hod -> require_l4
+-- ----------------------------------------------------------------------------
+IF COL_LENGTH('dbo.approval_employee_rules', 'require_l2') IS NULL AND COL_LENGTH('dbo.approval_employee_rules', 'require_branch') IS NOT NULL
+    EXEC sp_rename 'dbo.approval_employee_rules.require_branch', 'require_l2', 'COLUMN';
+IF COL_LENGTH('dbo.approval_employee_rules', 'require_l4') IS NULL AND COL_LENGTH('dbo.approval_employee_rules', 'require_hod') IS NOT NULL
+    EXEC sp_rename 'dbo.approval_employee_rules.require_hod', 'require_l4', 'COLUMN';
+IF COL_LENGTH('dbo.approval_employee_rules', 'require_l3') IS NULL
+    ALTER TABLE dbo.approval_employee_rules ADD require_l3 BIT NOT NULL CONSTRAINT DF_apv_rules_require_l3 DEFAULT 1;
 
--- ============================================================
--- APPROVAL APPLICATION — FULL TABLE DDL (2026-07)
--- These 4 tables are created automatically on server startup
--- (Base.metadata.create_all). Run below in SSMS only if you want
--- to create them manually / on a fresh DB without starting the app.
--- All statements are idempotent (skip if table already exists).
--- ============================================================
+-- ----------------------------------------------------------------------------
+-- 5) VALUE MIGRATIONS — legacy names -> the L1..L5 scheme
+-- ----------------------------------------------------------------------------
+-- authority levels: user -> l1, branch -> l2, hod -> l4, coo -> l5
+UPDATE dbo.approval_rights
+SET level = CASE level WHEN 'user'   THEN 'l1'
+                       WHEN 'branch' THEN 'l2'
+                       WHEN 'hod'    THEN 'l4'
+                       WHEN 'coo'    THEN 'l5'
+                       ELSE level END
+WHERE level IN ('user','branch','hod','coo');
 
--- 1) Rights master: which approval level a user acts at
-IF OBJECT_ID('dbo.approval_rights', 'U') IS NULL
-CREATE TABLE dbo.approval_rights (
-    id              INT IDENTITY(1,1) PRIMARY KEY,
-    user_id         NVARCHAR(50)  NOT NULL,
-    user_name       NVARCHAR(100) NULL,
-    branch          NVARCHAR(20)  NULL,
-    level           NVARCHAR(20)  NOT NULL DEFAULT 'user',  -- user|branch|hod|coo
-    granted_by      NVARCHAR(50)  NULL,
-    granted_by_name NVARCHAR(100) NULL,
-    created_at      DATETIME      NULL,
-    updated_at      DATETIME      NULL,
-    CONSTRAINT UQ_approval_rights_user UNIQUE (user_id)
-);
-GO
+-- application statuses: pending_branch -> pending_l2, pending_hod -> pending_l4,
+-- pending_coo -> pending_l5 (the new pending_l3 only occurs for new records)
+UPDATE dbo.approval_applications
+SET status = CASE status WHEN 'pending_branch' THEN 'pending_l2'
+                         WHEN 'pending_hod'    THEN 'pending_l4'
+                         WHEN 'pending_coo'    THEN 'pending_l5'
+                         ELSE status END
+WHERE status IN ('pending_branch','pending_hod','pending_coo');
 
--- 2) Applications (includes the newer columns: quotation_no,
---    discount_percent, credit_days; customer_name is NULLable
---    because Expense applications carry no customer)
-IF OBJECT_ID('dbo.approval_applications', 'U') IS NULL
-CREATE TABLE dbo.approval_applications (
-    id                    INT IDENTITY(1,1) PRIMARY KEY,
-    app_no                NVARCHAR(30)  NULL,          -- DIS/2025-26/01 style
-    category              NVARCHAR(30)  NOT NULL,      -- spares|services|spares_services
-    request_type          NVARCHAR(20)  NOT NULL,      -- discounting|credit|expense
-    branch                NVARCHAR(20)  NOT NULL,
-    branch_name           NVARCHAR(100) NULL,
-    customer_name         NVARCHAR(255) NULL,
-    instance_id           NVARCHAR(100) NULL,
-    sr_no                 NVARCHAR(100) NULL,
-    invoice_no            NVARCHAR(100) NULL,
-    delivery_challan      NVARCHAR(100) NULL,
-    quotation_no          NVARCHAR(100) NULL,
-    quotation_amount      FLOAT         NULL,
-    discount_percent      FLOAT         NULL,          -- discounting only
-    credit_days           INT           NULL,          -- credit only
-    expense_amount        FLOAT         NULL,          -- expense only
-    expense_type          NVARCHAR(100) NULL,          -- expense only (from master)
-    payment_mode          NVARCHAR(50)  NULL,          -- legacy, no longer used
-    description           NVARCHAR(MAX) NULL,          -- Purpose of Approval
-    remark                NVARCHAR(MAX) NULL,
-    status                NVARCHAR(20)  NOT NULL DEFAULT 'pending_branch',
-    created_by            NVARCHAR(50)  NOT NULL,
-    created_by_name       NVARCHAR(100) NULL,
-    created_by_level      NVARCHAR(20)  NULL,
-    branch_action_by      NVARCHAR(50)  NULL,
-    branch_action_by_name NVARCHAR(100) NULL,
-    branch_action_at      DATETIME      NULL,
-    branch_action_remark  NVARCHAR(MAX) NULL,
-    hod_action_by         NVARCHAR(50)  NULL,
-    hod_action_by_name    NVARCHAR(100) NULL,
-    hod_action_at         DATETIME      NULL,
-    hod_action_remark     NVARCHAR(MAX) NULL,
-    coo_action_by         NVARCHAR(50)  NULL,
-    coo_action_by_name    NVARCHAR(100) NULL,
-    coo_action_at         DATETIME      NULL,
-    coo_action_remark     NVARCHAR(MAX) NULL,
-    rejected_by           NVARCHAR(50)  NULL,
-    rejected_by_name      NVARCHAR(100) NULL,
-    rejected_at_level     NVARCHAR(20)  NULL,          -- branch|hod|coo
-    rejected_at           DATETIME      NULL,
-    rejected_remark       NVARCHAR(MAX) NULL,
-    created_at            DATETIME      NULL,
-    updated_at            DATETIME      NULL,
-    CONSTRAINT UQ_approval_applications_app_no UNIQUE (app_no)
-);
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_approval_applications_branch' AND object_id = OBJECT_ID('dbo.approval_applications'))
-    CREATE NONCLUSTERED INDEX IX_approval_applications_branch ON dbo.approval_applications (branch);
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_approval_applications_status' AND object_id = OBJECT_ID('dbo.approval_applications'))
-    CREATE NONCLUSTERED INDEX IX_approval_applications_status ON dbo.approval_applications (status);
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_approval_applications_created_by' AND object_id = OBJECT_ID('dbo.approval_applications'))
-    CREATE NONCLUSTERED INDEX IX_approval_applications_created_by ON dbo.approval_applications (created_by);
-GO
+-- creator level snapshot on old records
+UPDATE dbo.approval_applications
+SET created_by_level = CASE created_by_level WHEN 'user'   THEN 'l1'
+                                             WHEN 'branch' THEN 'l2'
+                                             WHEN 'hod'    THEN 'l4'
+                                             WHEN 'coo'    THEN 'l5'
+                                             ELSE created_by_level END
+WHERE created_by_level IN ('user','branch','hod','coo');
 
--- 3) Attachments (file bytes stored in DB, deleted with the application)
-IF OBJECT_ID('dbo.approval_attachments', 'U') IS NULL
-CREATE TABLE dbo.approval_attachments (
-    id             INT IDENTITY(1,1) PRIMARY KEY,
-    application_id INT           NOT NULL,
-    original_name  NVARCHAR(255) NOT NULL,
-    content_type   NVARCHAR(120) NULL,
-    size_bytes     INT           NULL,
-    data           VARBINARY(MAX) NULL,
-    uploaded_by    NVARCHAR(50)  NULL,
-    created_at     DATETIME      NULL,
-    CONSTRAINT FK_approval_attachments_app FOREIGN KEY (application_id)
-        REFERENCES dbo.approval_applications (id) ON DELETE CASCADE
-);
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_approval_attachments_app' AND object_id = OBJECT_ID('dbo.approval_attachments'))
-    CREATE NONCLUSTERED INDEX IX_approval_attachments_app ON dbo.approval_attachments (application_id);
-GO
+-- rejection level on old records
+UPDATE dbo.approval_applications
+SET rejected_at_level = CASE rejected_at_level WHEN 'branch' THEN 'l2'
+                                               WHEN 'hod'    THEN 'l4'
+                                               WHEN 'coo'    THEN 'l5'
+                                               ELSE rejected_at_level END
+WHERE rejected_at_level IN ('branch','hod','coo');
 
--- 4) Expense type master (dropdown values, managed from the COO view)
-IF OBJECT_ID('dbo.approval_expense_types', 'U') IS NULL
-CREATE TABLE dbo.approval_expense_types (
-    id              INT IDENTITY(1,1) PRIMARY KEY,
-    name            NVARCHAR(100) NOT NULL,
-    created_by      NVARCHAR(50)  NULL,
-    created_by_name NVARCHAR(100) NULL,
-    created_at      DATETIME      NULL,
-    CONSTRAINT UQ_approval_expense_types_name UNIQUE (name)
-);
-GO
+-- ----------------------------------------------------------------------------
+-- 6) NO AUTO-ASSIGNMENT — every L2 / L3 approver is chosen MANUALLY in the
+--    Employee Hierarchy tab. Remove any rows a previous auto-seed created
+--    (only seeded rows carry updated_by NULL; rows set from the UI always
+--    store the admin who saved them).
+-- ----------------------------------------------------------------------------
+DELETE FROM dbo.approval_stage_approvers WHERE updated_by IS NULL;
 
--- FIX (2026-07): drafts have app_no = NULL, but SQL Server unique indexes
--- treat NULL as a value, so a second draft failed with a duplicate-key error.
--- Replace the plain unique index/constraint with a FILTERED unique index that
--- only applies to numbered applications. Applied automatically on startup.
-IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_approval_applications_app_no'
-           AND object_id = OBJECT_ID('dbo.approval_applications') AND is_unique = 1)
-    DROP INDEX ix_approval_applications_app_no ON dbo.approval_applications;
-GO
-IF EXISTS (SELECT 1 FROM sys.key_constraints WHERE name = 'UQ_approval_applications_app_no'
-           AND parent_object_id = OBJECT_ID('dbo.approval_applications'))
-    ALTER TABLE dbo.approval_applications DROP CONSTRAINT UQ_approval_applications_app_no;
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_approval_applications_app_no'
-               AND object_id = OBJECT_ID('dbo.approval_applications'))
-    CREATE UNIQUE NONCLUSTERED INDEX UX_approval_applications_app_no
-        ON dbo.approval_applications (app_no) WHERE app_no IS NOT NULL;
-GO
+-- ----------------------------------------------------------------------------
+-- 6b) LEVEL-WISE AUTHORITY LIMITS + RENAMABLE LEVEL NAMES
+--     One row per level (l1..l5) with its display name and limits — the
+--     limits apply to EVERY user holding the level (no per-user limits).
+--     (Both tables are created automatically by SQLAlchemy create_all;
+--     kept here for SSMS use.)
+-- ----------------------------------------------------------------------------
+IF OBJECT_ID('dbo.approval_level_configs') IS NULL
+BEGIN
+    CREATE TABLE dbo.approval_level_configs (
+        id                   INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        level                NVARCHAR(5)   NOT NULL,   -- 'l1'..'l5'
+        display_name         NVARCHAR(100) NULL,       -- NULL = default name
+        max_discount_percent FLOAT         NULL,
+        max_credit_days      INT           NULL,
+        max_expense_amount   FLOAT         NULL,
+        updated_by           NVARCHAR(50)  NULL,
+        created_at           DATETIME      NULL,
+        updated_at           DATETIME      NULL,
+        CONSTRAINT uq_apv_level_cfg UNIQUE (level)
+    );
+END;
 
--- ============================================================
--- AUTHORITY MATRIX (2026-07) — all applied automatically on
--- server startup (create_all + ensure_schema). SSMS reference:
--- ============================================================
+IF OBJECT_ID('dbo.approval_level_expense_limits') IS NULL
+BEGIN
+    CREATE TABLE dbo.approval_level_expense_limits (
+        id              INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        level           NVARCHAR(5) NOT NULL,          -- 'l1'..'l5'
+        expense_type_id INT NOT NULL
+            CONSTRAINT FK_apv_lvl_exp_type REFERENCES dbo.approval_expense_types(id) ON DELETE CASCADE,
+        max_amount      FLOAT        NULL,
+        updated_by      NVARCHAR(50) NULL,
+        created_at      DATETIME     NULL,
+        updated_at      DATETIME     NULL,
+        CONSTRAINT uq_apv_lvl_exp_type UNIQUE (level, expense_type_id)
+    );
+END;
 
--- Per-approver authority limits on approval_rights
-IF COL_LENGTH('dbo.approval_rights', 'max_discount_percent') IS NULL
-    ALTER TABLE dbo.approval_rights ADD max_discount_percent FLOAT NULL;
-GO
-IF COL_LENGTH('dbo.approval_rights', 'max_credit_days') IS NULL
-    ALTER TABLE dbo.approval_rights ADD max_credit_days INT NULL;
-GO
-IF COL_LENGTH('dbo.approval_rights', 'max_expense_amount') IS NULL
-    ALTER TABLE dbo.approval_rights ADD max_expense_amount FLOAT NULL;
-GO
+-- One-time seed: the five level rows with their default names (the COO can
+-- rename them from the Authority Limit tab). Limits start empty (= 0).
+IF NOT EXISTS (SELECT 1 FROM dbo.approval_level_configs)
+BEGIN
+    INSERT INTO dbo.approval_level_configs (level, display_name, created_at) VALUES
+        ('l1', 'Employee', GETDATE()),
+        ('l2', 'Approver', GETDATE()),
+        ('l3', 'Approver', GETDATE()),
+        ('l4', 'HOD',      GETDATE()),
+        ('l5', 'COO',      GETDATE());
+END;
 
--- Per-employee approval chain rules (skip Branch Admin / HOD steps)
-IF OBJECT_ID('dbo.approval_employee_rules', 'U') IS NULL
-CREATE TABLE dbo.approval_employee_rules (
-    id              INT IDENTITY(1,1) PRIMARY KEY,
-    user_id         NVARCHAR(50)  NOT NULL,
-    user_name       NVARCHAR(100) NULL,
-    branch          NVARCHAR(20)  NULL,
-    require_branch  BIT           NULL DEFAULT 1,
-    require_hod     BIT           NULL DEFAULT 1,
-    updated_by      NVARCHAR(50)  NULL,
-    updated_by_name NVARCHAR(100) NULL,
-    created_at      DATETIME      NULL,
-    updated_at      DATETIME      NULL,
-    CONSTRAINT UQ_approval_employee_rules_user UNIQUE (user_id)
-);
-GO
+-- ----------------------------------------------------------------------------
+-- 7) PERFORMANCE INDEXES for the new stage-approver lookups
+--    (also applied automatically by performance_indexes.py)
+-- ----------------------------------------------------------------------------
+-- list_applications scopes L2/L3 viewers by the branches they approve for
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_stage_user_stage'
+               AND object_id = OBJECT_ID('dbo.approval_stage_approvers'))
+    CREATE NONCLUSTERED INDEX IX_apv_stage_user_stage
+    ON dbo.approval_stage_approvers (user_id, stage) INCLUDE (branch);
 
--- HOD category approver map (spares / services / spares_services)
-IF OBJECT_ID('dbo.approval_hod_categories', 'U') IS NULL
-CREATE TABLE dbo.approval_hod_categories (
-    id         INT IDENTITY(1,1) PRIMARY KEY,
-    category   NVARCHAR(30)  NOT NULL,
-    user_id    NVARCHAR(50)  NULL,
-    user_name  NVARCHAR(100) NULL,
-    updated_by NVARCHAR(50)  NULL,
-    created_at DATETIME      NULL,
-    updated_at DATETIME      NULL,
-    CONSTRAINT UQ_approval_hod_categories_cat UNIQUE (category)
-);
-GO
+-- routing decisions resolve (branch, stage) on every submit / approve
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_stage_branch_stage'
+               AND object_id = OBJECT_ID('dbo.approval_stage_approvers'))
+    CREATE NONCLUSTERED INDEX IX_apv_stage_branch_stage
+    ON dbo.approval_stage_approvers (branch, stage) INCLUDE (user_id, user_name);
 
--- Per expense type, per approver amount limits (Authority Matrix tab).
--- Created automatically on server startup; SSMS reference:
-IF OBJECT_ID('dbo.approval_expense_type_limits', 'U') IS NULL
-CREATE TABLE dbo.approval_expense_type_limits (
-    id              INT IDENTITY(1,1) PRIMARY KEY,
-    expense_type_id INT           NOT NULL,
-    user_id         NVARCHAR(50)  NOT NULL,
-    user_name       NVARCHAR(100) NULL,
-    max_amount      FLOAT         NULL,
-    updated_by      NVARCHAR(50)  NULL,
-    created_at      DATETIME      NULL,
-    updated_at      DATETIME      NULL,
-    CONSTRAINT UQ_apv_exp_type_user UNIQUE (expense_type_id, user_id),
-    CONSTRAINT FK_apv_exp_type FOREIGN KEY (expense_type_id)
-        REFERENCES dbo.approval_expense_types (id) ON DELETE CASCADE
-);
-GO
-
--- HOD category approvers: MULTIPLE approvers per category (2026-07).
--- Applied automatically on startup; SSMS reference:
-DECLARE @uq NVARCHAR(256);
-SELECT TOP 1 @uq = name FROM sys.key_constraints
-WHERE parent_object_id = OBJECT_ID('dbo.approval_hod_categories') AND type = 'UQ';
-IF @uq IS NOT NULL EXEC('ALTER TABLE dbo.approval_hod_categories DROP CONSTRAINT [' + @uq + ']');
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_apv_hod_cat_user'
-               AND object_id = OBJECT_ID('dbo.approval_hod_categories'))
-    CREATE UNIQUE NONCLUSTERED INDEX UX_apv_hod_cat_user
-        ON dbo.approval_hod_categories (category, user_id) WHERE user_id IS NOT NULL;
-GO
-
--- APPROVAL APPLICATION PERFORMANCE (2026-07) — hot list-path indexes.
--- Applied automatically on startup via performance_indexes; SSMS reference:
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_created_id' AND object_id = OBJECT_ID('dbo.approval_applications'))
-    CREATE NONCLUSTERED INDEX IX_apv_apps_created_id ON dbo.approval_applications (created_at DESC, id DESC);
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_creator_created' AND object_id = OBJECT_ID('dbo.approval_applications'))
-    CREATE NONCLUSTERED INDEX IX_apv_apps_creator_created ON dbo.approval_applications (created_by, created_at DESC);
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_branch_created' AND object_id = OBJECT_ID('dbo.approval_applications'))
-    CREATE NONCLUSTERED INDEX IX_apv_apps_branch_created ON dbo.approval_applications (branch, created_at DESC);
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_type_status' AND object_id = OBJECT_ID('dbo.approval_applications'))
-    CREATE NONCLUSTERED INDEX IX_apv_apps_type_status ON dbo.approval_applications (request_type, status);
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_attach_app_meta' AND object_id = OBJECT_ID('dbo.approval_attachments'))
-    CREATE NONCLUSTERED INDEX IX_apv_attach_app_meta ON dbo.approval_attachments (application_id)
-        INCLUDE (original_name, content_type, size_bytes, uploaded_by, created_at);
-GO
-
--- SOFT DELETE (2026-07): Profile -> Delete Employee now marks the user
--- deleted (hidden everywhere, cannot log in) instead of removing the row,
--- so all history (MOM, followups, expenses, approval trails) keeps its
--- person. Column added automatically on startup; SSMS reference:
-IF COL_LENGTH('dbo.users', 'is_deleted') IS NULL
-    ALTER TABLE dbo.users ADD is_deleted BIT NOT NULL
-        CONSTRAINT DF_users_is_deleted DEFAULT 0;
-GO
-
--- Per-employee approver exclusions (2026-07): "this employee's records must
--- never go to this approver". Created automatically on startup; SSMS ref:
-IF OBJECT_ID('dbo.approval_approver_exclusions', 'U') IS NULL
-CREATE TABLE dbo.approval_approver_exclusions (
-    id          INT IDENTITY(1,1) PRIMARY KEY,
-    employee_id NVARCHAR(50) NOT NULL,
-    approver_id NVARCHAR(50) NOT NULL,
-    created_by  NVARCHAR(50) NULL,
-    created_at  DATETIME     NULL,
-    CONSTRAINT UQ_apv_excl_emp_app UNIQUE (employee_id, approver_id)
-);
-GO
-
--- FIX (2026-07): approver exclusions are CATEGORY-wise. Adds the category
--- column, drops the old 2-column unique constraint, clears legacy rows and
--- enforces uniqueness per (employee, approver, category).
--- Applied automatically on startup; SSMS reference:
-IF COL_LENGTH('dbo.approval_approver_exclusions', 'category') IS NULL
-    ALTER TABLE dbo.approval_approver_exclusions ADD category NVARCHAR(30) NULL;
-GO
-DECLARE @xq NVARCHAR(256);
-SELECT TOP 1 @xq = name FROM sys.key_constraints
-WHERE parent_object_id = OBJECT_ID('dbo.approval_approver_exclusions')
-  AND type = 'UQ' AND name <> 'uq_apv_excl_emp_app_cat';
-IF @xq IS NOT NULL EXEC('ALTER TABLE dbo.approval_approver_exclusions DROP CONSTRAINT [' + @xq + ']');
-GO
-DELETE FROM dbo.approval_approver_exclusions WHERE category IS NULL;
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_apv_excl_emp_app_cat'
-               AND object_id = OBJECT_ID('dbo.approval_approver_exclusions'))
-    CREATE UNIQUE NONCLUSTERED INDEX UX_apv_excl_emp_app_cat
-        ON dbo.approval_approver_exclusions (employee_id, approver_id, category)
-        WHERE category IS NOT NULL;
-GO
-
--- Employee email for approval notifications (2026-07). Added automatically
--- on startup; SSMS reference:
-IF COL_LENGTH('dbo.users', 'email') IS NULL
-    ALTER TABLE dbo.users ADD email NVARCHAR(255) NULL;
-GO
-
--- HOD category approvers became PER-BRANCH (2026-07): each branch row in the
--- Employee Hierarchy sets its own HOD approvers per category. Legacy
--- company-wide rows (branch NULL) are cleared. Applied on startup; SSMS ref:
-IF COL_LENGTH('dbo.approval_hod_categories', 'branch') IS NULL
-    ALTER TABLE dbo.approval_hod_categories ADD branch NVARCHAR(20) NULL;
-GO
-IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_apv_hod_cat_user'
-           AND object_id = OBJECT_ID('dbo.approval_hod_categories'))
-    DROP INDEX UX_apv_hod_cat_user ON dbo.approval_hod_categories;
-GO
-DELETE FROM dbo.approval_hod_categories WHERE branch IS NULL;
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_apv_hod_br_cat_user'
-               AND object_id = OBJECT_ID('dbo.approval_hod_categories'))
-    CREATE UNIQUE NONCLUSTERED INDEX UX_apv_hod_br_cat_user
-        ON dbo.approval_hod_categories (branch, category, user_id)
-        WHERE user_id IS NOT NULL AND branch IS NOT NULL;
-GO
+-- ============================================================================
+-- DONE. After running this (or simply restarting the server, which applies the
+-- same migration automatically):
+--   * L2 and L3 start empty — assign people from the Employee Hierarchy tab
+--     (nothing is auto-assigned)
+--   * HOD category assignments carry over unchanged as L4
+--   * COO stays fixed as L5 (rights-master users)
+--   * pending records continue from the equivalent new status
+--   * authority limits are LEVEL-WISE (approval_level_configs) — set them in
+--     the Authority Limit tab; old per-user limits are no longer used
+--   * level display names are renamable there too and show everywhere
+-- ============================================================================

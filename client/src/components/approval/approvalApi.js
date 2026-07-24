@@ -54,6 +54,9 @@ export const rejectApplication = (id, remark) =>
 export const deleteApplication = (id) =>
     axios.delete(`${BASE}/applications/${id}`, { headers: authHeaders() }).then(r => r.data);
 
+export const sendResultEmail = (id, emails) =>
+    axios.post(`${BASE}/applications/${id}/send-email`, { emails }, { headers: authHeaders() }).then(r => r.data);
+
 export const getRights = () =>
     axios.get(`${BASE}/rights`, { headers: authHeaders() }).then(r => r.data);
 
@@ -95,6 +98,12 @@ export const setExpenseTypeLimit = (payload) =>
 
 export const setHodCategory = (branch, category, userIds) =>
     axios.post(`${BASE}/matrix/hod-category`, { branch, category, user_ids: userIds }, { headers: authHeaders() }).then(r => r.data);
+
+export const setLevelConfig = (payload) =>
+    axios.post(`${BASE}/matrix/level-config`, payload, { headers: authHeaders() }).then(r => r.data);
+
+export const setStageApprovers = (branch, stage, userIds) =>
+    axios.post(`${BASE}/matrix/stage-approvers`, { branch, stage, user_ids: userIds }, { headers: authHeaders() }).then(r => r.data);
 
 export const approvalPdfUrl = (id) => `${BASE}/applications/${id}/pdf`;
 

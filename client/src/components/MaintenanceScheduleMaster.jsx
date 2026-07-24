@@ -302,10 +302,11 @@ const MasterData = ({ onMasterChanged }) => {
         const aoa = [ORIG_HEADERS];
         list.forEach((a) => a.parts.forEach((p) => aoa.push([
             a.segment, a.appCode, a.systemAppCode, a.engineModel, a.kva, a.emission,
-            p.partNumber, p.partDesc, p.qty, p.action, p.altPartNo, p.altDesc, p.altQty, p.altAction, p.serviceHours, p.schedule,
+            p.partNumber, p.partDesc, p.qty, p.action, p.serviceHours,
+            p.altPartNo, p.altDesc, p.altQty, p.altAction, p.altServiceHours, p.schedule,
         ])));
         const ws = XLSX.utils.aoa_to_sheet(aoa);
-        ws['!cols'] = ORIG_HEADERS.map((h, i) => ({ wch: [8, 12, 14, 16, 6, 9, 16, 40, 5, 7, 12, 14, 5, 7, 12, 16][i] || 12 }));
+        ws['!cols'] = ORIG_HEADERS.map((h, i) => ({ wch: [8, 12, 14, 16, 6, 9, 16, 40, 5, 7, 9, 14, 30, 5, 7, 9, 16][i] || 12 }));
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'MASTER_DATA');
         XLSX.writeFile(wb, `MASTER_DATA_${codes ? `selected_${codes.length}` : `all_${list.length}`}.xlsx`);
@@ -429,7 +430,7 @@ const MasterData = ({ onMasterChanged }) => {
                         <div style={{ width: sheetW }} className="h-px" />
                     </div>
                     <div ref={sheetScrollRef} onScroll={mirrorScroll(sheetScrollRef, topScrollRef)} className="overflow-auto qm-scroll max-h-[70vh]">
-                        <table className="master-sheet-table min-w-[1580px] w-full text-[12px]">
+                        <table className="master-sheet-table min-w-[1660px] w-full text-[12px]">
                             <thead className="sticky top-0 z-10">
                                 {/* Two-tier header: "Qty" and "Action" appear under both Part
                                     Details and Kit Details, so the group row tells them apart. */}
@@ -449,7 +450,7 @@ const MasterData = ({ onMasterChanged }) => {
                                     <th rowSpan={2} className="px-2 py-1 border border-gray-200 bg-gray-100 w-11 text-center">Sr.</th>
                                     <th colSpan={6} className="px-3 py-1 border border-gray-200 bg-gray-100 text-center">Application Code</th>
                                     <th colSpan={5} className="px-3 py-1 border border-gray-200 bg-indigo-100 text-center" style={{ color: themeColor }}>Part Details</th>
-                                    <th colSpan={4} className="px-3 py-1 border border-gray-200 bg-amber-100 text-center text-amber-800">Kit Details</th>
+                                    <th colSpan={5} className="px-3 py-1 border border-gray-200 bg-amber-100 text-center text-amber-800">Kit Details</th>
                                     <th rowSpan={2} className="px-3 py-1 border border-gray-200 bg-gray-100 w-24 text-center">Actions</th>
                                 </tr>
                                 <tr className="bg-gray-50 text-[10px] font-semibold text-black uppercase tracking-wider">
@@ -468,6 +469,7 @@ const MasterData = ({ onMasterChanged }) => {
                                     <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Kit Description</th>
                                     <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Qty</th>
                                     <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Action</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Svc Hrs</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -520,6 +522,7 @@ const MasterData = ({ onMasterChanged }) => {
                                                         <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-gray-600 align-middle min-w-[200px] bg-amber-50/20">{kit.p?.altDesc || '—'}</td>
                                                         <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center text-gray-600 align-middle bg-amber-50/20">{kit.p?.altQty || '—'}</td>
                                                         <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center align-middle bg-amber-50/20"><Chip a={kit.p?.altAction} /></td>
+                                                        <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center font-mono text-gray-600 align-middle bg-amber-50/20">{kit.p?.altServiceHours || '—'}</td>
                                                     </>
                                                 )}
 
@@ -1120,6 +1123,9 @@ const AppMapping = ({ onMasterChanged }) => {
 // Kit fields (Kit Number / Kit Description / Qty / Action) are stored on the part
 // line as altPartNo / altDesc / altQty / altAction. A part "has a kit" when any of
 // them is filled.
+// NOTE: altServiceHours deliberately does NOT count — the master file fills the
+// kit's Service Hours on every row, including the blank rows a kit merges down
+// across; counting it would break every kit block apart.
 const kitHasData = (p) => !!(String(p.altPartNo || '').trim() || String(p.altDesc || '').trim() || String(p.altQty || '').trim() || String(p.altAction || '').trim());
 
 /* ---------------- Kits <-> stored part lines ----------------
@@ -1155,6 +1161,7 @@ const partsToModel = (raw) => {
                 const k = {
                     __id: `k${n++}`, number: String(p.altPartNo || ''), desc: String(p.altDesc || ''),
                     qty: String(p.altQty ?? ''), action: String(p.altAction || ''),
+                    hours: String(p.altServiceHours ?? ''),
                 };
                 kits.push(k);
                 curKit = k.__id;
@@ -1189,7 +1196,7 @@ const modelToParts = (parts, kits) => {
         const out = {
             partNumber: p.partNumber.trim(), partDesc: p.partDesc.trim(), qty: String(p.qty).trim(),
             action: p.action.trim(), serviceHours: String(p.serviceHours).trim(), schedule: '',
-            altPartNo: '', altDesc: '', altQty: '', altAction: '',
+            altPartNo: '', altDesc: '', altQty: '', altAction: '', altServiceHours: '',
         };
         const k = p.__kitId && kits.find((x) => x.__id === p.__kitId);
         if (k) {
@@ -1198,11 +1205,13 @@ const modelToParts = (parts, kits) => {
             if (firstOf[p.__kitId] === i) {
                 out.altPartNo = k.number.trim(); out.altDesc = k.desc.trim();
                 out.altQty = String(k.qty).trim(); out.altAction = k.action.trim();
+                out.altServiceHours = String(k.hours || '').trim();
             }
         } else {
             // Loose part — supplied as-is, so the kit columns repeat the part.
             out.altPartNo = out.partNumber; out.altDesc = out.partDesc;
             out.altQty = out.qty; out.altAction = out.action;
+            out.altServiceHours = out.serviceHours;
         }
         return out;
     });
@@ -1254,13 +1263,13 @@ const AppViewModal = ({ record, services = [], emission, commissioning, onClose,
                     </div>
                     {/* Master-sheet-format table for this single code */}
                     <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto qm-scroll shadow-sm">
-                        <table className="master-sheet-table min-w-[1180px] w-full text-[12px]">
+                        <table className="master-sheet-table min-w-[1260px] w-full text-[12px]">
                             <thead>
                                 <tr className="bg-gray-100 text-[10px] font-bold text-black uppercase tracking-wider">
                                     <th rowSpan={2} className="px-2 py-1 border border-gray-200 bg-gray-100 w-11 text-center">Sr.</th>
                                     <th colSpan={5} className="px-3 py-1 border border-gray-200 bg-gray-100 text-center">Application Code</th>
                                     <th colSpan={5} className="px-3 py-1 border border-gray-200 bg-indigo-100 text-center" style={{ color: themeColor }}>Part Details</th>
-                                    <th colSpan={4} className="px-3 py-1 border border-gray-200 bg-amber-100 text-center text-amber-800">Kit Details</th>
+                                    <th colSpan={5} className="px-3 py-1 border border-gray-200 bg-amber-100 text-center text-amber-800">Kit Details</th>
                                 </tr>
                                 <tr className="bg-gray-50 text-[10px] font-semibold text-black uppercase tracking-wider">
                                     <th className="px-3 py-1 border border-gray-200 bg-gray-50 text-center">Segment</th>
@@ -1277,6 +1286,7 @@ const AppViewModal = ({ record, services = [], emission, commissioning, onClose,
                                     <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Kit Description</th>
                                     <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Qty</th>
                                     <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Action</th>
+                                    <th className="px-3 py-1 border border-gray-200 bg-amber-50 text-center">Svc Hrs</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1310,6 +1320,7 @@ const AppViewModal = ({ record, services = [], emission, commissioning, onClose,
                                                     <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-gray-600 align-middle min-w-[200px] bg-amber-50/20">{kit.p?.altDesc || '—'}</td>
                                                     <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center text-gray-600 align-middle bg-amber-50/20">{kit.p?.altQty || '—'}</td>
                                                     <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center align-middle bg-amber-50/20"><Chip a={kit.p?.altAction} /></td>
+                                                    <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center font-mono text-gray-600 align-middle bg-amber-50/20">{kit.p?.altServiceHours || '—'}</td>
                                                 </>
                                             )}
                                         </tr>
@@ -1455,7 +1466,7 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
             const used = new Set(nextParts.map((p) => p.__kitId).filter(Boolean));
             return {
                 parts: nextParts,
-                kits: [...m.kits.filter((k) => used.has(k.__id)), { __id: id, number: '', desc: '', qty: '1', action: 'R' }],
+                kits: [...m.kits.filter((k) => used.has(k.__id)), { __id: id, number: '', desc: '', qty: '1', action: 'R', hours: '' }],
             };
         });
         setChecked({});
@@ -1773,7 +1784,7 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                                 <div className="text-[13px] font-bold text-black mb-2">
                                     Please add kit details <span className="text-[10.5px] font-normal text-gray-600">— for the {members.length} selected part{members.length === 1 ? '' : 's'}</span>
                                 </div>
-                                <div className="grid grid-cols-[.9fr_2.1fr_.4fr_.6fr] gap-2 max-md:grid-cols-2">
+                                <div className="grid grid-cols-[.9fr_2.1fr_.4fr_.6fr_.5fr] gap-2 max-md:grid-cols-2">
                                     <div>
                                         <label className={kitLbl}>Kit Number <span className="text-red-500">*</span></label>
                                         <input className={`${kitInp} font-mono`} value={k.number} onChange={(e) => setKit(k.__id, 'number', e.target.value)} placeholder="e.g. 3H.019.11.0.SP" />
@@ -1789,6 +1800,10 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                                     <div>
                                         <label className={kitLbl}>Action <span className="text-red-500">*</span></label>
                                         <Combo value={k.action} onChange={(v) => setKit(k.__id, 'action', v)} options={opts.actOpts} mono fieldCls={kitInp} />
+                                    </div>
+                                    <div>
+                                        <label className={kitLbl}>Svc Hrs</label>
+                                        <input className={`${kitInp} font-mono text-center`} value={k.hours || ''} onChange={(e) => setKit(k.__id, 'hours', e.target.value)} placeholder="e.g. 50" />
                                     </div>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-1 mt-2">
@@ -1834,7 +1849,7 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                                         Remove kit
                                     </button>
                                 </div>
-                                <div className="grid grid-cols-[.9fr_2.1fr_.4fr_.6fr] gap-2 max-md:grid-cols-2">
+                                <div className="grid grid-cols-[.9fr_2.1fr_.4fr_.6fr_.5fr] gap-2 max-md:grid-cols-2">
                                     <div>
                                         <label className={kitLbl}>Kit Number <span className="text-red-500">*</span></label>
                                         <input className={`${kitInp} font-mono`} value={k.number} onChange={(e) => setKit(k.__id, 'number', e.target.value)} placeholder="e.g. 3H.019.11.0.SP" />
@@ -1850,6 +1865,10 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                                     <div>
                                         <label className={kitLbl}>Action <span className="text-red-500">*</span></label>
                                         <Combo value={k.action} onChange={(v) => setKit(k.__id, 'action', v)} options={opts.actOpts} mono fieldCls={kitInp} />
+                                    </div>
+                                    <div>
+                                        <label className={kitLbl}>Svc Hrs</label>
+                                        <input className={`${kitInp} font-mono text-center`} value={k.hours || ''} onChange={(e) => setKit(k.__id, 'hours', e.target.value)} placeholder="e.g. 50" />
                                     </div>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-1 mt-1.5">
@@ -1893,12 +1912,12 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                                 </div>
                                 <div className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm">
                                     <div className="overflow-x-auto qm-scroll">
-                                        <table className="min-w-[1380px] w-full text-[11.5px]">
+                                        <table className="min-w-[1460px] w-full text-[11.5px]">
                                             <thead>
                                                 <tr className="bg-gray-100 text-[9.5px] font-bold text-black uppercase tracking-wider">
                                                     <th colSpan={6} className="px-2 py-1 border border-gray-200 bg-gray-100 text-center">Application Code</th>
                                                     <th colSpan={5} className="px-2 py-1 border border-gray-200 bg-indigo-100 text-center" style={{ color: themeColor }}>Part Details</th>
-                                                    <th colSpan={4} className="px-2 py-1 border border-gray-200 bg-amber-100 text-center text-amber-800">Kit Details</th>
+                                                    <th colSpan={5} className="px-2 py-1 border border-gray-200 bg-amber-100 text-center text-amber-800">Kit Details</th>
                                                 </tr>
                                                 <tr className="bg-gray-50 text-[9.5px] font-semibold text-black uppercase tracking-wider">
                                                     {['Segment', 'App Code', 'System App Code', 'Engine Model', 'KVA', 'Emission'].map((h) => (
@@ -1907,7 +1926,7 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                                                     {['Part Number', 'Part Description', 'Qty', 'Action', 'Svc Hrs'].map((h) => (
                                                         <th key={h} className="px-2 py-1 border border-gray-200 bg-indigo-50 text-center">{h}</th>
                                                     ))}
-                                                    {['Kit Number', 'Kit Description', 'Qty', 'Action'].map((h) => (
+                                                    {['Kit Number', 'Kit Description', 'Qty', 'Action', 'Svc Hrs'].map((h) => (
                                                         <th key={h} className="px-2 py-1 border border-gray-200 bg-amber-50 text-center">{h}</th>
                                                     ))}
                                                 </tr>
@@ -1940,6 +1959,7 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                                                                     <td rowSpan={kit.span} className={`${td} text-gray-600 align-middle min-w-[180px] bg-amber-50/20`}>{kit.p.altDesc || '—'}</td>
                                                                     <td rowSpan={kit.span} className={`${td} text-center text-gray-600 align-middle bg-amber-50/20`}>{kit.p.altQty || '—'}</td>
                                                                     <td rowSpan={kit.span} className={`${td} text-center align-middle bg-amber-50/20`}><Chip a={kit.p.altAction} /></td>
+                                                                    <td rowSpan={kit.span} className={`${td} text-center font-mono text-gray-600 align-middle bg-amber-50/20`}>{kit.p.altServiceHours || '—'}</td>
                                                                 </>
                                                             )}
                                                         </tr>
@@ -2107,7 +2127,7 @@ const ImportData = ({ onMasterChanged }) => {
         // the kit columns, so the first hit is the part's and the next one AFTER the
         // kit-description column belongs to the kit.
         const colAll = (n) => hdr.reduce((acc, h, i) => ((h === n || h.includes(n)) ? [...acc, i] : acc), []);
-        const qtyCols = colAll('qty'), actCols = colAll('action');
+        const qtyCols = colAll('qty'), actCols = colAll('action'), hrsCols = colAll('servicehours');
         // Kit columns: "Kit Number" / "Kit Description" (new master file). Legacy
         // files used "Part NO " / "Description " for the same pair — fall back to
         // those exact normalized names (distinct from partnumber / partdescription).
@@ -2125,10 +2145,15 @@ const ImportData = ({ onMasterChanged }) => {
         const C = {
             seg: col('segment'), app: col('appcode'), sys: col('systemappcode'), eng: col('enginemodel'), kva: col('kva'),
             emi: col('emmission') >= 0 ? col('emmission') : col('emission'), pn: col('partnumber'), pd: col('partdescription'),
-            qty: qtyCols[0] ?? -1, act: actCols[0] ?? -1, hrs: col('servicehours'), sch: col('serviceschedules'),
+            qty: qtyCols[0] ?? -1, act: actCols[0] ?? -1, hrs: hrsCols[0] ?? -1, sch: col('serviceschedules'),
             kitNo, kitDesc,
             kitQty: kitDesc >= 0 ? after(qtyCols, kitDesc) : (qtyCols[1] ?? -1),
             kitAct: kitDesc >= 0 ? after(actCols, kitDesc) : (actCols[1] ?? -1),
+            // "Service Hours" can appear twice — after the part's Action AND after
+            // the kit's. The first is the part's (it drives service mapping); the
+            // one after Kit Description is the kit's own. A file with a single
+            // Service Hours column (legacy layout) has no kit hours at all.
+            kitHrs: hrsCols.length > 1 ? (kitDesc >= 0 ? after(hrsCols, kitDesc) : hrsCols[1]) : -1,
         };
         if (C.app < 0) { toast.error('No "App Code" column found in ' + sheet); return; }
         const g = (r, i) => (i >= 0 ? String(r[i] ?? '').trim() : '');
@@ -2149,7 +2174,19 @@ const ImportData = ({ onMasterChanged }) => {
             if (!code) continue;
             lastCode = code;
             if (!groups[code]) { groups[code] = { appCode: code, segment: g(r, C.seg), systemAppCode: g(r, C.sys), engineModel: g(r, C.eng), kva: g(r, C.kva), emission: g(r, C.emi), parts: [] }; order.push(code); }
-            if (g(r, C.pn) || g(r, C.pd)) groups[code].parts.push({ partNumber: g(r, C.pn), partDesc: g(r, C.pd), qty: g(r, C.qty), action: g(r, C.act), serviceHours: g(r, C.hrs), schedule: g(r, C.sch), altPartNo: kv(r, C.kitNo), altDesc: kv(r, C.kitDesc), altQty: kv(r, C.kitQty), altAction: kv(r, C.kitAct) });
+            if (g(r, C.pn) || g(r, C.pd)) {
+                const kNo = kv(r, C.kitNo), kDe = kv(r, C.kitDesc), kQ = kv(r, C.kitQty), kA = kv(r, C.kitAct);
+                // The file repeats the kit's Service Hours on EVERY row — including
+                // the blank rows a kit merges down across. Keep it only on rows
+                // that actually carry kit data, so merged member rows stay fully
+                // blank and the kit block spans them correctly.
+                groups[code].parts.push({
+                    partNumber: g(r, C.pn), partDesc: g(r, C.pd), qty: g(r, C.qty), action: g(r, C.act),
+                    serviceHours: g(r, C.hrs), schedule: g(r, C.sch),
+                    altPartNo: kNo, altDesc: kDe, altQty: kQ, altAction: kA,
+                    altServiceHours: (kNo || kDe || kQ || kA) ? kv(r, C.kitHrs) : '',
+                });
+            }
         }
         const items = order.map((c) => ({ code: c, rec: groups[c], exists: existing.has(c), parts: groups[c].parts.length }));
         setPreview({ items, news: items.filter((i) => !i.exists), reps: items.filter((i) => i.exists), fname, sheet });
@@ -2279,38 +2316,42 @@ const ImportData = ({ onMasterChanged }) => {
                                                                 <div className="px-4 py-3 text-[11px] text-gray-400">No part lines found in the file for this code.</div>
                                                             ) : (
                                                                 <div className="overflow-x-auto qm-scroll px-3 py-2">
-                                                                    <table className="min-w-[860px] w-full border-collapse text-[11.5px]">
-                                                                        <thead>
-                                                                            <tr className="text-[9.5px] font-semibold text-gray-500 uppercase tracking-wide">
-                                                                                <th className="px-2 py-1 text-center">Sr.</th>
-                                                                                <th className="px-2 py-1 text-center">Part Number</th>
-                                                                                <th className="px-2 py-1 text-center">Description</th>
-                                                                                <th className="px-2 py-1 text-center">Qty</th>
-                                                                                <th className="px-2 py-1 text-center">Act</th>
-                                                                                <th className="px-2 py-1 text-center">Kit Number</th>
-                                                                                <th className="px-2 py-1 text-center">Kit Description</th>
-                                                                                <th className="px-2 py-1 text-center">Qty</th>
-                                                                                <th className="px-2 py-1 text-center">Act</th>
-                                                                                <th className="px-2 py-1 text-center">Svc Hrs</th>
-                                                                            </tr>
-                                                                        </thead>
-                                                                        <tbody>
-                                                                            {i.rec.parts.map((p, j) => (
-                                                                                <tr key={j} className="border-t border-gray-200/70">
-                                                                                    <td className="px-2 py-1 font-mono text-gray-400">{j + 1}</td>
-                                                                                    <td className="px-2 py-1 font-mono text-gray-700">{p.partNumber || '—'}</td>
-                                                                                    <td className="px-2 py-1 text-gray-600">{p.partDesc || '—'}</td>
-                                                                                    <td className="px-2 py-1 text-center">{p.qty || '—'}</td>
-                                                                                    <td className="px-2 py-1 text-center"><Chip a={p.action} /></td>
-                                                                                    <td className="px-2 py-1 font-mono text-gray-500 whitespace-nowrap">{p.altPartNo || '—'}</td>
-                                                                                    <td className="px-2 py-1 text-gray-500">{p.altDesc || '—'}</td>
-                                                                                    <td className="px-2 py-1 text-center text-gray-500">{p.altQty || '—'}</td>
-                                                                                    <td className="px-2 py-1 text-center"><Chip a={p.altAction} /></td>
-                                                                                    <td className="px-2 py-1 text-center font-mono">{p.serviceHours || '—'}</td>
+                                                                    <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+                                                                        <table className="min-w-[920px] w-full text-[11.5px]">
+                                                                            <thead>
+                                                                                <tr className="bg-gray-100 text-[9.5px] font-bold text-black uppercase tracking-wider">
+                                                                                    <th rowSpan={2} className="px-2 py-1 border border-gray-200 bg-gray-100 w-9 text-center">Sr.</th>
+                                                                                    <th colSpan={5} className="px-2 py-1 border border-gray-200 bg-indigo-100 text-center" style={{ color: themeColor }}>Part Details</th>
+                                                                                    <th colSpan={5} className="px-2 py-1 border border-gray-200 bg-amber-100 text-center text-amber-800">Kit Details</th>
                                                                                 </tr>
-                                                                            ))}
-                                                                        </tbody>
-                                                                    </table>
+                                                                                <tr className="bg-gray-50 text-[9.5px] font-semibold text-black uppercase tracking-wider">
+                                                                                    {['Part Number', 'Description', 'Qty', 'Action', 'Svc Hrs'].map((h) => (
+                                                                                        <th key={h} className="px-2 py-1 border border-gray-200 bg-indigo-50 text-center">{h}</th>
+                                                                                    ))}
+                                                                                    {['Kit Number', 'Kit Description', 'Qty', 'Action', 'Svc Hrs'].map((h) => (
+                                                                                        <th key={h} className="px-2 py-1 border border-gray-200 bg-amber-50 text-center">{h}</th>
+                                                                                    ))}
+                                                                                </tr>
+                                                                            </thead>
+                                                                            <tbody>
+                                                                                {i.rec.parts.map((p, j) => (
+                                                                                    <tr key={j} className="bg-white hover:bg-indigo-50/30 transition">
+                                                                                        <td className="px-2 py-1 border border-gray-200 text-center font-mono text-gray-400">{j + 1}</td>
+                                                                                        <td className="px-2 py-1 border border-gray-200 font-mono text-gray-700 whitespace-nowrap">{p.partNumber || '—'}</td>
+                                                                                        <td className="px-2 py-1 border border-gray-200 text-gray-600 min-w-[220px]">{p.partDesc || '—'}</td>
+                                                                                        <td className="px-2 py-1 border border-gray-200 text-center">{p.qty || '—'}</td>
+                                                                                        <td className="px-2 py-1 border border-gray-200 text-center"><Chip a={p.action} /></td>
+                                                                                        <td className="px-2 py-1 border border-gray-200 text-center font-mono">{p.serviceHours || '—'}</td>
+                                                                                        <td className="px-2 py-1 border border-gray-200 font-mono text-gray-500 whitespace-nowrap bg-amber-50/20">{p.altPartNo || '—'}</td>
+                                                                                        <td className="px-2 py-1 border border-gray-200 text-gray-500 min-w-[180px] bg-amber-50/20">{p.altDesc || '—'}</td>
+                                                                                        <td className="px-2 py-1 border border-gray-200 text-center text-gray-500 bg-amber-50/20">{p.altQty || '—'}</td>
+                                                                                        <td className="px-2 py-1 border border-gray-200 text-center bg-amber-50/20"><Chip a={p.altAction} /></td>
+                                                                                        <td className="px-2 py-1 border border-gray-200 text-center font-mono text-gray-500 bg-amber-50/20">{p.altServiceHours || '—'}</td>
+                                                                                    </tr>
+                                                                                ))}
+                                                                            </tbody>
+                                                                        </table>
+                                                                    </div>
                                                                 </div>
                                                             )}
                                                         </td>

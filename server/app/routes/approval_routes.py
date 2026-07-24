@@ -96,6 +96,8 @@ async def create_application(
     expense_type: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
     remark: Optional[str] = Form(None),
+    l4_approver_id: Optional[str] = Form(None),
+    l5_approver_id: Optional[str] = Form(None),
     save_as_draft: Optional[str] = Form(None),
     files: List[UploadFile] = File(default=[]),
     user_id: str = Header(...),
@@ -120,6 +122,8 @@ async def create_application(
         "expense_type": expense_type,
         "description": description,
         "remark": remark,
+        "l4_approver_id": l4_approver_id,
+        "l5_approver_id": l5_approver_id,
     }, files, as_draft=as_draft)
     msg = "Draft saved" if as_draft else "Application submitted successfully"
     return {"success": True, "message": msg, "application": application}
@@ -145,6 +149,8 @@ async def update_application(
     expense_type: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
     remark: Optional[str] = Form(None),
+    l4_approver_id: Optional[str] = Form(None),
+    l5_approver_id: Optional[str] = Form(None),
     submit: Optional[str] = Form(None),
     files: List[UploadFile] = File(default=[]),
     user_id: str = Header(...),
@@ -170,6 +176,8 @@ async def update_application(
         "expense_type": expense_type,
         "description": description,
         "remark": remark,
+        "l4_approver_id": l4_approver_id,
+        "l5_approver_id": l5_approver_id,
     }, files, submit=do_submit)
     msg = "Application submitted successfully" if do_submit else "Draft saved"
     return {"success": True, "message": msg, "application": application}
@@ -203,6 +211,19 @@ def reject_application(
 def delete_application(app_id: int, user_id: str = Header(...), db: Session = Depends(get_db)):
     ac.delete_application(db, user_id, app_id)
     return {"success": True, "message": "Application deleted"}
+
+
+@router.post("/applications/{app_id}/send-email")
+def send_result_email(
+    app_id: int,
+    body: Optional[dict] = None,
+    user_id: str = Header(...),
+    db: Session = Depends(get_db),
+):
+    """Send the approved / rejected outcome email. Body: { emails: [...] } —
+    optional extra recipients added to the CC list."""
+    res = ac.send_result_email(db, user_id, app_id, (body or {}).get("emails"))
+    return {"success": True, "message": "Email sent", **res}
 
 
 # ---------------- EXPENSE TYPE MASTER ---------------- #
@@ -268,11 +289,29 @@ def set_expense_type_limit(body: dict, user_id: str = Header(...), db: Session =
 
 @router.post("/matrix/hod-category")
 def set_hod_category(body: dict, user_id: str = Header(...), db: Session = Depends(get_db)):
-    """Body: { branch, category, user_ids: [...] } — replaces the approver
-    list for that branch's category."""
+    """Body: { branch, category, user_ids: [...] } — replaces the L4 (HOD)
+    approver list for that branch's category."""
     user_ids = body.get("user_ids", body.get("user_id"))
     res = ac.set_hod_category(db, user_id, body.get("branch"), body.get("category"), user_ids)
-    return {"success": True, "message": "HOD category approvers saved", **res}
+    return {"success": True, "message": "L4 (HOD) category approvers saved", **res}
+
+
+@router.post("/matrix/level-config")
+def set_level_config(body: dict, user_id: str = Header(...), db: Session = Depends(get_db)):
+    """Body: { level: 'l1'..'l5', display_name?, max_discount_percent,
+    max_credit_days, max_expense_amount, expense_type_limits: [...] } —
+    level-wise limits (applied to every user of the level) + custom name."""
+    res = ac.set_level_config(db, user_id, body)
+    return {"success": True, "message": "Level configuration saved", **res}
+
+
+@router.post("/matrix/stage-approvers")
+def set_stage_approvers(body: dict, user_id: str = Header(...), db: Session = Depends(get_db)):
+    """Body: { branch, stage: 'l2'|'l3', user_ids: [...] } — replaces the
+    stage approver list for that branch's hierarchy row."""
+    user_ids = body.get("user_ids", body.get("user_id"))
+    res = ac.set_stage_approvers(db, user_id, body.get("branch"), body.get("stage"), user_ids)
+    return {"success": True, "message": "Stage approvers saved", **res}
 
 
 @router.get("/applications/{app_id}/pdf")

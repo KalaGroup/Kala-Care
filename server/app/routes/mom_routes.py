@@ -11,7 +11,7 @@ from app.database import SessionLocal
 from app.controllers import mom_controller as mc
 from app.controllers import mom_files_controller as mf
 from app.schemas.mom_schema import (
-    MeetingIn, MasterPointIn, MasterPointUpdate, CategoryIn, CategoryUpdate,
+    MeetingIn, MeetingUpdateIn, MasterPointIn, MasterPointUpdate, CategoryIn, CategoryUpdate,
     MeetingTypeIn, MeetingTypeUpdate, DraftIn,
 )
 from app.models.user_model import User, UserRole
@@ -115,6 +115,34 @@ async def create_meeting(
                 raise HTTPException(
                     status_code=503,
                     detail="Database connection dropped while saving — the minutes were NOT saved. Please try again.",
+                )
+            await asyncio.sleep(1 + attempt)
+
+
+@router.put("/meetings/{meeting_id}")
+async def edit_meeting(
+    meeting_id: int,
+    payload: MeetingUpdateIn,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Edit an already-finalized meeting from MOM History. Admins only.
+
+    Same flaky-link retry story as create_meeting: the transaction rolls back
+    on failure, so retrying the whole update is safe."""
+    _require_role(db, user_id, user_role, ADMIN_ROLES,
+                  "Only admins can edit meeting minutes")
+    for attempt in range(3):
+        try:
+            meeting = mc.update_meeting(db, meeting_id, payload.model_dump(exclude_unset=True))
+            return {"success": True, "meeting": meeting}
+        except OperationalError:
+            db.rollback()
+            if attempt == 2:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Database connection dropped while saving — the changes were NOT saved. Please try again.",
                 )
             await asyncio.sleep(1 + attempt)
 

@@ -24,23 +24,25 @@ export const themeSoft = 'rgba(47, 49, 146, 0.10)';
 export const ACTION = { R: 'Replace', C: 'Check', T: 'Top-up' };
 
 // MASTER_DATA export column order. The kit columns (Kit Number / Kit Description /
-// Qty / Action) are stored on the same part line as altPartNo / altDesc / altQty /
-// altAction — same order the new master file uses.
+// Qty / Action / Service Hours) are stored on the same part line as altPartNo /
+// altDesc / altQty / altAction / altServiceHours — same order the new master file
+// uses: the part's Service Hours sits before the kit block, the kit's after it.
 export const ORIG_HEADERS = [
-    'Segment', 'App Code', 'System App Code', 'Engine Model', 'KVA', 'Emmission ',
-    'Part Number', 'Part Description', 'Qty', 'Action', 'Kit Number', 'Kit Description',
-    'Qty', 'Action', 'Service Hours', 'Service schedules ',
+    'Segment', 'App Code', 'System App Code', 'Engine Model', 'KVA', 'Emission',
+    'Part Number', 'Part Description', 'Qty', 'Action', 'Service Hours',
+    'Kit Number', 'Kit Description', 'Qty', 'Action', 'Service Hours',
+    'Service schedules',
 ];
 
 // Columns the Import Data parser looks for, in file order — shown as the expected
-// format on the Import tab. Qty / Action appear twice in the file (once for the
-// part, once for the kit), so they are labelled here to tell the pairs apart.
-// 'App Code' is the only one an import cannot proceed without.
+// format on the Import tab. Qty / Action / Service Hours appear twice in the file
+// (once for the part, once for the kit), so they are labelled here to tell the
+// pairs apart. 'App Code' is the only one an import cannot proceed without.
 export const IMPORT_COLUMNS = [
-    'Segment', 'App Code', 'System App Code', 'Engine Model', 'KVA', 'Emmission',
-    'Part Number', 'Part Description', 'Qty (part)', 'Action (part)',
-    'Kit Number', 'Kit Description', 'Qty (kit)', 'Action (kit)',
-    'Service Hours', 'Service schedules',
+    'Segment', 'App Code', 'System App Code', 'Engine Model', 'KVA', 'Emission',
+    'Part Number', 'Part Description', 'Qty (part)', 'Action (part)', 'Service Hours (part)',
+    'Kit Number', 'Kit Description', 'Qty (kit)', 'Action (kit)', 'Service Hours (kit)',
+    'Service schedules',
 ];
 export const IMPORT_REQUIRED_COLUMN = 'App Code';
 

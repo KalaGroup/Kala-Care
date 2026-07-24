@@ -11,6 +11,7 @@ class PartIn(BaseModel):
     altDesc: Optional[str] = ""
     altQty: Optional[str] = ""
     altAction: Optional[str] = ""
+    altServiceHours: Optional[str] = ""
     serviceHours: Optional[str] = "500"
     consumable: Optional[str] = ""
     schedule: Optional[str] = ""

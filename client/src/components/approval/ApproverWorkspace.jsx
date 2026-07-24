@@ -3,15 +3,16 @@
    the same filters and the shared detail modal for approve / reject. */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
-import { RotateCcw, Search, Inbox, ListChecks } from 'lucide-react';
+import { Search, Inbox, ListChecks, FileText } from 'lucide-react';
 import { getApplications, errText } from './approvalApi';
 import {
     ApplicationsTable, ApplicationDetailModal, CreateApplicationModal,
-    SummaryCards, TypeTabs, STATUS_META, BRAND,
+    SummaryCards, TypeTabs, STATUS_META, statusLabel, BRAND,
 } from './ApprovalShared';
 import ApprovalReports from './ApprovalReports';
 
 export default function ApproverWorkspace({ pendingStatus, pendingLabel, headerActions = null }) {
+    const user = JSON.parse(sessionStorage.getItem('user') || '{}');
     const [apps, setApps] = useState([]);
     const [loading, setLoading] = useState(true);
     const [tab, setTab] = useState('pending');       // pending | all
@@ -34,17 +35,35 @@ export default function ApproverWorkspace({ pendingStatus, pendingLabel, headerA
 
     useEffect(() => { load(); }, [load]);
 
-    const pending = useMemo(() => apps.filter(a => a.status === pendingStatus), [apps, pendingStatus]);
+    // Everything the server says THIS user can act on right now — their own
+    // stage queue PLUS records whose HO creator chose them as L4/L5 approver
+    const pending = useMemo(() => apps.filter(a => a.can_act === true), [apps]);
 
-    const visible = useMemo(() => {
-        const base = tab === 'pending' ? pending : apps;
+    // My NFA — only the records THIS user created (their own applications)
+    const mine = useMemo(() => apps.filter(a => a.created_by === user.user_id),
+        [apps, user.user_id]);
+
+    // Current tab's records with every filter EXCEPT the type — the type tabs
+    // show a per-type count of exactly this set.
+    const filteredBase = useMemo(() => {
+        const base = tab === 'pending' ? pending : tab === 'mine' ? mine : apps;
         return base.filter(a =>
-            a.request_type === typeFilter &&
             (tab === 'pending' || !statusFilter || a.status === statusFilter) &&
             (!search || [a.app_no, a.customer_name, a.invoice_no, a.sr_no, a.created_by_name].some(
                 v => (v || '').toLowerCase().includes(search.toLowerCase())))
         );
-    }, [apps, pending, tab, typeFilter, statusFilter, search]);
+    }, [apps, pending, mine, tab, statusFilter, search]);
+
+    const typeCounts = useMemo(() => ({
+        discounting: filteredBase.filter(a => a.request_type === 'discounting').length,
+        credit: filteredBase.filter(a => a.request_type === 'credit').length,
+        discounting_credit: filteredBase.filter(a => a.request_type === 'discounting_credit').length,
+        expense: filteredBase.filter(a => a.request_type === 'expense').length,
+    }), [filteredBase]);
+
+    const visible = useMemo(() =>
+        filteredBase.filter(a => a.request_type === typeFilter),
+        [filteredBase, typeFilter]);
 
     const tabBtn = (key, label, icon, count) => (
         <button onClick={() => setTab(key)}
@@ -68,11 +87,12 @@ export default function ApproverWorkspace({ pendingStatus, pendingLabel, headerA
 
             <div className="flex flex-wrap items-center gap-2 mb-3">
                 {tabBtn('pending', pendingLabel, <Inbox size={14} />, pending.length)}
+                {tabBtn('mine', 'My NFA', <FileText size={14} />, 0)}
                 {tabBtn('all', 'All Applications', <ListChecks size={14} />, 0)}
                 {headerActions}
 
                 <div className="ml-auto">
-                    <TypeTabs value={typeFilter} onChange={setTypeFilter} />
+                    <TypeTabs value={typeFilter} onChange={setTypeFilter} counts={typeCounts} />
                 </div>
 
                 <div className="relative">
@@ -80,24 +100,22 @@ export default function ApproverWorkspace({ pendingStatus, pendingLabel, headerA
                     <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…"
                         className="pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-xs w-56 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
                 </div>
-                {tab === 'all' && (
+                {tab !== 'pending' && (
                     <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
                         className="border border-gray-300 rounded-lg px-2.5 py-2 text-xs bg-white">
                         <option value="">All Statuses</option>
-                        {Object.entries(STATUS_META).map(([v, m]) => <option key={v} value={v}>{m.label}</option>)}
+                        {Object.keys(STATUS_META).map(v => <option key={v} value={v}>{statusLabel(v)}</option>)}
                     </select>
                 )}
-                <button onClick={load} title="Refresh"
-                    className="p-2 rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-50">
-                    <RotateCcw size={13} />
-                </button>
             </div>
 
             {loading
                 ? <div className="py-16 text-center text-sm text-gray-400">Loading applications…</div>
                 : <ApplicationsTable apps={visible} type={typeFilter}
                     onOpen={app => app.status === 'draft' ? setEditDraft(app) : setSelected(app)}
-                    emptyText={tab === 'pending' ? 'Nothing waiting for your approval' : 'No applications found'} />}
+                    emptyText={tab === 'pending' ? 'Nothing waiting for your approval'
+                        : tab === 'mine' ? 'You have not created any applications yet'
+                            : 'No applications found'} />}
 
             {editDraft && (
                 <CreateApplicationModal draft={editDraft}
@@ -110,10 +128,11 @@ export default function ApproverWorkspace({ pendingStatus, pendingLabel, headerA
             {selected && (
                 <ApplicationDetailModal
                     app={selected}
-                    canAct={selected.status === pendingStatus}
+                    canAct={selected.can_act === true}
                     canDelete={false}
                     onClose={() => setSelected(null)}
                     onChanged={load}
+                    onEditResubmit={(a) => { setSelected(null); setEditDraft(a); }}
                 />
             )}
         </div>

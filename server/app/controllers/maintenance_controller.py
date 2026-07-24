@@ -15,6 +15,7 @@ def serialize_part(p: MaintenancePart):
         "partNumber": p.part_number or "", "partDesc": p.part_desc or "", "qty": p.qty or "",
         "action": p.action or "", "altPartNo": p.alt_part_no or "", "altDesc": p.alt_desc or "",
         "altQty": p.alt_qty or "", "altAction": p.alt_action or "",
+        "altServiceHours": p.alt_service_hours or "",
         "serviceHours": p.service_hours or "500", "consumable": p.consumable or "",
         "schedule": p.schedule or "",
     }
@@ -64,6 +65,7 @@ def _insert_app(db: Session, a: dict, created_by=None):
             qty=p.get("qty"), action=p.get("action"),
             alt_part_no=p.get("altPartNo"), alt_desc=p.get("altDesc"),
             alt_qty=p.get("altQty"), alt_action=p.get("altAction"),
+            alt_service_hours=p.get("altServiceHours"),
             service_hours=str(p.get("serviceHours") or "500"),
             consumable=p.get("consumable"), schedule=p.get("schedule"), sort_order=i,
         ))
@@ -123,6 +125,7 @@ def update_app(db: Session, app_code: str, payload: dict):
                 qty=p.get("qty"), action=p.get("action"),
                 alt_part_no=p.get("altPartNo"), alt_desc=p.get("altDesc"),
                 alt_qty=p.get("altQty"), alt_action=p.get("altAction"),
+                alt_service_hours=p.get("altServiceHours"),
                 service_hours=str(p.get("serviceHours") or "500"),
                 consumable=p.get("consumable"), schedule=p.get("schedule"), sort_order=i,
             ))

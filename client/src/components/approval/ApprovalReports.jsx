@@ -13,7 +13,7 @@ import { X, BarChart3, RotateCcw, Search, FileSpreadsheet } from 'lucide-react';
 import { getApplications, errText } from './approvalApi';
 import {
     ApplicationsTable, ApplicationDetailModal, TypeTabs,
-    STATUS_META, BRAND, typeLabel, catLabel, fmtDate,
+    STATUS_META, statusLabel, BRAND, typeLabel, catLabel, fmtDate,
 } from './ApprovalShared';
 
 // text-gray-900 is explicit: inputs inside the blue header would otherwise
@@ -68,8 +68,9 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
         return Object.entries(seen).sort().map(([branch, branch_name]) => ({ branch, branch_name }));
     }, [apps]);
 
-    const filtered = useMemo(() => apps.filter(a => {
-        if (a.request_type !== tab) return false;
+    // Filters shared by every type tab (branch / status / dates / search /
+    // quotation range) — the per-type counts on the tabs use exactly these.
+    const commonOk = (a) => {
         if (f.branch && a.branch !== f.branch) return false;
         // 'pending' groups every pending_* status (used by the Pending card)
         if (f.status === 'pending' ? !a.status.startsWith('pending') : (f.status && a.status !== f.status)) return false;
@@ -78,11 +79,28 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
         if (f.search && ![a.app_no, a.customer_name, a.invoice_no, a.sr_no, a.created_by_name].some(
             v => (v || '').toLowerCase().includes(f.search.toLowerCase()))) return false;
         if (!inRange(a.quotation_amount, f.qMin, f.qMax)) return false;
+        return true;
+    };
+
+    const filtered = useMemo(() => apps.filter(a => {
+        if (a.request_type !== tab) return false;
+        if (!commonOk(a)) return false;
         if (tab === 'discounting' && !inRange(a.discount_percent, f.dMin, f.dMax)) return false;
         if (tab === 'credit' && !inRange(a.credit_days, f.cMin, f.cMax)) return false;
+        if (tab === 'discounting_credit'
+            && !inRange(a.discount_percent, f.dMin, f.dMax)
+            && !inRange(a.credit_days, f.cMin, f.cMax)) return false;
         if (tab === 'expense' && !inRange(a.expense_amount, f.eMin, f.eMax)) return false;
         return true;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }), [apps, tab, f]);
+
+    const typeCounts = useMemo(() => {
+        const c = { discounting: 0, credit: 0, discounting_credit: 0, expense: 0 };
+        apps.forEach(a => { if (commonOk(a)) c[a.request_type] = (c[a.request_type] || 0) + 1; });
+        return c;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [apps, f]);
 
     const exportExcel = async () => {
         if (!filtered.length) return toast.error('No records to export');
@@ -95,11 +113,14 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
                 ...(isExpense ? ['SR No.', 'Expense Amount', 'Expense Type']
                     : ['Customer Name', 'Instance ID', 'SR No.', 'Invoice', 'Delivery Challan']),
                 'Quotation No.', 'Quotation Amount',
-                ...(tab === 'discounting' ? ['Discounting %'] : tab === 'credit' ? ['Credit Period (Days)'] : []),
+                ...(tab === 'discounting' ? ['Discounting %']
+                    : tab === 'credit' ? ['Credit Period (Days)']
+                        : tab === 'discounting_credit' ? ['Discounting %', 'Credit Period (Days)'] : []),
                 'Purpose', 'Remark', 'Created By', 'Status',
-                'Branch Approved By', 'Branch Approved At',
-                'HOD Approved By', 'HOD Approved At',
-                'COO Approved By', 'COO Approved At',
+                'L2 Approved By', 'L2 Approved At',
+                'L3 Approved By', 'L3 Approved At',
+                'L4 (HOD) Approved By', 'L4 Approved At',
+                'L5 (COO) Approved By', 'L5 Approved At',
                 'Rejected By', 'Rejection Remark',
             ];
             const rows = filtered.map((a, i) => [
@@ -108,12 +129,15 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
                 ...(isExpense ? [a.sr_no || '', a.expense_amount ?? '', a.expense_type || '']
                     : [a.customer_name || '', a.instance_id || '', a.sr_no || '', a.invoice_no || '', a.delivery_challan || '']),
                 a.quotation_no || '', a.quotation_amount ?? '',
-                ...(tab === 'discounting' ? [a.discount_percent ?? ''] : tab === 'credit' ? [a.credit_days ?? ''] : []),
+                ...(tab === 'discounting' ? [a.discount_percent ?? '']
+                    : tab === 'credit' ? [a.credit_days ?? '']
+                        : tab === 'discounting_credit' ? [a.discount_percent ?? '', a.credit_days ?? ''] : []),
                 a.description || '', a.remark || '', a.created_by_name || a.created_by,
-                STATUS_META[a.status]?.label || a.status,
-                a.branch_action_by_name || '', a.branch_action_at ? fmtDate(a.branch_action_at) : '',
-                a.hod_action_by_name || '', a.hod_action_at ? fmtDate(a.hod_action_at) : '',
-                a.coo_action_by_name || '', a.coo_action_at ? fmtDate(a.coo_action_at) : '',
+                statusLabel(a.status),
+                a.l2_action_by_name || '', a.l2_action_at ? fmtDate(a.l2_action_at) : '',
+                a.l3_action_by_name || '', a.l3_action_at ? fmtDate(a.l3_action_at) : '',
+                a.l4_action_by_name || '', a.l4_action_at ? fmtDate(a.l4_action_at) : '',
+                a.l5_action_by_name || '', a.l5_action_at ? fmtDate(a.l5_action_at) : '',
                 a.rejected_by_name || '', a.rejected_remark || '',
             ]);
 
@@ -156,7 +180,7 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
 
     return (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden"
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[96vw] h-[94vh] flex flex-col overflow-hidden"
                 onClick={e => e.stopPropagation()}>
                 {/* Blue bar: title + search + branch + type tabs + export + close */}
                 <div className="flex flex-nowrap items-center gap-2 px-5 py-2.5 rounded-t-2xl text-white overflow-x-auto"
@@ -176,15 +200,19 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
                                 <option key={b.branch} value={b.branch}>{b.branch}{b.branch_name ? ` — ${b.branch_name}` : ''}</option>
                             ))}
                         </select>
-                        <TypeTabs value={tab} onChange={setTab} />
+                        <TypeTabs value={tab} onChange={setTab} counts={typeCounts} />
                         {canExport && (
                             <button onClick={exportExcel} disabled={exporting || loading}
                                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 whitespace-nowrap">
                                 <FileSpreadsheet size={14} /> {exporting ? 'Exporting…' : 'Export Excel'}
                             </button>
                         )}
+                        <button onClick={load} disabled={loading} title="Refresh"
+                            className="p-2 rounded-lg bg-white/15 hover:bg-white/25 text-white transition disabled:opacity-50 flex-shrink-0">
+                            <RotateCcw size={14} />
+                        </button>
                     </div>
-                    <button onClick={onClose} className="p-1 rounded-lg hover:bg-white/15 flex-shrink-0"><X size={16} /></button>
+                    <button onClick={onClose} className="p-1.5 rounded-lg bg-white hover:bg-white/90 transition flex-shrink-0" style={{ color: '#2f3192' }}><X size={15} /></button>
                 </div>
 
                 <div className="p-4 flex-1 min-h-0 flex flex-col gap-3">
@@ -193,8 +221,8 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
                         <select className={input} value={f.status} onChange={set('status')}>
                             <option value="">All Statuses</option>
                             <option value="pending">All Pending</option>
-                            {Object.entries(STATUS_META).filter(([v]) => v !== 'draft')
-                                .map(([v, m]) => <option key={v} value={v}>{m.label}</option>)}
+                            {Object.keys(STATUS_META).filter(v => v !== 'draft')
+                                .map(v => <option key={v} value={v}>{statusLabel(v)}</option>)}
                         </select>
                         <div className="flex items-center gap-1">
                             <span className="text-[10px] font-bold text-gray-800">From</span>
@@ -204,14 +232,9 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
                         </div>
 
                         {rangePair('Quotation Amt', 'qMin', 'qMax', ' ₹')}
-                        {tab === 'discounting' && rangePair('Discount %', 'dMin', 'dMax', ' %')}
-                        {tab === 'credit' && rangePair('Credit Days', 'cMin', 'cMax', '')}
+                        {(tab === 'discounting' || tab === 'discounting_credit') && rangePair('Discount %', 'dMin', 'dMax', ' %')}
+                        {(tab === 'credit' || tab === 'discounting_credit') && rangePair('Credit Days', 'cMin', 'cMax', '')}
                         {tab === 'expense' && rangePair('Expense Amt', 'eMin', 'eMax', ' ₹')}
-
-                        <button onClick={() => setF(EMPTY_FILTERS)} title="Reset filters"
-                            className="p-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">
-                            <RotateCcw size={13} />
-                        </button>
 
                         <span className="ml-auto text-[11px] font-semibold text-gray-800">
                             {filtered.length} record{filtered.length === 1 ? '' : 's'}

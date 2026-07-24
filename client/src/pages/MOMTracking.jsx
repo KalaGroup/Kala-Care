@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import toast from 'react-hot-toast';
@@ -105,7 +106,6 @@ let _uid = 0;
 const uid = (p = 'r') => `${p}${Date.now().toString(36)}${(_uid++).toString(36)}`;
 const today0 = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
 const iso = (d) => d.toISOString().slice(0, 10);
-const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const fmt = (s) => s ? new Date(s).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : '\u2014';
 const fmtDDMMYY = (s) => { if (!s) return ''; const d = new Date(s); return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`; };
 /* responsibility can be a legacy string or (now) an array of names */
@@ -528,6 +528,83 @@ const FlagToggle = ({ value, onChange }) => (
     ))}
   </div>
 );
+/* Discussion-Area picker — replaces the plain <select> with a two-column
+   dropdown (Category first, then the discussion-area description). The menu
+   is portalled to <body> so the sheet's horizontal-scroll container can't
+   clip it, and it re-anchors to the trigger on scroll/resize. */
+const AreaPicker = ({ options, onSelect, placeholder, emptyLabel }) => {
+  const [open, setOpen] = useState(false);
+  const [rect, setRect] = useState(null);
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+  const has = options.length > 0;
+  useEffect(() => {
+    if (!open) return undefined;
+    const reanchor = () => { if (btnRef.current) setRect(btnRef.current.getBoundingClientRect()); };
+    const onDown = (e) => {
+      if (btnRef.current?.contains(e.target) || menuRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', reanchor, true);
+    window.addEventListener('resize', reanchor);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', reanchor, true);
+      window.removeEventListener('resize', reanchor);
+    };
+  }, [open]);
+  const toggle = () => {
+    if (!has) return;
+    if (open) { setOpen(false); return; }
+    if (btnRef.current) setRect(btnRef.current.getBoundingClientRect());
+    setOpen(true);
+  };
+  let menu = null;
+  if (open && rect) {
+    const width = Math.min(Math.max(rect.width, 480), window.innerWidth - 16);
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - 8 - width));
+    const below = window.innerHeight - rect.bottom;
+    const up = below < 300 && rect.top > below;
+    const pos = up ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 };
+    menu = createPortal(
+      <div ref={menuRef} style={{ position: 'fixed', left, width, zIndex: 9999, ...pos }}
+        className="rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden">
+        <div className="flex items-stretch border-b border-gray-200 bg-gray-50 fs-11 font-bold text-gray-700">
+          <span className="px-3 py-2 border-r border-gray-200" style={{ width: '8rem', flexShrink: 0 }}>Category</span>
+          <span className="px-3 py-2">Discussion Area</span>
+        </div>
+        <div style={{ maxHeight: '16rem', overflowY: 'auto' }}>
+          {options.map((p) => (
+            <button key={p.id} type="button"
+              onMouseDown={(e) => e.preventDefault()} /* don't steal focus — avoids scroll jump when this row unmounts */
+              onClick={() => { onSelect(p.id); setOpen(false); }}
+              className="w-full flex items-stretch text-left border-b border-gray-200 hover:bg-gray-50 transition">
+              <span className="px-3 py-2 border-r border-gray-200 fs-12 text-black" style={{ width: '8rem', flexShrink: 0 }}>{p.category}</span>
+              <span className="px-3 py-2 fs-12 text-black break-words flex-1">{p.title}</span>
+            </button>
+          ))}
+        </div>
+      </div>,
+      document.body,
+    );
+  }
+  return (
+    <>
+      <button ref={btnRef} type="button" onMouseDown={(e) => e.preventDefault()} onClick={toggle} disabled={!has}
+        title="Pick a master discussion area — only points not already on the sheet are listed"
+        className="no-ring w-full flex items-center justify-between gap-1 fs-12 font-semibold outline-none px-1 py-1 rounded text-left disabled:cursor-not-allowed"
+        style={{ cursor: has ? 'pointer' : 'not-allowed' }}>
+        <span className={has ? 'text-gray-800' : 'text-gray-400'}>{has ? placeholder : emptyLabel}</span>
+        <ChevronDown size={14} className="text-gray-400 flex-shrink-0" />
+      </button>
+      {menu}
+    </>
+  );
+};
 const SegStatus = ({ value, onChange }) => (
   <div className="inline-flex items-center rounded-lg border border-gray-200 overflow-hidden flex-shrink-0">
     {[['pending', 'Pending'], ['in_progress', 'WIP'], ['completed', 'Done']].map(([k, lbl]) => (
@@ -826,6 +903,7 @@ export default function MOMTracking() {
   const [confirm, setConfirm] = useState(null);
   const [confirmBusy, setConfirmBusy] = useState(false);  // async onYes running → spinner on the Yes button
   const [viewMtg, setViewMtg] = useState(null);
+  const [editMtg, setEditMtg] = useState(null);   // meeting being edited from MOM History
   // branch pre-selected when Reports jumps to History; branch admins start on
   // their login branch instead of "All branches"
   const [histBranch, setHistBranch] = useState(isMaster ? null : (me?.branch || null));
@@ -868,6 +946,16 @@ export default function MOMTracking() {
     const codes = mt.branches?.length ? mt.branches.map((b) => b.code) : [mt.branchCode];
     const next = { ...h };
     codes.forEach((c) => { next[c] = [mt, ...(next[c] || [])]; });
+    return next;
+  };
+  /* replace an edited meeting in place across every branch list it's filed
+     under (branch never changes on edit), keeping each list date-desc */
+  const replaceMeeting = (h, mt) => {
+    const codes = mt.branches?.length ? mt.branches.map((b) => b.code) : [mt.branchCode];
+    const next = {};
+    Object.keys(h).forEach((c) => { next[c] = (h[c] || []).filter((x) => x.id !== mt.id); });
+    codes.forEach((c) => { next[c] = [mt, ...(next[c] || [])]; });
+    Object.keys(next).forEach((c) => next[c].sort((a, b) => (b.date || '').localeCompare(a.date || '') || ((b.id || 0) - (a.id || 0))));
     return next;
   };
 
@@ -1299,7 +1387,10 @@ export default function MOMTracking() {
         byMaster.get(k).push(r);
       });
       const custom = prev.filter((r) => !r.masterId || !masterIds.has(String(r.masterId)));
-      const fromMaster = master.filter((p) => picked.has(p.id)).flatMap((p) => byMaster.get(String(p.id)) || [{
+      /* rows appear in the order the points were PICKED (Set keeps insertion
+         order, and the draft saves/restores it as an ordered array) — not in
+         master-list order */
+      const fromMaster = [...picked].map((id) => master.find((p) => p.id === id)).filter(Boolean).flatMap((p) => byMaster.get(String(p.id)) || [{
         id: uid(), trackId: uid('t'), masterId: p.id, area: p.title, category: p.category,
         point: '', resp: [], due: '', flag: 'I', status: 'pending', remark: '',
         originDate: mDate, prevRemarks: [],
@@ -1356,8 +1447,8 @@ export default function MOMTracking() {
        T (Task) is user-wise — picking any owner flips the row to T
        automatically, and switching to I clears the owners again. */
     if (patch.resp !== undefined && respArr(patch.resp).length && next.flag !== 'T') next.flag = 'T';
-    if (next.flag === 'T' && r.flag !== 'T' && !next.due) next.due = iso(addDays(new Date(mDate || iso(new Date())), 7));
-    if (patch.flag === 'T' && !next.due) next.due = iso(addDays(new Date(mDate || iso(new Date())), 7));
+    if (next.flag === 'T' && r.flag !== 'T' && !next.due) next.due = iso(new Date());
+    if (patch.flag === 'T' && !next.due) next.due = iso(new Date());
     if (patch.flag === 'I') { next.due = ''; next.status = 'pending'; next.resp = []; }
     return next;
   }));
@@ -2260,16 +2351,11 @@ export default function MOMTracking() {
                           {gi === 0 && <td rowSpan={g.rows.length} className="px-2 py-2 align-middle text-left">
                             {(r.masterId === null && !r.area) ? (
                               <>
-                                <select value="" onChange={(e) => assignMasterToRow(r.id, e.target.value)}
-                                  className="no-ring w-full fs-12 font-semibold text-gray-800 outline-none px-1 py-1 rounded cursor-pointer"
-                                  title="Pick a master discussion area — only points not already on the sheet are listed">
-                                  <option value="">
-                                    {master.some((p) => !picked.has(p.id)) ? 'Select discussion area…' : 'All master points are already on the sheet'}
-                                  </option>
-                                  {master.filter((p) => !picked.has(p.id)).map((p) => (
-                                    <option key={p.id} value={p.id}>{p.title} — {p.category}</option>
-                                  ))}
-                                </select>
+                                <AreaPicker
+                                  options={master.filter((p) => !picked.has(p.id))}
+                                  onSelect={(id) => assignMasterToRow(r.id, id)}
+                                  placeholder="Select discussion area…"
+                                  emptyLabel="All master points are already on the sheet" />
                                 <div className="fs-9 mt-0.5 font-medium text-gray-400">from master points only</div>
                               </>
                             ) : (
@@ -2372,7 +2458,7 @@ export default function MOMTracking() {
         )}
 
         {/* ===== HISTORY ===== */}
-        {view === 'history' && <HistoryView history={scopedHistory} branches={branchOptions} onView={setViewMtg} onDelete={deleteMeeting} canDelete={histSource === 'api' && me?.role === 'master_admin'} canExport={canExport} onExport={doExport} source={histSource} initialCode={histBranch} fromD={histFrom} toD={histTo} />}
+        {view === 'history' && <HistoryView history={scopedHistory} branches={branchOptions} onView={setViewMtg} onEdit={setEditMtg} canEdit={histSource === 'api' && isMomAdmin} onDelete={deleteMeeting} canDelete={histSource === 'api' && me?.role === 'master_admin'} canExport={canExport} onExport={doExport} source={histSource} initialCode={histBranch} fromD={histFrom} toD={histTo} />}
 
         {/* ===== REPORTS ===== */}
         {view === 'reports' && <ReportsView history={scopedHistory} branches={branchOptions} canExport={canExport} onView={setViewMtg} onOpenBranch={(code) => { setHistBranch(code); setView('history'); }} />}
@@ -2406,6 +2492,11 @@ export default function MOMTracking() {
 
       {/* ===== VIEW MEETING (sheet replica) ===== */}
       {viewMtg && <MeetingSheetModal data={viewMtg} categories={categories} canExport={canExport} onExport={doExport} onClose={() => setViewMtg(null)} />}
+
+      {/* ===== EDIT MEETING (current details · attendees · add row) ===== */}
+      {editMtg && <MeetingEditModal data={editMtg} employees={employees} categories={categories} master={master} authHeaders={authHeaders}
+        onClose={() => setEditMtg(null)}
+        onSaved={(mt) => { setHistory((h) => replaceMeeting(h, mt)); setEditMtg(null); ping('Meeting updated'); }} />}
 
       {/* ===== CONFIRM (finalize) ===== */}
       {confirm && (
@@ -2591,9 +2682,372 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
 }
 
 /* ============================================================
+   MEETING EDIT MODAL — edit a finalized meeting from MOM History.
+   A faithful replica of the New-meeting sheet, but scoped to:
+     • attendees — add employee (remaining employees of this meeting's
+       branches) / add guest, toggle present, remove
+     • the meeting's OWN discussion rows — full sheet functionality
+       (grouped Discussion Areas, add point, add row at the bottom,
+        delete with warning)
+   The meeting details (branch · date · location · type · conductor) are
+   READ-ONLY and never change. Carried (past) points are not shown or
+   edited here; they ride along unchanged in the save so nothing is lost.
+   ============================================================ */
+function MeetingEditModal({ data, employees = [], categories, master = [], authHeaders, onClose, onSaved }) {
+  const [attendees, setAttendees] = useState(() => (data.attendees || []).map((a) => ({ ...a, id: a.id || uid('a') })));
+  const [manualName, setManualName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const { sort: sheetSort, toggle: toggleSheetSort } = useSort();
+  const heads = data.heads || [];
+
+  /* the whole sheet is editable — carried (C/F) points first, then this
+     meeting's own rows — matching how the meeting form lays them out */
+  const [rows, setRows] = useState(() => {
+    const all = (data.rows || []).map((r) => ({ ...r, id: r.id || uid('r'), resp: respArr(r.resp) }));
+    return [...all.filter((r) => r.carried), ...all.filter((r) => !r.carried)];
+  });
+  const carriedCount = useMemo(() => rows.filter((r) => r.carried).length, [rows]);
+  /* master Discussion Areas already on the sheet (string ids so a DB int
+     masterId and a master-list string id compare equal) */
+  const [picked, setPicked] = useState(() =>
+    new Set((data.rows || []).filter((r) => r.masterId != null).map((r) => String(r.masterId))));
+
+  const presentNames = useMemo(() => attendees.filter((a) => a.present).map((a) => a.name), [attendees]);
+  const respOptions = useMemo(() => presentNames.filter((n) => !heads.includes(n)), [presentNames, heads]);
+  const defCat = Object.keys(categories || {})[0] || 'Other';
+
+  const addManual = () => {
+    const n = manualName.trim();
+    if (!n) return;
+    if (attendees.some((a) => (a.name || '').trim().toLowerCase() === n.toLowerCase())) { toast.error('Attendee already in the list'); return; }
+    setAttendees((p) => [...p, { id: uid('a'), name: n, source: 'manual', present: true }]);
+    setManualName('');
+  };
+  const togglePresent = (id) => setAttendees((p) => p.map((a) => a.id === id ? { ...a, present: !a.present } : a));
+  const removeAttendee = (id) => setAttendees((p) => p.filter((a) => a.id !== id));
+
+  /* row edits mirror the live-sheet rules: any owner flips the row to Task,
+     a Task defaults its due date to today, an Information row clears both */
+  const updRow = (id, patch) => setRows((p) => p.map((r) => {
+    if (r.id !== id) return r;
+    const next = { ...r, ...patch };
+    if (patch.resp !== undefined && respArr(patch.resp).length && next.flag !== 'T') next.flag = 'T';
+    if (patch.flag === 'T' && !next.due) next.due = iso(new Date());
+    if (patch.flag === 'I') { next.due = ''; next.status = 'pending'; next.resp = []; }
+    return next;
+  }));
+  /* removing the last row of a master Discussion Area also unpicks it */
+  const delRow = (id) => {
+    const r = rows.find((x) => x.id === id);
+    if (r?.masterId && rows.filter((x) => String(x.masterId) === String(r.masterId)).length <= 1) {
+      setPicked((s) => { const n = new Set(s); n.delete(String(r.masterId)); return n; });
+    }
+    setRows((p) => p.filter((x) => x.id !== id));
+  };
+  /* deleting a row that has anything typed in it asks first */
+  const askDelRow = (r) => {
+    const hasContent = (r.point || '').trim() || (r.remark || '').trim() || respArr(r.resp).length;
+    if (!hasContent) { delRow(r.id); return; }
+    Swal.fire({
+      icon: 'warning',
+      title: 'Remove this row?',
+      html: `<div style="font-size:13px;line-height:1.6">Discussion Area: <b>${r.area || '—'}</b><br/>The point, remark and everything typed in this row will be lost.</div>`,
+      showCancelButton: true,
+      confirmButtonColor: '#2f3192',
+      cancelButtonText: 'Cancel',
+      confirmButtonText: 'Yes, remove',
+    }).then((res) => { if (res.isConfirmed) delRow(r.id); });
+  };
+  /* one Discussion Area → many points: add a fresh point-row right below */
+  const addPointRow = (rowId) => setRows((prev) => {
+    const i = prev.findIndex((x) => x.id === rowId);
+    if (i < 0) return prev;
+    const src = prev[i];
+    const nr = { id: uid('r'), trackId: uid('t'), masterId: src.masterId || null, area: src.area, category: src.category, point: '', resp: [], due: '', flag: 'I', status: 'pending', remark: '', carried: false, originDate: data.date, prevRemarks: [] };
+    return [...prev.slice(0, i + 1), nr, ...prev.slice(i + 1)];
+  });
+  const unpickedMaster = useMemo(() => master.filter((p) => !picked.has(String(p.id))), [master, picked]);
+  const hasBlankRow = rows.some((r) => !r.masterId && !(r.area || '').trim());
+  /* new row comes in at the BOTTOM (same as the meeting form) */
+  const addRow = () => {
+    if (hasBlankRow) { toast.error('Select a discussion area for the new row first'); return; }
+    setRows((p) => [...p, { id: uid('r'), trackId: uid('t'), masterId: null, area: '', category: defCat, point: '', resp: [], due: '', flag: 'I', status: 'pending', remark: '', originDate: data.date, prevRemarks: [] }]);
+  };
+  const assignMasterToRow = (rowId, pid) => {
+    const p = master.find((x) => String(x.id) === String(pid));
+    if (!p) return;
+    setRows((prev) => prev.map((r) => r.id === rowId ? { ...r, masterId: p.id, area: p.title, category: p.category } : r));
+    setPicked((s) => { const n = new Set(s); n.add(String(p.id)); return n; });
+  };
+
+  const save = () => {
+    if (saving) return;
+    if (!attendees.some((a) => a.present)) return toast.error('Mark at least one attendee as present');
+    /* drop untouched blank Information rows (carried rows are always kept) */
+    const kept = rows.filter((r) => r.carried || !(r.flag === 'I' && !(r.point || '').trim() && !(r.remark || '').trim() && !respArr(r.resp).length));
+    const unassigned = kept.filter((r) => !r.carried && r.flag === 'T' && !respArr(r.resp).length);
+    if (unassigned.length) return toast.error('Some Task rows have no Responsibility — assign someone or switch them to "I"');
+    const emptyPoint = kept.filter((r) => !r.carried && (r.flag === 'T' || respArr(r.resp).length) && !(r.point || '').trim());
+    if (emptyPoint.length) return toast.error('A Task row has no Discussion point — write what was discussed or switch it to "I"');
+
+    /* only attendees + rows go up — the meeting's own details never change */
+    const payload = {
+      attendees: attendees.map((a) => ({ name: a.name, source: a.source, present: a.present, user_id: a.user_id || null, branch: a.branch || null })),
+      rows: kept.map((r) => ({
+        trackId: r.trackId, masterId: r.masterId ?? null, area: r.area, category: r.category,
+        point: r.point || '', resp: respArr(r.resp), due: r.due || '', flag: r.flag,
+        status: r.status, remark: r.remark || '', originDate: r.originDate || r.srcDate || '',
+        carried: !!r.carried, prevRemarks: r.prevRemarks || [],
+      })),
+    };
+    setSaving(true);
+    axios.put(`${MOM_API}/meetings/${data.id}`, payload, { headers: authHeaders })
+      .then((res) => { if (!res.data?.success) throw new Error('Save failed'); onSaved(res.data.meeting); })
+      .catch((e) => toast.error(e?.response?.data?.detail || 'Could not save changes — is the server running?'))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-7xl flex flex-col" style={{ maxHeight: '96vh' }} onClick={(e) => e.stopPropagation()}>
+        {/* header — read-only meeting details */}
+        <div className="px-4 py-3 flex items-start justify-between rounded-t-2xl border-b border-gray-100 gap-2" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
+          <div className="min-w-0 flex items-start gap-3">
+            <span className="h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: SHEET_SOFT }}><Pencil size={18} style={{ color: SHEET_DARK }} /></span>
+            <div className="min-w-0">
+              <h3 className="text-base font-bold text-gray-800 leading-tight truncate">Edit meeting — {data.branchName}</h3>
+              <div className="fs-12 mt-1 text-black flex items-center gap-3 flex-wrap">
+                <span className="inline-flex items-center gap-1"><CalendarDays size={13} /> {fmt(data.date)}</span>
+                {data.location && <span className="inline-flex items-center gap-1"><MapPin size={13} /> {data.location}</span>}
+                {data.type && <span>{data.type}</span>}
+                <span>by {data.conductedBy || '—'}</span>
+                <span className="fs-10 text-gray-400">· details are read-only</span>
+              </div>
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* ---- attendees (same layout as the meeting form) ---- */}
+          <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+            <div className="grid grid-cols-1 lg:grid-cols-[0.6fr_1fr_1fr] divide-x divide-gray-100">
+              {/* Meeting heads — read-only */}
+              <div className="px-3 py-2 flex items-center gap-2 min-w-0">
+                <div className="min-w-0 flex-1">
+                  <div className="fs-9 font-bold uppercase tracking-wide text-black pb-1">Meeting heads</div>
+                  <div className="kc-input mt-0.5 w-full flex items-center gap-1.5 px-2 py-1" title={heads.join(', ')}>
+                    <Crown size={12} className="text-gray-400 flex-shrink-0" />
+                    <span className="truncate flex-1 min-w-0 fs-12 font-semibold text-gray-800">{heads.join(', ') || data.conductedBy || '—'}</span>
+                  </div>
+                </div>
+              </div>
+              {/* Attendees dropdown */}
+              <div className="px-3 py-2 flex items-center gap-2 min-w-0">
+                <div className="min-w-0 flex-1">
+                  <div className="fs-9 font-bold uppercase tracking-wide text-black pb-1">Attendees <span className="text-red-300">*</span></div>
+                  <Dropdown hover panelClass="w-80 max-w-[90vw]"
+                    trigger={({ open, toggle }) => (
+                      <button type="button" onClick={toggle}
+                        className="kc-input mt-0.5 w-full flex items-center justify-between gap-1.5 px-2 py-1 fs-12 font-semibold text-gray-800 text-left"
+                        title="See the attendee list & mark who is present"
+                        style={open ? { borderColor: BRAND, background: '#fff', boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}}>
+                        <span className="truncate flex-1 min-w-0" style={!attendees.length ? { color: '#9ca3af', fontWeight: 500, fontSize: '10px' } : {}}>
+                          {attendees.length ? `${presentNames.length}/${attendees.length} present` : 'No attendees yet…'}
+                        </span>
+                        <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
+                      </button>
+                    )}>
+                    <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-black border-b border-gray-100 flex items-center justify-between gap-2">
+                      <span>Attendees — tick = present</span>
+                      <span className="rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: INK }}>{presentNames.length}/{attendees.length}</span>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto kc-scroll py-1">
+                      {attendees.length === 0 && <div className="px-3 py-2 fs-11 text-gray-400">No attendees yet — add employees or a guest below.</div>}
+                      {attendees.map((a) => (
+                        <div key={a.id} role="button" tabIndex={0} onClick={() => togglePresent(a.id)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePresent(a.id); } }}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50 cursor-pointer"
+                          title={a.present ? 'Click to mark absent' : 'Click to mark present'}>
+                          <span className="h-4 w-4 rounded border flex items-center justify-center flex-shrink-0" style={a.present ? { background: BRAND, borderColor: BRAND } : { borderColor: '#cfcfe0' }}>
+                            {a.present && <Check size={11} color="#fff" className="kc-pop" />}
+                          </span>
+                          <span className={`fs-11 flex-1 min-w-0 truncate ${a.present ? 'text-gray-800' : 'text-gray-400 line-through'}`}>{a.name}</span>
+                          {a.branch && <span className="fs-9 font-medium px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: '#eef0fa', color: '#4b4e9e' }}>{a.branch}</span>}
+                          {a.source === 'manual' && <span className="rounded-full px-1 fs-9 font-bold flex-shrink-0" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Manually added guest">M</span>}
+                          {(a.source === 'manual' || a.extra) && (
+                            <button type="button" onClick={(e) => { e.stopPropagation(); removeAttendee(a.id); }} className="flex-shrink-0 rounded-lg p-1 text-black hover:text-red-500 hover:bg-red-50" title="Remove"><Trash2 size={12} /></button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </Dropdown>
+                </div>
+              </div>
+              {/* Add guest */}
+              <div className="px-3 py-2 flex items-center gap-2 min-w-0">
+                <div className="min-w-0 flex-1">
+                  <div className="fs-9 font-bold uppercase tracking-wide text-black pb-1">Add guest</div>
+                  <div className="kc-input mt-0.5 w-full flex items-center gap-1 px-2 py-1">
+                    <input value={manualName} onChange={(e) => setManualName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addManual()}
+                      placeholder="Type guest name…" className="flex-1 min-w-0 fs-12 font-semibold text-gray-800 outline-none bg-transparent" />
+                    <button type="button" onClick={addManual} className="rounded px-2 py-0.5 fs-10 font-bold text-white flex-shrink-0" style={{ background: BRAND }} title="Add the typed name as a guest">Add</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ---- discussion sheet (this meeting's own rows) ---- */}
+          <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+            <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-2 flex-wrap">
+              <span className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ background: BRAND_SOFT }}><ClipboardList size={15} style={{ color: INK }} /></span>
+              <span className="fs-13 font-bold text-gray-800">Discussion — this meeting</span>
+              {carriedCount > 0 && <span className="fs-10 font-medium text-gray-400">· includes {carriedCount} carried (C/F) point{carriedCount > 1 ? 's' : ''}</span>}
+              <div className="flex items-center gap-3 fs-11 text-black ml-auto">
+                <span className="inline-flex items-center gap-1"><FlagChip f="T" small /> Task</span>
+                <span className="inline-flex items-center gap-1"><FlagChip f="I" small /> Information</span>
+              </div>
+            </div>
+            <DualScroll>
+              <table className="mom-sheet w-full fs-12" style={{ borderCollapse: 'collapse', minWidth: SHEET_MINW }}>
+                <thead>
+                  <tr style={{ background: '#f1f3fb', color: INK }}>
+                    <th className="px-1 py-2 fs-11 font-bold" style={{ width: '2.75rem' }}>Action</th>
+                    <th className="px-2 py-2 fs-11 font-bold" style={{ width: '2.8rem' }}>Sr.no</th>
+                    <SortTh label="Category" sortKey="category" sort={sheetSort} onSort={toggleSheetSort} className="px-2 py-2 fs-11 font-bold" style={{ width: '5rem' }} />
+                    <SortTh label="Discussion Area" sortKey="area" sort={sheetSort} onSort={toggleSheetSort} className="px-2 py-2 fs-11 font-bold" style={{ width: '12rem', minWidth: '12rem' }} />
+                    <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '15rem' }}>Discussion points</th>
+                    <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8rem' }}>Responsibility</th>
+                    <th className="px-2 py-2 fs-11 font-bold" style={{ width: '5rem' }}>Action flag</th>
+                    <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8.5rem' }}>Due Date</th>
+                    <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '16rem' }}>Remark/Observation/Action</th>
+                    <th className="px-2 py-2 fs-11 font-bold" style={{ width: '6.5rem' }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    let groups = groupConsecutive(rows, sheetGroupKey).map((g) => ({ key: g.key, rows: g.items }));
+                    if (sheetSort) {
+                      const get = sheetSort.key === 'category' ? (g) => g.rows[0]?.category : (g) => g.rows[0]?.area;
+                      const dir = sheetSort.dir === 'desc' ? -1 : 1;
+                      groups = groups.slice().sort((x, y) => {
+                        const a = get(x), b = get(y);
+                        const ea = String(a ?? '').trim() === '', eb = String(b ?? '').trim() === '';
+                        if (ea && eb) return 0;
+                        if (ea) return 1;
+                        if (eb) return -1;
+                        return dir * compareValues(a, b);
+                      });
+                    }
+                    return groups.flatMap((g, gIdx) => g.rows.map((r, gi) => {
+                      const isT = r.flag === 'T';
+                      return (
+                        <tr key={r.id}>
+                          <td className="px-1 py-2">
+                            <div className="flex items-center justify-center gap-1.5">
+                              {r.carried
+                                ? <span className="fs-9 font-bold rounded px-1 py-0.5" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Carried forward from a previous meeting — kept here and cannot be removed">C/F</span>
+                                : <button onClick={() => askDelRow(r)} className="text-gray-700 hover:text-red-500" title="Remove row"><Trash2 size={14} strokeWidth={2.25} /></button>}
+                            </div>
+                          </td>
+                          {gi === 0 && <td rowSpan={g.rows.length} className="px-2 py-2 text-center text-gray-500 align-middle">{gIdx + 1}</td>}
+                          {gi === 0 && <td rowSpan={g.rows.length} className="px-2 py-2 align-middle text-center">
+                            {(r.masterId === null && !r.area) ? <span className="fs-11 text-gray-300">—</span> : <span className="fs-11 text-black">{r.category || '—'}</span>}
+                          </td>}
+                          {gi === 0 && <td rowSpan={g.rows.length} className="px-2 py-2 align-middle text-left">
+                            {(r.masterId === null && !r.area) ? (
+                              <>
+                                <AreaPicker options={unpickedMaster} onSelect={(id) => assignMasterToRow(r.id, id)} placeholder="Select discussion area…" emptyLabel="All master points are already on the sheet" />
+                                <div className="fs-9 mt-0.5 font-medium text-gray-400">from master points only</div>
+                              </>
+                            ) : <span className="font-semibold text-gray-800">{r.area}</span>}
+                          </td>}
+                          <td className="px-1 py-1 align-top mom-fill">
+                            {r.carried && (
+                              <div className="px-1.5 pt-1">
+                                <span className="fs-9 font-bold rounded px-1 py-0.5" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Carried forward from a previous meeting">C/F · raised {fmt(r.originDate || r.srcDate)}</span>
+                              </div>
+                            )}
+                            <BulletEditor value={r.point} onChange={(v) => updRow(r.id, { point: v })} placeholder="What was discussed / decided…" />
+                            {gi === g.rows.length - 1 && !!r.area && (
+                              <button onClick={() => addPointRow(r.id)}
+                                className="mb-1 ml-1.5 inline-flex items-center gap-1 fs-10 font-bold rounded-lg px-1.5 py-0.5"
+                                style={{ color: '#047857', background: 'rgba(5,150,105,0.1)', border: '1px solid rgba(5,150,105,0.25)' }}
+                                title="Add another discussion point under this Discussion Area">
+                                <Plus size={11} strokeWidth={2.5} /> point
+                              </button>
+                            )}
+                          </td>
+                          <td className="px-1 py-1"><RespPicker value={respArr(r.resp)} options={respOptions} onChange={(v) => updRow(r.id, { resp: v })} /></td>
+                          <td className="px-2 py-2 text-center"><FlagToggle value={r.flag} onChange={(f) => updRow(r.id, { flag: f })} /></td>
+                          <td className="px-1 py-1">
+                            {isT ? <input type="date" value={r.due} onChange={(e) => updRow(r.id, { due: e.target.value })} className="w-full fs-11 text-gray-700 outline-none px-1 py-1 rounded" />
+                              : <div className="text-center fs-11 text-gray-300" title="Information rows don't need a due date">—</div>}
+                          </td>
+                          <td className="px-1 py-1 mom-fill">
+                            {r.carried && r.prevRemarks?.length > 0 && <div className="px-1.5 pt-1"><RemarkHistory list={r.prevRemarks} /></div>}
+                            {(r.remark || '').trim() && (
+                              <div className="px-1.5 pt-1 flex items-center gap-1.5 flex-wrap" style={r.carried && r.prevRemarks?.length ? { borderTop: '1px solid #e4e7f2' } : undefined}>
+                                <span className="fs-10 font-bold" style={{ color: '#475569' }}>{fmtDDMMYY(data.date)}</span>
+                                <span className="rounded-full px-1.5 py-0.5 fs-9 font-bold" style={{ background: BRAND_SOFT, color: INK }}>this meeting</span>
+                              </div>
+                            )}
+                            <BulletEditor value={r.remark} onChange={(v) => updRow(r.id, { remark: v })} placeholder="Remark…" />
+                          </td>
+                          <td className="px-1 py-1">
+                            {isT ? (
+                              <select value={r.status} onChange={(e) => updRow(r.id, { status: e.target.value })} className="w-full fs-11 font-semibold outline-none px-1.5 py-1.5 rounded-lg" style={{ color: STATUS[r.status].color, background: STATUS[r.status].soft }}>
+                                <option value="pending">Pending</option><option value="in_progress">WIP</option><option value="completed">Completed</option>
+                              </select>
+                            ) : <div className="text-center fs-11 text-gray-300">—</div>}
+                          </td>
+                        </tr>
+                      );
+                    }));
+                  })()}
+                  {rows.length === 0 && <tr><td colSpan={10} className="px-3 text-center fs-12 text-gray-400" style={{ height: '6rem', verticalAlign: 'middle' }}>No rows — add a discussion area using "Add row" below.</td></tr>}
+                  {/* add row — always at the BOTTOM, in the Discussion Area column */}
+                  {unpickedMaster.length > 0 && (
+                    <tr style={{ background: '#fafbfd' }}>
+                      <td />
+                      <td className="px-2 py-2 text-center text-gray-300">{groupConsecutive(rows, sheetGroupKey).length + 1}</td>
+                      <td />
+                      <td className="p-0">
+                        <button onClick={addRow} type="button"
+                          className="mom-addrow w-full flex items-center justify-start gap-1.5 px-3 py-2 fs-11 font-bold transition hover:bg-[#eef2ff]"
+                          style={hasBlankRow ? { color: '#9ca3af', background: 'transparent', border: 'none', cursor: 'not-allowed' } : { color: BRAND, background: 'transparent', border: 'none' }}
+                          title={hasBlankRow ? 'Select a discussion area for the pending row first' : 'Pick the new row\'s Discussion Area from the master points'}>
+                          <Plus size={14} /> Add row
+                        </button>
+                      </td>
+                      <td className="px-2 py-2"><span className="fs-10 font-normal text-gray-400 max-sm:hidden">{hasBlankRow ? '— select the pending row\'s Discussion Area to add more' : '— select its Discussion Area from the master points'}</span></td>
+                      <td /><td /><td /><td /><td />
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </DualScroll>
+          </div>
+        </div>
+
+        {/* footer */}
+        <div className="flex justify-end gap-2 px-5 py-3 border-t border-gray-100" style={{ background: '#fafbfd' }}>
+          <button onClick={onClose} disabled={saving} className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 fs-11 font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-60">Cancel</button>
+          <button onClick={save} disabled={saving} className="kc-lift inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 fs-11 font-bold text-white disabled:opacity-60" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})` }}>
+            {saving ? <span className="h-3 w-3 rounded-full animate-spin" style={{ border: '2px solid rgba(255,255,255,0.35)', borderTopColor: '#fff' }} /> : <CheckCircle2 size={14} />}
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    HISTORY VIEW — branch sidebar + searchable, sortable table
    ============================================================ */
-function HistoryView({ history, branches, onView, onDelete, canDelete, canExport, onExport, source, initialCode, fromD = '', toD = '' }) {
+function HistoryView({ history, branches, onView, onEdit, canEdit, onDelete, canDelete, canExport, onExport, source, initialCode, fromD = '', toD = '' }) {
   /* the sidebar also lists branches that ONLY exist in history
      (e.g. manually added ones) */
   const allBranches = useMemo(() => {
@@ -2856,6 +3310,7 @@ function HistoryView({ history, branches, onView, onDelete, canDelete, canExport
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-end gap-1.5">
                           {canExport && <button onClick={() => onExport(m)} title="Export Excel" className="export-btn rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50"><Upload size={13} /></button>}
+                          {canEdit && <button onClick={() => onEdit(m)} title="Edit meeting — details, attendees & add rows" className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:text-[#2f3192] hover:bg-indigo-50"><Pencil size={13} /></button>}
                           {canDelete && <button onClick={() => onDelete(m)} title="Delete meeting" className="rounded-lg border border-gray-200 p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-50"><Trash2 size={13} /></button>}
                           <button onClick={() => onView(m)} className="kc-lift rounded-lg px-2.5 py-1.5 fs-11 font-bold text-white" style={{ background: `linear-gradient(120deg, ${BRAND}, ${BRAND_DARK})` }}>View sheet</button>
                         </div>

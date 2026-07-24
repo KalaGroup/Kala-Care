@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Network, FileCheck2, Gauge, X, BarChart3 } from 'lucide-react';
+import { Network, FileCheck2, Gauge, X, BarChart3, RotateCcw } from 'lucide-react';
 import { getAccess, errText } from '../components/approval/approvalApi';
+import { setLevelNames, levelLabel, levelName } from '../components/approval/ApprovalShared';
 import EmployeeApprovalView from '../components/approval/EmployeeApprovalView';
 import BranchApprovalView from '../components/approval/BranchApprovalView';
 import HODApprovalView from '../components/approval/HODApprovalView';
@@ -12,53 +13,89 @@ import ApprovalReports from '../components/approval/ApprovalReports';
 const themeColor = '#2f3192';
 const themeDark = '#23255f';
 
-const LEVEL_BADGES = {
-    user: { label: 'Employee' },
-    branch: { label: 'Branch Admin Approval' },
-    hod: { label: 'HOD Approval' },
-    coo: { label: 'COO Approval' },
-};
+// Level labels come from levelLabel() (ApprovalShared) so COO-renamed level
+// names show here too.
 
-// Small popup showing the logged-in approver's own authority limits
+// Popup showing the logged-in user's own authority limits AND the L1..L5
+// hierarchy their own submissions follow. Shown for EVERY user.
 function MyLimitsModal({ access, onClose }) {
     const lim = access.limits || {};
-    // no limit set = 0 (approver forwards everything upward)
+    const chain = access.my_chain || {};
+    const unlimited = lim.unlimited === true;
+    // null = unlimited (rights masters, or L5 whose blanks default unlimited);
+    // other levels' blanks arrive as 0 from the server
     const fmt = (v, unit = '') =>
-        (v === null || v === undefined || v === '') ? (unit === 'inr' ? '₹0' : `0${unit}`)
-            : unit === 'inr' ? `₹${Number(v).toLocaleString('en-IN')}` : `${v}${unit}`;
+        unlimited || v === null || v === undefined ? 'Unlimited'
+            : v === '' ? (unit === 'inr' ? '₹0' : `0${unit}`)
+                : unit === 'inr' ? `₹${Number(v).toLocaleString('en-IN')}` : `${v}${unit}`;
     const Row = ({ label, value }) => (
         <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 last:border-0">
             <span className="text-xs font-semibold text-gray-800">{label}</span>
             <span className="text-xs font-bold" style={{ color: themeColor }}>{value}</span>
         </div>
     );
+    const CATS = [['spares', 'Spares'], ['services', 'Services'], ['spares_services', 'Spares & Services']];
+    const stepNames = (s) => {
+        if (!s) return 'Skipped';
+        if (Array.isArray(s)) return s.join(', ');
+        if (s.skipped) return `Skipped — ${s.skipped}`;
+        return (s.names || []).join(', ') || '—';
+    };
+    const ChainStep = ({ tag, text }) => (
+        <div className="flex items-start gap-2 px-3 py-1.5 border-b border-gray-100 last:border-0">
+            <span className="mt-0.5 flex-shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-50 text-indigo-700 w-14 text-center">{tag}</span>
+            <span className="text-[11px] text-gray-800">{text}</span>
+        </div>
+    );
     return (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
-                <div className="flex items-center justify-between px-4 py-3 text-white" style={{ background: themeColor }}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                <div className="sticky top-0 flex items-center justify-between px-4 py-3 text-white" style={{ background: themeColor }}>
                     <span className="font-semibold text-sm flex items-center gap-2">
                         <Gauge size={15} /> My Approval Limits
                     </span>
-                    <button onClick={onClose} className="p-1 rounded-lg hover:bg-white/15"><X size={15} /></button>
+                    <button onClick={onClose} className="p-1.5 rounded-lg bg-white hover:bg-white/90 transition flex-shrink-0" style={{ color: '#2f3192' }}><X size={15} /></button>
                 </div>
                 <div className="p-4 space-y-3">
                     <p className="text-[11px] text-gray-700">
-                        Records within these limits are finally approved by you (0 = everything forwards); bigger values are
-                        forwarded to the next level after your approval.
+                        You act as <b>{levelLabel(access.level)}</b>. Within these limits = <b>auto approved</b>; above = next level.
                     </p>
                     <div className="rounded-xl border border-gray-200 overflow-hidden">
-                        <Row label="Discounting" value={fmt(lim.max_discount_percent, '%')} />
-                        <Row label="Credit Period" value={fmt(lim.max_credit_days, ' days')} />
+                        <Row label="Max Discounting %" value={fmt(lim.max_discount_percent, '%')} />
+                        <Row label="Max Credit Days" value={fmt(lim.max_credit_days, ' days')} />
                     </div>
                     <div className="rounded-xl border border-gray-200 overflow-hidden">
                         <p className="px-3 py-2 bg-gray-50 text-[10px] uppercase tracking-wide font-bold text-gray-800 border-b border-gray-200">
-                            Expense (per type)
+                            Max Expense Amount (per type)
                         </p>
                         {(lim.expense_types || []).length === 0
                             ? <p className="px-3 py-3 text-xs text-gray-600">No expense types defined yet</p>
                             : lim.expense_types.map(t => (
                                 <Row key={t.name} label={t.name} value={fmt(t.max_amount, 'inr')} />
                             ))}
+                    </div>
+                    {/* The hierarchy this user's own records follow */}
+                    <div className="rounded-xl border border-gray-200 overflow-hidden">
+                        <p className="px-3 py-2 bg-gray-50 text-[10px] uppercase tracking-wide font-bold text-gray-800 border-b border-gray-200">
+                            My Approval Hierarchy {chain.branch ? `(${chain.branch})` : ''}
+                        </p>
+                        <ChainStep tag="L1" text={`${access.name} — creates (within own limit = auto approved)`} />
+                        {chain.is_ho ? (
+                            <>
+                                <ChainStep tag="L2 · L3" text="Skipped — Head Office records go directly to L4/L5" />
+                                <ChainStep tag={`L4 ${levelName('l4')}`} text="You choose your approver at submit" />
+                                <ChainStep tag={`L5 ${levelName('l5')}`} text={stepNames(chain.l5)} />
+                            </>
+                        ) : (
+                            <>
+                                <ChainStep tag="L2" text={stepNames(chain.l2)} />
+                                <ChainStep tag="L3" text={stepNames(chain.l3)} />
+                                {CATS.map(([k, label]) => (
+                                    <ChainStep key={k} tag={`L4 ${levelName('l4')}`} text={`${label}: ${stepNames(chain.l4?.[k])}`} />
+                                ))}
+                                <ChainStep tag={`L5 ${levelName('l5')}`} text={stepNames(chain.l5)} />
+                            </>
+                        )}
                     </div>
                 </div>
             </div>
@@ -78,6 +115,8 @@ export default function ApprovalApplication() {
     const loadAccess = useCallback(async () => {
         try {
             const data = await getAccess();
+            // custom level names (Authority Limit tab) show everywhere
+            setLevelNames(data.access?.level_names);
             setAccess(data.access);
         } catch (err) {
             toast.error(errText(err, 'Failed to load your approval access'));
@@ -101,13 +140,19 @@ export default function ApprovalApplication() {
         );
     }
 
-    const badge = LEVEL_BADGES[access.level] || LEVEL_BADGES.user;
+    const badge = { label: levelLabel(access.level) };
     const View = {
-        user: EmployeeApprovalView,
-        branch: BranchApprovalView,
-        hod: HODApprovalView,
-        coo: COOApprovalView,
+        l1: EmployeeApprovalView,
+        l2: BranchApprovalView,      // generic stage workspace (pending L2)
+        l3: BranchApprovalView,      // generic stage workspace (pending L3)
+        l4: HODApprovalView,
+        l5: COOApprovalView,
     }[access.level] || EmployeeApprovalView;
+    const viewProps = access.level === 'l3'
+        ? { pendingStatus: 'pending_l3', pendingLabel: 'Pending My Approval (L3)' }
+        : access.level === 'l2'
+            ? { pendingStatus: 'pending_l2', pendingLabel: 'Pending My Approval (L2)' }
+            : {};
 
     return (
         <div className="min-h-screen font-sans">
@@ -125,7 +170,7 @@ export default function ApprovalApplication() {
                         <div>
                             <h1 className="text-lg sm:text-xl font-bold leading-tight">Approval Application</h1>
                             <p className="text-[11px] text-white/70 leading-tight">
-                                Discounting, Credit &amp; Expense approvals — Branch Admin, then HOD, then COO
+                                Discounting, Credit &amp; Expense approvals — L2 → L3 → L4 (HOD) → L5 (COO)
                             </p>
                         </div>
                     </div>
@@ -133,30 +178,32 @@ export default function ApprovalApplication() {
                         <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium bg-white/15 text-white">
                             Your view: <b className="font-bold">{badge.label}</b>
                         </span>
-                        {(access.level === 'branch' || access.level === 'hod') && (
-                            <button onClick={() => setShowLimits(true)}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1.5 text-[12px] font-semibold text-white transition">
-                                <Gauge size={14} /> My Approval Limits
-                            </button>
-                        )}
-                        {(access.level === 'hod' || access.level === 'coo') && (
+                        <button onClick={() => setShowLimits(true)}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1.5 text-[12px] font-semibold text-white transition">
+                            <Gauge size={14} /> My Approval Limits
+                        </button>
+                        {(access.level === 'l4' || access.level === 'l5') && (
                             <button onClick={() => setShowReports(true)}
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1.5 text-[12px] font-semibold text-white transition">
                                 <BarChart3 size={14} /> Reports
                             </button>
                         )}
-                        {access.level === 'coo' && (
+                        {access.level === 'l5' && (
                             <button onClick={() => setShowMatrix(true)}
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-[12px] font-semibold transition hover:bg-white/90"
                                 style={{ color: themeColor }}>
                                 <Network size={14} /> Authority Matrix
                             </button>
                         )}
+                        <button onClick={() => { loadAccess(); setViewKey(k => k + 1); }} title="Refresh"
+                            className="rounded-lg bg-white/15 hover:bg-white/25 p-2 text-white transition">
+                            <RotateCcw size={14} />
+                        </button>
                     </div>
                 </div>
             </div>
 
-            <View key={viewKey} />
+            <View key={viewKey} {...viewProps} />
 
             {showMatrix && (
                 <AuthorityMatrix
