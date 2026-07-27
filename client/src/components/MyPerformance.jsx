@@ -503,6 +503,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [statusLocked, setStatusLocked] = useState(false); // true = a status card opened the modal, so hide the Status dropdown
+    // true = modal opened from a Daily Breakdown date — non-drive rows of EVERY
+    // status are merged in so the clicked day shows drive + non-drive together
+    const [dateViewActive, setDateViewActive] = useState(false);
     const [showCancelledCspModal, setShowCancelledCspModal] = useState(false);
 
     // ── Letter Report (letters sent BY this employee) ──────────────────────
@@ -537,6 +540,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const [nonCampaignServiceFilter, setNonCampaignServiceFilter] = useState('all');
     // 'all' = every taken record; 'unique' = latest record per customer (old behavior)
     const [nonCampaignViewMode, setNonCampaignViewMode] = useState('all');
+    const [nonCampaignFromDate, setNonCampaignFromDate] = useState('');   // last follow-up date range (YYYY-MM-DD)
+    const [nonCampaignToDate, setNonCampaignToDate] = useState('');
 
     const [showCspModal, setShowCspModal] = useState(false);
     const [cspData, setCspData] = useState({ total_instances: 0, total_rows: 0, rows: [] });
@@ -604,6 +609,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             setFollowupView('all');
             setStatusFilter('all');
             setStatusLocked(false);
+            setDateViewActive(false);
         }
     }, [showAllFollowupsModal]);
 
@@ -1605,6 +1611,35 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             }));
     }, [nonCampaignData.customers]);
 
+    // EVERY non-campaign record (all statuses), reshaped the same way — used by
+    // the per-date view so a clicked day shows drive + non-drive follow-ups together
+    const allNonDriveFollowups = useMemo(() => {
+        return (nonCampaignData.customers || []).map((c, i) => ({
+            id: `other_${c.instance_id || 'x'}_${i}`,
+            followup_date: c.last_followup_date || null,
+            customer_instance_id: c.instance_id || '',
+            customer_id: null,
+            customer_name: c.customer_name || '',
+            phone_number: c.phone_number || '',
+            email: c.email || '',
+            branch_id: c.branch_id || '',
+            campaign_name: 'other',
+            campaign_service: c.service || '',
+            csp_subtype: c.csp_subtype || '',
+            followup_by: c.followup_by || '',
+            followup_flag: (c.latest_flag && c.latest_flag !== 'N/A') ? c.latest_flag : '',
+            status: (c.last_status || '').toLowerCase(),
+            next_followup_date: c.next_followup_date || null,
+            activity_content: c.activity_content || c.latest_activity || c.activity || '',
+            rr_content: c.rr_content || '',
+            followup_remark: c.latest_remark || '',
+            quotation_sent: !!c.quotation_sent,
+            quotation_no: c.quotation_no || '',
+            quotation_value: c.quotation_value || 0,
+            created_at: c.created_at || c.last_followup_date || null,
+        }));
+    }, [nonCampaignData.customers]);
+
     // Only the plain "All Follow-ups" view (opened from Total Calls and Follow-ups)
     // gets the "other" completed rows appended. Quotation/CSP filtered views do not.
     const isPlainAllView =
@@ -1621,8 +1656,10 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     }[statusFilter] || 'Follow-ups';
 
     const mergedFollowups = useMemo(
-        () => (isPlainAllView ? [...allFollowupsData, ...otherCompletedFollowups] : allFollowupsData),
-        [isPlainAllView, allFollowupsData, otherCompletedFollowups]
+        () => dateViewActive
+            ? [...allFollowupsData, ...allNonDriveFollowups]
+            : (isPlainAllView ? [...allFollowupsData, ...otherCompletedFollowups] : allFollowupsData),
+        [dateViewActive, isPlainAllView, allFollowupsData, allNonDriveFollowups, otherCompletedFollowups]
     );
 
     // Memoized filtered follow-ups for the All-Follow-ups modal
@@ -2032,6 +2069,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setNonCampaignSearchTerm('');
         setNonCampaignStatusFilter('all');
         setNonCampaignServiceFilter('all');
+        setNonCampaignFromDate('');
+        setNonCampaignToDate('');
         setNonCampaignViewMode('all');
         // Rows are prefetched on mount — show them instantly, refresh silently
         fetchNonCampaignCustomers(nonCampaignData.customers.length > 0);
@@ -2045,8 +2084,30 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setNonCampaignSearchTerm('');
         setNonCampaignStatusFilter(status);
         setNonCampaignServiceFilter('all');
+        setNonCampaignFromDate('');
+        setNonCampaignToDate('');
         // Status pills count ALL records — open in All so counts match
         setNonCampaignViewMode('all');
+        fetchNonCampaignCustomers(nonCampaignData.customers.length > 0);
+    };
+
+    // Open the All-Follow-ups modal locked to ONE day (a clicked Daily Performance
+    // Breakdown date). Drive + non-drive rows are both shown and every top filter
+    // (date range / status / view / search / export) stays available.
+    const handleOpenDateFollowups = (date) => {
+        const d = String(date).split('T')[0];
+        setQuotationFilterActive(false);
+        setQuotationSentFilterActive(false);
+        setCspQuotationFilterActive(false);
+        setCspQuotationSentFilterActive(false);
+        setDateViewActive(true);
+        setShowAllFollowupsModal(true);
+        setFollowupSearchTerm('');
+        setCreatedFromDate(d);
+        setCreatedToDate(d);
+        setStatusFilter('all');
+        setStatusLocked(false);
+        fetchAllFollowups(allFollowupsData.length > 0);
         fetchNonCampaignCustomers(nonCampaignData.customers.length > 0);
     };
 
@@ -2081,6 +2142,21 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             if (nonCampaignServiceFilter !== 'all') {
                 if ((c.service || '') !== nonCampaignServiceFilter) return false;
             }
+            if (nonCampaignFromDate || nonCampaignToDate) {
+                if (!c.last_followup_date) return false;
+                const d = new Date(c.last_followup_date);
+                d.setHours(0, 0, 0, 0);
+                if (nonCampaignFromDate) {
+                    const from = new Date(nonCampaignFromDate);
+                    from.setHours(0, 0, 0, 0);
+                    if (d < from) return false;
+                }
+                if (nonCampaignToDate) {
+                    const to = new Date(nonCampaignToDate);
+                    to.setHours(23, 59, 59, 999);
+                    if (d > to) return false;
+                }
+            }
             if (nonCampaignSearchTerm.trim()) {
                 const t = nonCampaignSearchTerm.toLowerCase();
                 const m = (
@@ -2095,7 +2171,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             }
             return true;
         });
-    }, [nonCampaignBase, nonCampaignStatusFilter, nonCampaignServiceFilter, nonCampaignSearchTerm]);
+    }, [nonCampaignBase, nonCampaignStatusFilter, nonCampaignServiceFilter, nonCampaignSearchTerm, nonCampaignFromDate, nonCampaignToDate]);
 
     const exportNonCampaignToExcel = () => {
         if (!filteredNonCampaignCustomers.length) return;
@@ -3013,7 +3089,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     filteredDailyPerformance.map((day, index) => (
                                         <tr key={index} className="hover:bg-gray-50 transition-colors duration-150">
                                             <td className="px-2 py-1 whitespace-nowrap text-[11px] text-black border border-gray-200 text-center">{index + 1}</td>
-                                            <td className="px-2 py-1 whitespace-nowrap text-[11px] font-medium text-black border border-gray-200 text-center">
+                                            <td
+                                                onClick={() => handleOpenDateFollowups(day.date)}
+                                                title="Click to view all drive + non-drive follow-ups on this date"
+                                                className="px-2 py-1 whitespace-nowrap text-[11px] font-medium border border-gray-200 text-center cursor-pointer text-[#2f3192] hover:underline hover:bg-indigo-50"
+                                            >
                                                 {new Date(day.date).toLocaleDateString('en-IN', {
                                                     day: '2-digit',
                                                     month: 'short',
@@ -3848,6 +3928,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     <h3 className="text-base font-semibold text-white">
                                         {statusLocked
                                             ? `${lockedStatusLabel} Follow-ups`
+                                            : dateViewActive
+                                            ? `Daily Follow-ups (Drive + Non-Drive) — ${createdFromDate ? new Date(createdFromDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}`
                                             : quotationFilterActive
                                                 ? 'Quotation Follow-ups'
                                                 : quotationSentFilterActive
@@ -3863,41 +3945,47 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-2 max-lg:flex-wrap">
-                                    {/* Created At - From */}
-                                    <div className="flex items-center gap-1">
-                                        <label className="text-[11px] text-white whitespace-nowrap">Created From:</label>
-                                        <input
-                                            type="date"
-                                            value={createdFromDate}
-                                            onChange={(e) => {
-                                                const newFrom = e.target.value;
-                                                setCreatedFromDate(newFrom);
-                                                if (createdToDate && newFrom && new Date(createdToDate) < new Date(newFrom)) {
-                                                    setCreatedToDate('');
-                                                }
-                                            }}
-                                            max={createdToDate || undefined}
-                                            className="border border-gray-300 rounded-md px-2 py-1 text-[11px] bg-white text-black"
-                                        />
-                                    </div>
+                                    {/* Created At range — hidden in the per-date view (the clicked
+                                        Daily Breakdown date locks the range to that one day) */}
+                                    {!dateViewActive && (
+                                        <>
+                                            {/* Created At - From */}
+                                            <div className="flex items-center gap-1">
+                                                <label className="text-[11px] text-white whitespace-nowrap">Created From:</label>
+                                                <input
+                                                    type="date"
+                                                    value={createdFromDate}
+                                                    onChange={(e) => {
+                                                        const newFrom = e.target.value;
+                                                        setCreatedFromDate(newFrom);
+                                                        if (createdToDate && newFrom && new Date(createdToDate) < new Date(newFrom)) {
+                                                            setCreatedToDate('');
+                                                        }
+                                                    }}
+                                                    max={createdToDate || undefined}
+                                                    className="border border-gray-300 rounded-md px-2 py-1 text-[11px] bg-white text-black"
+                                                />
+                                            </div>
 
-                                    {/* Created At - To */}
-                                    <div className="flex items-center gap-1">
-                                        <label className="text-[11px] text-white whitespace-nowrap">To:</label>
-                                        <input
-                                            type="date"
-                                            value={createdToDate}
-                                            onChange={(e) => {
-                                                const newTo = e.target.value;
-                                                if (createdFromDate && newTo && new Date(newTo) < new Date(createdFromDate)) {
-                                                    return;
-                                                }
-                                                setCreatedToDate(newTo);
-                                            }}
-                                            min={createdFromDate || undefined}
-                                            className="border border-gray-300 rounded-md px-2 py-1 text-[11px] bg-white text-black"
-                                        />
-                                    </div>
+                                            {/* Created At - To */}
+                                            <div className="flex items-center gap-1">
+                                                <label className="text-[11px] text-white whitespace-nowrap">To:</label>
+                                                <input
+                                                    type="date"
+                                                    value={createdToDate}
+                                                    onChange={(e) => {
+                                                        const newTo = e.target.value;
+                                                        if (createdFromDate && newTo && new Date(newTo) < new Date(createdFromDate)) {
+                                                            return;
+                                                        }
+                                                        setCreatedToDate(newTo);
+                                                    }}
+                                                    min={createdFromDate || undefined}
+                                                    className="border border-gray-300 rounded-md px-2 py-1 text-[11px] bg-white text-black"
+                                                />
+                                            </div>
+                                        </>
+                                    )}
                                     {!quotationSentFilterActive && !statusLocked && (
                                         <div className="flex items-center gap-1">
                                             <label className="text-[11px] text-white whitespace-nowrap">Status:</label>
@@ -3957,13 +4045,17 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
                                     {/* Clear filters — status resets only when its dropdown is
                                         visible (a status card locks it as the report's subject) */}
-                                    {(followupSearchTerm || createdFromDate || createdToDate
+                                    {(followupSearchTerm || (!dateViewActive && (createdFromDate || createdToDate))
                                         || (!quotationSentFilterActive && !statusLocked && statusFilter !== 'all')) && (
                                         <button
                                             onClick={() => {
                                                 setFollowupSearchTerm('');
-                                                setCreatedFromDate('');
-                                                setCreatedToDate('');
+                                                // per-date view: the clicked day stays locked — Clear
+                                                // only resets search / status there
+                                                if (!dateViewActive) {
+                                                    setCreatedFromDate('');
+                                                    setCreatedToDate('');
+                                                }
                                                 if (!quotationSentFilterActive && !statusLocked) setStatusFilter('all');
                                             }}
                                             className="px-2 py-1 text-[11px] text-white border border-white/40 rounded-md bg-white/10 hover:bg-white/20 flex items-center gap-1"
@@ -4653,7 +4745,43 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         Showing {filteredNonCampaignCustomers.length} of {nonCampaignBase.length} {nonCampaignViewMode === 'all' ? 'record(s)' : 'customer(s)'}
                                     </p>
                                 </div>
-                                <div className="flex flex-wrap items-center gap-2">
+                                <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
+                                    {/* Follow-up date range — From */}
+                                    <div className="flex items-center gap-1">
+                                        <label className="text-[11px] text-white whitespace-nowrap">From:</label>
+                                        <input
+                                            type="date"
+                                            value={nonCampaignFromDate}
+                                            onChange={(e) => {
+                                                const newFrom = e.target.value;
+                                                setNonCampaignFromDate(newFrom);
+                                                if (nonCampaignToDate && newFrom && new Date(nonCampaignToDate) < new Date(newFrom)) {
+                                                    setNonCampaignToDate('');
+                                                }
+                                            }}
+                                            max={nonCampaignToDate || undefined}
+                                            className="border border-gray-300 rounded-md px-2 py-1 text-[11px] bg-white text-black"
+                                        />
+                                    </div>
+
+                                    {/* Follow-up date range — To */}
+                                    <div className="flex items-center gap-1">
+                                        <label className="text-[11px] text-white whitespace-nowrap">To:</label>
+                                        <input
+                                            type="date"
+                                            value={nonCampaignToDate}
+                                            onChange={(e) => {
+                                                const newTo = e.target.value;
+                                                if (nonCampaignFromDate && newTo && new Date(newTo) < new Date(nonCampaignFromDate)) {
+                                                    return;
+                                                }
+                                                setNonCampaignToDate(newTo);
+                                            }}
+                                            min={nonCampaignFromDate || undefined}
+                                            className="border border-gray-300 rounded-md px-2 py-1 text-[11px] bg-white text-black"
+                                        />
+                                    </div>
+
                                     {/* All records vs latest-per-customer toggle */}
                                     <div className="flex items-center gap-1">
                                         <label className="text-[11px] text-white whitespace-nowrap">View:</label>
@@ -4717,12 +4845,14 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     </div>
 
                                     {/* Clear filters */}
-                                    {(nonCampaignSearchTerm || nonCampaignStatusFilter !== 'all' || nonCampaignServiceFilter !== 'all') && (
+                                    {(nonCampaignSearchTerm || nonCampaignStatusFilter !== 'all' || nonCampaignServiceFilter !== 'all' || nonCampaignFromDate || nonCampaignToDate) && (
                                         <button
                                             onClick={() => {
                                                 setNonCampaignSearchTerm('');
                                                 setNonCampaignStatusFilter('all');
                                                 setNonCampaignServiceFilter('all');
+                                                setNonCampaignFromDate('');
+                                                setNonCampaignToDate('');
                                             }}
                                             className="px-2 py-1 text-[11px] text-white border border-white/40 rounded-md bg-white/10 hover:bg-white/20 flex items-center gap-1"
                                             title="Clear filters"

@@ -1,14 +1,23 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Network, FileCheck2, Gauge, X, BarChart3, RotateCcw } from 'lucide-react';
-import { getAccess, errText } from '../components/approval/approvalApi';
+import { getAccess, prefetchApplications, errText } from '../components/approval/approvalApi';
 import { setLevelNames, levelLabel, levelName } from '../components/approval/ApprovalShared';
-import EmployeeApprovalView from '../components/approval/EmployeeApprovalView';
-import BranchApprovalView from '../components/approval/BranchApprovalView';
-import HODApprovalView from '../components/approval/HODApprovalView';
-import COOApprovalView from '../components/approval/COOApprovalView';
-import AuthorityMatrix from '../components/approval/AuthorityMatrix';
-import ApprovalReports from '../components/approval/ApprovalReports';
+
+// LAZY chunks — only the view matching the caller's level is downloaded;
+// the COO-only Authority Matrix / Reports load when their button is clicked.
+const EmployeeApprovalView = lazy(() => import('../components/approval/EmployeeApprovalView'));
+const BranchApprovalView = lazy(() => import('../components/approval/BranchApprovalView'));
+const HODApprovalView = lazy(() => import('../components/approval/HODApprovalView'));
+const COOApprovalView = lazy(() => import('../components/approval/COOApprovalView'));
+const AuthorityMatrix = lazy(() => import('../components/approval/AuthorityMatrix'));
+const ApprovalReports = lazy(() => import('../components/approval/ApprovalReports'));
+
+const viewLoader = (
+    <div className="flex items-center justify-center min-h-[40vh] text-sm text-gray-400">
+        Loading…
+    </div>
+);
 
 const themeColor = '#2f3192';
 const themeDark = '#23255f';
@@ -63,16 +72,7 @@ function MyLimitsModal({ access, onClose }) {
                     <div className="rounded-xl border border-gray-200 overflow-hidden">
                         <Row label="Max Discounting %" value={fmt(lim.max_discount_percent, '%')} />
                         <Row label="Max Credit Days" value={fmt(lim.max_credit_days, ' days')} />
-                    </div>
-                    <div className="rounded-xl border border-gray-200 overflow-hidden">
-                        <p className="px-3 py-2 bg-gray-50 text-[10px] uppercase tracking-wide font-bold text-gray-800 border-b border-gray-200">
-                            Max Expense Amount (per type)
-                        </p>
-                        {(lim.expense_types || []).length === 0
-                            ? <p className="px-3 py-3 text-xs text-gray-600">No expense types defined yet</p>
-                            : lim.expense_types.map(t => (
-                                <Row key={t.name} label={t.name} value={fmt(t.max_amount, 'inr')} />
-                            ))}
+                        <Row label="Max Expense Amount (all types combined)" value={fmt(lim.max_expense_amount, 'inr')} />
                     </div>
                     {/* The hierarchy this user's own records follow */}
                     <div className="rounded-xl border border-gray-200 overflow-hidden">
@@ -123,7 +123,12 @@ export default function ApprovalApplication() {
         } finally { setLoading(false); }
     }, []);
 
-    useEffect(() => { loadAccess(); }, [loadAccess]);
+    useEffect(() => {
+        // fire BOTH initial calls in parallel — the view's first
+        // getApplications() consumes the prefetched request (no waterfall)
+        prefetchApplications();
+        loadAccess();
+    }, [loadAccess]);
 
     if (loading) {
         return (
@@ -203,18 +208,24 @@ export default function ApprovalApplication() {
                 </div>
             </div>
 
-            <View key={viewKey} {...viewProps} />
+            <Suspense fallback={viewLoader}>
+                <View key={viewKey} {...viewProps} />
+            </Suspense>
 
             {showMatrix && (
-                <AuthorityMatrix
-                    onClose={() => { setShowMatrix(false); loadAccess(); setViewKey(k => k + 1); }}
-                />
+                <Suspense fallback={viewLoader}>
+                    <AuthorityMatrix
+                        onClose={() => { setShowMatrix(false); loadAccess(); setViewKey(k => k + 1); }}
+                    />
+                </Suspense>
             )}
             {showLimits && (
                 <MyLimitsModal access={access} onClose={() => setShowLimits(false)} />
             )}
             {showReports && (
-                <ApprovalReports onClose={() => setShowReports(false)} />
+                <Suspense fallback={viewLoader}>
+                    <ApprovalReports onClose={() => setShowReports(false)} />
+                </Suspense>
             )}
         </div>
         </div>

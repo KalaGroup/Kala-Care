@@ -831,12 +831,13 @@ const AppMapping = ({ onMasterChanged }) => {
 
     // One list per view. Asset-side views slice the `codes` payload; master-side
     // views ('master' / 'notmatched') are the master records shaped like asset
-    // rows so the one table below renders them all the same way.
-    const source = useMemo(() => {
+    // rows so the one table below renders them all the same way. Shared with the
+    // Export button, which walks every view (each stat box becomes one sheet).
+    const rowsForView = useCallback((v) => {
         const all = map?.codes || [];
-        if (view === 'uploaded') return all.filter((r) => r.uploaded);
-        if (view === 'remaining') return all.filter((r) => !r.uploaded);
-        if (view === 'master' || view === 'notmatched') {
+        if (v === 'uploaded') return all.filter((r) => r.uploaded);
+        if (v === 'remaining') return all.filter((r) => !r.uploaded);
+        if (v === 'master' || v === 'notmatched') {
             const assetBy = new Map(all.map((r) => [String(r.appCode || '').trim().toLowerCase(), r]));
             const masterRows = rows.map((a) => {
                 const m = assetBy.get(String(a.appCode || '').trim().toLowerCase());
@@ -845,10 +846,11 @@ const AppMapping = ({ onMasterChanged }) => {
                     kva: a.kva, assets: m ? m.assets : 0, uploaded: !!m,
                 };
             });
-            return view === 'notmatched' ? masterRows.filter((r) => !r.uploaded) : masterRows;
+            return v === 'notmatched' ? masterRows.filter((r) => !r.uploaded) : masterRows;
         }
         return all;
-    }, [map, rows, view]);
+    }, [map, rows]);
+    const source = useMemo(() => rowsForView(view), [rowsForView, view]);
 
     const filtered = useMemo(() => {
         const t = q.trim().toLowerCase();
@@ -872,6 +874,52 @@ const AppMapping = ({ onMasterChanged }) => {
         rows.forEach((a) => m.set(String(a.appCode || '').trim().toLowerCase(), new Set(a.parts.map((p) => partService(services, p).id))));
         return m;
     }, [rows, services]);
+
+    // Export ALL data of every stat box — one workbook, one sheet per box, with
+    // the same columns each box shows on screen (search/sort filters ignored).
+    // Gated by canExportExcel() like every other Export button in the app.
+    const exportXlsx = () => {
+        const wb = XLSX.utils.book_new();
+        const EXPORT_VIEWS = [
+            ['all', 'All Application Codes'],
+            ['remaining', 'Remaining'],
+            ['master', 'Total in Master'],
+            ['uploaded', 'Match in Master'],
+            ['notmatched', 'Not Matched'],
+        ];
+        EXPORT_VIEWS.forEach(([v, sheetName]) => {
+            const withSvc = v !== 'remaining';           // Remaining shows no coverage columns on screen
+            const masterSide = v === 'master' || v === 'notmatched';
+            // For asset-side boxes the flag means "already in the master"; for
+            // master-side boxes it means "matched in the asset data".
+            const flagLabel = masterSide ? 'In Asset Data' : 'In Master';
+            const aoa = [[
+                'Sr.', 'App Code', 'Engine Model', 'Segment', 'KVA Rating', 'Emission Norm',
+                'Commissioning Date', 'Assets', flagLabel,
+                ...(withSvc ? svcCols.map((c) => c.short) : []),
+            ]];
+            rowsForView(v).forEach((r, i) => {
+                const ids = svcCoverage.get(String(r.appCode || '').trim().toLowerCase());
+                aoa.push([
+                    i + 1, r.appCode, r.engineModel || '', r.segment || '',
+                    assetKva(r.kva) ? `${assetKva(r.kva)} KVA` : '',
+                    emissionOf(r) || '',
+                    commissioningOf(r) ? fmtDMY(commissioningOf(r)) : '',
+                    r.assets ?? 0,
+                    r.uploaded ? 'Yes' : 'No',
+                    ...(withSvc ? svcCols.map((c) => (ids && ids.has(c.id) ? 'Yes' : 'No')) : []),
+                ]);
+            });
+            const ws = XLSX.utils.aoa_to_sheet(aoa);
+            ws['!cols'] = [
+                { wch: 5 }, { wch: 14 }, { wch: 18 }, { wch: 10 }, { wch: 11 }, { wch: 13 },
+                { wch: 15 }, { wch: 7 }, { wch: 12 },
+                ...(withSvc ? svcCols.map(() => ({ wch: 8 })) : []),
+            ];
+            XLSX.utils.book_append_sheet(wb, ws, sheetName);
+        });
+        XLSX.writeFile(wb, 'App_Mapping.xlsx');
+    };
 
     const { sort, toggle } = useSort();
     const remaining = useSortedRows(filtered, sort, {
@@ -969,6 +1017,13 @@ const AppMapping = ({ onMasterChanged }) => {
                                 placeholder={`Search ${(SEARCH_FIELDS.find((f) => f.key === searchField) || SEARCH_FIELDS[0]).label.toLowerCase()}`}
                                 className="w-56 max-sm:w-full rounded-lg border border-gray-200 bg-white pl-8 pr-2.5 py-1.5 text-[12px] outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition" />
                         </div>
+                        {canExportExcel() && (
+                            <button onClick={exportXlsx} title="Export every box (all / remaining / master / matched / not matched) into one Excel file"
+                                className="export-btn inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90"
+                                style={{ backgroundColor: themeColor }}>
+                                <ArrowUpTrayIcon className="h-3.5 w-3.5" /> Export
+                            </button>
+                        )}
                         <button onClick={() => load(false)} title="Refresh"
                             className="rounded-lg border border-gray-200 bg-white p-1.5 text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition">
                             <ArrowPathIcon className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />

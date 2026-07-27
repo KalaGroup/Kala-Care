@@ -81,7 +81,27 @@ def _get(db: Session, app_code: str) -> MaintenanceAppCode:
 
 # ---------------- APP CODES ---------------- #
 
-def list_apps(db: Session):
+def list_apps(db: Session, slim: bool = False):
+    # SLIM mode (Master Report page): the coverage matrix only reads
+    # parts[].serviceHours (see partService on the client), so ship each app's
+    # DISTINCT service hours instead of the full 12-field part rows — same
+    # coverage result, a fraction of the query, serialization and payload cost.
+    if slim:
+        apps = db.query(MaintenanceAppCode).order_by(MaintenanceAppCode.app_code).all()
+        hour_rows = db.query(
+            MaintenancePart.app_code_id, MaintenancePart.service_hours
+        ).distinct().all()
+        hours_by_app = {}
+        for app_id, h in hour_rows:
+            # same default the full serializer applies (blank -> "500")
+            hours_by_app.setdefault(app_id, set()).add(str(h or "").strip() or "500")
+        return [{
+            "id": a.id, "appCode": a.app_code, "systemAppCode": a.system_app_code or "",
+            "segment": a.segment or "", "engineModel": a.engine_model or "",
+            "kva": a.kva or "", "emission": a.emission or "",
+            "parts": [{"serviceHours": h} for h in sorted(hours_by_app.get(a.id, set()))],
+        } for a in apps]
+
     # selectinload eager-loads ALL parts in ONE extra query (parts are ordered by
     # sort_order via the relationship) instead of the N+1 that lazy access caused
     # — one query per app code. This is the main speed-up for the Master, Service

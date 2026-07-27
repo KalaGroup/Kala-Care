@@ -43,16 +43,20 @@ DEFAULT_LEVEL_NAMES = {
 
 
 class ApprovalLevelConfig(Base):
-    """One row per level (l1..l5): its display name and its authority limits.
+    """Level configuration rows.
 
-    LIMITS ARE LEVEL-WISE — every user holding the level gets the same
-    Max Discounting % / Max Credit Days / Max Expense Amount. NULL = 0
-    (nothing can be finalized at that level) except for the rights-master
-    COOs, who are always unlimited regardless of the l5 row."""
+    branch NULL  -> the GLOBAL row of a level: carries the (renamable)
+                    display name.
+    branch set   -> that BRANCH's level-wise limits (Max Discounting % /
+                    Max Credit Days / Max Expense Amount) shared by every
+                    employee holding the level IN THAT branch row. No row /
+                    NULL value = 0 — a freshly added branch starts at zero.
+    L5 (COO) is always unlimited regardless of any row."""
     __tablename__ = "approval_level_configs"
 
     id = Column(Integer, primary_key=True, index=True)
-    level = Column(String(5), nullable=False, unique=True)   # l1..l5
+    level = Column(String(5), nullable=False)                # l1..l5
+    branch = Column(String(20), nullable=True, index=True)   # NULL = global (names)
     display_name = Column(String(100), nullable=True)        # NULL = default name
     max_discount_percent = Column(Float, nullable=True)
     max_credit_days = Column(Integer, nullable=True)
@@ -61,10 +65,13 @@ class ApprovalLevelConfig(Base):
     created_at = Column(DateTime, default=now_ist)
     updated_at = Column(DateTime, onupdate=now_ist)
 
+    __table_args__ = (UniqueConstraint("branch", "level", name="uq_apv_lvl_cfg_br"),)
+
     def to_dict(self):
         return {
             "id": self.id,
             "level": self.level,
+            "branch": self.branch,
             "display_name": self.display_name or DEFAULT_LEVEL_NAMES.get(self.level, self.level),
             "max_discount_percent": self.max_discount_percent,
             "max_credit_days": self.max_credit_days,
@@ -352,9 +359,10 @@ class ApprovalApplication(Base):
     discount_percent = Column(Float, nullable=True)   # discounting only
     credit_days = Column(Integer, nullable=True)      # credit only
 
-    # Expense-only extras
+    # Expense-only extras. expense_amount = the COMBINED total of all chosen
+    # types; expense_type holds the breakdown text "Food: 500; Travel: 1000".
     expense_amount = Column(Float, nullable=True)
-    expense_type = Column(String(100), nullable=True)
+    expense_type = Column(String(400), nullable=True)
     payment_mode = Column(String(50), nullable=True)
 
     description = Column(Text, nullable=True)
@@ -369,6 +377,10 @@ class ApprovalApplication(Base):
     # True when the record was approved at submit because its value was within
     # the creator's OWN authority limit (self-approval replaced by auto-approve)
     auto_approved = Column(Boolean, default=False)
+
+    # Extra CC addresses the CREATOR attached at submit — automatically added
+    # to the result email's CC when the record is approved / rejected
+    cc_emails = Column(String(500), nullable=True)
 
     # HO-branch creators choose who approves their record at L4 / L5
     l4_approver_id = Column(String(50), nullable=True)
@@ -440,6 +452,7 @@ class ApprovalApplication(Base):
             "created_by_name": self.created_by_name,
             "created_by_level": self.created_by_level,
             "auto_approved": bool(self.auto_approved),
+            "cc_emails": self.cc_emails,
             "l4_approver_id": self.l4_approver_id,
             "l4_approver_name": self.l4_approver_name,
             "l5_approver_id": self.l5_approver_id,

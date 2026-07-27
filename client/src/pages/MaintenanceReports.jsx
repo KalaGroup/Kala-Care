@@ -1,6 +1,5 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import * as XLSX from 'xlsx';
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 import { canExportExcel } from '../utils/exportPermission';
 import {
@@ -9,11 +8,16 @@ import {
     CircleStackIcon, WrenchScrewdriverIcon, ArrowsRightLeftIcon,
 } from '@heroicons/react/24/outline';
 import {
-    getAppCodes, getServices, getActivity, getAssetCommissioning, partService, findApp, getRole,
+    getAppCodesSlim, getServices, getActivity, getAssetCommissioning, partService, findApp, getRole,
     themeColor, themeDark, themeSoft, fmtDateTime,
 } from '../components/maintenanceApi';
-import MaintenanceScheduleMaster from '../components/MaintenanceScheduleMaster';
 import { SortTh, useSort, useSortedRows } from '../components/TableSort';
+
+// LAZY chunks: the master-only management panel (Master Data / Import /
+// Mapping / Service tabs) is not downloaded by regular users at all, and the
+// xlsx library loads only when an Export button is actually clicked.
+const MaintenanceScheduleMaster = lazy(() => import('../components/MaintenanceScheduleMaster'));
+const loadXLSX = () => import('xlsx');
 
 const sortByHours = (svcs) => svcs.slice().sort((a, b) => (parseFloat(a.hours) || 0) - (parseFloat(b.hours) || 0));
 
@@ -78,8 +82,10 @@ const MaintenanceReports = () => {
         try {
             // Commissioning is a bonus column — if that one call fails (e.g. no asset
             // data), the rest of the page still loads. .catch keeps Promise.all intact.
+            // SLIM app codes: this page only derives service coverage from
+            // parts[].serviceHours, so skip the heavy full-parts payload.
             const [m, s, a, c] = await Promise.all([
-                getAppCodes(), getServices(), getActivity(),
+                getAppCodesSlim(), getServices(), getActivity(),
                 getAssetCommissioning().catch(() => []),
             ]);
             setMaster(m); setServices(s); setActivity(a); setCommissioning(c);
@@ -148,7 +154,16 @@ const MaintenanceReports = () => {
                 </div>
 
                 {MGMT_TABS.includes(tab) && isMaster ? (
-                    <MaintenanceScheduleMaster embedded initialTab={tab} onMasterChanged={() => load(true)} />
+                    <Suspense fallback={
+                        <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+                            <div className="animate-pulse space-y-3">
+                                <div className="h-4 w-1/3 rounded bg-gray-100" />
+                                {Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-8 rounded bg-gray-50" />)}
+                            </div>
+                        </div>
+                    }>
+                        <MaintenanceScheduleMaster embedded initialTab={tab} onMasterChanged={() => load(true)} />
+                    </Suspense>
                 ) : err ? (
                     <div className="rounded-2xl border border-red-200 bg-red-50 py-12 text-center">
                         <ExclamationTriangleIcon className="h-9 w-9 mx-auto text-red-400" />
@@ -262,7 +277,8 @@ const CoverageReport = React.memo(({ master, services, commissioning = [] }) => 
     }, [visibleCount, visible.length]);
     const shownRows = useMemo(() => visible.slice(0, visibleCount), [visible, visibleCount]);
 
-    const exportXlsx = () => {
+    const exportXlsx = async () => {
+        const XLSX = await loadXLSX();   // heavy lib — loaded on click, not at page load
         const aoa = [['Sr.', 'App Code', 'Engine Model', 'Segment', 'KVA Rating', 'Emission Norm', 'Commissioning Date', ...cols.map((c) => c.short)]];
         // Export exactly what is on screen, in the same order.
         visible.forEach(({ a, ids }, i) => {
@@ -485,7 +501,8 @@ const ActivityReport = React.memo(({ master, activity }) => {
         ? new Date(dk + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })
         : '\u2014');
 
-    const exportXlsx = () => {
+    const exportXlsx = async () => {
+        const XLSX = await loadXLSX();   // heavy lib — loaded on click, not at page load
         const aoa = [['Date', 'Employee', 'App Code', 'Engine Model', 'Segment', 'Visits']];
         data.groups.forEach((g) => aoa.push([fmtDate(g.dateKey), g.employee, g.code, g.engineModel, g.segment, g.visits]));
         const ws = XLSX.utils.aoa_to_sheet(aoa);

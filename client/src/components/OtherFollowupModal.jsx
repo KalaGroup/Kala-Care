@@ -255,7 +255,7 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
             <div className="flex items-center justify-center h-screen w-screen p-0">
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={onClose}></div>
 
-                <div className="relative w-screen h-screen max-w-none bg-white shadow-2xl overflow-hidden rounded-none">
+                <div className="relative w-screen h-screen max-w-none bg-white shadow-2xl overflow-hidden rounded-none flex flex-col">
                     {/* Header */}
                     <div className="relative px-3 sm:px-5 py-2 sm:py-3 max-md:px-2" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}>
                         <div className="absolute top-0 right-0 w-48 sm:w-64 h-48 sm:h-64 bg-white/5 rounded-full -mr-24 sm:-mr-32 -mt-24 sm:-mt-32"></div>
@@ -449,20 +449,21 @@ const OtherFollowupModal = ({ isOpen, onClose, apiBaseUrl, userData }) => {
                         )}
                     </div>
 
-                    {/* Table Section */}
-                    <div className="relative bg-gray-50">
+                    {/* Table Section — flex column filling the rest of the screen,
+                        so the table always drops down to the very bottom */}
+                    <div className="relative bg-gray-50 flex-1 min-h-0 flex flex-col">
                         {/* Top Scroll Bar */}
                         <div
                             ref={topScrollBarRef}
-                            className="hidden sm:block sticky top-0 z-10 bg-gray-100 border-b border-gray-200 overflow-x-auto"
+                            className="hidden sm:block sticky top-0 z-10 bg-gray-100 border-b border-gray-200 overflow-x-auto flex-shrink-0"
                             style={{ scrollbarWidth: 'thin', overflowY: 'hidden', height: '8px', cursor: 'pointer' }}
                         ></div>
 
                         {/* Table Container */}
                         <div
                             ref={tableContainerRef}
-                            className="overflow-x-auto"
-                            style={{ maxHeight: 'calc(100vh - 230px)', minHeight: '450px', overflowX: 'auto' }}
+                            className="overflow-x-auto overflow-y-auto flex-1"
+                            style={{ minHeight: 300 }}
                         >
                             {loading ? (
                                 <div className="flex flex-col items-center justify-center py-16">

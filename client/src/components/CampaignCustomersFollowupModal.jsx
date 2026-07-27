@@ -23,7 +23,9 @@ const statusLabel = (s) => {
 // userOnly: the exact difference View All − Admin Added — used by the "User Added"
 // button. Same view-all fetch; admin-added assets are filtered out on the frontend,
 // so the count always equals the difference between the two other buttons.
-const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl, allReportCampaigns = null, adminOnly = false, userOnly = false }) => {
+// includeNonDrive (all-report mode only): also merge every non-drive/PW customer
+// (latest record per customer, same as the drive rows) tagged as drive "Non-Drive/PW".
+const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl, allReportCampaigns = null, adminOnly = false, userOnly = false, includeNonDrive = false }) => {
     const [customers, setCustomers] = useState([]);
     const [campaignInfo, setCampaignInfo] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -78,7 +80,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
         // Stop any in-flight all-report loop when the modal closes/reopens
         return () => { loadRunRef.current++; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isOpen, campaign, adminOnly]);
+    }, [isOpen, campaign, adminOnly, includeNonDrive]);
 
     // Close the drive-filter dropdown when clicking outside it
     useEffect(() => {
@@ -284,7 +286,50 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
         setTotalToLoad(allReportCampaigns.length);
 
         let accumulated = [];
-        let sno = 0;
+
+        // Merge new rows, re-sort by Last Follow-up Date (most recent first,
+        // nulls at the bottom), re-number, and render progressively.
+        const appendRows = (rows) => {
+            accumulated = [...accumulated, ...rows];
+            accumulated.sort((a, b) => {
+                const dateA = a.last_followup_date ? new Date(a.last_followup_date) : null;
+                const dateB = b.last_followup_date ? new Date(b.last_followup_date) : null;
+                if (!dateA && !dateB) return 0;
+                if (!dateA) return 1;
+                if (!dateB) return -1;
+                return dateB - dateA;
+            });
+            accumulated = accumulated.map((cust, idx) => ({ ...cust, s_no: idx + 1 }));
+            if (loadRunRef.current === myRun) setCustomers([...accumulated]);
+        };
+
+        // All-data mode: pull the non-drive/PW customers first (one call), tagged
+        // with their own "drive" name so the shared table and filters just work.
+        if (includeNonDrive) {
+            try {
+                // POST endpoint — expects the logged-in user's info in the body
+                // (same contract as OtherFollowupModal)
+                let user = {};
+                try { user = JSON.parse(sessionStorage.getItem('user')) || {}; } catch { /* no session user */ }
+                const response = await fetch(`${apiBaseUrl}/performance/non-campaign-customers`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_id: user.user_id || user.id,
+                        name: user.name,
+                        role: user.role,
+                        branch: user.branch
+                    })
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    if (loadRunRef.current !== myRun) return;
+                    appendRows((data.customers || []).map(cust => ({ ...cust, campaign_name: 'Non-Drive/PW' })));
+                }
+            } catch (error) {
+                console.error('Error fetching non-drive customers:', error);
+            }
+        }
 
         for (let i = 0; i < allReportCampaigns.length; i++) {
             if (loadRunRef.current !== myRun) return; // modal closed/reopened — stop
@@ -306,23 +351,8 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                         if (data.customers.remaining?.length) part = [...part, ...data.customers.remaining];
                         if (data.customers.completed?.length) part = [...part, ...data.customers.completed];
                     }
-                    const tagged = part.map(cust => ({ ...cust, campaign_name: cname }));
-                    accumulated = [...accumulated, ...tagged];
-
-                    // Sort by Last Follow-up Date (most recent first); nulls go to the bottom
-                    accumulated.sort((a, b) => {
-                        const dateA = a.last_followup_date ? new Date(a.last_followup_date) : null;
-                        const dateB = b.last_followup_date ? new Date(b.last_followup_date) : null;
-                        if (!dateA && !dateB) return 0;
-                        if (!dateA) return 1;
-                        if (!dateB) return -1;
-                        return dateB - dateA;
-                    });
-
-                    // Re-number after sorting
-                    accumulated = accumulated.map((cust, idx) => ({ ...cust, s_no: idx + 1 }));
-
-                    if (loadRunRef.current === myRun) setCustomers([...accumulated]); // progressive render
+                    if (loadRunRef.current !== myRun) return;
+                    appendRows(part.map(cust => ({ ...cust, campaign_name: cname })));
                 }
             } catch (error) {
                 console.error(`Error fetching customers for drive ${cid}:`, error);
@@ -343,7 +373,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
         const wsData = [];
 
         if (isAllReport) {
-            wsData.push(['ALL Drives Report']);
+            wsData.push([includeNonDrive ? 'ALL DATA REPORT (DRIVES + NON-DRIVE/PW)' : 'ALL Drives Report']);
             wsData.push(['Total Drives:', allReportCampaigns.length]);
             wsData.push(['Rows Exported (after filters):', filteredCustomers.length]);
             wsData.push([]);
@@ -406,7 +436,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
             { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 30 }, { wch: 40 }, { wch: 15 }, { wch: 15 }, { wch: 30 }
         ];
 
-        const baseName = (isAllReport ? 'all_campaigns' : (campaignInfo?.name?.replace(/\s/g, '_') || 'drive')) + (adminOnly ? '_admin_added' : userOnly ? '_user_added' : '');
+        const baseName = (isAllReport ? (includeNonDrive ? 'all_data_drive_and_non_drive' : 'all_campaigns') : (campaignInfo?.name?.replace(/\s/g, '_') || 'drive')) + (adminOnly ? '_admin_added' : userOnly ? '_user_added' : '');
         const filename = `${baseName}_customers_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
         XLSX.writeFile(wb, filename);
         setExportLoading(false);
@@ -529,7 +559,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={onClose}></div>
 
                 {/* Modal */}
-                <div className="relative w-screen h-screen max-w-none bg-white shadow-2xl overflow-hidden rounded-none max-lg:overflow-y-auto">
+                <div className="relative w-screen h-screen max-w-none bg-white shadow-2xl overflow-hidden rounded-none max-lg:overflow-y-auto flex flex-col">
                     {/* Header */}
                     <div className="relative px-3 sm:px-5 py-2 sm:py-3 max-md:px-2" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}>
                         <div className="absolute top-0 right-0 w-48 sm:w-64 h-48 sm:h-64 bg-white/5 rounded-full -mr-24 sm:-mr-32 -mt-24 sm:-mt-32"></div>
@@ -543,7 +573,7 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                         </svg>
                                     </div>
-                                    <h2 className="text-base sm:text-lg font-bold text-white tracking-tight truncate">{isAllReport ? 'All Drives Report' : campaignInfo?.name}</h2>
+                                    <h2 className="text-base sm:text-lg font-bold text-white tracking-tight truncate">{isAllReport ? (includeNonDrive ? 'All Data Report (Drive + Non-Drive)' : 'All Drives Report') : campaignInfo?.name}</h2>
                                     {!isAllReport && adminOnly && (
                                         <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-white text-[#2f3192] whitespace-nowrap flex-shrink-0">
                                             Admin Added
@@ -802,12 +832,13 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                         </div>
                     </div>
 
-                    {/* Table Section */}
-                    <div className="relative bg-gray-50">
+                    {/* Table Section — flex column filling the rest of the screen,
+                        so the table always drops down to the very bottom */}
+                    <div className="relative bg-gray-50 flex-1 min-h-0 flex flex-col">
                         {/* Top Scroll Bar */}
                         <div
                             ref={topScrollBarRef}
-                            className="hidden sm:block sticky top-0 z-10 bg-gray-100 border-b border-gray-200 overflow-x-auto"
+                            className="hidden sm:block sticky top-0 z-10 bg-gray-100 border-b border-gray-200 overflow-x-auto flex-shrink-0"
                             style={{
                                 scrollbarWidth: 'thin',
                                 overflowY: 'hidden',
@@ -821,8 +852,8 @@ const CampaignCustomersFollowupModal = ({ isOpen, onClose, campaign, apiBaseUrl,
                         {/* Table Container */}
                         <div
                             ref={tableContainerRef}
-                            className="overflow-x-auto"
-                            style={{ maxHeight: 'calc(135vh - 300px)', minHeight: '450px', overflowX: 'auto' }}
+                            className="overflow-x-auto overflow-y-auto flex-1"
+                            style={{ minHeight: 300 }}
                         >
                             {loading && customers.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center py-16">

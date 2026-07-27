@@ -173,18 +173,15 @@ def serialize_meeting_type(t: MomMeetingType):
 #  bootstrap: master points + categories (seed defaults on first run) #
 # ------------------------------------------------------------------ #
 def get_bootstrap(db: Session, created_by: str | None = None):
-    if db.query(MomCategory).count() == 0:
+    # Seed-on-empty: the list queries below double as the emptiness check, so
+    # the steady state runs THREE queries total instead of three extra COUNTs
+    # before them. First run (empty tables) seeds and re-queries as before.
+    cats = db.query(MomCategory).order_by(MomCategory.id).all()
+    if not cats:
         for name, color in DEFAULT_CATEGORIES.items():
             db.add(MomCategory(name=name, color=color))
         db.commit()
-    if db.query(MomMasterPoint).count() == 0:
-        for title, cat in DEFAULT_MASTER_POINTS:
-            db.add(MomMasterPoint(title=title, category=cat))
-        db.commit()
-    if db.query(MomMeetingType).count() == 0:
-        for name in DEFAULT_MEETING_TYPES:
-            db.add(MomMeetingType(name=name))
-        db.commit()
+        cats = db.query(MomCategory).order_by(MomCategory.id).all()
 
     points = (
         db.query(MomMasterPoint)
@@ -192,8 +189,24 @@ def get_bootstrap(db: Session, created_by: str | None = None):
         .order_by(MomMasterPoint.id)
         .all()
     )
-    cats = db.query(MomCategory).order_by(MomCategory.id).all()
+    if not points and db.query(MomMasterPoint.id).first() is None:
+        # truly empty (not just all soft-deleted) — seed the defaults
+        for title, cat in DEFAULT_MASTER_POINTS:
+            db.add(MomMasterPoint(title=title, category=cat))
+        db.commit()
+        points = (
+            db.query(MomMasterPoint)
+            .filter(MomMasterPoint.is_active == True)  # noqa: E712
+            .order_by(MomMasterPoint.id)
+            .all()
+        )
+
     types = db.query(MomMeetingType).order_by(MomMeetingType.id).all()
+    if not types:
+        for name in DEFAULT_MEETING_TYPES:
+            db.add(MomMeetingType(name=name))
+        db.commit()
+        types = db.query(MomMeetingType).order_by(MomMeetingType.id).all()
     return {
         "masterPoints": [serialize_master_point(p) for p in points],
         "categories": [serialize_category(c) for c in cats],

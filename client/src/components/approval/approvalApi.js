@@ -29,8 +29,33 @@ export const errText = (err, fallback) => {
 export const getAccess = () =>
     axios.get(`${BASE}/access`, { headers: authHeaders() }).then(r => r.data);
 
-export const getApplications = (params = {}) =>
-    axios.get(`${BASE}/applications`, { headers: authHeaders(), params }).then(r => r.data);
+// HO creators: L4 choices filtered for ONE record — only HO HODs whose limit
+// for the record's type is higher than the caller's own.
+export const getL4Choices = (branch, requestType) =>
+    axios.get(`${BASE}/l4-choices`, {
+        headers: authHeaders(), params: { branch, request_type: requestType },
+    }).then(r => r.data);
+
+// Warm-up cache: the page fires prefetchApplications() in PARALLEL with the
+// access call, and the view's first plain getApplications() consumes the
+// in-flight request instead of starting a second one (no waterfall). The
+// cache is used ONCE and only for the no-params call — refreshes and
+// filtered calls always hit the network.
+let _appsPrefetch = null;
+export const prefetchApplications = () => {
+    _appsPrefetch = axios.get(`${BASE}/applications`, { headers: authHeaders() })
+        .then(r => r.data)
+        .catch(() => null);   // consumed below — falls back to a fresh call
+};
+
+export const getApplications = (params = {}) => {
+    if (_appsPrefetch && Object.keys(params).length === 0) {
+        const p = _appsPrefetch;
+        _appsPrefetch = null;
+        return p.then(d => d ?? axios.get(`${BASE}/applications`, { headers: authHeaders() }).then(r => r.data));
+    }
+    return axios.get(`${BASE}/applications`, { headers: authHeaders(), params }).then(r => r.data);
+};
 
 export const getSummary = () =>
     axios.get(`${BASE}/summary`, { headers: authHeaders() }).then(r => r.data);
@@ -54,8 +79,8 @@ export const rejectApplication = (id, remark) =>
 export const deleteApplication = (id) =>
     axios.delete(`${BASE}/applications/${id}`, { headers: authHeaders() }).then(r => r.data);
 
-export const sendResultEmail = (id, emails) =>
-    axios.post(`${BASE}/applications/${id}/send-email`, { emails }, { headers: authHeaders() }).then(r => r.data);
+export const sendResultEmail = (id, emails, toEmails) =>
+    axios.post(`${BASE}/applications/${id}/send-email`, { emails, to_emails: toEmails }, { headers: authHeaders() }).then(r => r.data);
 
 export const getRights = () =>
     axios.get(`${BASE}/rights`, { headers: authHeaders() }).then(r => r.data);
@@ -101,6 +126,9 @@ export const setHodCategory = (branch, category, userIds) =>
 
 export const setLevelConfig = (payload) =>
     axios.post(`${BASE}/matrix/level-config`, payload, { headers: authHeaders() }).then(r => r.data);
+
+export const removeEmployeeRights = (userId) =>
+    axios.post(`${BASE}/matrix/remove-employee`, { user_id: userId }, { headers: authHeaders() }).then(r => r.data);
 
 export const setStageApprovers = (branch, stage, userIds) =>
     axios.post(`${BASE}/matrix/stage-approvers`, { branch, stage, user_ids: userIds }, { headers: authHeaders() }).then(r => r.data);

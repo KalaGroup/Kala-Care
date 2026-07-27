@@ -80,6 +80,10 @@ async function jsend(method, path, body) {
 
 // -- Application codes (master data) -----------------------------------------
 export const getAppCodes = () => jget('/maintenance/app-codes').then((d) => d.items || []);
+// SLIM variant for the Master Report page: identity fields + each app's
+// distinct service hours (all the coverage matrix reads) — a fraction of the
+// full parts payload. Same shape, so consumers work unchanged.
+export const getAppCodesSlim = () => jget('/maintenance/app-codes?slim=true').then((d) => d.items || []);
 export const createAppCode = (rec) => jsend('POST', '/maintenance/app-codes', rec).then((d) => d.item);
 export const updateAppCode = (code, rec) => jsend('PUT', `/maintenance/app-codes/${encodeURIComponent(code)}`, rec).then((d) => d.item);
 export const deleteAppCode = (code) => jsend('DELETE', `/maintenance/app-codes/${encodeURIComponent(code)}`);

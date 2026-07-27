@@ -11,11 +11,13 @@ import {
 } from './ApprovalShared';
 import ApprovalReports from './ApprovalReports';
 
-export default function ApproverWorkspace({ pendingStatus, pendingLabel, headerActions = null }) {
+// showMine=false hides the "My NFA" tab — used by the COO view, where the
+// viewer does not file NFAs themselves.
+export default function ApproverWorkspace({ pendingStatus, pendingLabel, headerActions = null, initialTab = 'pending', showMine = true }) {
     const user = JSON.parse(sessionStorage.getItem('user') || '{}');
     const [apps, setApps] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [tab, setTab] = useState('pending');       // pending | all
+    const [tab, setTab] = useState(initialTab);      // pending | mine | all
     const [selected, setSelected] = useState(null);
     const [editDraft, setEditDraft] = useState(null); // own drafts open in the editor
     const [cardView, setCardView] = useState(null);   // clicked summary card -> records popup
@@ -87,7 +89,7 @@ export default function ApproverWorkspace({ pendingStatus, pendingLabel, headerA
 
             <div className="flex flex-wrap items-center gap-2 mb-3">
                 {tabBtn('pending', pendingLabel, <Inbox size={14} />, pending.length)}
-                {tabBtn('mine', 'My NFA', <FileText size={14} />, 0)}
+                {showMine && tabBtn('mine', 'My NFA', <FileText size={14} />, 0)}
                 {tabBtn('all', 'All Applications', <ListChecks size={14} />, 0)}
                 {headerActions}
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -11,12 +11,16 @@ import {
   ChevronDown, FileText, MapPin, UserPlus, Upload, Search, RotateCcw,
   Crown, Pencil,
 } from 'lucide-react';
-import {
-  ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-} from 'recharts';
 import { SortTh, useSort, compareValues } from '../components/TableSort';
-import MomFiles from '../components/MomFiles';
+import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
+// LAZY chunks — recharts (~376 KB) loads only when the Reports tab renders
+// its charts, and the master-only MOM Files modal only when it is opened.
+const MomChart = lazy(() => import('../components/MomReportCharts'));
+const MomFiles = lazy(() => import('../components/MomFiles'));
+/* small skeleton while a lazy chart chunk downloads */
+const ChartFallback = ({ h = 210 }) => (
+  <div className="animate-pulse rounded-xl bg-gray-50" style={{ height: h }} />
+);
 // xlsx-js-style is heavy (~140kB gzip) and only needed when a user actually
 // exports to Excel — loaded on demand inside exportMeetingExcel() so it never
 // weighs down the initial MOM page load (esp. for employees who only view).
@@ -31,12 +35,7 @@ const BRAND_DARK = '#23255f';
 const BRAND_SOFT = 'rgba(47,49,146,0.10)';
 const INK = 'var(--mom-ink)';       // theme-adaptive: near-black in light, light-grey in dark
 
-// Compact Recharts tooltips — keeps the hover info box small on every chart
-const TIP_PROPS = {
-    contentStyle: { fontSize: 11, padding: '5px 8px', borderRadius: 8, lineHeight: 1.4 },
-    itemStyle: { fontSize: 11, padding: '1px 0' },
-    labelStyle: { fontSize: 11, fontWeight: 600 },
-};
+// Chart tooltip styling lives with the charts in MomReportCharts.jsx
 const SHEET = BRAND;                // sheet chrome = system brand
 const SHEET_DARK = BRAND_DARK;
 const SHEET_SOFT = BRAND_SOFT;
@@ -772,10 +771,10 @@ const RespPicker = ({ value = [], options = [], onChange, disabled }) => {
     <>
       <button type="button" ref={btnRef} onClick={() => (open ? setOpen(false) : openIt())}
         onMouseEnter={cancelClose} onMouseLeave={scheduleClose}
-        className="w-full flex items-center justify-between gap-1 rounded px-1.5 py-1 fs-11 text-left transition hover:bg-[#f6f8fc]"
+        className={`w-full flex items-center justify-between gap-1 rounded px-1.5 py-1 fs-11 text-left transition hover:bg-[#f6f8fc]${value.length === 0 ? ' border border-gray-200' : ''}`}
         style={{ minHeight: 30 }} title="Assign one or more attendees">
         {value.length === 0 ? (
-          <span className="text-gray-400">— Unassigned —</span>
+          <span />
         ) : (
           <span className="flex items-center gap-1 flex-wrap min-w-0">
             {value.slice(0, 2).map((n) => (
@@ -964,18 +963,29 @@ export default function MOMTracking() {
     let alive = true;
     const loadFailed = () => { if (!alive) return; setHistory({}); setHistSource('error'); };
     if (!API_BASE_URL) { loadFailed(); return; }
+    // Warm-cache-first paint: on repeat visits, instantly repaint the last
+    // dataset this user saw while the normal fetch below runs unchanged and
+    // overwrites it — the data users end up seeing is exactly the same.
+    const cacheKey = warmKey('mom-tracking', { userId: me?.user_id || '' });
+    const warm = readWarmCache(cacheKey);
+    if (warm && warm.history) {
+      if (Array.isArray(warm.master) && warm.master.length) setMaster(warm.master);
+      if (warm.categories && Object.keys(warm.categories).length) setCategories(warm.categories);
+      if (Array.isArray(warm.meetingTypes) && warm.meetingTypes.length) setMeetingTypes(warm.meetingTypes);
+      setHistory(warm.history); setHistSource('api');
+    }
     Promise.all([
       axios.get(`${MOM_API}/bootstrap`, { headers: authHeaders }),
       axios.get(`${MOM_API}/meetings`, { headers: authHeaders }),
     ]).then(([b, m]) => {
       if (!alive) return;
+      let pts = [], cats = {}, types = [];
       if (b.data?.success) {
-        const pts = (b.data.masterPoints || []).map((p) => ({ id: String(p.id), title: p.title, category: p.category }));
+        pts = (b.data.masterPoints || []).map((p) => ({ id: String(p.id), title: p.title, category: p.category }));
         if (pts.length) setMaster(pts);
-        const cats = {};
         (b.data.categories || []).forEach((c) => { cats[c.name] = c.color; });
         if (Object.keys(cats).length) setCategories(cats);
-        const types = (b.data.meetingTypes || []).map((t) => ({ id: t.id, name: t.name }));
+        types = (b.data.meetingTypes || []).map((t) => ({ id: t.id, name: t.name }));
         if (types.length) setMeetingTypes(types);
       }
       if (m.data?.success) {
@@ -985,6 +995,7 @@ export default function MOMTracking() {
           codes.forEach((c) => { (map[c] = map[c] || []).push(mt); });
         });
         setHistory(map); setHistSource('api');
+        writeWarmCache(cacheKey, { master: pts, categories: cats, meetingTypes: types, history: map });
       } else loadFailed();
     }).catch(loadFailed);
     return () => { alive = false; };
@@ -2370,7 +2381,7 @@ export default function MOMTracking() {
                                 <span className="fs-9 font-bold rounded px-1 py-0.5" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Carried forward from a previous meeting">C/F · raised {fmt(r.originDate || r.srcDate)}</span>
                               </div>
                             )}
-                            <BulletEditor value={r.point} onChange={(v) => updRow(r.id, { point: v })} placeholder="What was discussed / decided…" />
+                            <BulletEditor value={r.point} onChange={(v) => updRow(r.id, { point: v })} />
                             {gi === g.rows.length - 1 && !!r.area && (
                               <button onClick={() => addPointRow(r.id)}
                                 className="mb-1 ml-1.5 inline-flex items-center gap-1 fs-10 font-bold rounded-lg px-1.5 py-0.5"
@@ -2434,8 +2445,7 @@ export default function MOMTracking() {
                         </button>
                       </td>
                       <td className="px-2 py-2">
-                        <span className="fs-10 font-normal text-gray-400 max-sm:hidden">{hasBlankRow ? '— select the pending row\'s Discussion Area to add more' : '— select its Discussion Area from the master points'}</span>
-                      </td>
+                                              </td>
                       <td /><td /><td /><td /><td />
                     </tr>
                     )}
@@ -2458,7 +2468,7 @@ export default function MOMTracking() {
         )}
 
         {/* ===== HISTORY ===== */}
-        {view === 'history' && <HistoryView history={scopedHistory} branches={branchOptions} onView={setViewMtg} onEdit={setEditMtg} canEdit={histSource === 'api' && isMomAdmin} onDelete={deleteMeeting} canDelete={histSource === 'api' && me?.role === 'master_admin'} canExport={canExport} onExport={doExport} source={histSource} initialCode={histBranch} fromD={histFrom} toD={histTo} />}
+        {view === 'history' && <HistoryView history={scopedHistory} branches={branchOptions} onView={setViewMtg} onEdit={setEditMtg} canEdit={histSource === 'api' && isMaster} onDelete={deleteMeeting} canDelete={histSource === 'api' && me?.role === 'master_admin'} canExport={canExport} onExport={doExport} source={histSource} initialCode={histBranch} fromD={histFrom} toD={histTo} />}
 
         {/* ===== REPORTS ===== */}
         {view === 'reports' && <ReportsView history={scopedHistory} branches={branchOptions} canExport={canExport} onView={setViewMtg} onOpenBranch={(code) => { setHistBranch(code); setView('history'); }} />}
@@ -2488,7 +2498,11 @@ export default function MOMTracking() {
       {masterOpen && <MasterModal master={master} setMaster={setMaster} categories={categories} setCategories={setCategories} meetingTypes={meetingTypes} setMeetingTypes={setMeetingTypes} persist={persist} onClose={() => setMasterOpen(false)} ping={ping} />}
 
       {/* ===== MASTER FOLDER (file store — master admin only) ===== */}
-      {filesOpen && isMaster && <MomFiles apiBase={MOM_API} authHeaders={authHeaders} brand={BRAND} brandDark={BRAND_DARK} onClose={() => setFilesOpen(false)} />}
+      {filesOpen && isMaster && (
+        <Suspense fallback={null}>
+          <MomFiles apiBase={MOM_API} authHeaders={authHeaders} brand={BRAND} brandDark={BRAND_DARK} onClose={() => setFilesOpen(false)} />
+        </Suspense>
+      )}
 
       {/* ===== VIEW MEETING (sheet replica) ===== */}
       {viewMtg && <MeetingSheetModal data={viewMtg} categories={categories} canExport={canExport} onExport={doExport} onClose={() => setViewMtg(null)} />}
@@ -2969,7 +2983,7 @@ function MeetingEditModal({ data, employees = [], categories, master = [], authH
                                 <span className="fs-9 font-bold rounded px-1 py-0.5" style={{ background: 'rgba(217,119,6,0.14)', color: '#b45309' }} title="Carried forward from a previous meeting">C/F · raised {fmt(r.originDate || r.srcDate)}</span>
                               </div>
                             )}
-                            <BulletEditor value={r.point} onChange={(v) => updRow(r.id, { point: v })} placeholder="What was discussed / decided…" />
+                            <BulletEditor value={r.point} onChange={(v) => updRow(r.id, { point: v })} />
                             {gi === g.rows.length - 1 && !!r.area && (
                               <button onClick={() => addPointRow(r.id)}
                                 className="mb-1 ml-1.5 inline-flex items-center gap-1 fs-10 font-bold rounded-lg px-1.5 py-0.5"
@@ -3853,20 +3867,11 @@ function ReportsView({ history, branches, canExport, onView, onOpenBranch }) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-3">
           <div className="fs-12 font-bold text-gray-700 mb-2">Tasks by status <span className="fs-10 font-normal text-gray-400">(latest state per task)</span></div>
-          <ResponsiveContainer width="100%" height={230}>
-            <PieChart><Pie data={d.pie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={82} paddingAngle={2}>{d.pie.map((e) => <Cell key={e.name} fill={e.color} />)}</Pie><Tooltip {...TIP_PROPS} /><Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} /></PieChart>
-          </ResponsiveContainer>
+          <Suspense fallback={<ChartFallback h={230} />}><MomChart kind="statusPie" data={d.pie} /></Suspense>
         </div>
         <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-3">
           <div className="fs-12 font-bold text-gray-700 mb-2">Task completion % by branch</div>
-          <ResponsiveContainer width="100%" height={230}>
-            <BarChart data={d.compBar} layout="vertical" margin={{ left: 8, right: 16 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
-              <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10 }} unit="%" />
-              <YAxis type="category" dataKey="name" width={88} tick={{ fontSize: 9 }} />
-              <Tooltip {...TIP_PROPS} formatter={(v) => `${v}%`} /><Bar dataKey="completion" radius={[0, 4, 4, 0]} fill={BRAND} />
-            </BarChart>
-          </ResponsiveContainer>
+          <Suspense fallback={<ChartFallback h={230} />}><MomChart kind="completionBar" data={d.compBar} /></Suspense>
         </div>
       </div>
 
@@ -3877,28 +3882,12 @@ function ReportsView({ history, branches, canExport, onView, onOpenBranch }) {
           {d.cats.length === 0 ? (
             <div className="flex items-center justify-center fs-11 text-gray-400" style={{ height: 210 }}>No tasks recorded yet.</div>
           ) : (
-            <ResponsiveContainer width="100%" height={210}>
-              <BarChart data={d.cats} layout="vertical" margin={{ left: 8, right: 16 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
-                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10 }} />
-                <YAxis type="category" dataKey="name" width={78} tick={{ fontSize: 9 }} />
-                <Tooltip {...TIP_PROPS} /><Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="done" name="Completed" stackId="a" fill="#059669" />
-                <Bar dataKey="open" name="Open" stackId="a" fill="#d97706" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <Suspense fallback={<ChartFallback />}><MomChart kind="categoryBar" data={d.cats} /></Suspense>
           )}
         </div>
         <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-3">
           <div className="fs-12 font-bold text-gray-700 mb-2">Meetings per month <span className="fs-10 font-normal text-gray-400">(last 6 months)</span></div>
-          <ResponsiveContainer width="100%" height={210}>
-            <BarChart data={d.trend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-              <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
-              <Tooltip {...TIP_PROPS} /><Bar dataKey="meetings" name="Meetings" fill={BRAND} radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          <Suspense fallback={<ChartFallback />}><MomChart kind="trendBar" data={d.trend} /></Suspense>
         </div>
       </div>
 
@@ -3911,14 +3900,7 @@ function ReportsView({ history, branches, canExport, onView, onOpenBranch }) {
               <CheckCircle2 size={22} className="mb-1" style={{ color: '#059669' }} /> No overdue tasks right now.
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={210}>
-              <BarChart data={d.aging}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
-                <Tooltip {...TIP_PROPS} /><Bar dataKey="v" name="Overdue tasks" fill="#f87171" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <Suspense fallback={<ChartFallback />}><MomChart kind="agingBar" data={d.aging} /></Suspense>
           )}
         </div>
         <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">

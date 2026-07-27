@@ -1,31 +1,27 @@
-/* Authority Matrix — three tabs on the L1..L5 hierarchy scheme:
+/* Authority Matrix — TWO tabs (UI combined; underlying logic unchanged):
 
-   1. Employee Hierarchy — branch-wise builder table with the 5 stages:
-      Branch -> L1 (Employees) -> L2 -> L3 -> L4 (HOD, per category) -> L5
-      (COO, fixed). L2/L3 are picked from that branch's members (multi-branch
-      users appear under every branch they can access); L4 approvers are
-      picked from the HO branch members; L5 is fixed to the rights masters.
-      Assigning someone to a stage grants that authority level automatically
-      (the server re-derives levels). The HO branch itself has NO hierarchy
-      row — HO members choose their own L4/L5 approvers when creating an
-      application.
-   2. Authority Limit — ONE ROW PER LEVEL (L1..L5): Max Discounting %, Max
-      Credit Days, Max Expense Amount (per type). The limits apply to EVERY
-      user holding the level; an L1 employee's OWN records auto-approve
-      within the L1 limit (self-approval is removed). Each level's NAME is
-      editable here and shows everywhere in the Approval Application.
-   3. Expense Types & Limits — the expense-type master.                     */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+   1. Employee Hierarchy & Limits — one table:
+      Branch | Employee | Level | Max Discounting % | Max Credit Days |
+      Max Expense Amount | Action.
+      Each branch row lists its taken-in employees as bullets; a LEVEL
+      dropdown in front of every employee assigns L1..L4 for THIS branch's
+      flow (L2/L3 = stage approvers, L4 = HOD for all three categories,
+      L5/COO stays fixed & unlimited). The limit columns edit each employee's
+      INDIVIDUAL limits (blank = the level's shared branch-row value applies);
+      the expense amount is ONE number applied to ALL expense types. Newly
+      created profile employees are DETECTED and offered through the row's
+      "Add employee" option.
+   2. Expense Type Master — the expense-type dropdown master.              */
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import Swal from 'sweetalert2';
 import {
-    X, Network, UserCog, GitBranch, Wallet, Trash2, Pencil,
-    ArrowRight, Plus,
+    X, Network, GitBranch, Wallet, Trash2, Pencil, Plus,
 } from 'lucide-react';
 import {
-    getMatrix, setEmployeeRule, setHodCategory, setStageApprovers, setLevelConfig,
-    addExpenseType, removeExpenseType, renameExpenseType,
-    setApproverExclusion, errText,
+    getMatrix, setAuthority, setEmployeeRule, setHodCategory, setStageApprovers,
+    setLevelConfig, removeEmployeeRights, addExpenseType, removeExpenseType,
+    renameExpenseType, setApproverExclusion, errText,
 } from './approvalApi';
 import { BRAND, CATEGORY_OPTIONS, catLabel, levelLabel, levelName, setLevelNames } from './ApprovalShared';
 
@@ -34,139 +30,15 @@ const input = 'w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-w
    stick with position:sticky in Chrome, which left a gap over the frozen
    header. The container's own border supplies the top/left edges. */
 const th = 'px-2.5 py-2 border-b border-r border-gray-200 bg-gray-50 text-gray-800 font-semibold text-center text-[11px] uppercase tracking-wide whitespace-nowrap';
-const td = 'px-2.5 py-1.5 border-b border-r border-gray-200 text-center align-middle text-xs';
+const td = 'px-2.5 py-1.5 border-b border-r border-gray-200 text-center align-top text-xs';
 
 const LEVELS = ['l1', 'l2', 'l3', 'l4', 'l5'];
-
-const LEVEL_BADGE_CLS = {
-    l1: 'bg-gray-100 text-gray-600',
-    l2: 'bg-amber-100 text-amber-700',
-    l3: 'bg-orange-100 text-orange-700',
-    l4: 'bg-blue-100 text-blue-700',
-    l5: 'bg-purple-100 text-purple-700',
-};
+const ROW_LEVELS = ['l1', 'l2', 'l3', 'l4'];   // assignable per employee (L5 fixed)
+const LIMIT_KEYS = ['max_discount_percent', 'max_credit_days', 'max_expense_amount'];
 
 // Which branches are shown as hierarchy rows — UI-only state, kept per
 // browser so the builder view survives refreshes.
 const LS_KEY = 'apvHierarchyBranchesL5';
-
-// Multi-select popover with PENDING selection: tick any number of people,
-// changes apply ONCE when the popover closes (one alert, not one per person).
-// `options` (the branch's own members) show by default; `extraOptions`
-// (employees of OTHER branches) open on demand — so a head from another
-// branch can also be chosen. Top-level component so its local state
-// survives parent re-renders.
-function MultiPick({ id, openPick, setOpenPick, buttonLabel, options, extraOptions = [], selectedIds, onApply }) {
-    const [localSel, setLocalSel] = useState([]);
-    const [showAll, setShowAll] = useState(false);
-    const [query, setQuery] = useState('');
-    // Anchor rect of the trigger button — the panel renders position:FIXED so
-    // the table's overflow container can never clip it.
-    const [anchor, setAnchor] = useState(null);
-    const btnRef = useRef(null);
-    const open = openPick === id;
-    // (Re)initialise whenever the popover opens. Done in an effect — NOT in
-    // the click handler — because a parent re-render can REMOUNT this
-    // component (e.g. when it sits inside an inline-defined cell component),
-    // which would wipe click-time state and leave the panel invisible.
-    useEffect(() => {
-        if (open && btnRef.current) {
-            setAnchor(btnRef.current.getBoundingClientRect());
-            setLocalSel(selectedIds);
-            setShowAll(false);
-            setQuery('');
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open]);
-    const openNow = () => setOpenPick(id);
-    const closeApply = () => {
-        setOpenPick(null);
-        const changed = localSel.length !== selectedIds.length
-            || localSel.some(i => !selectedIds.includes(i));
-        if (changed) onApply(localSel);
-    };
-    const toggle = (uid) =>
-        setLocalSel(prev => prev.includes(uid) ? prev.filter(i => i !== uid) : [...prev, uid]);
-    const match = (m) => !query
-        || m.name.toLowerCase().includes(query.toLowerCase())
-        || m.user_id.toLowerCase().includes(query.toLowerCase());
-    const row = (m, sub = null) => (
-        <label key={m.user_id}
-            title={`${m.name} (${m.user_id})${sub ? ` · ${sub}` : ''}`}
-            className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-gray-50 cursor-pointer text-[11px] text-gray-800">
-            <input type="checkbox" checked={localSel.includes(m.user_id)}
-                onChange={() => toggle(m.user_id)} className="accent-indigo-600" />
-            <span className="truncate">
-                {m.name} ({m.user_id}){sub && <span className="text-gray-500"> · {sub}</span>}
-            </span>
-        </label>
-    );
-    // people from other branches ALREADY selected stay visible even collapsed
-    const pickedExtras = extraOptions.filter(m => localSel.includes(m.user_id));
-    const visibleExtras = (showAll ? extraOptions : pickedExtras).filter(match);
-
-    // Fixed-position panel: clamp inside the viewport, flip upward when there
-    // is more room above the button than below it.
-    const PANEL_W = 288;
-    let panelStyle = null, listMax = 224;
-    if (open && anchor) {
-        const left = Math.max(8, Math.min(anchor.left, window.innerWidth - PANEL_W - 8));
-        const spaceBelow = window.innerHeight - anchor.bottom - 8;
-        const spaceAbove = anchor.top - 8;
-        const openUp = spaceBelow < 240 && spaceAbove > spaceBelow;
-        const avail = (openUp ? spaceAbove : spaceBelow) - 8;
-        listMax = Math.max(120, Math.min(224, avail - 84));   // search + Done ≈ 84px
-        panelStyle = openUp
-            ? { position: 'fixed', left, bottom: window.innerHeight - anchor.top, width: PANEL_W, zIndex: 100, paddingBottom: 4 }
-            : { position: 'fixed', left, top: anchor.bottom, width: PANEL_W, zIndex: 100, paddingTop: 4 };
-    }
-
-    return (
-        <div className="relative inline-block text-left">
-            <button ref={btnRef} type="button" onClick={() => (open ? closeApply() : openNow())}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 whitespace-nowrap">
-                {buttonLabel} ▾
-            </button>
-            {open && panelStyle && (
-                <>
-                    {/* invisible backdrop: the popover stays open while searching /
-                        ticking (no hover-out auto close) and applies on outside click */}
-                    <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={closeApply} />
-                    <div style={panelStyle}>
-                    <div className="rounded-xl border border-gray-200 bg-white shadow-xl p-2 text-left">
-                        <input value={query} onChange={e => setQuery(e.target.value)}
-                            placeholder="Search name / id…"
-                            className="w-full mb-1.5 border border-gray-300 rounded-lg px-2 py-1 text-[11px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-                        <div className="overflow-y-auto space-y-0.5" style={{ scrollbarWidth: 'thin', maxHeight: listMax }}>
-                            {options.filter(match).length === 0 && (
-                                <p className="px-2 py-1.5 text-[11px] text-gray-600">No branch members found</p>
-                            )}
-                            {options.filter(match).map(m => row(m))}
-                            {extraOptions.length > 0 && (
-                                <>
-                                    <button type="button" onClick={() => setShowAll(v => !v)}
-                                        className="w-full text-left px-2 py-1 text-[10px] font-bold text-indigo-700 hover:bg-indigo-50 rounded-lg">
-                                        {showAll ? '▾ Other branch employees' : '▸ Other branch employees…'}
-                                    </button>
-                                    {visibleExtras.map(m => row(m, m.branch))}
-                                    {showAll && visibleExtras.length === 0 && (
-                                        <p className="px-2 py-1.5 text-[11px] text-gray-600">No matching employees</p>
-                                    )}
-                                </>
-                            )}
-                        </div>
-                        <button type="button" onClick={closeApply}
-                            className="mt-1.5 w-full px-2 py-1.5 rounded-lg text-[11px] font-semibold text-white"
-                            style={{ background: BRAND }}>
-                            Done
-                        </button>
-                    </div>
-                    </div>
-                </>
-            )}
-        </div>
-    );
-}
 
 export default function AuthorityMatrix({ onClose }) {
     const [data, setData] = useState({
@@ -175,17 +47,19 @@ export default function AuthorityMatrix({ onClose }) {
         ho_branch: 'HO',
     });
     const [loading, setLoading] = useState(true);
-    const [tab, setTab] = useState('hierarchy');   // hierarchy | limits | expense
-    // Local editable copies keyed by LEVEL (Authority Limit tab)
-    const [lvlEdits, setLvlEdits] = useState({});
+    const [tab, setTab] = useState('hierarchy');   // hierarchy | expense
     const [savingId, setSavingId] = useState(null);
     const [newTypeName, setNewTypeName] = useState('');
-    const [openExpenseFor, setOpenExpenseFor] = useState(null);
-    const [expAnchor, setExpAnchor] = useState(null);   // trigger rect (fixed-position panel)
-    const [openPick, setOpenPick] = useState(null);       // which multi-select popover is open
     const [treeFor, setTreeFor] = useState(null);         // hierarchy tree popup (name click)
     const [addedBranches, setAddedBranches] = useState(null);   // hierarchy rows
     const [editingRow, setEditingRow] = useState(null);         // branch row in edit mode
+    // Pending per-branch level assignments {code: {user_id: 'l1'..'l4'}}
+    const [rowEdits, setRowEdits] = useState({});
+    // Pending L4 category picks {code: {user_id: ['spares', ...]}}
+    const [rowCats, setRowCats] = useState({});
+    // Pending PER-EMPLOYEE limit edits, scoped per row so typing in one
+    // branch row never marks/saves the other rows: {code: {user_id: {max_*}}}
+    const [rowUserEdits, setRowUserEdits] = useState({});
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -201,9 +75,6 @@ export default function AuthorityMatrix({ onClose }) {
                 branch_members: d.branch_members || {},
                 ho_branch: d.ho_branch || 'HO',
             });
-            // NOTE: lvlEdits is intentionally NOT cleared here — reloading
-            // (e.g. after saving ONE level row) must not wipe the unsaved
-            // edits of the other rows. saveLevel clears its own row only.
         } catch (err) {
             toast.error(errText(err, 'Failed to load authority matrix'));
         } finally { setLoading(false); }
@@ -218,11 +89,10 @@ export default function AuthorityMatrix({ onClose }) {
         let stored = null;
         try { stored = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch { /* ignore */ }
         if (Array.isArray(stored)) {
-            setAddedBranches(stored.filter(b => b !== data.ho_branch));
+            setAddedBranches(stored);
             return;
         }
-        setAddedBranches(Object.keys(data.chain_data?.stage_approvers || {})
-            .filter(b => b !== data.ho_branch));
+        setAddedBranches(Object.keys(data.chain_data?.stage_approvers || {}));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [loading, data]);
 
@@ -233,34 +103,93 @@ export default function AuthorityMatrix({ onClose }) {
 
     const branchName = (code) => data.branches.find(b => b.branch === code)?.branch_name || '';
     const userOf = (id) => data.users.find(x => x.user_id === id);
+    const nameOf = (id) => userOf(id)?.name || id;
     const membersOf = (code) => data.branch_members[code] || [];
     const cooNames = data.chain_data?.coo_names?.length ? data.chain_data.coo_names : ['COO'];
     const stageOf = (code, stage) => ((data.chain_data?.stage_approvers || {})[code] || {})[stage] || [];
     const hodMapsOf = (branchCode, cat) => ((data.hod_categories[branchCode] || {})[cat] || []);
+    const sameIds = (a, b) => a.length === b.length && a.every(x => b.includes(x));
 
-    /* ------- Authority Limit tab (LEVEL-wise) local-edit helpers ------- */
-    const cfgOf = (lvl) =>
-        data.level_configs.find(c => c.level === lvl)
-        || { level: lvl, display_name: levelName(lvl), expense_limits: {} };
-    const lval = (lvl, key) => {
-        const e = lvlEdits[lvl];
-        return e && key in e ? e[key] : (cfgOf(lvl)[key] ?? '');
+    /* ------- combined-tab helpers ------- */
+
+    // Employees SHOWN in a branch row: members already taken into the
+    // hierarchy (has_right) plus anyone assigned at a stage / as L4 here.
+    const rowMembers = (code) => {
+        const ids = new Set();
+        membersOf(code).forEach(m => { if (userOf(m.user_id)?.has_right) ids.add(m.user_id); });
+        ['l2', 'l3'].forEach(st => stageOf(code, st).forEach(p => ids.add(p.user_id)));
+        CATEGORY_OPTIONS.forEach(c => hodMapsOf(code, c.value).forEach(m => m.user_id && ids.add(m.user_id)));
+        return [...ids].map(id => ({ user_id: id, name: nameOf(id) }))
+            .sort((a, b) => a.name.localeCompare(b.name));
     };
-    const setLval = (lvl, key, v) =>
-        setLvlEdits(prev => ({ ...prev, [lvl]: { ...prev[lvl], [key]: v } }));
-    const lexpVal = (lvl, t) => {
-        const k = `exp_${t.id}`;
-        const e = lvlEdits[lvl];
-        return e && k in e ? e[k] : (cfgOf(lvl).expense_limits?.[t.id] ?? '');
+
+    // NEW employees detected for this branch (in Profile but not taken in yet)
+    const newCandidates = (code) => {
+        const shown = new Set(rowMembers(code).map(m => m.user_id));
+        return membersOf(code).filter(m => !shown.has(m.user_id))
+            .sort((a, b) => a.name.localeCompare(b.name));
     };
-    const isDirtyLevel = (lvl) => {
-        const c = cfgOf(lvl);
-        const same = (a, b) => String(a ?? '') === String(b ?? '');
-        if (!same(lval(lvl, 'display_name'), c.display_name)) return true;
-        if (!same(lval(lvl, 'max_discount_percent'), c.max_discount_percent)) return true;
-        if (!same(lval(lvl, 'max_credit_days'), c.max_credit_days)) return true;
-        return data.expense_types.some(t => !same(lexpVal(lvl, t), c.expense_limits?.[t.id]));
+
+    // The level an employee holds IN THIS ROW's flow
+    const serverLevelInRow = (code, uid) => {
+        if (CATEGORY_OPTIONS.some(c => hodMapsOf(code, c.value).some(m => m.user_id === uid))) return 'l4';
+        if (stageOf(code, 'l3').some(p => p.user_id === uid)) return 'l3';
+        if (stageOf(code, 'l2').some(p => p.user_id === uid)) return 'l2';
+        return 'l1';
     };
+    const effLevelInRow = (code, uid) => rowEdits[code]?.[uid] ?? serverLevelInRow(code, uid);
+    const setLevelInRow = (code, uid, lvl) =>
+        setRowEdits(prev => ({ ...prev, [code]: { ...prev[code], [uid]: lvl } }));
+
+    // Which categories an L4 (HOD) covers in THIS row — default: all three
+    const serverCatsInRow = (code, uid) =>
+        CATEGORY_OPTIONS.filter(c => hodMapsOf(code, c.value).some(m => m.user_id === uid))
+            .map(c => c.value);
+    const effCatsInRow = (code, uid) => {
+        const pending = rowCats[code]?.[uid];
+        if (pending) return pending;
+        const srv = serverCatsInRow(code, uid);
+        return srv.length ? srv : CATEGORY_OPTIONS.map(c => c.value);
+    };
+    const toggleCat = (code, uid, cat) =>
+        setRowCats(prev => {
+            const cur = prev[code]?.[uid] ?? effCatsInRow(code, uid);
+            const next = cur.includes(cat) ? cur.filter(x => x !== cat) : [...cur, cat];
+            return { ...prev, [code]: { ...prev[code], [uid]: next } };
+        });
+
+    // LEVEL-wise limit rows of a branch — the shared FALLBACK an employee
+    // inherits when no individual limit is set. (Global branch-less rows
+    // only carry the renamable level names.)
+    const cfgOf = (code, lvl) =>
+        data.level_configs.find(c => c.branch === code && c.level === lvl) || {};
+    // INDIVIDUAL limits live on the employee's rights row (null = inherit)
+    const indivOf = (uid, key) => userOf(uid)?.[key] ?? null;
+    const usrVal = (code, uid, key) => {
+        const e = rowUserEdits[code]?.[uid];
+        return e && key in e ? e[key] : (indivOf(uid, key) ?? '');
+    };
+    const setUsrVal = (code, uid, key, v) =>
+        setRowUserEdits(prev => ({
+            ...prev,
+            [code]: { ...prev[code], [uid]: { ...prev[code]?.[uid], [key]: v } },
+        }));
+    const isUserLimitDirty = (code, uid) => {
+        const e = rowUserEdits[code]?.[uid];
+        return !!e && LIMIT_KEYS.some(k => k in e && String(e[k] ?? '') !== String(indivOf(uid, k) ?? ''));
+    };
+    const rowLimitsDirty = (code) =>
+        Object.keys(rowUserEdits[code] || {}).some(uid => isUserLimitDirty(code, uid));
+    const rowLevelsDirty = (code) => {
+        const e = rowEdits[code];
+        return !!e && Object.entries(e).some(([uid, lvl]) => lvl !== serverLevelInRow(code, uid));
+    };
+    const rowCatsDirty = (code) => {
+        const e = rowCats[code];
+        return !!e && Object.entries(e).some(([uid, cats]) =>
+            effLevelInRow(code, uid) === 'l4' && !sameIds(cats, serverCatsInRow(code, uid)));
+    };
+    const isRowDirty = (code) => rowLevelsDirty(code) || rowCatsDirty(code) || rowLimitsDirty(code);
 
     const showImpact = async (res, fallbackMsg) => {
         if (res?.impact?.message) {
@@ -276,35 +205,6 @@ export default function AuthorityMatrix({ onClose }) {
         }
     };
 
-    const saveLevel = async (lvl) => {
-        if (!isDirtyLevel(lvl)) return;
-        setSavingId(`lvl_${lvl}`);
-        try {
-            const res = await setLevelConfig({
-                level: lvl,
-                display_name: lval(lvl, 'display_name'),
-                max_discount_percent: lval(lvl, 'max_discount_percent'),
-                max_credit_days: lval(lvl, 'max_credit_days'),
-                expense_type_limits: data.expense_types.map(t => ({
-                    expense_type_id: t.id, max_amount: lexpVal(lvl, t),
-                })),
-            });
-            // drop ONLY this row's local edits (it now matches the server);
-            // other rows keep their pending changes
-            setLvlEdits(prev => {
-                const next = { ...prev };
-                delete next[lvl];
-                return next;
-            });
-            await load();
-            await showImpact(res, `Saved — ${lvl.toUpperCase()}`);
-        } catch (err) {
-            toast.error(errText(err, 'Failed to save level limits'));
-        } finally { setSavingId(null); }
-    };
-
-    /* ------- hierarchy tab actions (BATCH: one alert per apply) ------- */
-
     const doneAlert = async (movedTotal, what) => {
         if (movedTotal) {
             await Swal.fire({
@@ -319,76 +219,152 @@ export default function AuthorityMatrix({ onClose }) {
         }
     };
 
-    /* ------- hierarchy row PENDING edits (nothing hits the server until
-              the row's Save button is pressed) ------- */
-    // {branchCode: { l2: [ids], l3: [ids], hod_spares: [ids], ... }} — only
-    // the keys the user actually touched are present.
-    const [rowEdits, setRowEdits] = useState({});
-    const setRowEdit = (code, key, ids) =>
-        setRowEdits(prev => ({ ...prev, [code]: { ...prev[code], [key]: ids } }));
-
-    // Picking people at a HIGHER stage of the same row removes them from the
-    // lower stage(s) — one person holds ONE level per row (highest wins).
-    const applyStageEdit = (code, stage, ids) =>
-        setRowEdits(prev => {
-            const cur = { ...prev[code], [stage]: ids };
-            if (stage === 'l3') {
-                const lower = prev[code]?.l2 ?? stageOf(code, 'l2').map(p => p.user_id);
-                const kept = lower.filter(i => !ids.includes(i));
-                if (kept.length !== lower.length) cur.l2 = kept;
-            }
-            return { ...prev, [code]: cur };
-        });
-    const applyHodEdit = (code, cat, ids) =>
-        setRowEdits(prev => {
-            const cur = { ...prev[code], [`hod_${cat}`]: ids };
-            for (const st of ['l2', 'l3']) {
-                const lower = prev[code]?.[st] ?? stageOf(code, st).map(p => p.user_id);
-                const kept = lower.filter(i => !ids.includes(i));
-                if (kept.length !== lower.length) cur[st] = kept;
-            }
-            return { ...prev, [code]: cur };
-        });
-    const discardRow = (code) => {
-        setRowEdits(prev => { const n = { ...prev }; delete n[code]; return n; });
-        if (editingRow === code) setEditingRow(null);
-    };
-    const sameIds = (a, b) => a.length === b.length && a.every(x => b.includes(x));
-    const serverStageIds = (code, stage) => stageOf(code, stage).map(p => p.user_id);
-    const serverHodIds = (code, cat) => hodMapsOf(code, cat).map(m => m.user_id).filter(Boolean);
-    // effective selection = pending edit if present, else the server value
-    const effStageIds = (code, stage) => rowEdits[code]?.[stage] ?? serverStageIds(code, stage);
-    const effHodIds = (code, cat) => rowEdits[code]?.[`hod_${cat}`] ?? serverHodIds(code, cat);
-    const isRowDirty = (code) => {
-        const e = rowEdits[code];
-        if (!e) return false;
-        if (['l2', 'l3'].some(s => e[s] && !sameIds(e[s], serverStageIds(code, s)))) return true;
-        return CATEGORY_OPTIONS.some(c =>
-            e[`hod_${c.value}`] && !sameIds(e[`hod_${c.value}`], serverHodIds(code, c.value)));
-    };
-    const nameOf = (id) => userOf(id)?.name || id;
-
-    // Push the row's pending L2 / L3 / L4 changes in one go
+    // Save ONE branch row: level assignments (stages + L4 map) and any
+    // touched PER-EMPLOYEE limits (blank clears the individual limit — the
+    // level's shared value applies again).
     const saveRow = async (code) => {
-        const e = rowEdits[code] || {};
+        const members = rowMembers(code);
+        // every L4 must cover at least one category
+        const noCat = members.find(m => effLevelInRow(code, m.user_id) === 'l4'
+            && effCatsInRow(code, m.user_id).length === 0);
+        if (noCat) return toast.error(`Select at least one category for ${noCat.name} (L4)`);
         setSavingId(`row_${code}`);
         try {
             let moved = 0;
-            for (const stage of ['l2', 'l3']) {
-                if (e[stage] && !sameIds(e[stage], serverStageIds(code, stage)))
-                    moved += (await setStageApprovers(code, stage, e[stage]))?.moved || 0;
+            const wanted = (st) => members.filter(m => effLevelInRow(code, m.user_id) === st)
+                .map(m => m.user_id);
+            for (const st of ['l2', 'l3']) {
+                const want = wanted(st);
+                const cur = stageOf(code, st).map(p => p.user_id);
+                if (!sameIds(want, cur))
+                    moved += (await setStageApprovers(code, st, want))?.moved || 0;
             }
+            // L4 per CATEGORY — each HOD covers only their picked categories
             for (const c of CATEGORY_OPTIONS) {
-                const k = `hod_${c.value}`;
-                if (e[k] && !sameIds(e[k], serverHodIds(code, c.value)))
-                    moved += (await setHodCategory(code, c.value, e[k]))?.moved || 0;
+                const want = members.filter(m => effLevelInRow(code, m.user_id) === 'l4'
+                    && effCatsInRow(code, m.user_id).includes(c.value)).map(m => m.user_id);
+                const cur = hodMapsOf(code, c.value).map(m => m.user_id).filter(Boolean);
+                if (!sameIds(want, cur))
+                    moved += (await setHodCategory(code, c.value, want))?.moved || 0;
+            }
+            // INDIVIDUAL limits — one save per edited employee; only the
+            // touched keys are sent so the others stay as they are.
+            for (const uid of Object.keys(rowUserEdits[code] || {})) {
+                if (!isUserLimitDirty(code, uid)) continue;
+                const e = rowUserEdits[code][uid];
+                const payload = { user_id: uid };
+                LIMIT_KEYS.forEach(k => { if (k in e) payload[k] = e[k]; });
+                moved += (await setAuthority(payload))?.moved || 0;
             }
             setRowEdits(prev => { const n = { ...prev }; delete n[code]; return n; });
+            setRowCats(prev => { const n = { ...prev }; delete n[code]; return n; });
+            setRowUserEdits(prev => { const n = { ...prev }; delete n[code]; return n; });
             setEditingRow(null);
             await load();
             await doneAlert(moved, `Hierarchy row ${code}`);
         } catch (err) {
             toast.error(errText(err, 'Failed to save the hierarchy row'));
+        } finally { setSavingId(null); }
+    };
+
+    const discardRow = (code) => {
+        setRowEdits(prev => { const n = { ...prev }; delete n[code]; return n; });
+        setRowCats(prev => { const n = { ...prev }; delete n[code]; return n; });
+        setRowUserEdits(prev => { const n = { ...prev }; delete n[code]; return n; });
+        if (editingRow === code) setEditingRow(null);
+    };
+
+    // Take a NEW employee into the hierarchy (registers them at their current
+    // level — set the wanted level afterwards and press Save)
+    const addEmployee = async (code, uid) => {
+        const u = userOf(uid);
+        if (!u) return;
+        setSavingId(`add_${code}`);
+        try {
+            await setAuthority({ user_id: uid, level: u.level || 'l1' });
+            await load();
+            toast.success(`${u.name} added to ${code} — set their level and press Save`);
+        } catch (err) {
+            toast.error(errText(err, 'Failed to add the employee'));
+        } finally { setSavingId(null); }
+    };
+
+    // Remove an employee from the hierarchy — all their rights go away and
+    // they move back into the "Add employee" dropdown of their branch.
+    const removeEmployee = async (code, m) => {
+        const res = await Swal.fire({
+            title: 'Remove employee?',
+            text: `${m.name} will lose all hierarchy rights and move back to the Add employee list.`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Remove',
+            confirmButtonColor: '#d97706',
+        });
+        if (!res.isConfirmed) return;
+        setSavingId(`rem_${m.user_id}`);
+        try {
+            const r = await removeEmployeeRights(m.user_id);
+            setRowEdits(prev => {
+                const n = { ...prev };
+                if (n[code]) { const e = { ...n[code] }; delete e[m.user_id]; n[code] = e; }
+                return n;
+            });
+            await load();
+            if (r?.moved) await doneAlert(r.moved, `${m.name} removed — assignments`);
+            else toast.success(`${m.name} removed from the hierarchy`);
+        } catch (err) {
+            toast.error(errText(err, 'Failed to remove the employee'));
+        } finally { setSavingId(null); }
+    };
+
+    // Take in EVERY current employee of the branch at once — runs
+    // automatically when a branch row is added, so the row loads with all
+    // its employees; anyone joining later shows up in "Add employee".
+    const takeInAll = async (code) => {
+        const fresh = newCandidates(code);
+        if (!fresh.length) return;
+        setSavingId(`add_${code}`);
+        try {
+            for (const m of fresh) {
+                const u = userOf(m.user_id);
+                await setAuthority({ user_id: m.user_id, level: u?.level || 'l1' });
+            }
+            await load();
+            toast.success(`${fresh.length} employee(s) loaded into ${code}`);
+        } catch (err) {
+            toast.error(errText(err, 'Failed to load the branch employees'));
+        } finally { setSavingId(null); }
+    };
+
+    // Rename the L1..L5 level names (shows everywhere)
+    const renameLevels = async () => {
+        const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const rowsHtml = LEVELS.map(l => `
+            <div style="display:flex;align-items:center;gap:8px;margin:5px 0">
+                <b style="width:30px;font-size:12px">${l.toUpperCase()}</b>
+                <input id="lvlname_${l}" value="${esc(levelName(l))}"
+                    style="flex:1;border:1px solid #d1d5db;border-radius:8px;padding:6px 10px;font-size:13px">
+            </div>`).join('');
+        const { isConfirmed } = await Swal.fire({
+            title: 'Level Names',
+            html: `<div style="text-align:left">${rowsHtml}</div>`,
+            showCancelButton: true,
+            confirmButtonText: 'Save Names',
+            confirmButtonColor: BRAND,
+        });
+        if (!isConfirmed) return;
+        setSavingId('lvlnames');
+        try {
+            for (const l of LEVELS) {
+                const v = (document.getElementById(`lvlname_${l}`)?.value || '').trim();
+                if (!v || v === levelName(l)) continue;
+                // global (branch-less) row = only the display name
+                await setLevelConfig({ level: l, display_name: v });
+            }
+            await load();
+            toast.success('Level names saved');
+        } catch (err) {
+            toast.error(errText(err, 'Failed to save level names'));
         } finally { setSavingId(null); }
     };
 
@@ -426,8 +402,8 @@ export default function AuthorityMatrix({ onClose }) {
     };
     const deleteType = async (t) => {
         const res = await Swal.fire({
-            title: 'Remove expense type?', text: `"${t.name}" and its level limits will be removed`,
-            icon: 'warning', showCancelButton: true, confirmButtonText: 'Remove', confirmButtonColor: '#dc2626',
+            title: 'Remove expense type?', text: `"${t.name}" will be removed`,
+            icon: 'warning', showCancelButton: true, confirmButtonText: 'Remove', confirmButtonColor: '#d97706',
         });
         if (!res.isConfirmed) return;
         try {
@@ -471,39 +447,14 @@ export default function AuthorityMatrix({ onClose }) {
 
     const rows = addedBranches || [];
     const hoCode = data.ho_branch;
-    // The HO branch never appears as a hierarchy row — HO members choose
-    // their own L4/L5 approvers when they create an application.
     const remainingBranches = useMemo(() =>
-        data.branches.filter(b => b.branch !== hoCode && !rows.includes(b.branch)
+        data.branches.filter(b => !rows.includes(b.branch)
             && membersOf(b.branch).length > 0),
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [data, rows]);
 
     /* ------- small UI pieces ------- */
 
-    const chip = (text, key) => (
-        <span key={key ?? text} className="px-2 py-0.5 rounded-lg border whitespace-nowrap inline-block bg-white text-gray-800 border-gray-300 text-[11px]">
-            {text}
-        </span>
-    );
-
-    // Clickable person chip — opens that person's hierarchy tree popup
-    const chipBtn = (text, key, onClick) => (
-        <button key={key ?? text} type="button" onClick={onClick}
-            title="Show this person's approval hierarchy"
-            className="px-2 py-0.5 rounded-lg border whitespace-nowrap inline-block bg-white text-gray-800 border-gray-300 text-[11px] hover:border-indigo-400 hover:bg-indigo-50">
-            {text}
-        </button>
-    );
-
-    // Arrow sits ON the cell border (no separate column)
-    const cellArrow = (
-        <span className="absolute top-1/2 -translate-y-1/2 -right-[9px] z-10 bg-white rounded-full border border-gray-200 p-0.5 text-gray-400">
-            <ArrowRight size={11} />
-        </span>
-    );
-
-    // Tabs live inside the blue header bar: active = white pill, rest = glass
     const tabBtn = (key, label, Icon) => (
         <button onClick={() => setTab(key)}
             className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap flex-shrink-0 ${tab === key
@@ -523,37 +474,13 @@ export default function AuthorityMatrix({ onClose }) {
         </button>
     );
 
-    // One stage cell of the hierarchy row (L2 / L3): chips + picker in edit
-    // mode. The picker defaults to the branch's own members, with the
-    // employees of OTHER branches available on demand (choose a head from
-    // another branch too). Selections stay PENDING until the row is saved.
-    const StageCell = ({ code, stage, members, isEditing }) => {
-        const ids = effStageIds(code, stage);
-        const memberIds = new Set(members.map(m => m.user_id));
-        const others = data.users
-            .filter(u => !memberIds.has(u.user_id))
-            .map(u => ({ user_id: u.user_id, name: u.name, branch: u.branch }));
-        return (
-            <div className={`flex flex-wrap items-center gap-1 ${!ids.length && !isEditing ? 'justify-center' : ''}`}>
-                {ids.map(id => chipBtn(nameOf(id), id, () => setTreeFor(id)))}
-                {!ids.length && !isEditing && <span className="text-[11px] text-gray-500">—</span>}
-                {isEditing && (
-                    <MultiPick id={`${stage}_${code}`}
-                        openPick={openPick} setOpenPick={setOpenPick}
-                        buttonLabel={ids.length ? 'Change' : `Select ${stage.toUpperCase()}`}
-                        options={members}
-                        extraOptions={others}
-                        selectedIds={ids}
-                        onApply={(sel) => applyStageEdit(code, stage, sel)} />
-                )}
-            </div>
-        );
-    };
+    // one aligned sub-line per employee in every cell of the branch row
+    const LINE = 'h-9 flex items-center';
 
     /* ================= RENDER ================= */
     return (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl h-[88vh] flex flex-col overflow-hidden"
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[96vw] h-[94vh] flex flex-col overflow-hidden"
                 onClick={e => e.stopPropagation()}>
                 {/* Blue bar: title + tabs + close, in ONE row */}
                 <div className="sticky top-0 z-30 flex flex-nowrap items-center gap-3 px-5 py-2.5 rounded-t-2xl text-white overflow-x-auto" style={{ background: BRAND, scrollbarWidth: 'thin' }}>
@@ -561,8 +488,7 @@ export default function AuthorityMatrix({ onClose }) {
                         <Network size={16} /> Authority Matrix
                     </span>
                     <div className="ml-auto flex flex-nowrap items-center gap-2">
-                        {tabBtn('hierarchy', 'Employee Hierarchy', GitBranch)}
-                        {tabBtn('limits', 'Authority Limit', UserCog)}
+                        {tabBtn('hierarchy', 'Employee Hierarchy & Limits', GitBranch)}
                         {tabBtn('expense', 'Expense Type Master', Wallet)}
                     </div>
                     <button onClick={onClose} className="p-1.5 rounded-lg bg-white hover:bg-white/90 transition flex-shrink-0" style={{ color: '#2f3192' }}><X size={15} /></button>
@@ -574,100 +500,185 @@ export default function AuthorityMatrix({ onClose }) {
                         <div className="py-16 text-center text-sm text-gray-600">Loading authority matrix…</div>
                     ) : tab === 'hierarchy' ? (
                         <>
-                            <p className="text-[11px] text-gray-700">
-                                Pick <b>L2 / L3</b> and category-wise <b>L4</b> approvers per branch — each record follows its branch row.
-                            </p>
+                            <div className="flex items-center gap-2">
+                                <p className="text-[11px] text-gray-700 flex-1 min-w-0">
+                                    Set each employee's <b>Level</b> per branch. Limits are <b>per-employee</b> — blank inherits the level's shared value; expense amount applies to all types.
+                                </p>
+                                <button type="button" onClick={renameLevels} disabled={savingId === 'lvlnames'}
+                                    className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                                    <Pencil size={12} /> Level Names
+                                </button>
+                            </div>
                             <div className="rounded-xl border border-gray-200 overflow-auto flex-1 min-h-0 apv-scroll">
                                 <table className="min-w-full border-separate" style={{ borderSpacing: 0 }}>
                                     <thead className="sticky top-0 z-10">
                                         <tr>
                                             <th className={`${th} min-w-[130px]`}>Branch</th>
-                                            <th className={`${th} min-w-[200px]`}>L1 – {levelName('l1')}</th>
-                                            <th className={`${th} min-w-[150px]`}>L2 – {levelName('l2')}</th>
-                                            <th className={`${th} min-w-[150px]`}>L3 – {levelName('l3')}</th>
-                                            <th className={`${th} min-w-[250px]`}>L4 – {levelName('l4')}</th>
-                                            <th className={th}>L5 – {levelName('l5')}</th>
-                                            <th className={`${th} w-16`}>Action</th>
+                                            <th className={`${th} min-w-[220px]`}>Approval Rights</th>
+                                            <th className={`${th} min-w-[150px]`}>Level</th>
+                                            <th className={`${th} min-w-[190px]`}>Category</th>
+                                            <th className={`${th} w-36 !whitespace-normal`}>Max Discounting %</th>
+                                            <th className={`${th} w-32 !whitespace-normal`}>Max Credit Days</th>
+                                            <th className={`${th} w-36 !whitespace-normal`}>Max Expense Amount</th>
+                                            <th className={`${th} w-20`}>Action</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {rows.map(code => {
-                                            const members = membersOf(code);
-                                            // Everyone comes under L1 first; picking a person as
-                                            // L2 / L3 / L4 of THIS row removes them from its L1 list.
-                                            const assignedIds = new Set([
-                                                ...effStageIds(code, 'l2'),
-                                                ...effStageIds(code, 'l3'),
-                                                ...CATEGORY_OPTIONS.flatMap(c => effHodIds(code, c.value)),
-                                            ]);
-                                            const emps = members.filter(m => !assignedIds.has(m.user_id));
-                                            const hoMembers = membersOf(hoCode);
+                                            const members = rowMembers(code);
+                                            const fresh = newCandidates(code);
                                             const isEditing = editingRow === code;
-                                            return (
-                                                <tr key={code} className={isEditing ? 'bg-amber-50/60' : 'hover:bg-gray-50/60'}>
-                                                    <td className={`${td} text-left`}>
-                                                        <p className="font-bold text-black">{code}</p>
-                                                        <p className="text-[10px] text-gray-600">{branchName(code)}</p>
-                                                    </td>
-                                                    {/* arrows sit ON the border of the flow cells */}
-                                                    <td className={`${td} text-left relative`}>
-                                                        <div className="flex flex-wrap gap-1">
-                                                            {emps.length
-                                                                ? emps.map(m => (
-                                                                    /* name click -> hierarchy tree popup */
-                                                                    <button key={m.user_id} type="button"
-                                                                        onClick={() => setTreeFor(m.user_id)}
-                                                                        title="Show this employee's approval flow"
-                                                                        className="px-2 py-0.5 rounded-lg border whitespace-nowrap text-[11px] bg-white text-gray-800 border-gray-300 hover:border-indigo-400 hover:bg-indigo-50">
-                                                                        {m.name}
-                                                                    </button>
-                                                                ))
-                                                                : <span className="text-[11px] text-gray-600">No plain employees — all hold a stage</span>}
-                                                        </div>
-                                                        {cellArrow}
-                                                    </td>
-                                                    <td className={`${td} text-left relative`}>
-                                                        <StageCell code={code} stage="l2" members={members} isEditing={isEditing} />
-                                                        {cellArrow}
-                                                    </td>
-                                                    <td className={`${td} text-left relative`}>
-                                                        <StageCell code={code} stage="l3" members={members} isEditing={isEditing} />
-                                                        {cellArrow}
-                                                    </td>
-                                                    <td className={`${td} text-left relative`}>
-                                                        {/* three category sub-rows in one cell — label line, then the
-                                                            names on the NEXT line. Assignments are PER BRANCH — each
-                                                            row sets its own approvers. */}
-                                                        <div className="space-y-1.5">
-                                                            {CATEGORY_OPTIONS.map(c => {
-                                                                const ids = effHodIds(code, c.value);
-                                                                return (
-                                                                    <div key={c.value}>
-                                                                        <p className="text-[10px] font-bold text-gray-700">{c.label}:</p>
-                                                                        <div className={`flex flex-wrap items-center gap-1 mt-0.5 ${!ids.length && !isEditing ? 'justify-center' : ''}`}>
-                                                                            {ids.map(id => chipBtn(nameOf(id), id, () => setTreeFor(id)))}
-                                                                            {!ids.length && !isEditing && <span className="text-[11px] text-gray-500">—</span>}
-                                                                            {isEditing && (
-                                                                                <MultiPick id={`hod_${code}_${c.value}`}
-                                                                                    openPick={openPick} setOpenPick={setOpenPick}
-                                                                                    buttonLabel={ids.length ? 'Change' : 'Select'}
-                                                                                    options={hoMembers}
-                                                                                    selectedIds={ids}
-                                                                                    onApply={(sel) => applyHodEdit(code, c.value, sel)} />
-                                                                            )}
+                                            const limitCell = (key, unit) => {
+                                                const tag = unit.trim();
+                                                return (
+                                                    <td className={td}>
+                                                        <div>
+                                                            {members.map(m => {
+                                                                const lvl = effLevelInRow(code, m.user_id);
+                                                                if (lvl === 'l5') return <div key={m.user_id} className={`${LINE} justify-center text-xs font-bold`} style={{ color: BRAND }}>Unlimited</div>;
+                                                                // INDIVIDUAL value for THIS employee; blank
+                                                                // inherits the level's shared branch-row value
+                                                                const lvlShared = cfgOf(code, lvl)[key];
+                                                                const indiv = indivOf(m.user_id, key);
+                                                                if (isEditing) {
+                                                                    const val = usrVal(code, m.user_id, key);
+                                                                    const hasVal = String(val ?? '') !== '';
+                                                                    return (
+                                                                        <div key={m.user_id} className={`${LINE} justify-center`}>
+                                                                            <div className="relative max-w-[110px]">
+                                                                                <input className={`${input} text-center ${hasVal ? (tag === 'days' ? 'pr-9' : 'pr-6') : ''}`}
+                                                                                    type="number" min="0" step="0.01"
+                                                                                    placeholder={String(lvlShared ?? 0)}
+                                                                                    title={`Individual limit for ${m.name} — blank = the level's shared value (${lvlShared ?? 0}${unit})`}
+                                                                                    value={val ?? ''}
+                                                                                    onChange={e => setUsrVal(code, m.user_id, key, e.target.value)} />
+                                                                                {hasVal && (
+                                                                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-semibold text-gray-600 pointer-events-none">{tag}</span>
+                                                                                )}
+                                                                            </div>
                                                                         </div>
+                                                                    );
+                                                                }
+                                                                const eff = indiv ?? (String(lvlShared ?? '') === '' ? 0 : lvlShared);
+                                                                return (
+                                                                    <div key={m.user_id} className={`${LINE} justify-center`}>
+                                                                        <span className={`text-xs ${indiv !== null ? 'font-bold text-indigo-700' : 'text-gray-800'}`}
+                                                                            title={indiv !== null ? 'Individual limit' : 'Level-wise (shared) limit'}>
+                                                                            {eff}{unit}
+                                                                        </span>
                                                                     </div>
                                                                 );
                                                             })}
                                                         </div>
-                                                        {cellArrow}
+                                                    </td>
+                                                );
+                                            };
+                                            return (
+                                                <tr key={code} className={isEditing ? 'bg-amber-50/60' : 'hover:bg-gray-50/60'}>
+                                                    <td className={`${td} !align-middle`}>
+                                                        <p className="font-bold text-black">{code}</p>
+                                                        <p className="text-[10px] text-gray-600">{branchName(code)}</p>
+                                                    </td>
+                                                    <td className={`${td} text-left`}>
+                                                        {members.length === 0 && (
+                                                            <p className={`${LINE} text-[11px] text-gray-500`}>No employees taken in yet</p>
+                                                        )}
+                                                        {members.map(m => (
+                                                            <div key={m.user_id} className={`${LINE} justify-between gap-1`}>
+                                                                <button type="button" onClick={() => setTreeFor(m.user_id)}
+                                                                    title="Show this employee's approval flow"
+                                                                    className="text-[11px] text-gray-800 hover:text-indigo-700 hover:underline decoration-dotted underline-offset-2 truncate">
+                                                                    • {m.name}
+                                                                </button>
+                                                                {isEditing && (
+                                                                    <button type="button"
+                                                                        title="Remove — take this employee out of the hierarchy"
+                                                                        disabled={savingId === `rem_${m.user_id}`}
+                                                                        onClick={() => removeEmployee(code, m)}
+                                                                        className="p-0.5 rounded text-gray-400 hover:text-amber-600 hover:bg-amber-50 flex-shrink-0 disabled:opacity-50">
+                                                                        <X size={12} />
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                        {fresh.length > 0 && (
+                                                            <div className={LINE}>
+                                                                <select className="border border-dashed border-indigo-300 rounded-lg px-2 py-1 text-[11px] bg-white text-indigo-700 font-semibold max-w-[210px] focus:outline-none"
+                                                                    value=""
+                                                                    disabled={savingId === `add_${code}`}
+                                                                    onChange={e => {
+                                                                        if (e.target.value === '__all__') takeInAll(code);
+                                                                        else if (e.target.value) addEmployee(code, e.target.value);
+                                                                    }}>
+                                                                    <option value="">
+                                                                        {savingId === `add_${code}` ? 'Adding…' : `＋ Add employee (${fresh.length} new)…`}
+                                                                    </option>
+                                                                    {fresh.length > 1 && (
+                                                                        <option value="__all__">Add ALL ({fresh.length})</option>
+                                                                    )}
+                                                                    {fresh.map(m => (
+                                                                        <option key={m.user_id} value={m.user_id}>{m.name} ({m.user_id})</option>
+                                                                    ))}
+                                                                </select>
+                                                            </div>
+                                                        )}
                                                     </td>
                                                     <td className={td}>
-                                                        <div className="flex flex-wrap justify-center gap-1">
-                                                            {cooNames.map(n => chipBtn(n, n, () => setTreeFor(`coo:${n}`)))}
-                                                        </div>
+                                                        {members.map(m => {
+                                                            const lvl = effLevelInRow(code, m.user_id);
+                                                            return (
+                                                                <div key={m.user_id} className={`${LINE} justify-center`}>
+                                                                    {isEditing ? (
+                                                                        <select className={`${input} max-w-[140px]`}
+                                                                            value={lvl}
+                                                                            onChange={e => setLevelInRow(code, m.user_id, e.target.value)}>
+                                                                            {ROW_LEVELS.map(l => (
+                                                                                <option key={l} value={l}>{levelLabel(l)}</option>
+                                                                            ))}
+                                                                        </select>
+                                                                    ) : (
+                                                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 whitespace-nowrap">
+                                                                            {levelLabel(lvl)}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
                                                     </td>
+                                                    {/* Category — only meaningful for L4 (HOD) employees */}
                                                     <td className={td}>
+                                                        {members.map(m => {
+                                                            const lvl = effLevelInRow(code, m.user_id);
+                                                            const cats = effCatsInRow(code, m.user_id);
+                                                            if (lvl !== 'l4') return (
+                                                                <div key={m.user_id} className={`${LINE} justify-center text-[11px] text-gray-400`}>—</div>
+                                                            );
+                                                            return (
+                                                                <div key={m.user_id} className={`${LINE} justify-center gap-2`}>
+                                                                    {isEditing ? (
+                                                                        CATEGORY_OPTIONS.map(c => (
+                                                                            <label key={c.value}
+                                                                                className="flex items-center gap-1 text-[10px] text-gray-700 cursor-pointer whitespace-nowrap">
+                                                                                <input type="checkbox" className="accent-indigo-600"
+                                                                                    checked={cats.includes(c.value)}
+                                                                                    onChange={() => toggleCat(code, m.user_id, c.value)} />
+                                                                                {c.label}
+                                                                            </label>
+                                                                        ))
+                                                                    ) : (
+                                                                        <span className="text-[10px] text-gray-700 truncate"
+                                                                            title={cats.map(catLabel).join(', ')}>
+                                                                            {cats.map(catLabel).join(', ') || '—'}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </td>
+                                                    {limitCell('max_discount_percent', '%')}
+                                                    {limitCell('max_credit_days', ' days')}
+                                                    {limitCell('max_expense_amount', ' ₹')}
+                                                    <td className={`${td} !align-middle`}>
                                                         <div className="flex flex-col items-center gap-1">
                                                             {(() => {
                                                                 const dirty = isRowDirty(code);
@@ -689,14 +700,14 @@ export default function AuthorityMatrix({ onClose }) {
                                                                         )}
                                                                         {dirty && !saving && (
                                                                             <button type="button" onClick={() => discardRow(code)}
-                                                                                className="text-[10px] font-semibold text-gray-500 hover:text-red-500">
+                                                                                className="text-[10px] font-semibold text-gray-500 hover:text-amber-600">
                                                                                 Cancel
                                                                             </button>
                                                                         )}
                                                                     </>
                                                                 );
                                                                 return (
-                                                                    <button type="button" title="Edit this row's L2 / L3 / L4 selection"
+                                                                    <button type="button" title="Edit this row"
                                                                         onClick={() => setEditingRow(code)}
                                                                         className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50">
                                                                         <Pencil size={13} />
@@ -708,11 +719,11 @@ export default function AuthorityMatrix({ onClose }) {
                                                                 onClick={async () => {
                                                                     const res = await Swal.fire({
                                                                         title: 'Delete this hierarchy row?',
-                                                                        text: `${code} — ${branchName(code)}: ALL its L2 / L3 / L4 assignments will be removed and those employees return to L1. Pending records are re-routed to the next available authority.`,
+                                                                        text: `${code} — ${branchName(code)}: ALL its L2 / L3 / L4 assignments AND its limits will be removed (employees return to L1, limits reset to 0). Pending records are re-routed to the next available authority.`,
                                                                         icon: 'warning',
                                                                         showCancelButton: true,
                                                                         confirmButtonText: 'Delete Row',
-                                                                        confirmButtonColor: '#dc2626',
+                                                                        confirmButtonColor: '#d97706',
                                                                     });
                                                                     if (!res.isConfirmed) return;
                                                                     setSavingId(`del_${code}`);
@@ -726,6 +737,23 @@ export default function AuthorityMatrix({ onClose }) {
                                                                             if (hodMapsOf(code, c.value).length)
                                                                                 moved += (await setHodCategory(code, c.value, []))?.moved || 0;
                                                                         }
+                                                                        // clear every limit this row had set (back to 0)
+                                                                        for (const lvl of ROW_LEVELS) {
+                                                                            const cfg = cfgOf(code, lvl);
+                                                                            if (LIMIT_KEYS.some(k => String(cfg[k] ?? '') !== ''))
+                                                                                await setLevelConfig({
+                                                                                    level: lvl, branch: code,
+                                                                                    max_discount_percent: '', max_credit_days: '', max_expense_amount: '',
+                                                                                });
+                                                                        }
+                                                                        // and the INDIVIDUAL limits of the row's employees
+                                                                        for (const m of rowMembers(code)) {
+                                                                            if (LIMIT_KEYS.some(k => indivOf(m.user_id, k) !== null))
+                                                                                await setAuthority({
+                                                                                    user_id: m.user_id,
+                                                                                    max_discount_percent: '', max_credit_days: '', max_expense_amount: '',
+                                                                                });
+                                                                        }
                                                                         persistBranches(rows.filter(b => b !== code));
                                                                         if (isEditing) setEditingRow(null);
                                                                         await load();
@@ -734,7 +762,7 @@ export default function AuthorityMatrix({ onClose }) {
                                                                         toast.error(errText(err, 'Failed to delete the hierarchy row'));
                                                                     } finally { setSavingId(null); }
                                                                 }}
-                                                                className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 disabled:opacity-50">
+                                                                className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 disabled:opacity-50">
                                                                 <Trash2 size={13} />
                                                             </button>
                                                         </div>
@@ -743,14 +771,14 @@ export default function AuthorityMatrix({ onClose }) {
                                             );
                                         })}
                                         {rows.length === 0 && (
-                                            <tr><td colSpan={7} className="px-3 py-10 text-center text-xs text-gray-600">
+                                            <tr><td colSpan={8} className="px-3 py-10 text-center text-xs text-gray-600">
                                                 No branches added yet — use the Add Row below to start building the hierarchy
                                             </td></tr>
                                         )}
-                                        {/* Add Row lives INSIDE the table as its last row (MOM-sheet style).
+                                        {/* Add Row lives INSIDE the table as its last row.
                                             The HO branch is never offered here. */}
                                         <tr>
-                                            <td colSpan={7} className="px-3 py-2 border-b border-r border-gray-200 bg-gray-50/60">
+                                            <td colSpan={8} className="px-3 py-2 border-b border-r border-gray-200 bg-gray-50/60">
                                                 {remainingBranches.length > 0 ? (
                                                     <div className="flex items-center gap-2">
                                                         <Plus size={13} className="text-indigo-600 flex-shrink-0" />
@@ -761,6 +789,8 @@ export default function AuthorityMatrix({ onClose }) {
                                                                     persistBranches([...rows, e.target.value]);
                                                                     // new rows open straight in edit mode with their Save button
                                                                     setEditingRow(e.target.value);
+                                                                    // load ALL the branch's current employees into the row
+                                                                    takeInAll(e.target.value);
                                                                 }
                                                             }}>
                                                             <option value="">Add Row — select a branch…</option>
@@ -774,161 +804,6 @@ export default function AuthorityMatrix({ onClose }) {
                                                 )}
                                             </td>
                                         </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </>
-                    ) : tab === 'limits' ? (
-                        <>
-                            <p className="text-[11px] text-gray-700">
-                                Level-wise limits — applied to <b>every user of that level</b>. Within limit = <b>final approval</b>;
-                                above = next level. Blank = 0 (<b>L5 blank = Unlimited</b>). The <b>Name</b> is editable and shows everywhere.
-                            </p>
-                            <div className="rounded-xl border border-gray-200 overflow-auto apv-scroll">
-                                <table className="min-w-full border-separate" style={{ borderSpacing: 0 }}>
-                                    <thead className="sticky top-0 z-10">
-                                        <tr>
-                                            <th className={`${th} w-20`}>Level</th>
-                                            <th className={`${th} min-w-[180px]`}>Name (Editable)</th>
-                                            <th className={`${th} w-40 !whitespace-normal`}>Max Discounting %</th>
-                                            <th className={`${th} w-32 !whitespace-normal`}>Max Credit Days</th>
-                                            <th className={th}>Max Expense Amount (per type)</th>
-                                            <th className={`${th} w-20`}>Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {LEVELS.map(lvl => {
-                                            const usersAtLevel = lvl === 'l5'
-                                                ? cooNames.length
-                                                : data.users.filter(u => u.level === lvl).length;
-                                            return (
-                                                <tr key={lvl} className="hover:bg-gray-50/60">
-                                                    <td className={td}>
-                                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${LEVEL_BADGE_CLS[lvl]}`}>
-                                                            {lvl.toUpperCase()}
-                                                        </span>
-                                                        <p className="mt-1 text-[9px] text-gray-500 whitespace-nowrap">
-                                                            {usersAtLevel} user{usersAtLevel === 1 ? '' : 's'}
-                                                        </p>
-                                                    </td>
-                                                    <td className={`${td} text-left`}>
-                                                        <input className={input}
-                                                            value={lval(lvl, 'display_name') ?? ''}
-                                                            onChange={e => setLval(lvl, 'display_name', e.target.value)}
-                                                            placeholder={levelName(lvl)} />
-                                                    </td>
-                                                    <td className={td}>
-                                                        {lvl === 'l5' ? (
-                                                            <span className="text-xs font-bold" style={{ color: BRAND }}>Unlimited</span>
-                                                        ) : (
-                                                            <div className="relative">
-                                                                <input className={`${input} text-center ${String(lval(lvl, 'max_discount_percent') ?? '') !== '' ? 'pr-6' : ''}`}
-                                                                    type="number" min="0" max="100" step="0.01"
-                                                                    placeholder="0"
-                                                                    value={lval(lvl, 'max_discount_percent') ?? ''}
-                                                                    onChange={e => setLval(lvl, 'max_discount_percent', e.target.value)} />
-                                                                {String(lval(lvl, 'max_discount_percent') ?? '') !== '' && (
-                                                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-gray-600 pointer-events-none">%</span>
-                                                                )}
-                                                            </div>
-                                                        )}
-                                                    </td>
-                                                    <td className={td}>
-                                                        {lvl === 'l5' ? (
-                                                            <span className="text-xs font-bold" style={{ color: BRAND }}>Unlimited</span>
-                                                        ) : (
-                                                            <div className="relative">
-                                                                <input className={`${input} text-center ${String(lval(lvl, 'max_credit_days') ?? '') !== '' ? 'pr-9' : ''}`}
-                                                                    type="number" min="0" step="1"
-                                                                    placeholder="0"
-                                                                    value={lval(lvl, 'max_credit_days') ?? ''}
-                                                                    onChange={e => setLval(lvl, 'max_credit_days', e.target.value)} />
-                                                                {String(lval(lvl, 'max_credit_days') ?? '') !== '' && (
-                                                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-gray-600 pointer-events-none">days</span>
-                                                                )}
-                                                            </div>
-                                                        )}
-                                                    </td>
-                                                    <td className={td}>
-                                                        {lvl === 'l5' ? (
-                                                            <span className="text-xs font-bold" style={{ color: BRAND }}>Unlimited</span>
-                                                        ) : data.expense_types.length === 0 ? (
-                                                            <span className="text-[10px] text-gray-600">No expense types yet — add them in the Expense Types tab</span>
-                                                        ) : (() => {
-                                                            const setCount = data.expense_types.filter(t => String(lexpVal(lvl, t) ?? '') !== '').length;
-                                                            const open = openExpenseFor === lvl;
-                                                            // fixed-position panel: never clipped by the table box
-                                                            let panelStyle = null;
-                                                            if (open && expAnchor) {
-                                                                const W = 250;
-                                                                const left = Math.max(8, Math.min(expAnchor.right - W, window.innerWidth - W - 8));
-                                                                const spaceBelow = window.innerHeight - expAnchor.bottom - 8;
-                                                                const openUp = spaceBelow < 230 && expAnchor.top > spaceBelow;
-                                                                panelStyle = openUp
-                                                                    ? { position: 'fixed', left, bottom: window.innerHeight - expAnchor.top, width: W, zIndex: 100, paddingBottom: 4 }
-                                                                    : { position: 'fixed', left, top: expAnchor.bottom, width: W, zIndex: 100, paddingTop: 4 };
-                                                            }
-                                                            return (
-                                                                <div className="relative inline-block text-left">
-                                                                    <button type="button"
-                                                                        onClick={(e) => {
-                                                                            if (open) { setOpenExpenseFor(null); return; }
-                                                                            setExpAnchor(e.currentTarget.getBoundingClientRect());
-                                                                            setOpenExpenseFor(lvl);
-                                                                        }}
-                                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 whitespace-nowrap">
-                                                                        {setCount ? `${setCount} type limit${setCount > 1 ? 's' : ''} set` : 'All 0 (default)'} ▾
-                                                                    </button>
-                                                                    {open && panelStyle && (
-                                                                        <>
-                                                                            <div style={{ position: 'fixed', inset: 0, zIndex: 99 }}
-                                                                                onClick={() => setOpenExpenseFor(null)} />
-                                                                            <div style={panelStyle}>
-                                                                                <div className="rounded-xl border border-gray-200 bg-white shadow-xl p-2.5 space-y-1.5 max-h-64 overflow-y-auto apv-scroll">
-                                                                                    {data.expense_types.map(t => (
-                                                                                        <div key={t.id} className="flex items-center gap-2">
-                                                                                            <span className="w-20 flex-shrink-0 text-left text-[10px] font-semibold text-gray-700 truncate" title={t.name}>{t.name}</span>
-                                                                                            <input className={input} type="number" min="0" step="0.01"
-                                                                                                placeholder="0"
-                                                                                                value={lexpVal(lvl, t) ?? ''}
-                                                                                                onChange={e => setLval(lvl, `exp_${t.id}`, e.target.value)} />
-                                                                                        </div>
-                                                                                    ))}
-                                                                                    <p className="text-[9px] text-gray-600 text-left pt-0.5">
-                                                                                        Blank = 0 · press Save in the Action column to store
-                                                                                    </p>
-                                                                                </div>
-                                                                            </div>
-                                                                        </>
-                                                                    )}
-                                                                </div>
-                                                            );
-                                                        })()}
-                                                    </td>
-                                                    <td className={td}>
-                                                        {(() => {
-                                                            const dirty = isDirtyLevel(lvl);
-                                                            const saving = savingId === `lvl_${lvl}`;
-                                                            return (
-                                                                <div className="flex flex-col items-center gap-0.5">
-                                                                    <button type="button" onClick={() => saveLevel(lvl)}
-                                                                        disabled={saving || !dirty}
-                                                                        className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition ${dirty
-                                                                            ? 'text-white shadow-sm animate-pulse'
-                                                                            : 'bg-gray-100 text-gray-500 border border-gray-200 cursor-default'}`}
-                                                                        style={dirty ? { background: '#d97706' } : undefined}>
-                                                                        {saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}
-                                                                    </button>
-                                                                    {dirty && !saving && (
-                                                                        <span className="text-[9px] font-bold text-amber-600 whitespace-nowrap">Pending to save</span>
-                                                                    )}
-                                                                </div>
-                                                            );
-                                                        })()}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
                                     </tbody>
                                 </table>
                             </div>
@@ -976,7 +851,7 @@ export default function AuthorityMatrix({ onClose }) {
                                                             <Pencil size={13} />
                                                         </button>
                                                         <button onClick={() => deleteType(t)}
-                                                            className="p-1.5 rounded-lg text-red-500 hover:bg-red-50" title="Remove type">
+                                                            className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50" title="Remove type">
                                                             <Trash2 size={13} />
                                                         </button>
                                                     </div>
@@ -1025,11 +900,11 @@ export default function AuthorityMatrix({ onClose }) {
                                 <button key={n.id} type="button"
                                     onClick={() => onNameClick(n)}
                                     title={n.excluded ? 'Excluded — click to allow again' : 'Click to exclude for this employee'}
-                                    className={`block text-left text-[11px] ${n.excluded ? 'text-red-400 line-through' : 'text-gray-700 hover:text-indigo-700'}`}>
+                                    className={`block text-left text-[11px] ${n.excluded ? 'text-amber-500 line-through' : 'text-gray-700 hover:text-indigo-700'}`}>
                                     {n.name}
                                 </button>
                             ) : (
-                                <p key={n.name} className={`text-[11px] ${dark ? 'text-white/80' : n.excluded ? 'text-red-400 line-through' : 'text-gray-700'}`}>
+                                <p key={n.name} className={`text-[11px] ${dark ? 'text-white/80' : n.excluded ? 'text-amber-500 line-through' : 'text-gray-700'}`}>
                                     {n.name}
                                 </p>
                             )
@@ -1052,162 +927,8 @@ export default function AuthorityMatrix({ onClose }) {
                         names={[{ name: selfIn ? 'Skipped — self approval removed' : 'Skipped — no approver' }]} />;
                 };
 
-                /* ---- data for the MIDDLE-of-chain charts (L2..L5 people) ---- */
-                const cd = data.chain_data || {};
                 const req = { l2: reqL2, l3: reqL3, l4: reqL4 };
-                // toggles apply to every stage of the records this user creates
                 const stagesAbove = ['l2', 'l3', 'l4'];
-                // journey of the records THIS user creates (honouring toggles):
-                // a stage runs when OTHER people man it in their home branch —
-                // being its only approver skips it (self-approval removed)
-                const ownPath = [
-                    ...['l2', 'l3'].filter(s => req[s]
-                        && stageOf(u.branch, s).some(p => p.user_id !== u.user_id))
-                        .map(s => s.toUpperCase()),
-                    ...(req.l4 ? ['L4'] : []),
-                    'L5',
-                ].join(' → ');
-                const ownRecordsLine = {
-                    name: `Own records: within limit auto-approved · beyond limit → ${ownPath}`,
-                };
-                const hierBranches = [...new Set([
-                    ...rows,
-                    ...Object.keys(cd.stage_approvers || {}),
-                    ...Object.keys(data.hod_categories || {}),
-                ])].filter(b => b && b !== hoCode).sort();
-                // plain employees of a branch = members minus that row's assignees
-                const empsOf = (b) => {
-                    const assigned = new Set([...stageOf(b, 'l2'), ...stageOf(b, 'l3')].map(p => p.user_id));
-                    CATEGORY_OPTIONS.forEach(c => hodMapsOf(b, c.value).forEach(m => assigned.add(m.user_id)));
-                    return membersOf(b).filter(m => !assigned.has(m.user_id));
-                };
-                // one card per branch showing its L2 / L3 people + employee count
-                const branchCard = (b, { showStages = true } = {}) => {
-                    const lines = [];
-                    if (showStages) {
-                        stageOf(b, 'l2').forEach(p => lines.push({ name: `L2 – ${p.name}` }));
-                        stageOf(b, 'l3').forEach(p => lines.push({ name: `L3 – ${p.name}` }));
-                    }
-                    if (!lines.length) {
-                        const emps = empsOf(b);
-                        emps.slice(0, 6).forEach(m => lines.push({ name: m.name }));
-                        if (emps.length > 6) lines.push({ name: `+ ${emps.length - 6} more…` });
-                        if (!emps.length) lines.push({ name: 'No employees' });
-                    }
-                    return (
-                        <OrgCard key={b} wide title={b} badge={`${empsOf(b).length} EMP`} names={lines} />
-                    );
-                };
-                // union of L4 approver names over some branches (all categories)
-                const l4NamesOver = (branches) => {
-                    const seen = new Map();
-                    branches.forEach(b => CATEGORY_OPTIONS.forEach(c =>
-                        (((cd.hod_by_branch || {})[b] || {})[c.value] || [])
-                            .forEach(p => seen.set(p.user_id, p.name))));
-                    return [...seen.values()].sort();
-                };
-                const stageBranchesOf = (uid, stage) =>
-                    hierBranches.filter(b => stageOf(b, stage).some(p => p.user_id === uid));
-                // {branch: [category labels]} where this user is the L4 approver
-                const l4Coverage = () => {
-                    const out = {};
-                    Object.entries(data.hod_categories).forEach(([b, cats]) =>
-                        Object.entries(cats).forEach(([c, list]) => {
-                            if (list.some(m => m.user_id === u.user_id))
-                                (out[b] = out[b] || []).push(catLabel(c));
-                        }));
-                    return out;
-                };
-
-                const cooCard = <OrgCard title={`L5 – ${levelName('l5')}`} names={cooNames.map(n => ({ name: n }))} />;
-
-                /* ---- chart per role: approvers sit in the MIDDLE — above them
-                       who they report to, below them who reports to them ---- */
-                const stageChart = () => {          // u is an L2 or L3 approver
-                    const stage = u.level;
-                    const covered = stageBranchesOf(u.user_id, stage);
-                    const l4Names = l4NamesOver(covered.length ? covered : hierBranches);
-                    const l3Names = stage === 'l2'
-                        ? [...new Set(covered.flatMap(b => stageOf(b, 'l3')
-                            .filter(p => p.user_id !== u.user_id).map(p => p.name)))].sort()
-                        : [];
-                    return (
-                        <div className="flex flex-col items-center py-2">
-                            {cooCard}
-                            <VLine />
-                            <OrgCard title={`L4 – ${levelName('l4')}`}
-                                names={l4Names.length ? l4Names.map(n => ({ name: n })) : [{ name: 'No L4 assigned yet' }]} />
-                            {stage === 'l2' && (
-                                <>
-                                    <VLine />
-                                    {l3Names.length
-                                        ? <OrgCard title={`L3 – ${levelName('l3')}`} names={l3Names.map(n => ({ name: n }))} />
-                                        : <OrgCard skipped title={`L3 – ${levelName('l3')}`} names={[{ name: 'No L3 — records go straight to L4' }]} />}
-                                </>
-                            )}
-                            <VLine />
-                            <OrgCard dark title={u.name} badge={`${levelLabel(u.level)} (SELF)`}
-                                names={[
-                                    {
-                                        name: covered.length
-                                            ? `Approves ${stage.toUpperCase()} for: ${covered.join(', ')}`
-                                            : 'Not assigned to any branch yet',
-                                    },
-                                    ownRecordsLine,
-                                ]} />
-                            <VLine />
-                            <div className="flex flex-wrap justify-center gap-3">
-                                {covered.length
-                                    ? covered.map(b => branchCard(b, { showStages: stage === 'l3' }))
-                                    : <OrgCard skipped title="Branches" names={[{ name: 'No branch coverage yet' }]} />}
-                            </div>
-                        </div>
-                    );
-                };
-
-                const l4Chart = () => {             // u is an L4 (HOD) approver
-                    const coverage = l4Coverage();
-                    const coveredB = Object.keys(coverage).sort();
-                    const below = coveredB.length ? coveredB : hierBranches;
-                    return (
-                        <div className="flex flex-col items-center py-2">
-                            {cooCard}
-                            <VLine />
-                            <OrgCard dark title={u.name} badge={`${levelLabel('l4')} (SELF)`}
-                                names={[
-                                    ...(coveredB.length
-                                        ? coveredB.map(b => ({ name: `${b}: ${coverage[b].join(', ')}` }))
-                                        : [{ name: 'Approves any unassigned branch + category' }]),
-                                    ownRecordsLine,
-                                ]} />
-                            <VLine />
-                            <div className="flex flex-wrap justify-center gap-3">
-                                {below.length
-                                    ? below.map(b => branchCard(b))
-                                    : <OrgCard skipped title="Branches" names={[{ name: 'No hierarchy rows yet' }]} />}
-                            </div>
-                        </div>
-                    );
-                };
-
-                const l5Chart = () => {             // u is L5 (COO) — top of everything
-                    const l4Users = data.users.filter(x => x.level === 'l4').map(x => x.name).sort();
-                    return (
-                        <div className="flex flex-col items-center py-2">
-                            <OrgCard dark title={u.name} badge={`${levelLabel('l5')} (SELF)`}
-                                names={[{ name: 'Final approval authority — every record ends here' }]} />
-                            <VLine />
-                            <OrgCard title={`L4 – ${levelName('l4')}`}
-                                names={l4Users.length ? l4Users.map(n => ({ name: n })) : [{ name: 'No L4 assigned yet' }]} />
-                            <VLine />
-                            <div className="flex flex-wrap justify-center gap-3">
-                                {hierBranches.length
-                                    ? hierBranches.map(b => branchCard(b))
-                                    : <OrgCard skipped title="Branches" names={[{ name: 'No hierarchy rows yet' }]} />}
-                            </div>
-                        </div>
-                    );
-                };
 
                 return (
                     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-3"
@@ -1221,9 +942,8 @@ export default function AuthorityMatrix({ onClose }) {
                                 <button onClick={() => setTreeFor(null)} className="p-1.5 rounded-lg bg-white hover:bg-white/90 transition flex-shrink-0" style={{ color: '#2f3192' }}><X size={15} /></button>
                             </div>
                             <div className="p-5 space-y-4">
-                                {/* step toggles for the records THIS user creates — only the
-                                    stages AFTER their own level; L5 is always the final stop */}
-                                {!isHOUser && !isCoo && u.level !== 'l5' && (
+                                {/* step toggles for the records THIS user creates */}
+                                {!isHOUser && !isCoo && (
                                     <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3 flex flex-wrap items-center gap-3">
                                         <span className="text-[11px] font-bold text-gray-800">Steps required for {u.name}'s records:</span>
                                         {stagesAbove.map(s => (
@@ -1235,57 +955,54 @@ export default function AuthorityMatrix({ onClose }) {
                                     </div>
                                 )}
 
-                                {/* L2..L5 people sit in the MIDDLE of their chart: who they
-                                    report to above, who reports to them below. L1 employees
-                                    get the creator chart (their records' journey upward). */}
-                                {(isCoo || u.level === 'l5') ? l5Chart()
-                                    : u.level === 'l4' ? l4Chart()
-                                        : (u.level === 'l2' || u.level === 'l3') ? stageChart()
-                                            : (
-                                                <div className="flex flex-col items-center py-2">
-                                                    <OrgCard dark title={u.name} badge={`${levelLabel(u.level)} · ${u.branch || '—'}`}
-                                                        names={[{ name: 'Creates the record — within own limit = auto approved' }]} />
-                                                    <VLine />
-                                                    {stageCard('l2', reqL2)}
-                                                    <VLine />
-                                                    {stageCard('l3', reqL3)}
-                                                    <VLine />
-                                                    {isHOUser ? (
-                                                        <OrgCard wide title={`L4 – ${levelName('l4')}`} badge="CHOSEN AT SUBMIT"
-                                                            names={[{ name: 'HO members pick their L4 approver on the form' }]} />
-                                                    ) : !reqL4 ? (
-                                                        <OrgCard skipped title={`L4 – ${levelName('l4')}`} names={[{ name: 'Skipped — not required' }]} />
-                                                    ) : (
-                                                        <div className="flex flex-wrap justify-center gap-3">
-                                                            {CATEGORY_OPTIONS.map(c => {
-                                                                const hods = (((cd.hod_by_branch || {})[u.branch] || {})[c.value] || [])
-                                                                    .filter(p => p.user_id !== u.user_id);
-                                                                return hods.length ? (
-                                                                    <OrgCard key={c.value} wide title={c.label} badge={`L4 – ${levelName('l4')}`}
-                                                                        onNameClick={(n) => toggleExclusion(u, {
-                                                                            id: n.id, name: n.name, category: c.value,
-                                                                            excluded: excludedIn(c.value, n.id),
-                                                                        })}
-                                                                        names={hods.map(p => ({
-                                                                            id: p.user_id, name: p.name,
-                                                                            excluded: excludedIn(c.value, p.user_id),
-                                                                        }))} />
-                                                                ) : (
-                                                                    <OrgCard key={c.value} wide skipped title={c.label}
-                                                                        names={[{ name: 'Skipped — no approver' }]} />
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    )}
-                                                    <VLine />
-                                                    <OrgCard title={`L5 – ${levelName('l5')}`}
-                                                        names={cooNames.map(n => ({ name: n }))} />
-                                                </div>
-                                            )}
+                                {/* L1..L5 chart for the records this user creates */}
+                                <div className="flex flex-col items-center py-2">
+                                    <OrgCard dark title={u.name} badge={`${levelLabel(u.level)} · ${u.branch || '—'}`}
+                                        names={[{
+                                            name: isCoo
+                                                ? 'Final approval authority — own records auto-approve within limit'
+                                                : 'Creates the record — within own limit (home branch) = auto approved',
+                                        }]} />
+                                    <VLine />
+                                    {stageCard('l2', reqL2)}
+                                    <VLine />
+                                    {stageCard('l3', reqL3)}
+                                    <VLine />
+                                    {isHOUser ? (
+                                        <OrgCard wide title={`L4 – ${levelName('l4')}`} badge="CHOSEN AT SUBMIT"
+                                            names={[{ name: 'HO members pick their L4 approver on the form' }]} />
+                                    ) : !reqL4 ? (
+                                        <OrgCard skipped title={`L4 – ${levelName('l4')}`} names={[{ name: 'Skipped — not required' }]} />
+                                    ) : (
+                                        <div className="flex flex-wrap justify-center gap-3">
+                                            {CATEGORY_OPTIONS.map(c => {
+                                                const hods = (((data.chain_data?.hod_by_branch || {})[u.branch] || {})[c.value] || [])
+                                                    .filter(p => p.user_id !== u.user_id);
+                                                return hods.length ? (
+                                                    <OrgCard key={c.value} wide title={c.label} badge={`L4 – ${levelName('l4')}`}
+                                                        onNameClick={(n) => toggleExclusion(u, {
+                                                            id: n.id, name: n.name, category: c.value,
+                                                            excluded: excludedIn(c.value, n.id),
+                                                        })}
+                                                        names={hods.map(p => ({
+                                                            id: p.user_id, name: p.name,
+                                                            excluded: excludedIn(c.value, p.user_id),
+                                                        }))} />
+                                                ) : (
+                                                    <OrgCard key={c.value} wide skipped title={c.label}
+                                                        names={[{ name: 'Skipped — no approver' }]} />
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                    <VLine />
+                                    <OrgCard title={`L5 – ${levelName('l5')}`}
+                                        names={cooNames.map(n => ({ name: n }))} />
+                                </div>
                                 <p className="text-[10px] text-gray-600 text-center">
-                                    {u.level === 'l1'
-                                        ? 'View only — build the hierarchy in the Employee Hierarchy tab. Click an L4 name to exclude / re-allow that approver for this employee’s records of that category (struck-out = excluded).'
-                                        : 'View only — build the hierarchy in the Employee Hierarchy tab.'}
+                                    View only — build the hierarchy in the Employee Hierarchy &amp; Limits tab. Click an L4 name to
+                                    exclude / re-allow that approver for this employee's records of that category
+                                    (struck-out = excluded).
                                 </p>
                             </div>
                         </div>

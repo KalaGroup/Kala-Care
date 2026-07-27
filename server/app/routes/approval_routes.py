@@ -26,6 +26,16 @@ def get_access(user_id: str = Header(...), db: Session = Depends(get_db)):
     return {"success": True, "access": ac.get_access(db, user_id)}
 
 
+@router.get("/l4-choices")
+def get_l4_choices(branch: str = None, request_type: str = None,
+                   user_id: str = Header(...), db: Session = Depends(get_db)):
+    """HO creators only: the L4 approver choices for ONE record — HO members
+    holding L4 whose limit for the record's type is HIGHER than the caller's
+    own. Empty = no useful HOD; the record may be submitted without an L4
+    pick and goes straight to L5."""
+    return {"success": True, **ac.get_ho_l4_choices(db, user_id, branch, request_type)}
+
+
 # ---------------- RIGHTS MASTER (kala000001 / 31240002 only) ---------------- #
 
 @router.get("/rights")
@@ -98,6 +108,7 @@ async def create_application(
     remark: Optional[str] = Form(None),
     l4_approver_id: Optional[str] = Form(None),
     l5_approver_id: Optional[str] = Form(None),
+    cc_emails: Optional[str] = Form(None),
     save_as_draft: Optional[str] = Form(None),
     files: List[UploadFile] = File(default=[]),
     user_id: str = Header(...),
@@ -124,6 +135,7 @@ async def create_application(
         "remark": remark,
         "l4_approver_id": l4_approver_id,
         "l5_approver_id": l5_approver_id,
+        "cc_emails": cc_emails,
     }, files, as_draft=as_draft)
     msg = "Draft saved" if as_draft else "Application submitted successfully"
     return {"success": True, "message": msg, "application": application}
@@ -151,6 +163,7 @@ async def update_application(
     remark: Optional[str] = Form(None),
     l4_approver_id: Optional[str] = Form(None),
     l5_approver_id: Optional[str] = Form(None),
+    cc_emails: Optional[str] = Form(None),
     submit: Optional[str] = Form(None),
     files: List[UploadFile] = File(default=[]),
     user_id: str = Header(...),
@@ -178,6 +191,7 @@ async def update_application(
         "remark": remark,
         "l4_approver_id": l4_approver_id,
         "l5_approver_id": l5_approver_id,
+        "cc_emails": cc_emails,
     }, files, submit=do_submit)
     msg = "Application submitted successfully" if do_submit else "Draft saved"
     return {"success": True, "message": msg, "application": application}
@@ -222,7 +236,8 @@ def send_result_email(
 ):
     """Send the approved / rejected outcome email. Body: { emails: [...] } —
     optional extra recipients added to the CC list."""
-    res = ac.send_result_email(db, user_id, app_id, (body or {}).get("emails"))
+    res = ac.send_result_email(db, user_id, app_id,
+                               (body or {}).get("emails"), (body or {}).get("to_emails"))
     return {"success": True, "message": "Email sent", **res}
 
 
@@ -303,6 +318,14 @@ def set_level_config(body: dict, user_id: str = Header(...), db: Session = Depen
     level-wise limits (applied to every user of the level) + custom name."""
     res = ac.set_level_config(db, user_id, body)
     return {"success": True, "message": "Level configuration saved", **res}
+
+
+@router.post("/matrix/remove-employee")
+def remove_employee_rights(body: dict, user_id: str = Header(...), db: Session = Depends(get_db)):
+    """Body: { user_id } — removes the employee's authority right and every
+    hierarchy assignment; they reappear under 'Add employee'."""
+    res = ac.remove_employee_rights(db, user_id, body)
+    return {"success": True, "message": "Employee removed from the hierarchy", **res}
 
 
 @router.post("/matrix/stage-approvers")

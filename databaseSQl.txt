@@ -197,6 +197,40 @@ BEGIN
 END;
 
 -- ----------------------------------------------------------------------------
+-- 6b-2) LEVEL LIMITS BECAME PER BRANCH — approval_level_configs.branch:
+--       NULL = the global row carrying the renamable level name;
+--       set  = that branch row's L1..L4 limits (fresh branch rows start 0).
+-- ----------------------------------------------------------------------------
+IF COL_LENGTH('dbo.approval_level_configs', 'branch') IS NULL
+    ALTER TABLE dbo.approval_level_configs ADD branch NVARCHAR(20) NULL;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_apv_lvl_cfg_br'
+               AND object_id = OBJECT_ID('dbo.approval_level_configs'))
+BEGIN
+    DECLARE @lq NVARCHAR(256);
+    SELECT TOP 1 @lq = name FROM sys.key_constraints
+    WHERE parent_object_id = OBJECT_ID('dbo.approval_level_configs') AND type = 'UQ';
+    IF @lq IS NOT NULL EXEC('ALTER TABLE dbo.approval_level_configs DROP CONSTRAINT [' + @lq + ']');
+    CREATE UNIQUE NONCLUSTERED INDEX UX_apv_lvl_cfg_br
+    ON dbo.approval_level_configs (branch, level);
+END;
+
+-- ----------------------------------------------------------------------------
+-- 6b-3) CREATOR-ATTACHED CC — extra CC addresses set at submit; auto-added
+--       to the result email's CC on approval / rejection.
+-- ----------------------------------------------------------------------------
+IF COL_LENGTH('dbo.approval_applications', 'cc_emails') IS NULL
+    ALTER TABLE dbo.approval_applications ADD cc_emails NVARCHAR(500) NULL;
+
+-- ----------------------------------------------------------------------------
+-- 6c) EXPENSE NFAs select MULTIPLE types — expense_type stores the combined
+--     breakdown text ("Food: 500; Travel: 1000"); widen the column.
+-- ----------------------------------------------------------------------------
+IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications')
+           AND name = 'expense_type' AND max_length < 800)
+    ALTER TABLE dbo.approval_applications ALTER COLUMN expense_type NVARCHAR(400) NULL;
+
+-- ----------------------------------------------------------------------------
 -- 7) PERFORMANCE INDEXES for the new stage-approver lookups
 --    (also applied automatically by performance_indexes.py)
 -- ----------------------------------------------------------------------------

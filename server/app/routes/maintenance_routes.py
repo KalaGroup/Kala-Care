@@ -50,9 +50,12 @@ def _resolve_name(db: Session, user_id: Optional[str], fallback: Optional[str] =
 # ---------------- APPLICATION CODES (master data) ---------------- #
 
 @router.get("/app-codes")
-async def list_app_codes(db: Session = Depends(get_db)):
-    """Read for any logged-in user (used by Service Selection, Reports and Master)."""
-    return {"success": True, "items": mc.list_apps(db)}
+async def list_app_codes(slim: bool = False, db: Session = Depends(get_db)):
+    """Read for any logged-in user (used by Service Selection, Reports and Master).
+    slim=true returns only the identity fields + each app's distinct service
+    hours — all the Master Report's coverage matrix needs, at a fraction of
+    the payload."""
+    return {"success": True, "items": mc.list_apps(db, slim=slim)}
 
 
 @router.post("/app-codes")

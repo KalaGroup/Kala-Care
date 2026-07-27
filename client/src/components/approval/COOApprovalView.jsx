@@ -9,6 +9,8 @@ export default function COOApprovalView() {
         <BranchApprovalView
             pendingStatus="pending_l5"
             pendingLabel={`Pending L5 (${levelName('l5')}) Approval`}
+            canCreate={false}
+            showMine={false}
         />
     );
 }

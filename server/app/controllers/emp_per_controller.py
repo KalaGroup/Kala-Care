@@ -2781,6 +2781,9 @@ class EmployeePerformanceController:
                     "last_followup_date": nfu.followup_date.isoformat() if nfu.followup_date else (
                         nfu.created_at.isoformat() if nfu.created_at else None
                     ),
+                    # Real record creation time — the Daily Performance Breakdown
+                    # groups by created_at, so per-date drill-downs must match it
+                    "created_at": nfu.created_at.isoformat() if nfu.created_at else None,
                     "next_followup_date": nfu.next_followup_date.isoformat() if nfu.next_followup_date else None,
                     "latest_flag": nfu.followup_flag or "N/A",
                     "latest_remark": nfu.followup_remark or "N/A",
@@ -3367,6 +3370,9 @@ class EmployeePerformanceController:
                     "last_followup_date": nfu.followup_date.isoformat() if nfu.followup_date else (
                         nfu.created_at.isoformat() if nfu.created_at else None
                     ),
+                    # Real record creation time — the Daily Performance Breakdown
+                    # groups by created_at, so per-date drill-downs must match it
+                    "created_at": nfu.created_at.isoformat() if nfu.created_at else None,
                     "next_followup_date": nfu.next_followup_date.isoformat() if nfu.next_followup_date else None,
                     "latest_flag": nfu.followup_flag or "N/A",
                     "latest_remark": nfu.followup_remark or "N/A",

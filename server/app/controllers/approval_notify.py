@@ -80,29 +80,29 @@ def details_rows(app: dict):
 
 
 def trail_rows(app: dict):
-    """Approval flow lines: (step, who/skip text, when, remark)."""
+    """Approval flow lines: (step, who, when, remark). ONLY the levels that
+    actually took part appear — the creator (with their level), the levels
+    that approved, the auto-approve note and a rejection. Skipped levels and
+    the levels after the final action are NOT listed."""
     out = []
 
-    def line(label, by, at, remark):
-        if by:
-            out.append((label, by, _fmt_dt(at), remark or "-"))
-        elif remark:  # auto-skip note stored without an actor
-            out.append((label, remark, "-", "-"))
-        else:
-            out.append((label, "Skipped", "-", "-"))
-
+    creator_lvl = (app.get("created_by_level") or "l1").upper()
+    out.append((
+        f"Created ({creator_lvl})",
+        app.get("created_by_name") or app.get("created_by") or "-",
+        _fmt_dt(app.get("created_at")),
+        app.get("remark") or "-",
+    ))
     if app.get("auto_approved"):
         out.append(("Auto Approved",
                     "Within the creator's own authority limit — no approver action needed",
                     _fmt_dt(app.get("created_at")), "-"))
-    line("L2 Approval", app.get("l2_action_by_name"),
-         app.get("l2_action_at"), app.get("l2_action_remark"))
-    line("L3 Approval", app.get("l3_action_by_name"),
-         app.get("l3_action_at"), app.get("l3_action_remark"))
-    line("L4 (HOD) Approval", app.get("l4_action_by_name"),
-         app.get("l4_action_at"), app.get("l4_action_remark"))
-    line("L5 (COO) Approval (Final)", app.get("l5_action_by_name"),
-         app.get("l5_action_at"), app.get("l5_action_remark"))
+    for lvl, label in (("l2", "L2 Approval"), ("l3", "L3 Approval"),
+                       ("l4", "L4 (HOD) Approval"), ("l5", "L5 (COO) Approval")):
+        by = app.get(f"{lvl}_action_by_name") or app.get(f"{lvl}_action_by")
+        if by:
+            out.append((label, by, _fmt_dt(app.get(f"{lvl}_action_at")),
+                        app.get(f"{lvl}_action_remark") or "-"))
     if app.get("status") == "rejected":
         level = (app.get("rejected_at_level") or "").upper()
         out.append((
@@ -132,9 +132,9 @@ def _email_html(app: dict, attachments):
     )
     files = "".join(f"<li>{name}</li>" for name, _, _ in attachments) or "<li>No documents attached</li>"
     rejected = app.get("status") == "rejected"
-    head_bg = "#b91c1c" if rejected else BRAND
+    head_bg = "#d97706" if rejected else BRAND   # rejected = AMBER (not red)
     outcome = "REJECTED" if rejected else "APPROVED"
-    outcome_color = "#dc2626" if rejected else "#059669"
+    outcome_color = "#d97706" if rejected else "#059669"
     sub_line = (f"{app.get('app_no')} was rejected by "
                 f"{app.get('rejected_by_name') or app.get('rejected_by') or '-'}"
                 if rejected else f"{app.get('app_no')} has completed all approvals")
@@ -145,7 +145,7 @@ def _email_html(app: dict, attachments):
     # auto-approve case (set by the controller before sending). Rendered as a
     # one-cell table so Outlook shows the tinted box correctly.
     final_note = app.get("final_action_note")
-    note_bg = "#fef2f2" if rejected else "#ecfdf5"
+    note_bg = "#fef3c7" if rejected else "#ecfdf5"
     final_line = (
         f"<table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0'"
         f" style='border-collapse:collapse;width:100%'><tr>"
@@ -199,25 +199,27 @@ def _email_html(app: dict, attachments):
     """
 
 
-def _send_email(to_email: str, app: dict, attachments, cc_emails=None):
-    """attachments: list of (name, content_type, bytes)."""
+def _send_email(to_email, app: dict, attachments, cc_emails=None):
+    """to_email: one address or a list. attachments: (name, ctype, bytes)."""
     smtp_server = os.getenv("SMTP_SERVER")
     smtp_port = int(os.getenv("SMTP_PORT", 587))
     smtp_username = os.getenv("SMTP_USERNAME")
     smtp_password = os.getenv("SMTP_PASSWORD")
     from_email = os.getenv("FROM_EMAIL", smtp_username)
-    if not (smtp_server and smtp_username and smtp_password and to_email):
+    to_list = [e for e in dict.fromkeys(
+        to_email if isinstance(to_email, (list, tuple)) else [to_email]) if e]
+    if not (smtp_server and smtp_username and smtp_password and to_list):
         print("[approval-email] SMTP not configured or no recipient — skipped")
         return
 
     # CC: everyone who approved along the trail + any manually added emails
-    cc_emails = [e for e in dict.fromkeys(cc_emails or []) if e and e != to_email]
+    cc_emails = [e for e in dict.fromkeys(cc_emails or []) if e and e not in to_list]
 
     outcome = "REJECTED" if app.get("status") == "rejected" else "APPROVED"
     msg = MIMEMultipart()
     msg["Subject"] = f"{outcome}: {app.get('app_no')} — Approval Application"
     msg["From"] = from_email
-    msg["To"] = to_email
+    msg["To"] = ", ".join(to_list)
     if cc_emails:
         msg["Cc"] = ", ".join(cc_emails)
     msg.attach(MIMEText(_email_html(app, attachments), "html", "utf-8"))
@@ -234,10 +236,10 @@ def _send_email(to_email: str, app: dict, attachments, cc_emails=None):
         server.starttls()
         server.login(smtp_username, smtp_password)
         server.send_message(msg)
-    print(f"[approval-email] sent {app.get('app_no')} -> {to_email} (cc: {len(cc_emails)})")
+    print(f"[approval-email] sent {app.get('app_no')} -> {', '.join(to_list)} (cc: {len(cc_emails)})")
 
 
-def send_final_approval_email_async(to_email: str, app: dict, attachments, cc_emails=None):
+def send_final_approval_email_async(to_email, app: dict, attachments, cc_emails=None):
     """Fire-and-forget so approving / rejecting never waits on SMTP.
     The outcome (approved / rejected) is read from the record's status."""
     def _run():
@@ -284,7 +286,7 @@ def build_approval_pdf(app: dict, attachments) -> bytes:
         """White header with the company logo + blue text, footer on every page."""
         canvas.saveState()
         w, h = A4
-        text_color = colors.HexColor("#b91c1c" if outcome == "REJECTED" else BRAND)
+        text_color = colors.HexColor("#d97706" if outcome == "REJECTED" else BRAND)
         # white band with a thin brand underline
         canvas.setFillColor(colors.white)
         canvas.rect(0, h - 21 * mm, w, 21 * mm, fill=1, stroke=0)

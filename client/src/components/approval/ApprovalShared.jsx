@@ -19,7 +19,7 @@ import {
 import {
     createApplication, updateApplication, approveApplication, rejectApplication,
     deleteApplication, sendResultEmail, attachmentViewUrl, attachmentDownloadUrl,
-    approvalPdfUrl, getExpenseTypes, getAccess, errText,
+    approvalPdfUrl, getExpenseTypes, getAccess, getL4Choices, errText,
 } from './approvalApi';
 
 export const BRAND = '#2f3192';
@@ -44,7 +44,7 @@ export const STATUS_META = {
     pending_l4: { label: 'Pending @ L4 (HOD)', cls: 'bg-blue-100 text-blue-700 border-blue-200' },
     pending_l5: { label: 'Pending @ L5 (COO)', cls: 'bg-purple-100 text-purple-700 border-purple-200' },
     approved: { label: 'Approved', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-    rejected: { label: 'Rejected', cls: 'bg-red-100 text-red-700 border-red-200' },
+    rejected: { label: 'Rejected', cls: 'bg-amber-200 text-amber-900 border-amber-300' },
 };
 
 // L1..L5 hierarchy names. The COO can RENAME the levels from the Authority
@@ -122,7 +122,7 @@ export function SummaryCards({ apps, onCardClick = null }) {
             {card('all', 'Total Applications', counts.total, FileText, 'bg-indigo-50 text-indigo-600', 'text-gray-800')}
             {card('pending', 'Pending', counts.pending, Clock3, 'bg-amber-50 text-amber-600', 'text-amber-600')}
             {card('approved', 'Approved', counts.approved, CheckCircle2, 'bg-emerald-50 text-emerald-600', 'text-emerald-600')}
-            {card('rejected', 'Rejected', counts.rejected, XCircle, 'bg-red-50 text-red-500', 'text-red-500')}
+            {card('rejected', 'Rejected', counts.rejected, XCircle, 'bg-amber-50 text-amber-600', 'text-amber-600')}
         </div>
     );
 }
@@ -345,35 +345,116 @@ export const finalActionText = (app) => {
     return 'Approved';
 };
 
-// Dialog before the outcome email goes out: To = creator, Cc = everyone who
-// approved on the trail; extra addresses can be added (optional) — OK sends.
+/* ---- email chip-group helpers (add ONE at a time, validated, removable) ---- */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const escHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+const emailGroupHtml = (prefix, labelText) => `
+    <p style="margin:10px 0 4px;font-size:12px;color:#555">${labelText}</p>
+    <div style="display:flex;gap:6px">
+        <input id="${prefix}-in" type="email" placeholder="name@email.com"
+            style="flex:1;min-width:0;border:1px solid #d1d5db;border-radius:8px;padding:7px 10px;font-size:13px;outline:none">
+        <button type="button" id="${prefix}-add"
+            style="background:${BRAND};color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">+ Add</button>
+    </div>
+    <p id="${prefix}-err" style="color:#d97706;font-size:11px;margin:4px 0 0;display:none"></p>
+    <div id="${prefix}-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>`;
+
+const wireEmailGroup = (prefix, added) => {
+    const input = document.getElementById(`${prefix}-in`);
+    const err = document.getElementById(`${prefix}-err`);
+    const list = document.getElementById(`${prefix}-list`);
+    const render = () => {
+        list.innerHTML = added.map((e, i) =>
+            `<span style="display:inline-flex;align-items:center;gap:6px;background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;border-radius:999px;padding:3px 10px;font-size:12px">${escHtml(e)}
+                 <b data-i="${i}" title="Remove" style="cursor:pointer;color:#6b7280;font-size:13px;line-height:1">×</b></span>`).join('');
+        list.querySelectorAll('b[data-i]').forEach(b =>
+            b.addEventListener('click', () => { added.splice(Number(b.dataset.i), 1); render(); }));
+    };
+    const add = () => {
+        const v = (input.value || '').trim();
+        if (!v) return;
+        if (!EMAIL_RE.test(v)) {
+            err.textContent = `'${v}' is not a valid email address`;
+            err.style.display = 'block';
+            return;
+        }
+        if (added.includes(v)) {
+            err.textContent = 'This email is already added';
+            err.style.display = 'block';
+            return;
+        }
+        added.push(v);
+        input.value = '';
+        err.style.display = 'none';
+        render();
+        input.focus();
+    };
+    document.getElementById(`${prefix}-add`).addEventListener('click', add);
+    input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); add(); }
+    });
+    render();
+};
+
+// typed-but-not-added address must be valid (or cleared); it is auto-added
+const flushEmailGroup = (prefix, added) => {
+    const input = document.getElementById(`${prefix}-in`);
+    const v = (input?.value || '').trim();
+    if (v) {
+        if (!EMAIL_RE.test(v)) {
+            Swal.showValidationMessage(`'${v}' is not a valid email address — press + Add or clear it`);
+            return false;
+        }
+        if (!added.includes(v)) added.push(v);
+    }
+    return true;
+};
+
+// Submit-time CC box for the CREATOR: the addresses attach to the record and
+// are automatically CC'd on the result email later. Always resolves (optional).
+export async function promptCcEmails(initial = []) {
+    const added = [...initial];
+    await Swal.fire({
+        title: 'CC emails for the result mail',
+        html: `<div style="text-align:left;font-size:13px">
+                   <p style="margin:0 0 2px;font-size:12px;color:#555">
+                       When this NFA is approved / rejected the result email goes
+                       <b>To: you (creator)</b> with the <b>approvers in CC automatically</b>.
+                   </p>
+                   ${emailGroupHtml('apv-ccsub', 'Add more CC emails (optional):')}
+               </div>`,
+        showCancelButton: false,
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+        confirmButtonText: 'OK — Continue',
+        confirmButtonColor: BRAND,
+        didOpen: () => wireEmailGroup('apv-ccsub', added),
+        preConfirm: () => flushEmailGroup('apv-ccsub', added),
+    });
+    return added;
+}
+
+// Dialog before the outcome email goes out: To = creator, Cc = the approvers
+// + the creator-attached CC; extra To AND CC addresses can be added — OK sends.
 export async function promptResultEmail(app) {
     if (!app || (app.status !== 'approved' && app.status !== 'rejected')) return;
-    const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const ccNames = [...new Set([
         app.l2_action_by_name, app.l3_action_by_name,
         app.l4_action_by_name, app.l5_action_by_name,
         app.status === 'rejected' ? (app.rejected_by_name || app.rejected_by) : null,
+        ...String(app.cc_emails || '').split(',').map(s => s.trim()).filter(Boolean),
     ].filter(n => n && n !== (app.created_by_name || app.created_by)))];
-    // The result email ALWAYS goes out — no skip. Extra addresses are added
-    // ONE at a time with validation (+ Add), shown as removable chips.
-    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const added = [];
+    const addedTo = [];
+    const addedCc = [];
     await Swal.fire({
         title: 'Send result email',
         html: `<div style="text-align:left;font-size:13px">
-                   <p style="margin:0 0 6px"><b>${esc(app.app_no || '')}</b> — ${esc(finalActionText(app))}</p>
-                   <p style="margin:2px 0"><b>To:</b> ${esc(app.created_by_name || app.created_by)} (creator)</p>
-                   <p style="margin:2px 0"><b>Cc:</b> ${ccNames.length ? esc(ccNames.join(', ')) : '—'}</p>
-                   <p style="margin:10px 0 4px;font-size:12px;color:#555">Add more emails (optional):</p>
-                   <div style="display:flex;gap:6px">
-                       <input id="apv-email-in" type="email" placeholder="name@email.com"
-                           style="flex:1;min-width:0;border:1px solid #d1d5db;border-radius:8px;padding:7px 10px;font-size:13px;outline:none">
-                       <button type="button" id="apv-email-add"
-                           style="background:${BRAND};color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">+ Add</button>
-                   </div>
-                   <p id="apv-email-err" style="color:#dc2626;font-size:11px;margin:4px 0 0;display:none"></p>
-                   <div id="apv-email-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+                   <p style="margin:0 0 6px"><b>${escHtml(app.app_no || '')}</b> — ${escHtml(finalActionText(app))}</p>
+                   <p style="margin:2px 0"><b>To:</b> ${escHtml(app.created_by_name || app.created_by)} (creator)</p>
+                   <p style="margin:2px 0"><b>Cc:</b> ${ccNames.length ? escHtml(ccNames.join(', ')) : '—'}</p>
+                   ${emailGroupHtml('apv-to', 'Add To emails (optional):')}
+                   ${emailGroupHtml('apv-cc', 'Add CC emails (optional):')}
                </div>`,
         showCancelButton: false,
         allowOutsideClick: false,
@@ -381,56 +462,14 @@ export async function promptResultEmail(app) {
         confirmButtonText: 'OK — Send Email',
         confirmButtonColor: BRAND,
         didOpen: () => {
-            const input = document.getElementById('apv-email-in');
-            const err = document.getElementById('apv-email-err');
-            const list = document.getElementById('apv-email-list');
-            const render = () => {
-                list.innerHTML = added.map((e, i) =>
-                    `<span style="display:inline-flex;align-items:center;gap:6px;background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;border-radius:999px;padding:3px 10px;font-size:12px">${esc(e)}
-                         <b data-i="${i}" title="Remove" style="cursor:pointer;color:#6b7280;font-size:13px;line-height:1">×</b></span>`).join('');
-                list.querySelectorAll('b[data-i]').forEach(b =>
-                    b.addEventListener('click', () => { added.splice(Number(b.dataset.i), 1); render(); }));
-            };
-            const add = () => {
-                const v = (input.value || '').trim();
-                if (!v) return;
-                if (!emailRe.test(v)) {
-                    err.textContent = `'${v}' is not a valid email address`;
-                    err.style.display = 'block';
-                    return;
-                }
-                if (added.includes(v)) {
-                    err.textContent = 'This email is already added';
-                    err.style.display = 'block';
-                    return;
-                }
-                added.push(v);
-                input.value = '';
-                err.style.display = 'none';
-                render();
-                input.focus();
-            };
-            document.getElementById('apv-email-add').addEventListener('click', add);
-            input.addEventListener('keydown', (ev) => {
-                if (ev.key === 'Enter') { ev.preventDefault(); add(); }
-            });
+            wireEmailGroup('apv-to', addedTo);
+            wireEmailGroup('apv-cc', addedCc);
         },
-        preConfirm: () => {
-            // a typed-but-not-yet-added address must be valid (or cleared)
-            const input = document.getElementById('apv-email-in');
-            const v = (input?.value || '').trim();
-            if (v) {
-                if (!emailRe.test(v)) {
-                    Swal.showValidationMessage(`'${v}' is not a valid email address — press + Add or clear it`);
-                    return false;
-                }
-                if (!added.includes(v)) added.push(v);
-            }
-            return true;
-        },
+        preConfirm: () =>
+            flushEmailGroup('apv-to', addedTo) && flushEmailGroup('apv-cc', addedCc),
     });
     try {
-        await sendResultEmail(app.id, added);
+        await sendResultEmail(app.id, addedCc, addedTo);
         toast.success('Email sent');
     } catch (err) {
         toast.error(errText(err, 'Failed to send the email'));
@@ -440,7 +479,7 @@ export async function promptResultEmail(app) {
 /* ---------------- Detail modal (with approve / reject) ---------------- */
 
 function Step({ label, byName, at, remark, state, pendingNames = null }) {
-    const dot = state === 'done' ? 'bg-emerald-500' : state === 'rejected' ? 'bg-red-500'
+    const dot = state === 'done' ? 'bg-emerald-500' : state === 'rejected' ? 'bg-amber-500'
         : state === 'current' ? 'bg-amber-400 animate-pulse' : 'bg-gray-300';
     return (
         <div className={`flex items-start gap-2 ${state === 'skipped' ? 'opacity-80' : ''}`}>
@@ -473,6 +512,7 @@ function Step({ label, byName, at, remark, state, pendingNames = null }) {
 
 export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChanged, onEditResubmit = null }) {
     const [busy, setBusy] = useState(false);
+    const [action, setAction] = useState(null);   // 'approve' | 'reject' — drives the button loading label
     const me = JSON.parse(sessionStorage.getItem('user') || '{}');
     if (!app) return null;
 
@@ -508,6 +548,7 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
         });
         if (!isConfirmed) return;
         setBusy(true);
+        setAction('approve');
         try {
             const res = await approveApplication(app.id, remark || '');
             const st = res?.application?.status;
@@ -521,7 +562,7 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
             onClose();
         } catch (err) {
             toast.error(errText(err, 'Failed to approve'));
-        } finally { setBusy(false); }
+        } finally { setBusy(false); setAction(null); }
     };
 
     const doReject = async () => {
@@ -534,11 +575,12 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
             icon: 'warning',
             showCancelButton: true,
             confirmButtonText: 'Reject',
-            confirmButtonColor: '#dc2626',
+            confirmButtonColor: '#d97706',
             inputValidator: (v) => (!v || !v.trim()) ? 'Please give a rejection reason' : undefined,
         });
         if (!isConfirmed) return;
         setBusy(true);
+        setAction('reject');
         try {
             const res = await rejectApplication(app.id, remark);
             toast.success('Application rejected');
@@ -547,7 +589,7 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
             onClose();
         } catch (err) {
             toast.error(errText(err, 'Failed to reject'));
-        } finally { setBusy(false); }
+        } finally { setBusy(false); setAction(null); }
     };
 
     const doDelete = async () => {
@@ -557,7 +599,7 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
             icon: 'warning',
             showCancelButton: true,
             confirmButtonText: 'Delete',
-            confirmButtonColor: '#dc2626',
+            confirmButtonColor: '#d97706',
         });
         if (!res.isConfirmed) return;
         setBusy(true);
@@ -571,8 +613,9 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
         } finally { setBusy(false); }
     };
 
+    // Bordered grid cell — the details render as a proper lined grid
     const Row = ({ label, value }) => (
-        <div>
+        <div className="min-w-0 px-3 py-2 bg-white border-b border-r border-gray-100">
             <p className="text-[10px] uppercase tracking-wide text-black font-bold">{label}</p>
             <p className="text-xs text-gray-800 break-words">{value ?? '—'}</p>
         </div>
@@ -610,7 +653,7 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
                         <p className="text-xs text-gray-800 break-words">{app.description || '—'}</p>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 rounded-xl border border-gray-200 overflow-hidden">
                         <Row label="Type" value={typeLabel(app.request_type)} />
                         <Row label="Category" value={catLabel(app.category)} />
                         <Row label="Branch" value={`${app.branch}${app.branch_name ? ` — ${app.branch_name}` : ''}`} />
@@ -633,7 +676,7 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
                     </div>
 
                     {app.remark && (
-                        <div className="grid sm:grid-cols-2 gap-3">
+                        <div className="rounded-xl border border-gray-200 overflow-hidden">
                             <Row label="Remark" value={app.remark} />
                         </div>
                     )}
@@ -687,7 +730,7 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
                             </p>
                         )}
                         {app.status === 'rejected' && (
-                            <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg p-2.5">
+                            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
                                 Rejected by <b>{app.rejected_by_name}</b> ({app.rejected_at_level?.toUpperCase()}) on {fmtDate(app.rejected_at)}
                                 {app.rejected_remark ? <> — "{app.rejected_remark}"</> : null}
                             </div>
@@ -705,19 +748,21 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
                         )}
                         {canDelete && (
                             <button onClick={doDelete} disabled={busy}
-                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 disabled:opacity-50">
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 disabled:opacity-50">
                                 <Trash2 size={13} /> Delete
                             </button>
                         )}
                         {canAct && (
                             <>
                                 <button onClick={doReject} disabled={busy}
-                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
-                                    <XCircle size={13} /> Reject
+                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-60">
+                                    <XCircle size={13} className={busy && action === 'reject' ? 'animate-spin' : ''} />
+                                    {busy && action === 'reject' ? 'Rejecting…' : 'Reject'}
                                 </button>
                                 <button onClick={doApprove} disabled={busy}
-                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
-                                    <CheckCircle2 size={13} /> Approve
+                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60">
+                                    <CheckCircle2 size={13} className={busy && action === 'approve' ? 'animate-spin' : ''} />
+                                    {busy && action === 'approve' ? 'Approving…' : 'Approve'}
                                 </button>
                             </>
                         )}
@@ -772,6 +817,40 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
     const [saving, setSaving] = useState(false);
     const fileInputRef = useRef(null);
 
+    // HO only: the L4 dropdown is filtered PER RECORD — only HO HODs whose
+    // limit for the chosen type is HIGHER than the creator's own. Refetched
+    // whenever the record's branch / type changes; null = fall back to the
+    // unfiltered access list (fetch failed).
+    const [l4Choices, setL4Choices] = useState(null);
+    useEffect(() => {
+        if (!isHO) return;
+        let alive = true;
+        getL4Choices(form.branch, form.request_type)
+            .then(d => {
+                if (!alive) return;
+                const list = d.l4_choices || [];
+                setL4Choices(list);
+                // a previously picked approver may no longer qualify
+                setForm(f => (f.l4_approver_id && !list.some(c => c.user_id === f.l4_approver_id)
+                    ? { ...f, l4_approver_id: '' } : f));
+            })
+            .catch(() => { if (alive) setL4Choices(null); });
+        return () => { alive = false; };
+    }, [isHO, form.branch, form.request_type]);
+    const l4Options = l4Choices ?? access?.l4_choices ?? [];
+
+    // Expense: MULTIPLE types picked from ONE dropdown, with ONE amount for
+    // all of them together (matching the single expense limit). Stored as
+    // "Food, Travel" + the amount. Legacy "Food: 500; ..." drafts parse too.
+    const parseExpTypes = (d) =>
+        d?.request_type === 'expense' && d.expense_type
+            ? String(d.expense_type).split(/[;,]/).map(p => p.split(':')[0].trim()).filter(Boolean)
+            : [];
+    const [expTypes, setExpTypes] = useState(() => parseExpTypes(draft));
+    const [expOpen, setExpOpen] = useState(false);
+    const toggleExpType = (n) =>
+        setExpTypes(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n]);
+
     // Expense type dropdown values from the COO-managed master
     const [expenseTypes, setExpenseTypes] = useState([]);
     useEffect(() => {
@@ -791,12 +870,13 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
         const branchObj = branches.find(b => b.branch === form.branch);
         Object.entries(form).forEach(([k, v]) => fd.append(k, v ?? ''));
         fd.append('branch_name', branchObj?.branch_name || '');
+        if (isExpense) fd.set('expense_type', expTypes.join(', '));
         files.forEach(f => fd.append('files', f));
         return fd;
     };
 
     // Anything typed at all? Used to decide whether closing should auto-draft.
-    const hasData = () => draft != null || files.length > 0 || [
+    const hasData = () => draft != null || files.length > 0 || expTypes.length > 0 || [
         'description', 'customer_name', 'instance_id', 'sr_no', 'invoice_no',
         'delivery_challan', 'quotation_no', 'quotation_amount', 'discount_percent',
         'credit_days', 'expense_amount', 'expense_type', 'remark',
@@ -847,7 +927,7 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
             icon: 'warning',
             showCancelButton: true,
             confirmButtonText: 'Delete',
-            confirmButtonColor: '#dc2626',
+            confirmButtonColor: '#d97706',
         });
         if (!res.isConfirmed) return;
         setSaving(true);
@@ -866,7 +946,9 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
         if (!form.category) return toast.error('Please select Spares / Services');
         if (!form.request_type) return toast.error('Please select Discounting / Credit / Expense');
         if (!form.branch) return toast.error('Please select a branch');
-        if (isHO && !form.l4_approver_id) return toast.error(`Select your L4 (${levelName('l4')}) approver`);
+        // L4 pick is required only when a qualifying HOD exists — with none
+        // (nobody's limit beats the creator's) the record goes straight to L5
+        if (isHO && l4Options.length > 0 && !form.l4_approver_id) return toast.error(`Select your L4 (${levelName('l4')}) approver`);
         if (!form.description.trim()) return toast.error('Purpose of approval is required');
         if (isDnC) {
             // combined type: either one may be blank, but never BOTH
@@ -882,9 +964,9 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
             if (!form.customer_name.trim()) return toast.error('Customer name is required');
             if (!form.quotation_amount) return toast.error('Quotation amount is required');
         }
-        // Expense: type & amount mandatory; SR Number optional
+        // Expense: at least one type + the single combined amount
         if (isExpense) {
-            if (!form.expense_type) return toast.error('Expense type is required');
+            if (!expTypes.length) return toast.error('Select at least one expense type');
             if (!form.expense_amount) return toast.error('Expense amount is required');
         }
         if (!form.remark.trim()) return toast.error('Remark is required');
@@ -909,9 +991,11 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
             li('Quotation Amount', form.quotation_amount && `₹${Number(form.quotation_amount).toLocaleString('en-IN')}`),
             isDiscounting && form.discount_percent ? li('Discounting %', `${form.discount_percent}%`) : '',
             isCredit && form.credit_days ? li('Credit Period', `${form.credit_days} days`) : '',
-            isExpense ? li('Expense Amount', `₹${Number(form.expense_amount).toLocaleString('en-IN')}`) : '',
-            isExpense ? li('Expense Type', form.expense_type) : '',
-            isHO ? li(`L4 (${levelName('l4')}) Approver`, (access?.l4_choices || []).find(c => c.user_id === form.l4_approver_id)?.name) : '',
+            isExpense ? li('Expense Types', expTypes.join(', ')) : '',
+            isExpense && form.expense_amount ? li('Expense Amount', `₹${Number(form.expense_amount).toLocaleString('en-IN')}`) : '',
+            isHO ? li(`L4 (${levelName('l4')}) Approver`,
+                l4Options.find(c => c.user_id === form.l4_approver_id)?.name
+                || (l4Options.length === 0 ? `Skipped — goes to L5 (${levelName('l5')})` : '')) : '',
             isHO ? li(`L5 (${levelName('l5')})`, (access?.l5_choices || []).map(c => c.name).join(', ') || 'Fixed') : '',
             li('Remark', form.remark),
             li('Attachments', files.length ? files.map(f => f.name).join(', ') : ''),
@@ -930,15 +1014,20 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
         });
         if (!res.isConfirmed) return;
 
+        // creator attaches CC addresses for the future result email (optional)
+        const ccList = await promptCcEmails(
+            String(draft?.cc_emails || '').split(',').map(s => s.trim()).filter(Boolean));
+
         setSaving(true);
         try {
             let res;
+            const fd = buildFormData();
+            fd.set('cc_emails', ccList.join(', '));
             if (draft) {
-                const fd = buildFormData();
                 fd.append('submit', 'true');    // draft becomes a numbered, pending application
                 res = await updateApplication(draft.id, fd);
             } else {
-                res = await createApplication(buildFormData());
+                res = await createApplication(fd);
             }
             if (res?.application?.status === 'approved') {
                 toast.success('Submitted — auto approved (within your own authority limit)');
@@ -969,202 +1058,196 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
                     <button onClick={handleClose} className="p-1.5 rounded-lg bg-white hover:bg-white/90 transition flex-shrink-0" style={{ color: '#2f3192' }}><X size={15} /></button>
                 </div>
 
-                <form onSubmit={submit} className="p-5 space-y-4">
-                    <div className="grid sm:grid-cols-3 gap-3">
-                        <div>
-                            <span className={label}>Spares / Services *</span>
-                            <select className={input} value={form.category} onChange={set('category')}>
-                                <option value="">Select…</option>
-                                {CATEGORY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                            </select>
-                        </div>
-                        <div>
-                            <span className={label}>Application Type *</span>
-                            <select className={input} value={form.request_type} onChange={set('request_type')} disabled={!!lockedType}>
-                                {TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                            </select>
-                        </div>
-                        <div>
-                            <span className={label}><Building2 size={11} className="inline mr-1" />Branch *</span>
-                            <select className={input} value={form.branch} onChange={set('branch')}>
-                                <option value="">Select…</option>
-                                {branches.map(b => (
-                                    <option key={b.branch} value={b.branch}>{b.branch} — {b.branch_name}</option>
-                                ))}
-                            </select>
-                        </div>
-                    </div>
-
+                <form onSubmit={submit} className="p-4 space-y-3">
                     {/* HO members choose who approves their record at L4 / L5 */}
                     {isHO && (
-                        <div className="rounded-xl border border-indigo-200 p-3 bg-indigo-50/40">
-                            <p className="text-[11px] uppercase tracking-wide text-gray-700 font-bold mb-2 text-center">
-                                Head Office — choose your approvers
-                            </p>
-                            <div className="grid sm:grid-cols-2 gap-3">
-                                <div>
-                                    <span className={label}>L4 ({levelName('l4')}) Approver *</span>
-                                    <select className={input} value={form.l4_approver_id} onChange={set('l4_approver_id')}>
+                        <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-2.5 grid sm:grid-cols-2 gap-2.5">
+                            <div>
+                                <span className={label}>L4 ({levelName('l4')}) Approver {l4Options.length > 0 ? '*' : ''}</span>
+                                <select className={input} value={form.l4_approver_id} onChange={set('l4_approver_id')}
+                                    disabled={l4Options.length === 0}>
+                                    <option value="">Select…</option>
+                                    {l4Options.map(c => (
+                                        <option key={c.user_id} value={c.user_id}>{c.name} ({c.user_id})</option>
+                                    ))}
+                                </select>
+                                {l4Options.length === 0 && (
+                                    <p className="text-[10px] text-gray-500 mt-1">
+                                        No L4 ({levelName('l4')}) with a higher limit than yours for this type — the record goes straight to L5 ({levelName('l5')})
+                                    </p>
+                                )}
+                            </div>
+                            <div>
+                                <span className={label}>L5 ({levelName('l5')})</span>
+                                <div className={`${input} bg-gray-50 text-gray-700 flex items-center min-h-[30px]`}>
+                                    {(access?.l5_choices || []).map(c => c.name).join(', ') || levelName('l5')}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ONE lined grid (like the detail view) — Purpose & Remark
+                        span the full width, every other field is one cell */}
+                    {(() => {
+                        const cell = 'min-w-0 px-3 py-2 bg-white border-b border-r border-gray-100';
+                        const full = `${cell} col-span-2 sm:col-span-3`;
+                        return (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 rounded-xl border border-gray-200">
+                                <div className={cell}>
+                                    <span className={label}>Spares / Services *</span>
+                                    <select className={input} value={form.category} onChange={set('category')}>
                                         <option value="">Select…</option>
-                                        {(access?.l4_choices || []).map(c => (
-                                            <option key={c.user_id} value={c.user_id}>{c.name} ({c.user_id})</option>
+                                        {CATEGORY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                    </select>
+                                </div>
+                                <div className={cell}>
+                                    <span className={label}>Application Type *</span>
+                                    <select className={input} value={form.request_type} onChange={set('request_type')} disabled={!!lockedType}>
+                                        {TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                    </select>
+                                </div>
+                                <div className={cell}>
+                                    <span className={label}><Building2 size={11} className="inline mr-1" />Branch *</span>
+                                    <select className={input} value={form.branch} onChange={set('branch')}>
+                                        <option value="">Select…</option>
+                                        {branches.map(b => (
+                                            <option key={b.branch} value={b.branch}>{b.branch} — {b.branch_name}</option>
                                         ))}
                                     </select>
-                                    {(access?.l4_choices || []).length === 0 && (
-                                        <p className="text-[10px] text-gray-500 mt-1">No L4 ({levelName('l4')}) users defined yet</p>
-                                    )}
                                 </div>
-                                <div>
-                                    <span className={label}>L5 ({levelName('l5')})</span>
-                                    <div className={`${input} bg-gray-50 text-gray-700 flex items-center min-h-[30px]`}>
-                                        {(access?.l5_choices || []).map(c => c.name).join(', ') || levelName('l5')}
+
+                                {/* Purpose — full width */}
+                                <div className={full}>
+                                    <span className={label}>Purpose of Approval *</span>
+                                    <textarea className={input} rows={2} value={form.description} onChange={set('description')}
+                                        placeholder="Explain why this approval is needed" />
+                                </div>
+
+                                {!isExpense && (
+                                    <>
+                                        <div className={cell}>
+                                            <span className={label}>Customer Name *</span>
+                                            <input className={input} value={form.customer_name} onChange={set('customer_name')} placeholder="Customer name" />
+                                        </div>
+                                        <div className={cell}>
+                                            <span className={label}>Instance ID</span>
+                                            <input className={input} value={form.instance_id} onChange={set('instance_id')} placeholder="Instance ID" />
+                                        </div>
+                                        <div className={cell}>
+                                            <span className={label}>SR No.</span>
+                                            <input className={input} value={form.sr_no} onChange={set('sr_no')} placeholder="SR number" />
+                                        </div>
+                                        <div className={cell}>
+                                            <span className={label}>Invoice</span>
+                                            <input className={input} value={form.invoice_no} onChange={set('invoice_no')} placeholder="Invoice no." />
+                                        </div>
+                                        <div className={cell}>
+                                            <span className={label}>Delivery Challan</span>
+                                            <input className={input} value={form.delivery_challan} onChange={set('delivery_challan')} placeholder="Challan no." />
+                                        </div>
+                                        <div className={cell}>
+                                            <span className={label}>Quotation Number</span>
+                                            <input className={input} value={form.quotation_no} onChange={set('quotation_no')} placeholder="Quotation no." />
+                                        </div>
+                                        <div className={cell}>
+                                            <span className={label}>Quotation Amount *</span>
+                                            <input className={input} type="number" step="0.01" min="0" value={form.quotation_amount}
+                                                onChange={set('quotation_amount')} placeholder="0.00" />
+                                        </div>
+                                    </>
+                                )}
+
+                                {isExpense && (
+                                    <>
+                                        <div className={cell}>
+                                            <span className={label}>SR Number</span>
+                                            <input className={input} value={form.sr_no} onChange={set('sr_no')} placeholder="SR number" />
+                                        </div>
+                                        {/* MULTI-SELECT dropdown — one amount covers all picked types */}
+                                        <div className={`${cell} relative`}>
+                                            <span className={label}>Expense Types *</span>
+                                            <button type="button" onClick={() => setExpOpen(o => !o)}
+                                                className={`${input} text-left flex items-center justify-between gap-1`}>
+                                                <span className={`truncate ${expTypes.length ? 'text-gray-900' : 'text-gray-400'}`}
+                                                    title={expTypes.join(', ')}>
+                                                    {expTypes.length ? expTypes.join(', ') : 'Select…'}
+                                                </span>
+                                                <span className="text-gray-500 flex-shrink-0">▾</span>
+                                            </button>
+                                            {expOpen && (
+                                                <>
+                                                    <div className="fixed inset-0 z-10" onClick={() => setExpOpen(false)} />
+                                                    <div className="absolute left-0 right-0 top-full z-20 mt-1 rounded-lg border border-gray-200 bg-white shadow-xl p-1.5 max-h-44 overflow-y-auto apv-scroll">
+                                                        {expenseTypes.map(t => (
+                                                            <label key={t.id}
+                                                                className="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-[11px] text-gray-800">
+                                                                <input type="checkbox" className="accent-indigo-600"
+                                                                    checked={expTypes.includes(t.name)}
+                                                                    onChange={() => toggleExpType(t.name)} />
+                                                                <span className="truncate" title={t.name}>{t.name}</span>
+                                                            </label>
+                                                        ))}
+                                                        {expenseTypes.length === 0 && (
+                                                            <p className="px-2 py-1.5 text-[10px] text-gray-400">No expense types yet — COO adds them from the Expense Type Master</p>
+                                                        )}
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                        <div className={cell}>
+                                            <span className={label}>Expense Amount *</span>
+                                            <input className={input} type="number" step="0.01" min="0" value={form.expense_amount}
+                                                onChange={set('expense_amount')} placeholder="0.00" />
+                                        </div>
+                                        <div className={cell}>
+                                            <span className={label}>Quotation Number</span>
+                                            <input className={input} value={form.quotation_no} onChange={set('quotation_no')} placeholder="Quotation no." />
+                                        </div>
+                                        <div className={cell}>
+                                            <span className={label}>Quotation Amount</span>
+                                            <input className={input} type="number" step="0.01" min="0" value={form.quotation_amount}
+                                                onChange={set('quotation_amount')} placeholder="0.00" />
+                                        </div>
+                                    </>
+                                )}
+
+                                {isDiscounting && (
+                                    <div className={cell}>
+                                        <span className={label}>Discounting % {isDnC ? '' : '*'}</span>
+                                        <input className={input} type="number" step="0.01" min="0" max="100"
+                                            value={form.discount_percent} onChange={set('discount_percent')} placeholder="e.g. 10" />
                                     </div>
+                                )}
+                                {isCredit && (
+                                    <div className={cell}>
+                                        <span className={label}>Credit Period (Days) {isDnC ? '' : '*'}</span>
+                                        <input className={input} type="number" step="1" min="1"
+                                            value={form.credit_days} onChange={set('credit_days')} placeholder="e.g. 30" />
+                                    </div>
+                                )}
+                                {isDnC && (
+                                    <div className={`${full} !py-1.5`}>
+                                        <p className="text-[10px] text-gray-500">
+                                            Fill Discounting % or Credit Period — at least one (both allowed).
+                                        </p>
+                                    </div>
+                                )}
+
+                                {/* Remark — full width */}
+                                <div className={full}>
+                                    <span className={label}>Remark *</span>
+                                    {/* input-height by default; grows automatically with the text */}
+                                    <textarea className={`${input} resize-none overflow-hidden`} rows={1}
+                                        value={form.remark} onChange={set('remark')}
+                                        onInput={e => {
+                                            e.target.style.height = 'auto';
+                                            e.target.style.height = `${e.target.scrollHeight}px`;
+                                        }}
+                                        placeholder="Any remark for the approvers" />
                                 </div>
                             </div>
-                        </div>
-                    )}
-
-                    {/* Purpose of approval — full-width, always on top */}
-                    <div>
-                        <span className={label}>Purpose of Approval *</span>
-                        <textarea className={input} rows={3} value={form.description} onChange={set('description')}
-                            placeholder="Explain why this approval is needed" />
-                    </div>
-
-                    {!isExpense && (
-                        <>
-                            <div className="rounded-xl border border-gray-200 p-3 bg-gray-50/50">
-                                <p className="text-[11px] uppercase tracking-wide text-gray-700 font-bold mb-2 flex items-center justify-center gap-1">
-                                    <User size={11} /> Customer Details
-                                </p>
-                                <div className="grid sm:grid-cols-3 gap-3">
-                                    <div>
-                                        <span className={label}>Customer Name *</span>
-                                        <input className={input} value={form.customer_name} onChange={set('customer_name')} placeholder="Customer name" />
-                                    </div>
-                                    <div>
-                                        <span className={label}>Instance ID</span>
-                                        <input className={input} value={form.instance_id} onChange={set('instance_id')} placeholder="Instance ID" />
-                                    </div>
-                                    <div>
-                                        <span className={label}>SR No.</span>
-                                        <input className={input} value={form.sr_no} onChange={set('sr_no')} placeholder="SR number" />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="rounded-xl border border-gray-200 p-3 bg-gray-50/50">
-                                <p className="text-[11px] uppercase tracking-wide text-gray-700 font-bold mb-2 text-center">Documents</p>
-                                <div className="grid sm:grid-cols-2 gap-3">
-                                    <div>
-                                        <span className={label}>Invoice</span>
-                                        <input className={input} value={form.invoice_no} onChange={set('invoice_no')} placeholder="Invoice no." />
-                                    </div>
-                                    <div>
-                                        <span className={label}>Delivery Challan</span>
-                                        <input className={input} value={form.delivery_challan} onChange={set('delivery_challan')} placeholder="Challan no." />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="rounded-xl border border-gray-200 p-3 bg-gray-50/50">
-                                <p className="text-[11px] uppercase tracking-wide text-gray-700 font-bold mb-2 flex items-center justify-center gap-1">
-                                    <IndianRupee size={11} /> Amount
-                                </p>
-                                <div className="grid sm:grid-cols-2 gap-3">
-                                    <div>
-                                        <span className={label}>Quotation Number</span>
-                                        <input className={input} value={form.quotation_no} onChange={set('quotation_no')} placeholder="Quotation no." />
-                                    </div>
-                                    <div>
-                                        <span className={label}>Quotation Amount *</span>
-                                        <input className={input} type="number" step="0.01" min="0" value={form.quotation_amount}
-                                            onChange={set('quotation_amount')} placeholder="0.00" />
-                                    </div>
-                                </div>
-                            </div>
-                        </>
-                    )}
-
-                    {isExpense && (
-                        <>
-                            <div className="rounded-xl border border-amber-200 p-3 bg-amber-50/60">
-                                <p className="text-[11px] uppercase tracking-wide text-gray-700 font-bold mb-2 text-center">Expense Details</p>
-                                <div className="grid sm:grid-cols-3 gap-3">
-                                    <div>
-                                        <span className={label}>SR Number</span>
-                                        <input className={input} value={form.sr_no} onChange={set('sr_no')} placeholder="SR number" />
-                                    </div>
-                                    <div>
-                                        <span className={label}>Expense Type *</span>
-                                        <select className={input} value={form.expense_type} onChange={set('expense_type')}>
-                                            <option value="">Select…</option>
-                                            {expenseTypes.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
-                                        </select>
-                                        {expenseTypes.length === 0 && (
-                                            <p className="text-[10px] text-gray-400 mt-1">No expense types yet — COO adds them from the Expense Type Master</p>
-                                        )}
-                                    </div>
-                                    <div>
-                                        <span className={label}>Expense Amount *</span>
-                                        <input className={input} type="number" step="0.01" min="0" value={form.expense_amount}
-                                            onChange={set('expense_amount')} placeholder="0.00" />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="rounded-xl border border-gray-200 p-3 bg-gray-50/50">
-                                <p className="text-[11px] uppercase tracking-wide text-gray-700 font-bold mb-2 flex items-center justify-center gap-1">
-                                    <IndianRupee size={11} /> Amount
-                                </p>
-                                <div className="grid sm:grid-cols-2 gap-3">
-                                    <div>
-                                        <span className={label}>Quotation Number</span>
-                                        <input className={input} value={form.quotation_no} onChange={set('quotation_no')} placeholder="Quotation no." />
-                                    </div>
-                                    <div>
-                                        <span className={label}>Quotation Amount</span>
-                                        <input className={input} type="number" step="0.01" min="0" value={form.quotation_amount}
-                                            onChange={set('quotation_amount')} placeholder="0.00" />
-                                    </div>
-                                </div>
-                            </div>
-                        </>
-                    )}
-
-                    {/* Last row: type-specific ask (Discounting % / Credit Period) + Remark */}
-                    <div className="grid sm:grid-cols-3 gap-3">
-                        {isDiscounting && (
-                            <div>
-                                <span className={label}>Discounting % {isDnC ? '' : '*'}</span>
-                                <input className={input} type="number" step="0.01" min="0" max="100"
-                                    value={form.discount_percent} onChange={set('discount_percent')} placeholder="e.g. 10" />
-                            </div>
-                        )}
-                        {isCredit && (
-                            <div>
-                                <span className={label}>Credit Period (Days) {isDnC ? '' : '*'}</span>
-                                <input className={input} type="number" step="1" min="1"
-                                    value={form.credit_days} onChange={set('credit_days')} placeholder="e.g. 30" />
-                            </div>
-                        )}
-                        {isDnC && (
-                            <p className="sm:col-span-3 -mt-1 text-[10px] text-gray-500">
-                                Fill Discounting % or Credit Period — at least one (both allowed).
-                            </p>
-                        )}
-                        <div className={isExpense || isDnC ? 'sm:col-span-3' : 'sm:col-span-2'}>
-                            <span className={label}>Remark *</span>
-                            {/* input-height by default; grows automatically with the text */}
-                            <textarea className={`${input} resize-none overflow-hidden`} rows={1}
-                                value={form.remark} onChange={set('remark')}
-                                onInput={e => {
-                                    e.target.style.height = 'auto';
-                                    e.target.style.height = `${e.target.scrollHeight}px`;
-                                }}
-                                placeholder="Any remark for the approvers" />
-                        </div>
-                    </div>
+                        );
+                    })()}
 
                     <div>
                         <span className={label}><Paperclip size={11} className="inline mr-1" />Attachments</span>
@@ -1191,7 +1274,7 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
                                         <Paperclip size={11} className="text-indigo-600" />
                                         <span className="max-w-[140px] truncate">{f.name}</span>
                                         <button type="button" onClick={() => setFiles(fs => fs.filter((_, j) => j !== i))}
-                                            className="text-gray-400 hover:text-red-500"><X size={11} /></button>
+                                            className="text-gray-400 hover:text-amber-600"><X size={11} /></button>
                                     </span>
                                 ))}
                             </div>
@@ -1201,7 +1284,7 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
                     <div className="flex justify-end gap-2 pt-1">
                         {draft && draft.status !== 'rejected' && (
                             <button type="button" onClick={handleDeleteDraft} disabled={saving}
-                                className="mr-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 disabled:opacity-50">
+                                className="mr-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 disabled:opacity-50">
                                 <Trash2 size={13} /> Delete Draft
                             </button>
                         )}

@@ -182,6 +182,34 @@ INDEX_STATEMENTS = [
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_stage_user_stage' AND object_id = OBJECT_ID('dbo.approval_stage_approvers')) CREATE NONCLUSTERED INDEX IX_apv_stage_user_stage ON dbo.approval_stage_approvers (user_id, stage) INCLUDE (branch);",
     # _available_approvers resolves (branch, stage) on every routing decision.
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_stage_branch_stage' AND object_id = OBJECT_ID('dbo.approval_stage_approvers')) CREATE NONCLUSTERED INDEX IX_apv_stage_branch_stage ON dbo.approval_stage_approvers (branch, stage) INCLUDE (user_id, user_name);",
+    # --- Approval Application action paths: pending queues / reroute scans
+    #     (status, branch), the list visibility OR-arms (acted-at columns,
+    #     HO chosen approvers) and the per-request level lookups ---
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_status_branch' AND object_id = OBJECT_ID('dbo.approval_applications')) CREATE NONCLUSTERED INDEX IX_apv_apps_status_branch ON dbo.approval_applications (status, branch) INCLUDE (category, created_by, created_at);",
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_l4_approver' AND object_id = OBJECT_ID('dbo.approval_applications')) CREATE NONCLUSTERED INDEX IX_apv_apps_l4_approver ON dbo.approval_applications (l4_approver_id) WHERE l4_approver_id IS NOT NULL;",
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_l5_approver' AND object_id = OBJECT_ID('dbo.approval_applications')) CREATE NONCLUSTERED INDEX IX_apv_apps_l5_approver ON dbo.approval_applications (l5_approver_id) WHERE l5_approver_id IS NOT NULL;",
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_l2_action_by' AND object_id = OBJECT_ID('dbo.approval_applications')) CREATE NONCLUSTERED INDEX IX_apv_apps_l2_action_by ON dbo.approval_applications (l2_action_by) WHERE l2_action_by IS NOT NULL;",
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_l3_action_by' AND object_id = OBJECT_ID('dbo.approval_applications')) CREATE NONCLUSTERED INDEX IX_apv_apps_l3_action_by ON dbo.approval_applications (l3_action_by) WHERE l3_action_by IS NOT NULL;",
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_l4_action_by' AND object_id = OBJECT_ID('dbo.approval_applications')) CREATE NONCLUSTERED INDEX IX_apv_apps_l4_action_by ON dbo.approval_applications (l4_action_by) WHERE l4_action_by IS NOT NULL;",
+    # resolve_level / _level_user_ids run on EVERY approval request
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_rights_level' AND object_id = OBJECT_ID('dbo.approval_rights')) CREATE NONCLUSTERED INDEX IX_apv_rights_level ON dbo.approval_rights (level) INCLUDE (user_id);",
+    # viewer-side exclusion lookups (list visibility + can_act flags)
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_excl_approver_cat' AND object_id = OBJECT_ID('dbo.approval_approver_exclusions')) CREATE NONCLUSTERED INDEX IX_apv_excl_approver_cat ON dbo.approval_approver_exclusions (approver_id) INCLUDE (employee_id, category);",
+    # _is_ho_user / _ho_member_ids check branch access on EVERY request
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_uba_branch_user' AND object_id = OBJECT_ID('dbo.user_branch_access')) CREATE NONCLUSTERED INDEX IX_uba_branch_user ON dbo.user_branch_access (branch) INCLUDE (user_id);",
+    # --- Part Detail Info (Master Report) initial-load paths ---
+    # newest-first top-N activity log
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_mnt_activity_created_id' AND object_id = OBJECT_ID('dbo.maintenance_activity')) CREATE NONCLUSTERED INDEX IX_mnt_activity_created_id ON dbo.maintenance_activity (created_at DESC, id DESC) INCLUDE (app_code, employee, engine_model, segment);",
+    # slim coverage query: DISTINCT (app_code_id, service_hours)
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_mnt_parts_app_hours' AND object_id = OBJECT_ID('dbo.maintenance_parts')) CREATE NONCLUSTERED INDEX IX_mnt_parts_app_hours ON dbo.maintenance_parts (app_code_id, service_hours);",
+    # asset_commissioning / app_mapping GROUP BY application_code — scan the
+    # narrow index instead of the whole asset_detailed table
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_asset_detailed_appcode' AND object_id = OBJECT_ID('dbo.asset_detailed')) CREATE NONCLUSTERED INDEX IX_asset_detailed_appcode ON dbo.asset_detailed (application_code) INCLUDE (commissioning_date, engine_model, segment, kva_rating, emission_norm);",
+    # --- MOM Tracking initial load: newest-first meeting list + the
+    #     selectinload child fetches (rows by position, attendees by id) ---
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_mom_meetings_date_id' AND object_id = OBJECT_ID('dbo.mom_meetings')) CREATE NONCLUSTERED INDEX IX_mom_meetings_date_id ON dbo.mom_meetings (date DESC, id DESC);",
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_mom_rows_meeting_pos' AND object_id = OBJECT_ID('dbo.mom_rows')) CREATE NONCLUSTERED INDEX IX_mom_rows_meeting_pos ON dbo.mom_rows (meeting_id, position);",
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_mom_attendees_meeting_id' AND object_id = OBJECT_ID('dbo.mom_attendees')) CREATE NONCLUSTERED INDEX IX_mom_attendees_meeting_id ON dbo.mom_attendees (meeting_id, id);",
 ]
 
 
@@ -440,6 +468,36 @@ COLUMN_STATEMENTS = [
             "('l4', 'HOD', GETDATE()), "
             "('l5', 'COO', GETDATE())"
         ),
+    },
+    {
+        # CC addresses the creator attaches at submit — auto-added to the
+        # result email's CC on approval / rejection
+        "name": "approval_applications.cc_emails",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'cc_emails'",
+        "add": "ALTER TABLE dbo.approval_applications ADD cc_emails NVARCHAR(500) NULL",
+    },
+    {
+        # Level limits became PER BRANCH: branch NULL = global name row,
+        # branch set = that branch row's L1..L4 limits (fresh rows start 0).
+        "name": "approval_level_configs.branch",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_level_configs') AND name = 'branch'",
+        "add": "ALTER TABLE dbo.approval_level_configs ADD branch NVARCHAR(20) NULL",
+    },
+    {
+        # uniqueness moved from (level) to (branch, level)
+        "name": "approval_level_configs unique (branch, level)",
+        "exists": "SELECT 1 FROM sys.indexes WHERE name = 'UX_apv_lvl_cfg_br' AND object_id = OBJECT_ID('dbo.approval_level_configs')",
+        "add": ("DECLARE @lq NVARCHAR(256); SELECT TOP 1 @lq = name FROM sys.key_constraints "
+                "WHERE parent_object_id = OBJECT_ID('dbo.approval_level_configs') AND type = 'UQ'; "
+                "IF @lq IS NOT NULL EXEC('ALTER TABLE dbo.approval_level_configs DROP CONSTRAINT [' + @lq + ']'); "
+                "CREATE UNIQUE NONCLUSTERED INDEX UX_apv_lvl_cfg_br ON dbo.approval_level_configs (branch, level)"),
+    },
+    {
+        # Expense NFAs select MULTIPLE types — the column stores the combined
+        # breakdown text ("Food: 500; Travel: 1000"), so widen it.
+        "name": "approval_applications.expense_type widen to 400",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'expense_type' AND max_length >= 800",
+        "add": "ALTER TABLE dbo.approval_applications ALTER COLUMN expense_type NVARCHAR(400) NULL",
     },
     {
         "name": "asset_detailed.emission_norm",

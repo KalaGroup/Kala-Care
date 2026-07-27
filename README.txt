@@ -21,9 +21,38 @@ uvicorn app.main:app --host 127.0.0.1 --port 5004 --reload
 Backend exe: 
 
 cd server
-.\venv\Scripts\pyinstaller.exe --onefile --name backend --add-data "app;app" --add-data ".env;." --collect-all fastapi --collect-all uvicorn --collect-all sqlalchemy --collect-all pandas --collect-all openpyxl --collect-all passlib --collect-all bcrypt --collect-all argon2 --collect-all cryptography --collect-all pyodbc --collect-all email app\run.py
-
-
+1: .\venv\Scripts\pyinstaller.exe --onefile --name backend --add-data "app;app" --add-data ".env;." --collect-all fastapi --collect-all uvicorn --collect-all sqlalchemy --collect-all pandas --collect-all openpyxl --collect-all passlib --collect-all bcrypt --collect-all argon2 --collect-all cryptography --collect-all pyodbc --collect-all email app\run.py
+new 2: .\venv\Scripts\pyinstaller.exe --onefile --name backend `
+  --add-data "app;app" `
+  --add-data ".env;." `
+  --collect-all fastapi `
+  --collect-all uvicorn `
+  --collect-all sqlalchemy `
+  --collect-all pandas `
+  --collect-all openpyxl `
+  --collect-all passlib `
+  --collect-all bcrypt `
+  --collect-all argon2 `
+  --collect-all cryptography `
+  --collect-all pyodbc `
+  --collect-all pytz `
+  --collect-all email_validator `
+  --collect-all pydantic `
+  --collect-all anyio `
+  --collect-all reportlab `
+  --collect-all pypdf `
+  --collect-all PIL `
+  --hidden-import=email `
+  --hidden-import=email.mime `
+  --hidden-import=email.mime.text `
+  --hidden-import=email.mime.multipart `
+  --hidden-import=email.mime.base `
+  --hidden-import=email.mime.application `
+  --hidden-import=email.mime.image `
+  --hidden-import=smtplib `
+  app\run.py
+ 
+new: 3: .\venv\Scripts\pyinstaller.exe backend.spec --noconfirm
 
 Added indexes: 
 

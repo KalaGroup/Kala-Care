@@ -464,6 +464,9 @@ const Dashboard = () => {
     const [selectedCampaign, setSelectedCampaign] = useState(null);
     const [showCustomersModal, setShowCustomersModal] = useState(false);
     const [showAllCampaignReport, setShowAllCampaignReport] = useState(false);
+    // "All Data Report" — same modal/filters as All Drive Report, but drive +
+    // non-drive/PW records combined in one table
+    const [showAllDataReport, setShowAllDataReport] = useState(false);
 
     // Branch employee sort state
     const [branchEmployeeSortState, setBranchEmployeeSortState] = useState({
@@ -4952,6 +4955,16 @@ const getPerformanceTitle = () => {
                                             </svg>
                                             Non-Drive/PW Followup Data
                                         </button>
+                                        <button
+                                            onClick={() => setShowAllDataReport(true)}
+                                            className="w-full sm:w-auto px-3 py-1.5 bg-[#2f3192] text-white text-sm rounded-lg hover:bg-[#252780] transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
+                                            title="Drive + Non-Drive/PW records combined in one report"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2z" />
+                                            </svg>
+                                            All Data Report
+                                        </button>
                                         {canExport && (
                                             <button
                                                 onClick={exportCampaignPerformanceToExcel}
@@ -6363,15 +6376,17 @@ const getPerformanceTitle = () => {
 
             <Suspense fallback={null}>
             <CampaignCustomersFollowupModal
-                isOpen={showCustomersModal || showAllCampaignReport}
+                isOpen={showCustomersModal || showAllCampaignReport || showAllDataReport}
                 onClose={() => {
                     setShowCustomersModal(false);
                     setShowAllCampaignReport(false);
+                    setShowAllDataReport(false);
                     setSelectedCampaign(null);
                 }}
-                campaign={showAllCampaignReport ? null : selectedCampaign}
+                campaign={(showAllCampaignReport || showAllDataReport) ? null : selectedCampaign}
                 apiBaseUrl={API_BASE_URL}
-                allReportCampaigns={showAllCampaignReport ? getSortedCampaignPerformance() : null}
+                allReportCampaigns={(showAllCampaignReport || showAllDataReport) ? getSortedCampaignPerformance() : null}
+                includeNonDrive={showAllDataReport}
             />
 
             <EmployeePerformanceModal
