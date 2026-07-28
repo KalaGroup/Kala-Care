@@ -138,6 +138,27 @@ class MaintenancePart(Base):
     app = relationship("MaintenanceAppCode", back_populates="parts")
 
 
+class MaintenancePartCodeChange(Base):
+    """Audit of part-code edits on a code's SERVICE parts (kits are ignored).
+
+    Backend-only — nothing serializes or serves this table to the frontend.
+    One row per part line, keyed by the line's current code: when the same
+    line's code is edited again the row is updated in place, so only the LAST
+    previous code is kept, along with how many times the code has changed and
+    who changed it last.
+    """
+    __tablename__ = "maintenance_part_code_changes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    app_code = Column(String(60), nullable=False, index=True)
+    part_number = Column(String(120), nullable=False, index=True)   # current code
+    last_part_number = Column(String(120), nullable=True)           # code it replaced
+    part_desc = Column(String(400), nullable=True)
+    change_count = Column(Integer, nullable=False, default=1)
+    changed_by = Column(String(50), nullable=True)
+    changed_at = Column(DateTime(timezone=True), default=now_ist, onupdate=now_ist)
+
+
 class MaintenanceService(Base):
     """Service-type catalogue (B-Check, 1500 Hrs, ...).
 

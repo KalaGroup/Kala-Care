@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.maintenance_model import (
     MaintenanceAppCode, MaintenancePart, MaintenanceService, MaintenanceActivity,
-    MaintenanceKit, MaintenanceKitPart,
+    MaintenanceKit, MaintenanceKitPart, MaintenancePartCodeChange,
 )
 
 
@@ -66,6 +66,64 @@ def _ensure_service_for_hours(db: Session, hours):
         return
     db.add(MaintenanceService(key=key, name=f"{h} Hrs", short=f"{h} Hr", hours=h, note=""))
     db.flush()
+
+
+def _track_part_code_changes(db: Session, app_code: str, old_parts, new_parts, user_id=None):
+    """Record part-code edits on the code's SERVICE parts. Kits are ignored on
+    purpose — a kit's part lines are its own copies.
+
+    Parts are replaced wholesale on save and lines carry no id, so an edited
+    line is found by matching: positionally when the list length is unchanged
+    (the editor edits rows in place), otherwise by a part description that is
+    unique on both sides. Only an edit of an existing code counts — blanks
+    being filled in and lines added/removed are not code changes.
+    """
+    def pair_up():
+        if len(old_parts) == len(new_parts):
+            return list(zip(old_parts, new_parts))
+
+        def uniq_by_desc(rows, desc_of):
+            m, dup = {}, set()
+            for r in rows:
+                d = str(desc_of(r) or "").strip().lower()
+                if d:
+                    dup.add(d) if d in m else m.setdefault(d, r)
+            return {d: r for d, r in m.items() if d not in dup}
+
+        old_m = uniq_by_desc(old_parts, lambda p: p.part_desc)
+        new_m = uniq_by_desc(new_parts, lambda p: p.get("partDesc"))
+        return [(old_m[d], new_m[d]) for d in old_m if d in new_m]
+
+    norm = lambda v: str(v or "").strip().upper()
+    changes = []
+    for old, new in pair_up():
+        old_pn, new_pn = (old.part_number or "").strip(), (new.get("partNumber") or "").strip()
+        if old_pn and new_pn and norm(old_pn) != norm(new_pn):
+            changes.append((old, old_pn, new, new_pn))
+    if not changes:
+        return
+
+    by_pn = {
+        norm(r.part_number): r
+        for r in db.query(MaintenancePartCodeChange)
+                   .filter(MaintenancePartCodeChange.app_code == app_code).all()
+    }
+    for old, old_pn, new, new_pn in changes:
+        row = by_pn.pop(norm(old_pn), None)
+        if row:
+            row.part_number = new_pn
+            row.last_part_number = old_pn
+            row.part_desc = new.get("partDesc") or row.part_desc
+            row.change_count = (row.change_count or 0) + 1
+            row.changed_by = user_id or row.changed_by
+        else:
+            row = MaintenancePartCodeChange(
+                app_code=app_code, part_number=new_pn, last_part_number=old_pn,
+                part_desc=new.get("partDesc") or old.part_desc,
+                change_count=1, changed_by=user_id,
+            )
+            db.add(row)
+        by_pn[norm(new_pn)] = row
 
 
 def _write_kits(db: Session, app_id: int, kits: list, user_id=None):
@@ -203,6 +261,8 @@ def update_app(db: Session, app_code: str, payload: dict):
         _write_kits(db, row.id, payload["kits"], user_id=payload.get("_updated_by"))
         row.kits_migrated = True
     if payload.get("parts") is not None:
+        _track_part_code_changes(db, row.app_code, list(row.parts), payload["parts"],
+                                 user_id=payload.get("_updated_by"))
         for p in list(row.parts):
             db.delete(p)
         db.flush()

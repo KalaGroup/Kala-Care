@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Part Detail Info — Welcome Letter (Prototype)</title>
+<style>
+  :root{
+    --blue:#1d4ed8; --blue-d:#1e40af; --blue-l:#eff6ff;
+    --ink:#0f172a; --mut:#64748b; --line:#e2e8f0; --bg:#f1f5f9;
+    --green:#059669; --green-l:#ecfdf5; --amber:#d97706; --amber-l:#fffbeb;
+    --red:#dc2626; --red-l:#fef2f2;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}
+  body{background:var(--bg);color:var(--ink);font-size:14px}
+
+  /* ---------- top bar ---------- */
+  .topbar{background:#fff;border-bottom:1px solid var(--line);padding:10px 22px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:50}
+  .topbar h1{font-size:17px;font-weight:700}
+  .topbar .crumb{color:var(--mut);font-size:12.5px}
+  .topbar .spacer{flex:1}
+  .btn{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:.15s}
+  .btn:hover{background:var(--bg)}
+  .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+  .btn.primary:hover{background:var(--blue-d)}
+  .btn.primary:disabled{background:#93c5fd;border-color:#93c5fd;cursor:not-allowed}
+  .btn.green{background:var(--green);border-color:var(--green);color:#fff}
+  .btn.green:hover{background:#047857}
+  .btn.ghost{border-color:transparent;color:var(--blue)}
+  .btn.sm{padding:5px 10px;font-size:12px;border-radius:6px}
+  .btn.danger{color:var(--red);border-color:#fecaca}
+  .btn.danger:hover{background:var(--red-l)}
+
+  /* ---------- tabs ---------- */
+  .tabs{background:#fff;border-bottom:1px solid var(--line);padding:0 22px;display:flex;gap:4px}
+  .tab{padding:11px 18px;font-size:13.5px;font-weight:600;color:var(--mut);border-bottom:2.5px solid transparent;cursor:pointer}
+  .tab:hover{color:var(--ink)}
+  .tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+  .tab .badge-new{background:var(--green);color:#fff;font-size:9.5px;padding:1.5px 6px;border-radius:99px;margin-left:6px;vertical-align:2px}
+
+  .wrap{max-width:1240px;margin:0 auto;padding:20px 22px 60px}
+  .view{display:none}
+  .view.active{display:block}
+
+  /* ---------- stepper ---------- */
+  .stepper{display:flex;align-items:center;gap:0;margin-bottom:20px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 22px}
+  .step{display:flex;align-items:center;gap:9px;color:var(--mut);font-size:13px;font-weight:600}
+  .step .num{width:26px;height:26px;border-radius:50%;background:var(--bg);border:1.5px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:12.5px}
+  .step.done .num{background:var(--green);border-color:var(--green);color:#fff}
+  .step.on{color:var(--blue)}
+  .step.on .num{background:var(--blue);border-color:var(--blue);color:#fff}
+  .step-line{flex:1;height:1.5px;background:var(--line);margin:0 14px;min-width:30px}
+
+  /* ---------- cards / tables ---------- */
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:16px}
+  .card-h{padding:13px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .card-h h3{font-size:14.5px;font-weight:700}
+  .card-h .sub{color:var(--mut);font-size:12.5px;font-weight:400}
+  .card-b{padding:16px 18px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{background:#f8fafc;text-align:left;padding:9px 12px;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:9px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+  tr:hover td{background:#f8fafc}
+  tr.rowsel td{background:var(--blue-l)}
+  .tbl-scroll{overflow-x:auto}
+  .empty{padding:34px;text-align:center;color:var(--mut)}
+
+  .pill{display:inline-block;padding:2.5px 10px;border-radius:99px;font-size:11.5px;font-weight:600}
+  .pill.up{background:var(--green-l);color:var(--green)}
+  .pill.pend{background:var(--amber-l);color:var(--amber)}
+  .pill.sent{background:var(--green-l);color:var(--green)}
+  .pill.sched{background:var(--blue-l);color:var(--blue)}
+  .pill.fail{background:var(--red-l);color:var(--red)}
+  .code-chip{font-family:Consolas,monospace;font-weight:700;color:var(--blue-d);background:var(--blue-l);padding:2px 8px;border-radius:6px;font-size:12.5px}
+
+  input[type=text],input[type=email],input[type=search],input[type=date],input[type=time],input[type=datetime-local],select,textarea{
+    border:1px solid #cbd5e1;border-radius:8px;padding:8px 11px;font-size:13px;color:var(--ink);background:#fff;outline:none;font-family:inherit}
+  input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(29,78,216,.12)}
+  label.f{display:block;font-size:12px;font-weight:600;color:var(--mut);margin-bottom:5px}
+  .field{margin-bottom:14px}
+
+  /* ---------- email chips ---------- */
+  .chips{display:flex;flex-wrap:wrap;gap:6px;border:1px solid #cbd5e1;border-radius:8px;padding:6px 8px;background:#fff;min-height:38px;align-items:center}
+  .chips:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px rgba(29,78,216,.12)}
+  .chip{display:inline-flex;align-items:center;gap:5px;background:var(--blue-l);color:var(--blue-d);border-radius:99px;padding:3px 5px 3px 10px;font-size:12px;font-weight:600}
+  .chip.cc{background:#f5f3ff;color:#6d28d9}
+  .chip.def{background:#f1f5f9;color:var(--mut)}
+  .chip button{border:none;background:rgba(0,0,0,.08);color:inherit;width:16px;height:16px;border-radius:50%;font-size:10px;cursor:pointer;line-height:1}
+  .chips input{border:none!important;box-shadow:none!important;flex:1;min-width:140px;padding:4px;font-size:12.5px}
+
+  /* ---------- customer send cards ---------- */
+  .cust-card{border:1px solid var(--line);border-radius:12px;margin-bottom:14px;background:#fff;overflow:hidden}
+  .cust-head{padding:12px 16px;background:#f8fafc;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .cust-head .nm{font-weight:700;font-size:14px}
+  .cust-head .meta{color:var(--mut);font-size:12px}
+  .cust-body{padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .cust-body .full{grid-column:1/-1}
+  .cust-foot{padding:10px 16px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px;align-items:center}
+  @media(max-width:820px){.cust-body{grid-template-columns:1fr}}
+
+  /* ---------- modal ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:100;padding:20px}
+  .overlay.open{display:flex}
+  .modal{background:#fff;border-radius:14px;width:100%;max-width:760px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,.25)}
+  .modal-h{padding:15px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center}
+  .modal-h h3{font-size:15px;font-weight:700;flex:1}
+  .modal-b{padding:18px 20px;overflow-y:auto}
+  .modal-f{padding:13px 20px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px}
+  .x{border:none;background:var(--bg);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--mut)}
+
+  /* ---------- letter preview ---------- */
+  .letter{border:1px solid var(--line);border-radius:10px;background:#fff;padding:28px 32px;font-size:13.5px;line-height:1.75;white-space:pre-wrap;box-shadow:inset 0 0 0 1px #f8fafc}
+  .letter .lg{font-weight:800;color:var(--blue-d);font-size:16px;margin-bottom:2px}
+  .tok{display:inline-block;background:var(--amber-l);color:var(--amber);border-radius:5px;padding:0 5px;font-family:Consolas,monospace;font-size:12px;font-weight:700}
+  .tok-btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .tok-btns button{border:1px dashed #cbd5e1;background:#f8fafc;border-radius:6px;padding:3px 8px;font-size:11.5px;font-family:Consolas,monospace;cursor:pointer;color:var(--mut)}
+  .tok-btns button:hover{border-color:var(--blue);color:var(--blue)}
+
+  /* ---------- filters bar ---------- */
+  .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+  .filters .fg{display:flex;flex-direction:column;gap:4px}
+  .filters .fg span{font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+
+  /* ---------- toast ---------- */
+  #toast{position:fixed;bottom:24px;right:24px;z-index:200;display:flex;flex-direction:column;gap:8px}
+  .toast{background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.25);animation:tin .25s}
+  .toast.ok{background:var(--green)}
+  @keyframes tin{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}
+
+  .hint{background:var(--blue-l);border:1px solid #bfdbfe;border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--blue-d);margin-bottom:14px}
+  .cnt{font-size:12.5px;color:var(--mut)}
+  .cnt b{color:var(--ink)}
+</style>
+</head>
+<body>
+
+<!-- ============ TOP BAR ============ -->
+<div class="topbar">
+  <div>
+    <h1>Part Detail Info</h1>
+    <div class="crumb">Master Report &nbsp;›&nbsp; Welcome Letter</div>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn" onclick="openFormatMaster()">⚙️ Letter Format Master</button>
+  <button class="btn primary" onclick="showView('report')">📊 Sent Email Report</button>
+</div>
+
+<!-- ============ TABS ============ -->
+<div class="tabs">
+  <div class="tab" onclick="fakeTab(this)">App Code Master</div>
+  <div class="tab" onclick="fakeTab(this)">App Mapping</div>
+  <div class="tab" onclick="fakeTab(this)">Master of Service</div>
+  <div class="tab active" id="tabWelcome" onclick="showView('wizard')">Welcome Letter <span class="badge-new">NEW</span></div>
+</div>
+
+<div class="wrap">
+
+<!-- ================= WIZARD VIEW ================= -->
+<div class="view active" id="view-wizard">
+
+  <div class="stepper">
+    <div class="step on" id="st1"><span class="num">1</span> Select App Codes</div>
+    <div class="step-line"></div>
+    <div class="step" id="st2"><span class="num">2</span> Letter Format</div>
+    <div class="step-line"></div>
+    <div class="step" id="st3"><span class="num">3</span> Schedule &amp; Send</div>
+  </div>
+
+  <!-- ---- STEP 1 ---- -->
+  <div id="step1">
+    <div class="hint">💡 Select one or more <b>Application Codes</b> below. All App&nbsp;Mapping data (engine model, segment, KVA, emission, assets, commissioning) is shown so you can verify each code <b>before</b> selecting. Click <b>OK</b> to continue to the letter format.</div>
+    <div class="card">
+      <div class="card-h">
+        <h3>Application Codes <span class="sub">(as displayed in App Mapping)</span></h3>
+        <div class="spacer" style="flex:1"></div>
+        <input type="search" id="s1search" placeholder="🔍 Search app code / engine / segment…" style="width:280px" oninput="renderStep1()">
+        <span class="cnt" id="s1cnt"></span>
+      </div>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr>
+            <th style="width:36px"><input type="checkbox" id="s1all" onchange="toggleAll(this)"></th>
+            <th>App Code</th><th>Engine Model</th><th>Segment</th><th>KVA</th>
+            <th>Emission</th><th style="text-align:right">Assets</th><th>Commissioning</th><th>Master Status</th>
+          </tr></thead>
+          <tbody id="s1body"></tbody>
+        </table>
+      </div>
+      <div class="card-h" style="border-top:1px solid var(--line);border-bottom:none;justify-content:flex-end">
+        <span class="cnt" id="s1sel"></span>
+        <button class="btn primary" id="s1ok" disabled onclick="goStep(2)">OK — Continue →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---- STEP 2 ---- -->
+  <div id="step2" style="display:none">
+    <div class="card">
+      <div class="card-h">
+        <h3>Choose Letter Format</h3>
+        <div class="spacer" style="flex:1"></div>
+        <button class="btn sm" onclick="openFormatMaster()">⚙️ Manage formats</button>
+      </div>
+      <div class="card-b">
+        <div style="display:grid;grid-template-columns:340px 1fr;gap:22px">
+          <div>
+            <div class="field">
+              <label class="f">Letter format (from master)</label>
+              <select id="tplSelect" style="width:100%" onchange="renderTplPreview()"></select>
+            </div>
+            <div class="field">
+              <label class="f">Default TO (from master)</label>
+              <div id="tplDefTo"></div>
+            </div>
+            <div class="field">
+              <label class="f">Default CC (from master)</label>
+              <div id="tplDefCc"></div>
+            </div>
+            <div class="field">
+              <label class="f">Default send time (from master)</label>
+              <div id="tplDefTime" style="font-weight:700"></div>
+            </div>
+            <div class="hint" style="margin-top:8px">TO / CC and send time can still be <b>edited per customer</b> in the next step.</div>
+          </div>
+          <div>
+            <label class="f">Preview (sample data merged)</label>
+            <div class="letter" id="tplPreview"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card-h" style="border-top:1px solid var(--line);border-bottom:none;justify-content:flex-end">
+        <button class="btn" onclick="goStep(1)">← Back</button>
+        <button class="btn primary" onclick="goStep(3)">Continue — Schedule &amp; Send →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---- STEP 3 ---- -->
+  <div id="step3" style="display:none">
+    <div class="hint">✉️ One card per customer under the selected app codes. Edit the <b>send time per customer</b>, add extra <b>TO / CC</b> emails, preview the merged letter, then send individually or <b>Send All</b>.</div>
+    <div class="card-h" style="background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:14px">
+      <span class="cnt" id="s3cnt"></span>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn" onclick="goStep(2)">← Back</button>
+      <button class="btn green" onclick="sendAll()">🚀 Send All Pending</button>
+    </div>
+    <div id="custList"></div>
+  </div>
+</div>
+
+<!-- ================= REPORT VIEW ================= -->
+<div class="view" id="view-report">
+  <div class="card">
+    <div class="card-h">
+      <h3>📊 Welcome Letter — Sent Email Report</h3>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn" onclick="showView('wizard')">← Back to Welcome Letter</button>
+      <button class="btn green" onclick="exportCSV()">⬇️ Export CSV</button>
+    </div>
+    <div class="card-b" style="border-bottom:1px solid var(--line)">
+      <div class="filters">
+        <div class="fg"><span>From date</span><input type="date" id="fFrom" onchange="renderReport()"></div>
+        <div class="fg"><span>To date</span><input type="date" id="fTo" onchange="renderReport()"></div>
+        <div class="fg"><span>App code</span><select id="fApp" onchange="renderReport()"><option value="">All</option></select></div>
+        <div class="fg"><span>Letter format</span><select id="fTpl" onchange="renderReport()"><option value="">All</option></select></div>
+        <div class="fg"><span>Status</span><select id="fStatus" onchange="renderReport()">
+          <option value="">All</option><option>Sent</option><option>Scheduled</option><option>Failed</option></select></div>
+        <div class="fg" style="flex:1;min-width:200px"><span>Search</span><input type="search" id="fSearch" placeholder="Customer / email / serial…" oninput="renderReport()" style="width:100%"></div>
+        <button class="btn sm" onclick="clearFilters()">✕ Clear</button>
+      </div>
+    </div>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th>#</th><th>Sent / Scheduled At</th><th>App Code</th><th>Customer</th><th>Engine Serial</th>
+          <th>Letter Format</th><th>To</th><th>Cc</th><th>Status</th><th>Sent By</th>
+        </tr></thead>
+        <tbody id="repBody"></tbody>
+      </table>
+    </div>
+    <div class="card-b"><span class="cnt" id="repCnt"></span></div>
+  </div>
+</div>
+
+</div><!-- /wrap -->
+
+<!-- ================= LETTER FORMAT MASTER MODAL ================= -->
+<div class="overlay" id="mFormats">
+  <div class="modal" style="max-width:900px">
+    <div class="modal-h"><h3>⚙️ Master — Letter Formats</h3><button class="x" onclick="closeModal('mFormats')">✕</button></div>
+    <div class="modal-b">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+        <button class="btn primary sm" onclick="editFormat(null)">＋ New Letter Format</button>
+      </div>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr><th>Format Name</th><th>Subject</th><th>Default To</th><th>Default Cc</th><th>Default Send Time</th><th style="width:130px">Actions</th></tr></thead>
+          <tbody id="fmtBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= FORMAT EDITOR MODAL ================= -->
+<div class="overlay" id="mEditor">
+  <div class="modal" style="max-width:860px">
+    <div class="modal-h"><h3 id="edTitle">New Letter Format</h3><button class="x" onclick="closeModal('mEditor')">✕</button></div>
+    <div class="modal-b">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div class="field"><label class="f">Format name *</label><input type="text" id="edName" style="width:100%" placeholder="e.g. Standard Welcome Letter"></div>
+        <div class="field"><label class="f">Default send time *</label><input type="time" id="edTime" style="width:100%" value="10:00"></div>
+      </div>
+      <div class="field"><label class="f">Email subject *</label><input type="text" id="edSubject" style="width:100%" placeholder="Welcome to Kala Care — {APP_CODE}"></div>
+      <div class="field">
+        <label class="f">Default TO emails (added in master — applied to every send)</label>
+        <div id="edTo"></div>
+      </div>
+      <div class="field">
+        <label class="f">Default CC emails (added in master — applied to every send)</label>
+        <div id="edCc"></div>
+      </div>
+      <div class="field">
+        <label class="f">Letter body * &nbsp;<span style="font-weight:400">(click a token to insert at cursor)</span></label>
+        <div class="tok-btns" id="edToks"></div>
+        <textarea id="edBody" style="width:100%;min-height:220px;margin-top:8px;line-height:1.6"></textarea>
+      </div>
+    </div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeModal('mEditor')">Cancel</button>
+      <button class="btn primary" onclick="saveFormat()">💾 Save Format</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= LETTER PREVIEW MODAL ================= -->
+<div class="overlay" id="mPreview">
+  <div class="modal">
+    <div class="modal-h"><h3 id="pvTitle">Letter Preview</h3><button class="x" onclick="closeModal('mPreview')">✕</button></div>
+    <div class="modal-b"><div class="letter" id="pvBody"></div></div>
+    <div class="modal-f"><button class="btn" onclick="closeModal('mPreview')">Close</button></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* =====================================================================
+   SAMPLE DATA  (mirrors App Mapping columns + Asset Detailed customers)
+===================================================================== */
+const APP_CODES = [
+  {appCode:"3H.8422", engineModel:"4R1040", segment:"Telecom",      kva:"15",  emission:"CPCB IV+", assets:42, commissioning:"2026-06-14", uploaded:true},
+  {appCode:"5D.2210", engineModel:"6R1080", segment:"Industrial",   kva:"62.5",emission:"CPCB IV+", assets:31, commissioning:"2026-07-02", uploaded:true},
+  {appCode:"2K.1104", engineModel:"3R750",  segment:"Retail",       kva:"10",  emission:"CPCB II",  assets:27, commissioning:"2026-05-20", uploaded:true},
+  {appCode:"7A.9033", engineModel:"6R1080T",segment:"Healthcare",   kva:"125", emission:"CPCB IV+", assets:19, commissioning:"2026-07-18", uploaded:true},
+  {appCode:"4M.5561", engineModel:"4R1040", segment:"Banking",      kva:"25",  emission:"CPCB IV+", assets:15, commissioning:"2026-04-11", uploaded:true},
+  {appCode:"9C.3307", engineModel:"8V2500", segment:"Data Centre",  kva:"500", emission:"CPCB IV+", assets:8,  commissioning:"2026-07-25", uploaded:false},
+  {appCode:"6T.7719", engineModel:"3R750",  segment:"Agriculture",  kva:"7.5", emission:"CPCB II",  assets:6,  commissioning:"2026-03-30", uploaded:true},
+  {appCode:"8B.4470", engineModel:"6R1080", segment:"Infrastructure",kva:"82.5",emission:"CPCB IV+",assets:4,  commissioning:"2026-07-10", uploaded:false},
+];
+
+const CUSTOMERS = [
+  {id:1, appCode:"3H.8422", name:"Reliance Jio Infocomm Ltd",   contact:"Amit Sharma",   email:"amit.sharma@jio.com",        serial:"ESN-88213", city:"Mumbai",    commissioning:"2026-06-14"},
+  {id:2, appCode:"3H.8422", name:"Bharti Airtel Ltd",           contact:"Priya Nair",    email:"priya.nair@airtel.com",      serial:"ESN-88450", city:"Pune",      commissioning:"2026-06-21"},
+  {id:3, appCode:"5D.2210", name:"Tata Motors Ltd",             contact:"Rakesh Verma",  email:"rakesh.verma@tatamotors.com",serial:"ESN-71022", city:"Pimpri",    commissioning:"2026-07-02"},
+  {id:4, appCode:"5D.2210", name:"Bajaj Auto Ltd",              contact:"Sneha Kulkarni",email:"sneha.k@bajajauto.com",      serial:"ESN-71388", city:"Akurdi",    commissioning:"2026-07-05"},
+  {id:5, appCode:"2K.1104", name:"DMart (Avenue Supermarts)",   contact:"Vikram Patil",  email:"vikram.patil@dmart.in",      serial:"ESN-55901", city:"Thane",     commissioning:"2026-05-20"},
+  {id:6, appCode:"7A.9033", name:"Ruby Hall Clinic",            contact:"Dr. Meera Joshi",email:"meera.joshi@rubyhall.com",  serial:"ESN-93011", city:"Pune",      commissioning:"2026-07-18"},
+  {id:7, appCode:"4M.5561", name:"HDFC Bank Ltd",               contact:"Suresh Iyer",   email:"suresh.iyer@hdfcbank.com",   serial:"ESN-40077", city:"Mumbai",    commissioning:"2026-04-11"},
+  {id:8, appCode:"9C.3307", name:"CtrlS Datacenters Ltd",       contact:"Anand Rao",     email:"anand.rao@ctrls.in",         serial:"ESN-62544", city:"Navi Mumbai",commissioning:"2026-07-25"},
+  {id:9, appCode:"6T.7719", name:"Jain Irrigation Systems",     contact:"Kiran Jain",    email:"kiran.jain@jains.com",       serial:"ESN-31209", city:"Jalgaon",   commissioning:"2026-03-30"},
+  {id:10,appCode:"8B.4470", name:"L&T Construction",            contact:"Deepak Menon",  email:"deepak.menon@lntecc.com",    serial:"ESN-27680", city:"Chennai",   commissioning:"2026-07-10"},
+];
+
+const TOKENS = ["{CUSTOMER_NAME}","{CONTACT_NAME}","{APP_CODE}","{ENGINE_MODEL}","{ENGINE_SERIAL_NO}","{KVA}","{SEGMENT}","{EMISSION}","{COMMISSIONING_DATE}","{CITY}"];
+
+let FORMATS = [
+  {id:1, name:"Standard Welcome Letter", time:"10:00",
+   subject:"Welcome to Kala Care — Genset {APP_CODE} | {CUSTOMER_NAME}",
+   to:["care@kalabiz.com"], cc:["kala.itss@kalabiz.com","service.head@kalabiz.com"],
+   body:"Dear {CONTACT_NAME},\n\nGreetings from Kala Care!\n\nWe are delighted to welcome {CUSTOMER_NAME} to the Kala Care family. Your genset with Application Code {APP_CODE} (Engine Model {ENGINE_MODEL}, {KVA} KVA, Serial No. {ENGINE_SERIAL_NO}) was commissioned on {COMMISSIONING_DATE} at {CITY}.\n\nAs part of our commitment, your asset is now covered under our preventive maintenance program. Our service team will reach out before every scheduled service (500 / 1000 / 1500 hrs) with the applicable part kits.\n\nFor any support, call our 24x7 helpline 1800-XXX-XXXX or reply to this email.\n\nWarm regards,\nKala Care Service Team\nKala Group"},
+  {id:2, name:"AMC Welcome + Service Schedule", time:"09:30",
+   subject:"Your AMC is Active — {CUSTOMER_NAME} ({APP_CODE})",
+   to:["amc@kalabiz.com"], cc:["kala.itss@kalabiz.com"],
+   body:"Dear {CONTACT_NAME},\n\nWelcome aboard! Your Annual Maintenance Contract for the {SEGMENT} segment genset (App Code {APP_CODE}, {ENGINE_MODEL}, Emission {EMISSION}) is now ACTIVE.\n\nCommissioning Date: {COMMISSIONING_DATE}\nEngine Serial No.: {ENGINE_SERIAL_NO}\n\nYour first preventive service is due at 500 running hours. The service schedule and part kit details are attached.\n\nThank you for choosing Kala Group.\n\nBest regards,\nKala Care AMC Desk"},
+];
+let nextFmtId = 3;
+
+/* Pre-seeded sent log so the report is not empty */
+let SENT_LOG = [
+  {id:1, ts:"2026-07-20 10:00", appCode:"3H.8422", customer:"Reliance Jio Infocomm Ltd", serial:"ESN-88213", tpl:"Standard Welcome Letter", to:"amit.sharma@jio.com; care@kalabiz.com", cc:"kala.itss@kalabiz.com; service.head@kalabiz.com", status:"Sent", by:"kala.itss"},
+  {id:2, ts:"2026-07-21 09:30", appCode:"5D.2210", customer:"Tata Motors Ltd", serial:"ESN-71022", tpl:"AMC Welcome + Service Schedule", to:"rakesh.verma@tatamotors.com; amc@kalabiz.com", cc:"kala.itss@kalabiz.com", status:"Sent", by:"kala.itss"},
+  {id:3, ts:"2026-07-24 11:15", appCode:"2K.1104", customer:"DMart (Avenue Supermarts)", serial:"ESN-55901", tpl:"Standard Welcome Letter", to:"vikram.patil@dmart.in; care@kalabiz.com", cc:"kala.itss@kalabiz.com", status:"Failed", by:"kala.itss"},
+  {id:4, ts:"2026-07-30 10:00", appCode:"7A.9033", customer:"Ruby Hall Clinic", serial:"ESN-93011", tpl:"Standard Welcome Letter", to:"meera.joshi@rubyhall.com; care@kalabiz.com", cc:"kala.itss@kalabiz.com; service.head@kalabiz.com", status:"Scheduled", by:"kala.itss"},
+];
+let nextLogId = 5;
+
+/* =====================================================================
+   STATE
+===================================================================== */
+let selectedCodes = new Set();
+let currentTplId = 1;
+let custState = {};   // per-customer editable state: {when, to[], cc[], sent}
+
+/* =====================================================================
+   HELPERS
+===================================================================== */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const emailOk = e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+const fmtDate = d => { const [y,m,dd]=d.split("-"); return `${dd}-${m}-${y}`; };
+
+function toast(msg, ok){
+  const t = document.createElement("div");
+  t.className = "toast" + (ok ? " ok" : "");
+  t.textContent = msg;
+  $("toast").appendChild(t);
+  setTimeout(()=>t.remove(), 3200);
+}
+function fakeTab(el){ toast("Prototype: only the Welcome Letter tab is functional here."); }
+function showView(v){
+  document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));
+  $("view-"+v).classList.add("active");
+  if(v==="report") renderReport();
+}
+function closeModal(id){ $(id).classList.remove("open"); }
+function openModal(id){ $(id).classList.add("open"); }
+
+function tplById(id){ return FORMATS.find(f=>f.id===Number(id)); }
+function merge(text, c){
+  const app = APP_CODES.find(a=>a.appCode===c.appCode) || {};
+  const map = {
+    "{CUSTOMER_NAME}":c.name, "{CONTACT_NAME}":c.contact, "{APP_CODE}":c.appCode,
+    "{ENGINE_MODEL}":app.engineModel||"", "{ENGINE_SERIAL_NO}":c.serial, "{KVA}":app.kva||"",
+    "{SEGMENT}":app.segment||"", "{EMISSION}":app.emission||"",
+    "{COMMISSIONING_DATE}":fmtDate(c.commissioning), "{CITY}":c.city,
+  };
+  return text.replace(/\{[A-Z_]+\}/g, m => map[m] !== undefined ? map[m] : m);
+}
+
+/* ---------- generic email-chips widget ---------- */
+function chipsWidget(hostId, list, kind, defaults){
+  const host = $(hostId);
+  host.innerHTML = "";
+  const box = document.createElement("div");
+  box.className = "chips";
+  list.forEach((e,i)=>{
+    const isDef = defaults && defaults.includes(e);
+    const c = document.createElement("span");
+    c.className = "chip " + (isDef ? "def" : kind==="cc" ? "cc" : "");
+    c.innerHTML = esc(e) + (isDef ? ' <span title="from master" style="font-size:9px">🔒</span>' : "");
+    if(!isDef){
+      const b = document.createElement("button");
+      b.textContent = "✕";
+      b.onclick = ()=>{ list.splice(i,1); chipsWidget(hostId,list,kind,defaults); };
+      c.appendChild(b);
+    }
+    box.appendChild(c);
+  });
+  const inp = document.createElement("input");
+  inp.type = "text";
+  inp.placeholder = "＋ add email & press Enter";
+  inp.onkeydown = ev => {
+    if(ev.key==="Enter" || ev.key===","){
+      ev.preventDefault();
+      const v = inp.value.trim().replace(/,$/,"");
+      if(!v) return;
+      if(!emailOk(v)) return toast("⚠️ Invalid email: " + v);
+      if(list.includes(v)) return toast("Already added");
+      list.push(v);
+      chipsWidget(hostId,list,kind,defaults);
+      $(hostId).querySelector("input").focus();
+    }
+  };
+  box.appendChild(inp);
+  host.appendChild(box);
+}
+
+/* =====================================================================
+   STEP 1 — app code selection (app-mapping style)
+===================================================================== */
+function renderStep1(){
+  const q = $("s1search").value.trim().toLowerCase();
+  const rows = APP_CODES.filter(a =>
+    !q || [a.appCode,a.engineModel,a.segment,a.kva,a.emission].join(" ").toLowerCase().includes(q));
+  $("s1body").innerHTML = rows.map(a=>{
+    const sel = selectedCodes.has(a.appCode);
+    return `<tr class="${sel?'rowsel':''}" onclick="toggleCode('${a.appCode}')" style="cursor:pointer">
+      <td><input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleCode('${a.appCode}')"></td>
+      <td><span class="code-chip">${esc(a.appCode)}</span></td>
+      <td>${esc(a.engineModel)}</td><td>${esc(a.segment)}</td><td>${esc(a.kva)}</td>
+      <td>${esc(a.emission)}</td><td style="text-align:right;font-weight:700">${a.assets}</td>
+      <td>${fmtDate(a.commissioning)}</td>
+      <td>${a.uploaded?'<span class="pill up">Uploaded</span>':'<span class="pill pend">Remaining</span>'}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="9" class="empty">No app codes match your search.</td></tr>`;
+  $("s1cnt").innerHTML = `<b>${rows.length}</b> of ${APP_CODES.length} codes`;
+  $("s1sel").innerHTML = `Selected: <b>${selectedCodes.size}</b> app code(s) · <b>${selCustomers().length}</b> customer(s)`;
+  $("s1ok").disabled = selectedCodes.size===0;
+  $("s1all").checked = rows.length>0 && rows.every(a=>selectedCodes.has(a.appCode));
+}
+function toggleCode(code){
+  selectedCodes.has(code) ? selectedCodes.delete(code) : selectedCodes.add(code);
+  renderStep1();
+}
+function toggleAll(cb){
+  const q = $("s1search").value.trim().toLowerCase();
+  APP_CODES.filter(a=>!q||[a.appCode,a.engineModel,a.segment,a.kva,a.emission].join(" ").toLowerCase().includes(q))
+    .forEach(a => cb.checked ? selectedCodes.add(a.appCode) : selectedCodes.delete(a.appCode));
+  renderStep1();
+}
+function selCustomers(){ return CUSTOMERS.filter(c=>selectedCodes.has(c.appCode)); }
+
+/* =====================================================================
+   STEP navigation
+===================================================================== */
+function goStep(n){
+  [1,2,3].forEach(i=>{
+    $("step"+i).style.display = i===n ? "" : "none";
+    const st = $("st"+i);
+    st.className = "step" + (i===n ? " on" : i<n ? " done" : "");
+  });
+  if(n===2) renderTplSelect();
+  if(n===3) renderStep3();
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+
+/* =====================================================================
+   STEP 2 — letter format
+===================================================================== */
+function renderTplSelect(){
+  $("tplSelect").innerHTML = FORMATS.map(f=>`<option value="${f.id}" ${f.id===currentTplId?'selected':''}>${esc(f.name)}</option>`).join("");
+  renderTplPreview();
+}
+function renderTplPreview(){
+  currentTplId = Number($("tplSelect").value);
+  const t = tplById(currentTplId);
+  if(!t) return;
+  const sample = selCustomers()[0] || CUSTOMERS[0];
+  $("tplPreview").innerHTML =
+    `<div class="lg">KALA GROUP · Kala Care</div><div style="color:var(--mut);font-size:12px;margin-bottom:12px">Subject: ${esc(merge(t.subject,sample))}</div>` + esc(merge(t.body,sample));
+  $("tplDefTo").innerHTML = t.to.map(e=>`<span class="chip def" style="margin:2px">${esc(e)} 🔒</span>`).join("") || '<span class="cnt">—</span>';
+  $("tplDefCc").innerHTML = t.cc.map(e=>`<span class="chip def" style="margin:2px">${esc(e)} 🔒</span>`).join("") || '<span class="cnt">—</span>';
+  $("tplDefTime").textContent = t.time + " (daily default)";
+  custState = {};   // template changed → reset per-customer state
+}
+
+/* =====================================================================
+   STEP 3 — schedule & send  (per-customer edit of time / to / cc)
+===================================================================== */
+function ensureCust(c){
+  if(!custState[c.id]){
+    const t = tplById(currentTplId);
+    const today = new Date().toISOString().slice(0,10);
+    custState[c.id] = {
+      when: `${today}T${t.time}`,
+      to:  [c.email, ...t.to],
+      cc:  [...t.cc],
+      sent:false,
+    };
+  }
+  return custState[c.id];
+}
+function renderStep3(){
+  const list = selCustomers();
+  const t = tplById(currentTplId);
+  $("s3cnt").innerHTML = `Format: <b>${esc(t.name)}</b> · <b>${list.length}</b> customer(s) across <b>${selectedCodes.size}</b> app code(s)`;
+  $("custList").innerHTML = "";
+  list.forEach(c=>{
+    const s = ensureCust(c);
+    const card = document.createElement("div");
+    card.className = "cust-card";
+    card.innerHTML = `
+      <div class="cust-head">
+        <span class="code-chip">${esc(c.appCode)}</span>
+        <span class="nm">${esc(c.name)}</span>
+        <span class="meta">👤 ${esc(c.contact)} · 🔧 ${esc(c.serial)} · 📍 ${esc(c.city)}</span>
+        <div style="flex:1"></div>
+        ${s.sent?'<span class="pill sent">✓ Queued</span>':''}
+      </div>
+      <div class="cust-body">
+        <div class="field" style="margin:0">
+          <label class="f">📅 Send date &amp; time (editable per customer)</label>
+          <input type="datetime-local" value="${s.when}" style="width:100%" ${s.sent?'disabled':''}
+                 onchange="custState[${c.id}].when=this.value">
+        </div>
+        <div class="field" style="margin:0">
+          <label class="f">Status</label>
+          <div style="padding-top:8px">${s.sent?'<span class="pill sent">Queued for sending</span>':'<span class="pill pend">Pending</span>'}</div>
+        </div>
+        <div class="field full" style="margin:0">
+          <label class="f">TO emails <span style="font-weight:400">(customer + master defaults 🔒 — add more below)</span></label>
+          <div id="to-${c.id}"></div>
+        </div>
+        <div class="field full" style="margin:0">
+          <label class="f">CC emails <span style="font-weight:400">(master defaults 🔒 — add more below)</span></label>
+          <div id="cc-${c.id}"></div>
+        </div>
+      </div>
+      <div class="cust-foot">
+        <button class="btn sm" onclick="previewCust(${c.id})">👁 Preview Letter</button>
+        <button class="btn green sm" ${s.sent?'disabled':''} onclick="sendOne(${c.id})">✉️ Send Email</button>
+      </div>`;
+    $("custList").appendChild(card);
+    const t2 = tplById(currentTplId);
+    chipsWidget("to-"+c.id, s.to, "to", t2.to);
+    chipsWidget("cc-"+c.id, s.cc, "cc", t2.cc);
+  });
+}
+function previewCust(id){
+  const c = CUSTOMERS.find(x=>x.id===id);
+  const t = tplById(currentTplId);
+  $("pvTitle").textContent = "Preview — " + c.name;
+  $("pvBody").innerHTML =
+    `<div class="lg">KALA GROUP · Kala Care</div>
+     <div style="color:var(--mut);font-size:12px;margin-bottom:12px">
+       Subject: ${esc(merge(t.subject,c))}<br>
+       To: ${esc(custState[id].to.join("; "))}<br>
+       Cc: ${esc(custState[id].cc.join("; "))}</div>` + esc(merge(t.body,c));
+  openModal("mPreview");
+}
+function sendOne(id, silent){
+  const c = CUSTOMERS.find(x=>x.id===id);
+  const s = custState[id];
+  if(s.sent) return;
+  if(!s.to.length) return toast("⚠️ " + c.name + ": at least one TO email is required");
+  const t = tplById(currentTplId);
+  const when = s.when.replace("T"," ");
+  const future = new Date(s.when) > new Date();
+  SENT_LOG.unshift({
+    id: nextLogId++, ts: when, appCode: c.appCode, customer: c.name, serial: c.serial,
+    tpl: t.name, to: s.to.join("; "), cc: s.cc.join("; "),
+    status: future ? "Scheduled" : "Sent", by: "kala.itss",
+  });
+  s.sent = true;
+  if(!silent){
+    toast((future?"🕑 Scheduled for "+when+" — ":"✅ Sent — ") + c.name, true);
+    renderStep3();
+  }
+}
+function sendAll(){
+  const pending = selCustomers().filter(c=>!ensureCust(c).sent);
+  if(!pending.length) return toast("Nothing pending — all letters already queued.");
+  pending.forEach(c=>sendOne(c.id, true));
+  renderStep3();
+  toast(`✅ ${pending.length} welcome letter(s) queued. See the Sent Email Report.`, true);
+}
+
+/* =====================================================================
+   LETTER FORMAT MASTER  (CRUD + default TO/CC in master)
+===================================================================== */
+let edToList = [], edCcList = [], editingId = null;
+
+function openFormatMaster(){
+  renderFormats();
+  openModal("mFormats");
+}
+function renderFormats(){
+  $("fmtBody").innerHTML = FORMATS.map(f=>`<tr>
+    <td style="font-weight:700">${esc(f.name)}</td>
+    <td>${esc(f.subject)}</td>
+    <td>${f.to.map(e=>`<span class="chip" style="margin:1px">${esc(e)}</span>`).join(" ")||"—"}</td>
+    <td>${f.cc.map(e=>`<span class="chip cc" style="margin:1px">${esc(e)}</span>`).join(" ")||"—"}</td>
+    <td style="font-weight:700">${f.time}</td>
+    <td>
+      <button class="btn sm" onclick="editFormat(${f.id})">✏️ Edit</button>
+      <button class="btn sm danger" onclick="delFormat(${f.id})">🗑</button>
+    </td></tr>`).join("") || `<tr><td colspan="6" class="empty">No letter formats yet — create one.</td></tr>`;
+}
+function editFormat(id){
+  editingId = id;
+  const f = id ? tplById(id) : null;
+  $("edTitle").textContent = f ? "Edit Letter Format" : "New Letter Format";
+  $("edName").value = f ? f.name : "";
+  $("edSubject").value = f ? f.subject : "";
+  $("edTime").value = f ? f.time : "10:00";
+  $("edBody").value = f ? f.body : "Dear {CONTACT_NAME},\n\n";
+  edToList = f ? [...f.to] : [];
+  edCcList = f ? [...f.cc] : [];
+  chipsWidget("edTo", edToList, "to");
+  chipsWidget("edCc", edCcList, "cc");
+  $("edToks").innerHTML = TOKENS.map(t=>`<button onclick="insertTok('${t}')">${t}</button>`).join("");
+  openModal("mEditor");
+}
+function insertTok(tok){
+  const ta = $("edBody");
+  const s = ta.selectionStart, e = ta.selectionEnd;
+  ta.value = ta.value.slice(0,s) + tok + ta.value.slice(e);
+  ta.focus(); ta.selectionStart = ta.selectionEnd = s + tok.length;
+}
+function saveFormat(){
+  const name = $("edName").value.trim(), subject = $("edSubject").value.trim(), body = $("edBody").value.trim();
+  if(!name || !subject || !body) return toast("⚠️ Name, subject and body are required");
+  const data = {name, subject, body, time:$("edTime").value||"10:00", to:[...edToList], cc:[...edCcList]};
+  if(editingId){ Object.assign(tplById(editingId), data); }
+  else { FORMATS.push({id:nextFmtId++, ...data}); }
+  closeModal("mEditor");
+  renderFormats();
+  toast("💾 Letter format saved to master", true);
+}
+function delFormat(id){
+  if(FORMATS.length===1) return toast("⚠️ At least one letter format must remain");
+  if(!confirm("Delete this letter format?")) return;
+  FORMATS = FORMATS.filter(f=>f.id!==id);
+  if(currentTplId===id) currentTplId = FORMATS[0].id;
+  renderFormats();
+  toast("🗑 Format deleted", true);
+}
+
+/* =====================================================================
+   REPORT  (filters + export)
+===================================================================== */
+function reportRows(){
+  const from = $("fFrom").value, to = $("fTo").value,
+        app = $("fApp").value, tpl = $("fTpl").value,
+        st  = $("fStatus").value, q = $("fSearch").value.trim().toLowerCase();
+  return SENT_LOG.filter(r=>{
+    const d = r.ts.slice(0,10);
+    if(from && d < from) return false;
+    if(to && d > to) return false;
+    if(app && r.appCode!==app) return false;
+    if(tpl && r.tpl!==tpl) return false;
+    if(st && r.status!==st) return false;
+    if(q && ![r.customer,r.to,r.cc,r.serial,r.appCode].join(" ").toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+function renderReport(){
+  // (re)fill filter dropdowns, keeping current choice
+  const appSel = $("fApp"), tplSel = $("fTpl");
+  const keepA = appSel.value, keepT = tplSel.value;
+  appSel.innerHTML = '<option value="">All</option>' + [...new Set(SENT_LOG.map(r=>r.appCode))].sort().map(c=>`<option>${esc(c)}</option>`).join("");
+  tplSel.innerHTML = '<option value="">All</option>' + [...new Set(SENT_LOG.map(r=>r.tpl))].map(t=>`<option>${esc(t)}</option>`).join("");
+  appSel.value = keepA; tplSel.value = keepT;
+
+  const rows = reportRows();
+  $("repBody").innerHTML = rows.map((r,i)=>`<tr>
+    <td>${i+1}</td><td style="white-space:nowrap;font-weight:600">${esc(r.ts)}</td>
+    <td><span class="code-chip">${esc(r.appCode)}</span></td>
+    <td>${esc(r.customer)}</td><td>${esc(r.serial)}</td><td>${esc(r.tpl)}</td>
+    <td style="max-width:220px;word-break:break-all;font-size:12px">${esc(r.to)}</td>
+    <td style="max-width:200px;word-break:break-all;font-size:12px">${esc(r.cc)}</td>
+    <td><span class="pill ${r.status==='Sent'?'sent':r.status==='Scheduled'?'sched':'fail'}">${r.status}</span></td>
+    <td>${esc(r.by)}</td></tr>`).join("")
+    || `<tr><td colspan="10" class="empty">No records match the selected filters.</td></tr>`;
+
+  const sent = rows.filter(r=>r.status==="Sent").length,
+        sch  = rows.filter(r=>r.status==="Scheduled").length,
+        fail = rows.filter(r=>r.status==="Failed").length;
+  $("repCnt").innerHTML = `Showing <b>${rows.length}</b> of ${SENT_LOG.length} records — Sent: <b>${sent}</b> · Scheduled: <b>${sch}</b> · Failed: <b>${fail}</b>`;
+}
+function clearFilters(){
+  ["fFrom","fTo","fApp","fTpl","fStatus","fSearch"].forEach(id=>$(id).value="");
+  renderReport();
+}
+function exportCSV(){
+  const rows = reportRows();
+  if(!rows.length) return toast("Nothing to export with current filters");
+  const head = ["Sr No","Sent/Scheduled At","App Code","Customer","Engine Serial","Letter Format","To","Cc","Status","Sent By"];
+  const csv = [head.join(",")].concat(rows.map((r,i)=>
+    [i+1, r.ts, r.appCode, r.customer, r.serial, r.tpl, r.to, r.cc, r.status, r.by]
+      .map(v=>`"${String(v).replace(/"/g,'""')}"`).join(","))).join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿"+csv], {type:"text/csv"}));
+  a.download = "welcome_letter_report.csv";
+  a.click();
+  toast("⬇️ Report exported (" + rows.length + " rows)", true);
+}
+
+/* ---------- init ---------- */
+renderStep1();
+</script>
+</body>
+</html>
