@@ -75,9 +75,11 @@ const DEFAULT_MEETING_TYPES = [
 /* Suggested types — the select also has an "Other — type manually…" option */
 
 /* Column widths of the two sheet tables (kept in sync with the
-   top scrollbar strip above the main table) */
+   top scrollbar strip above the main table). Both tables use identical
+   widths for their shared columns; the carry table is wider only by its
+   extra "Previous remarks" column (18rem). */
 const SHEET_MINW = '98rem';
-const CARRY_MINW = '98rem';
+const CARRY_MINW = '116rem';
 
 /* ============================================================
    MASTER DISCUSSION AREAS (editable via "Master setup")
@@ -828,7 +830,7 @@ const RespPicker = ({ value = [], options = [], onChange, disabled }) => {
   );
 };
 
-const FontScale = React.memo(() => <style>{`@keyframes livedot{0%,100%{opacity:1}50%{opacity:.35}} @keyframes pop{0%{transform:scale(.4)}70%{transform:scale(1.2)}100%{transform:scale(1)}} .kc-pop{animation:pop .18s ease-out} .kc-lift{transition:transform .15s ease,box-shadow .15s ease} .kc-lift:hover{transform:translateY(-1px);box-shadow:0 10px 22px -10px rgba(35,37,95,.35)} .kc-input{background:#f7f8fc;border:1.5px solid #e6e9f0;border-radius:10px;transition:border-color .15s,box-shadow .15s,background .15s} .kc-input:focus,.kc-input:focus-within{background:#fff;border-color:#2f3192;box-shadow:0 0 0 3px rgba(47,49,146,.10);outline:none} .kc-input::placeholder,.kc-input input::placeholder{font-size:10px;font-weight:500;color:#9ca3af} .kc-grid{background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px),repeating-linear-gradient(90deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px)} .kc-scroll::-webkit-scrollbar{height:6px;width:6px} .kc-scroll::-webkit-scrollbar-thumb{background:#d5d9e6;border-radius:8px} .kc-scroll::-webkit-scrollbar-thumb:hover{background:#bfc5d8} .kc-scroll::-webkit-scrollbar-track{background:transparent} .fs-9{font-size:9px;line-height:1.3} .fs-10{font-size:10px;line-height:1.35} .fs-11{font-size:11px;line-height:1.4} .fs-12{font-size:12px;line-height:1.45} .fs-13{font-size:13px;line-height:1.45} .mom-sheet td,.mom-sheet th{border:1px solid #cbd5e1} .mom-sheet thead th{text-align:center;vertical-align:middle} .mom-sheet input,.mom-sheet select,.mom-sheet textarea{background:transparent;border-radius:6px;transition:box-shadow .12s,background .12s} .mom-sheet input:hover,.mom-sheet select:hover,.mom-sheet textarea:hover{background:#f6f8fc} .mom-sheet input:focus,.mom-sheet select:focus,.mom-sheet textarea:focus{background:#fff;box-shadow:inset 0 0 0 1.5px ${BRAND}55} .mom-sheet tbody tr:nth-child(even){background:#fbfcfe} .mom-stickyhead thead th{background:#f1f3fb;box-shadow:inset 0 -1px 0 #cbd5e1}`}</style>);
+const FontScale = React.memo(() => <style>{`@keyframes livedot{0%,100%{opacity:1}50%{opacity:.35}} @keyframes pop{0%{transform:scale(.4)}70%{transform:scale(1.2)}100%{transform:scale(1)}} .kc-pop{animation:pop .18s ease-out} .kc-lift{transition:transform .15s ease,box-shadow .15s ease} .kc-lift:hover{transform:translateY(-1px);box-shadow:0 10px 22px -10px rgba(35,37,95,.35)} .kc-input{background:#f7f8fc;border:1.5px solid #e6e9f0;border-radius:10px;transition:border-color .15s,box-shadow .15s,background .15s} .kc-input:focus,.kc-input:focus-within{background:#fff;border-color:#2f3192;box-shadow:0 0 0 3px rgba(47,49,146,.10);outline:none} .kc-input::placeholder,.kc-input input::placeholder{font-size:10px;font-weight:500;color:#9ca3af} .kc-grid{background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px),repeating-linear-gradient(90deg,rgba(255,255,255,.07) 0 1px,transparent 1px 13px)} .kc-scroll::-webkit-scrollbar{height:6px;width:6px} .kc-scroll::-webkit-scrollbar-thumb{background:#d5d9e6;border-radius:8px} .kc-scroll::-webkit-scrollbar-thumb:hover{background:#bfc5d8} .kc-scroll::-webkit-scrollbar-track{background:transparent} .fs-9{font-size:9px;line-height:1.3} .fs-10{font-size:10px;line-height:1.35} .fs-11{font-size:11px;line-height:1.4} .fs-12{font-size:12px;line-height:1.45} .fs-13{font-size:13px;line-height:1.45} .mom-sheet td,.mom-sheet th{border:1px solid #cbd5e1} .mom-sheet thead th{text-align:center;vertical-align:middle} .mom-sheet input,.mom-sheet select,.mom-sheet textarea{background:transparent;border-radius:6px;transition:box-shadow .12s,background .12s} .mom-sheet input:hover,.mom-sheet select:hover,.mom-sheet textarea:hover{background:#f6f8fc} .mom-sheet input:focus,.mom-sheet select:focus,.mom-sheet textarea:focus{background:#fff;box-shadow:inset 0 0 0 1.5px ${BRAND}55} .mom-sheet tbody tr:nth-child(even){background:#fbfcfe} .mom-stickyhead thead th{background:#f1f3fb;box-shadow:inset -1px 0 0 #cbd5e1,inset 0 1px 0 #cbd5e1,inset 0 -1px 0 #cbd5e1} .mom-stickyhead thead th:first-child{box-shadow:inset 1px 0 0 #cbd5e1,inset -1px 0 0 #cbd5e1,inset 0 1px 0 #cbd5e1,inset 0 -1px 0 #cbd5e1}`}</style>);
 
 /* ============================================================
    MAIN COMPONENT
@@ -2139,11 +2141,11 @@ export default function MOMTracking() {
                       <button type="button" onClick={() => {
                         const gs = groupConsecutive(shownCarry, (c) => (c.area || '').trim().toLowerCase());
                         exportTableExcel('MOM_pending_tasks',
-                          ['Sr. No.', 'Discussion Area', 'Discussion Points', 'Responsibility', 'Flag', 'Due Date', 'Previous remarks', 'Remark — this meeting', 'Status'],
+                          ['Sr. No.', 'Category', 'Discussion Area', 'Discussion Points', 'Responsibility', 'Flag', 'Due Date', 'Previous remarks', 'Remark — this meeting', 'Status'],
                           gs.flatMap((g, gIdx) => g.items.map((c) => [
-                            gIdx + 1, c.area, c.point || '', respArr(c.resp).join(', '), c.flag, c.due ? fmtDDMMYY(c.due) : '', remarksText(c.prevRemarks), c.remark || '', STATUS[c.status]?.label || c.status,
+                            gIdx + 1, c.category || '', c.area, c.point || '', respArr(c.resp).join(', '), c.flag, c.due ? fmtDDMMYY(c.due) : '', remarksText(c.prevRemarks), c.remark || '', STATUS[c.status]?.label || c.status,
                           ])),
-                          { mergeCols: [0, 1], leftCols: [1], groupSizes: gs.map((g) => g.items.length) }).catch(() => toast.error('Could not generate the Excel file'));
+                          { mergeCols: [0, 1, 2], leftCols: [2], groupSizes: gs.map((g) => g.items.length) }).catch(() => toast.error('Could not generate the Excel file'));
                       }}
                         className={XL_BTN} title="Download this pending-tasks table as Excel">
                         <Upload size={11} /> Export Excel
@@ -2202,21 +2204,22 @@ export default function MOMTracking() {
                   <table className="mom-sheet mom-stickyhead w-full fs-12" style={{ borderCollapse: 'collapse', minWidth: CARRY_MINW }}>
                     <thead>
                       <tr style={{ background: '#f1f3fb', color: INK }}>
-                        <th className="px-1 py-2 fs-10 font-bold" style={{ width: '2.6rem' }} title="Tick to move the task into the current-meeting discussion">Discuss</th>
-                        <th className="px-1 py-2 fs-11 font-bold" style={{ width: '2rem' }}>Sr. No.</th>
+                        <th className="px-1 py-2 fs-10 font-bold" style={{ width: '2.75rem' }} title="Tick to move the task into the current-meeting discussion">Discuss</th>
+                        <th className="px-1 py-2 fs-11 font-bold" style={{ width: '2.8rem' }}>Sr. No.</th>
+                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '5rem' }}>Category</th>
                         <th className="px-2 py-2 fs-11 font-bold" style={{ width: '12rem', minWidth: '12rem' }}>Discussion Area</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '12rem' }}>Discussion Points</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '7rem' }}>Responsibility</th>
-                        <th className="px-1 py-2 fs-10 font-bold" style={{ width: '3rem' }}>Flag</th>
-                        <th className="px-1 py-2 fs-11 font-bold" style={{ width: '6rem' }}>Due Date</th>
+                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '24rem' }}>Discussion Points</th>
+                        <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8rem' }}>Responsibility</th>
+                        <th className="px-1 py-2 fs-10 font-bold" style={{ width: '5rem' }}>Flag</th>
+                        <th className="px-1 py-2 fs-11 font-bold" style={{ width: '8.5rem' }}>Due Date</th>
                         <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '18rem' }}>Previous remarks</th>
-                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '16rem' }}>Remark/Observation/Action — this meeting</th>
+                        <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '23rem' }}>Remark/Observation/Action — this meeting</th>
                         <th className="px-1 py-2 fs-11 font-bold" style={{ width: '6.5rem' }}>Status</th>
                       </tr>
                     </thead>
                     <tbody>
                       {shownCarry.length === 0 && (
-                        <tr><td colSpan={10} className="px-3 py-5 text-center fs-12 text-gray-400">No carried tasks match the current status / category filter.</td></tr>
+                        <tr><td colSpan={11} className="px-3 py-5 text-center fs-12 text-gray-400">No carried tasks match the current status / category filter.</td></tr>
                       )}
                       {groupConsecutive(shownCarry, (c) => (c.area || '').toLowerCase()).flatMap((g, gIdx) => g.items.map((c, gi) => {
                         const od = c.due ? daysFromDue(c.due) : 0;
@@ -2230,6 +2233,9 @@ export default function MOMTracking() {
                                 title={c.status === 'completed' ? 'Completed — this task can\'t be moved to the current discussion' : 'Tick to move this task into the current-meeting discussion table below'} />
                             </td>
                             {gi === 0 && <td rowSpan={g.items.length} className="px-1 py-2 text-center text-black align-middle">{gIdx + 1}</td>}
+                            {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 text-center align-middle">
+                              <span className="fs-11 text-black">{c.category || '—'}</span>
+                            </td>}
                             {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 align-middle text-left">
                               <span className="font-semibold text-black">{c.area}</span>
                             </td>}
@@ -2306,11 +2312,11 @@ export default function MOMTracking() {
                         className="px-2 py-2 fs-11 font-bold" style={{ width: '5rem' }} />
                       <SortTh label="Discussion Area" sortKey="area" sort={sheetSort} onSort={toggleSheetSort}
                         className="px-2 py-2 fs-11 font-bold" style={{ width: '12rem', minWidth: '12rem' }} />
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '15rem' }}>Discussion points</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '24rem' }}>Discussion points</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8rem' }}>Responsibility</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '5rem' }}>Action flag</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '8.5rem' }}>Due Date</th>
-                      <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '16rem' }}>Remark/Observation/Action</th>
+                      <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '23rem' }}>Remark/Observation/Action</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '6.5rem' }}>Status</th>
                     </tr>
                   </thead>

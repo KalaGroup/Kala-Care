@@ -16,8 +16,14 @@ import {
     ClockIcon
 } from '@heroicons/react/24/outline';
 import * as XLSX from 'xlsx';
+import { startUpload, finishUpload, useUploads } from '../utils/uploadStatus';
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
+
+// Id of this page's running background import. Module scope on purpose: the
+// component's `uploading` state dies when the user navigates away, but the
+// request keeps running — on remount the page re-detects the job from here.
+let activeImportJobId = null;
 
 const FILE_TYPES = [
     "AMC Population Report",
@@ -338,6 +344,10 @@ const tightHeader = (name) =>
 const Import = () => {
     const [files, setFiles] = useState([]);
     const [uploading, setUploading] = useState(false);
+    // Uploading as far as the UI is concerned: either this mount started it, or
+    // a previous mount did and the background job is still running.
+    const activeJobs = useUploads();
+    const busy = uploading || activeJobs.some((j) => j.id === activeImportJobId);
     const [results, setResults] = useState([]);
     const [selectedFileType, setSelectedFileType] = useState('');
     const [dragActive, setDragActive] = useState(false);
@@ -624,6 +634,7 @@ const Import = () => {
         e.preventDefault();
         e.stopPropagation();
         setDragActive(false);
+        if (busy) return;   // the drop zone is disabled while an import runs
 
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             const droppedFiles = Array.from(e.dataTransfer.files);
@@ -687,6 +698,12 @@ const Import = () => {
         }
 
         setUploading(true);
+        // Register with the app-wide background-upload tracker (same as the Part
+        // Detail Info master import): the upload + processing poll are plain
+        // requests that keep running if the user changes page, and UploadGuard
+        // shows the floating banner and warns before the tab is closed/reloaded.
+        const bgJob = startUpload(`${getFileTypeLabel(selectedFileType)} import`);
+        activeImportJobId = bgJob;
         const uploadToast = toast.loading('Uploading file...');
 
         try {
@@ -747,6 +764,8 @@ const Import = () => {
             setResults([{ filename: file.name, status: 'error', message: errorMessage }]);
         } finally {
             setUploading(false);
+            finishUpload(bgJob);
+            if (activeImportJobId === bgJob) activeImportJobId = null;
         }
     };
 
@@ -836,7 +855,7 @@ const Import = () => {
                                             }}
                                             onFocus={(e) => e.target.style.borderColor = 'var(--erp-accent)'}
                                             onBlur={(e) => e.target.style.borderColor = selectedFileType ? 'var(--erp-accent)' : '#D1D5DB'}
-                                            disabled={uploading}
+                                            disabled={busy}
                                         >
                                             <option value="" disabled>Select a file type</option>
                                             {FILE_TYPES.map(type => (
@@ -937,7 +956,7 @@ const Import = () => {
                                     onClick={triggerFileInput}
                                     className={`
                         relative border-2 border-dashed rounded-lg p-3 sm:p-5 transition-all cursor-pointer
-                        ${uploading ? 'opacity-50 cursor-not-allowed' : ''}
+                        ${busy ? 'opacity-50 cursor-not-allowed' : ''}
                     `}
                                     style={{
                                         borderColor: dragActive
@@ -956,7 +975,7 @@ const Import = () => {
                                         accept=".xlsx,.xls"
                                         onChange={handleFileChange}
                                         className="hidden"
-                                        disabled={uploading}
+                                        disabled={busy}
                                     />
 
                                     <div className="text-center">
@@ -1001,7 +1020,7 @@ const Import = () => {
                                 </div>
 
                                 {/* Action Buttons */}
-                                {files.length > 0 && !uploading && (
+                                {files.length > 0 && !busy && (
                                     <div className="flex items-center justify-end gap-1.5 mt-2 max-sm:flex-wrap max-md:flex-wrap max-md:gap-2">
                                         {filePreview && (
                                             <button
@@ -1169,13 +1188,13 @@ const Import = () => {
                             <div className="hidden sm:flex items-center gap-3 pt-2">
                                 <button
                                     onClick={handleUpload}
-                                    disabled={uploading || files.length === 0 || !selectedFileType || formatError}
+                                    disabled={busy || files.length === 0 || !selectedFileType || formatError}
                                     className="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 text-white text-[11px] sm:text-xs font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
                                     style={{
                                         background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})`,
                                     }}
                                 >
-                                    {uploading ? (
+                                    {busy ? (
                                         <>
                                             <ArrowPathIcon className="animate-spin h-3 w-3 sm:h-3.5 sm:w-3.5" />
                                             <span>Uploading...</span>
@@ -1188,7 +1207,7 @@ const Import = () => {
                                     )}
                                 </button>
 
-                                {files.length > 0 && selectedFileType && !uploading && !formatError && (
+                                {files.length > 0 && selectedFileType && !busy && !formatError && (
                                     <span className="text-[10px] sm:text-xs text-black truncate max-w-xs">
                                         Ready: {files[0].name}
                                     </span>
@@ -1199,13 +1218,13 @@ const Import = () => {
                             <div className="sm:hidden flex justify-center pt-1">
                                 <button
                                     onClick={handleUpload}
-                                    disabled={uploading || files.length === 0 || !selectedFileType || formatError}
+                                    disabled={busy || files.length === 0 || !selectedFileType || formatError}
                                     className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-white text-[11px] font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"
                                     style={{
                                         background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})`,
                                     }}
                                 >
-                                    {uploading ? (
+                                    {busy ? (
                                         <>
                                             <ArrowPathIcon className="animate-spin h-3 w-3" />
                                             <span>Uploading...</span>

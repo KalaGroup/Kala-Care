@@ -12,6 +12,35 @@ import {
     themeColor, themeDark, themeSoft, fmtDateTime,
 } from '../components/maintenanceApi';
 import { SortTh, useSort, useSortedRows } from '../components/TableSort';
+import DraggableScrollButtons from '../components/DraggableScrollButtons';
+
+// Floating scroll-to-top / bottom arrows (same widget as the other pages).
+// `targetRef` scrolls that container; without one it scrolls the window itself.
+const ScrollArrows = ({ storageKey, targetRef }) => {
+    const go = (toTop) => {
+        const el = targetRef?.current;
+        if (el) el.scrollTo({ top: toTop ? 0 : el.scrollHeight, behavior: 'smooth' });
+        else window.scrollTo({ top: toTop ? 0 : document.documentElement.scrollHeight, behavior: 'smooth' });
+    };
+    return (
+        <DraggableScrollButtons storageKey={storageKey} initialRight={16}>
+            <button onClick={() => go(true)}
+                className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
+                style={{ backgroundColor: themeColor }} title="Scroll to top">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="white" className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+                </svg>
+            </button>
+            <button onClick={() => go(false)}
+                className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
+                style={{ backgroundColor: themeColor }} title="Scroll to bottom">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="white" className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                </svg>
+            </button>
+        </DraggableScrollButtons>
+    );
+};
 
 // LAZY chunks: the master-only management panel (Master Data / Import /
 // Mapping / Service tabs) is not downloaded by regular users at all, and the
@@ -265,6 +294,7 @@ const CoverageReport = React.memo(({ master, services, commissioning = [] }) => 
     // the FULL dataset — only how many rows are in the DOM at once changes.
     const [visibleCount, setVisibleCount] = useState(ROW_CHUNK);
     const loadMoreRef = useRef(null);
+    const tableScrollRef = useRef(null);
     useEffect(() => { setVisibleCount(ROW_CHUNK); }, [search, segment, sort, searchField]);
     useEffect(() => {
         const observer = new IntersectionObserver((entries) => {
@@ -327,7 +357,7 @@ const CoverageReport = React.memo(({ master, services, commissioning = [] }) => 
                     </button>
                 )}
             </div>
-            <div className="overflow-auto r-scroll max-h-[70vh]">
+            <div ref={tableScrollRef} className="overflow-auto r-scroll max-h-[70vh]">
                 <table className="min-w-[900px] w-full border-collapse text-[12px]">
                     <thead className="sticky top-0 z-10">
                         <tr className="bg-gray-50 text-[10px] sm:text-[11px] font-semibold text-black uppercase tracking-wider">
@@ -382,6 +412,9 @@ const CoverageReport = React.memo(({ master, services, commissioning = [] }) => 
                     </tbody>
                 </table>
             </div>
+
+            {/* Floating scroll to top / bottom buttons — draggable horizontally along the bottom */}
+            <ScrollArrows storageKey="reportsCoverageScrollBtnsPos" targetRef={tableScrollRef} />
         </div>
     );
 });
@@ -616,6 +649,9 @@ const ActivityReport = React.memo(({ master, activity }) => {
                     )}
                 </div>
             )}
+
+            {/* Floating scroll to top / bottom buttons — draggable horizontally along the bottom */}
+            <ScrollArrows storageKey="reportsActivityScrollBtnsPos" />
         </div>
     );
 });

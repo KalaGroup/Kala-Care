@@ -14,8 +14,38 @@ import {
     IMPORT_COLUMNS, IMPORT_REQUIRED_COLUMN, themeColor, themeDark, themeSoft,
 } from './maintenanceApi';
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
+import { startUpload, finishUpload } from '../utils/uploadStatus';
 import { canExportExcel } from '../utils/exportPermission';
 import { SortTh, useSort, useSortedRows } from './TableSort';
+import DraggableScrollButtons from './DraggableScrollButtons';
+
+// Floating scroll-to-top / bottom arrows (same widget as the other pages).
+// `targetRef` scrolls that container; without one it scrolls the window itself.
+const ScrollArrows = ({ storageKey, targetRef }) => {
+    const go = (toTop) => {
+        const el = targetRef?.current;
+        if (el) el.scrollTo({ top: toTop ? 0 : el.scrollHeight, behavior: 'smooth' });
+        else window.scrollTo({ top: toTop ? 0 : document.documentElement.scrollHeight, behavior: 'smooth' });
+    };
+    return (
+        <DraggableScrollButtons storageKey={storageKey} initialRight={16}>
+            <button onClick={() => go(true)}
+                className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
+                style={{ backgroundColor: themeColor }} title="Scroll to top">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="white" className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+                </svg>
+            </button>
+            <button onClick={() => go(false)}
+                className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
+                style={{ backgroundColor: themeColor }} title="Scroll to bottom">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="white" className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                </svg>
+            </button>
+        </DraggableScrollButtons>
+    );
+};
 
 const chipCls = { R: 'bg-blue-50 text-blue-700', C: 'bg-amber-50 text-amber-700', T: 'bg-emerald-50 text-emerald-700' };
 const Chip = React.memo(({ a }) => {
@@ -48,6 +78,59 @@ const assetSegment = (v) => {
 
 // Closes off one application code's run of part rows in the Master Data sheet.
 const BLOCK_END = { borderBottom: '1.5px solid #9ca3af' };
+
+/* ===================== Kits — independent of the part lines =====================
+   A kit is its OWN record carrying its OWN copied part lines. Building a kit from
+   service parts copies them; it never links back. So:
+     · editing a service part does NOT change what the kit holds,
+     · a kit's part lines can be edited and extended on their own,
+     · the same part may be copied into any number of kits,
+     · "loose" parts are simply the service parts no kit contains.
+   These helpers read the serialized record ({ parts:[], kits:[{ parts:[] }] }) and
+   tolerate records cached before kits existed. */
+const kitsOf = (a) => (Array.isArray(a?.kits) ? a.kits : []);
+const normPn = (v) => String(v || '').trim().toLowerCase();
+const kitPartNumbers = (a) =>
+    new Set(kitsOf(a).flatMap((k) => (k.parts || []).map((p) => normPn(p.partNumber))).filter(Boolean));
+const loosePartsOf = (a) => {
+    const inKit = kitPartNumbers(a);
+    return (a?.parts || []).filter((p) => !inKit.has(normPn(p.partNumber)));
+};
+
+// A loose part is copied into the kit columns as-is, exactly the way the master
+// file writes it: the part repeats itself as its own kit line.
+const looseAsKit = (p) => ({
+    kitNumber: p.partNumber || '', kitDesc: p.partDesc || '',
+    qty: p.qty || '', action: p.action || '', serviceHours: p.serviceHours || '',
+});
+
+// One flat row list for the master sheet. The two column groups are two separate
+// lists printed side by side — a kit only ever COPIED its part codes, so nothing
+// on the right belongs to the part on its left:
+//   PART DETAILS — the code's service parts: the ones some kit copied first, the
+//                  loose ones last. Parts that exist only inside a kit never
+//                  appear here at all.
+//   KIT DETAILS  — all the kits, one row each, then "—" rows, then the loose
+//                  parts, each copying itself across the way the master file
+//                  writes them (so the loose block lines up at the bottom).
+// A kit's own part lines are not printed here — they are information held on the
+// kit, shown in the Edit form and the View modal.
+const sheetRowsOf = (a) => {
+    const inKit = kitPartNumbers(a);
+    const parts = a?.parts || [];
+    const members = parts.filter((p) => inKit.has(normPn(p.partNumber)));
+    const loose = parts.filter((p) => !inKit.has(normPn(p.partNumber)));
+    const kits = kitsOf(a);
+
+    // The block above the loose parts is as tall as it needs to be to hold both
+    // sides: every kit-copied part on the left, every kit on the right.
+    const top = Math.max(members.length, kits.length);
+    const rows = [];
+    for (let i = 0; i < top; i++) rows.push({ part: members[i] || null, kit: kits[i] || null, loose: false });
+    loose.forEach((p) => rows.push({ part: p, kit: looseAsKit(p), loose: true }));
+
+    return rows.length ? rows : [{ part: null, kit: null, loose: false }];
+};
 
 const Loading = React.memo(() => (
     <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm animate-pulse space-y-3">
@@ -213,13 +296,18 @@ const MasterData = ({ onMasterChanged }) => {
             kvaOpts: numSort([...new Set(distinct((a) => a.kva))]),
             emiOpts: [...new Set([...distinct((a) => a.emission), 'CPCB IV+'])],
             actOpts: ['R', 'C', 'T'],
-            hrsOpts: numSort([...new Set([...distinctP((p) => p.serviceHours), ...services.map((s) => s.hours)])]),
+            hrsOpts: numSort([...new Set([
+                ...distinctP((p) => p.serviceHours),
+                ...rows.flatMap(kitsOf).map((k) => String(k.serviceHours ?? '').trim()).filter(Boolean),
+                ...services.map((s) => s.hours),
+            ])]),
         };
     }, [rows, services]);
     const existingCodes = useMemo(() => new Set(rows.map((a) => a.appCode)), [rows]);
 
     // Field-scoped search: default App Code; picking another field searches only
-    // it. "Part / Kit" keeps the old across-all-part-lines behaviour.
+    // it. "Part / Kit" spans the part lines AND the kits (which now carry their
+    // own part copies, so those are searched too).
     const SEARCH_FIELDS = [
         { key: 'appCode', label: 'App Code', match: (a, q) => a.appCode.toLowerCase().includes(q) },
         { key: 'engineModel', label: 'Engine Model', match: (a, q) => (a.engineModel || '').toLowerCase().includes(q) },
@@ -227,9 +315,11 @@ const MasterData = ({ onMasterChanged }) => {
         { key: 'kva', label: 'KVA Rating', match: (a, q) => (a.kva || '').toLowerCase().includes(q) },
         { key: 'emission', label: 'Emission Norm', match: (a, q) => (a.emission || '').toLowerCase().includes(q) },
         {
-            key: 'part', label: 'Part / Kit', match: (a, q) => a.parts.some((p) =>
-                (p.partNumber || '').toLowerCase().includes(q) || (p.partDesc || '').toLowerCase().includes(q) ||
-                (p.altPartNo || '').toLowerCase().includes(q) || (p.altDesc || '').toLowerCase().includes(q)),
+            key: 'part', label: 'Part / Kit', match: (a, q) =>
+                a.parts.some((p) => (p.partNumber || '').toLowerCase().includes(q) || (p.partDesc || '').toLowerCase().includes(q)) ||
+                kitsOf(a).some((k) =>
+                    (k.kitNumber || '').toLowerCase().includes(q) || (k.kitDesc || '').toLowerCase().includes(q) ||
+                    (k.parts || []).some((p) => (p.partNumber || '').toLowerCase().includes(q) || (p.partDesc || '').toLowerCase().includes(q))),
         },
     ];
     const [searchField, setSearchField] = useState('appCode');
@@ -243,8 +333,8 @@ const MasterData = ({ onMasterChanged }) => {
     }, [query, rows, searchField]);
 
     // Only the application-code columns sort. The part and kit columns can't:
-    // their row order is what the kit merges are built from, so reordering them
-    // would tear the blocks apart.
+    // the rows are laid out kit-block by kit-block, so reordering them would tear
+    // the blocks apart.
     const { sort, toggle } = useSort();
     const shown = useSortedRows(filtered, sort, {
         segment: (a) => a.segment,
@@ -255,24 +345,10 @@ const MasterData = ({ onMasterChanged }) => {
         emission: (a) => a.emission,
     });
 
-    // Flatten to the master-file layout: one row per part line, plus the rowSpans
-    // needed to merge the repeated cells.
-    //  - `lines`  — the app's parts (a code with none still gets one blank row, so
-    //               its merged header cells have something to span).
-    //  - `kitAt`  — keyed by the row that STARTS a kit block, holding that block's
-    //               span. The file merges a kit down the part rows that share it:
-    //               a part carrying kit data opens a block, and each following part
-    //               with no kit data of its own extends it.
-    const sheet = useMemo(() => shown.map((a) => {
-        const lines = a.parts.length ? a.parts : [null];
-        const kitAt = {};
-        let start = 0;
-        lines.forEach((p, i) => {
-            if (i === 0 || (p && kitHasData(p))) { kitAt[i] = { p, span: 1 }; start = i; }
-            else kitAt[start].span++;
-        });
-        return { app: a, lines, kitAt };
-    }), [shown]);
+    // Flatten to the sheet layout: every kit's own part copies first (kit values
+    // on the block's first row only), then the loose parts. Only the application-
+    // code columns are still merged, down all of the code's rows.
+    const sheet = useMemo(() => shown.map((a) => ({ app: a, rows: sheetRowsOf(a) })), [shown]);
 
     const selCodes = Object.keys(sel).filter((k) => sel[k]);
 
@@ -297,14 +373,26 @@ const MasterData = ({ onMasterChanged }) => {
             to.current.scrollLeft = from.current.scrollLeft;
     };
 
+    // Export keeps the ORIGINAL master-file shape (ORIG_HEADERS) rather than the
+    // on-screen layout, so a file exported here can be re-imported unchanged:
+    // that file format encodes kit membership by row position, which is the only
+    // way Import can tell which parts made up a kit. Each kit therefore writes
+    // its own part copies with the kit values on the block's FIRST row and blanks
+    // below, and each loose part repeats itself in the kit columns ("no kit").
     const exportXlsx = (codes) => {
         const list = codes ? rows.filter((a) => codes.includes(a.appCode)) : rows;
         const aoa = [ORIG_HEADERS];
-        list.forEach((a) => a.parts.forEach((p) => aoa.push([
-            a.segment, a.appCode, a.systemAppCode, a.engineModel, a.kva, a.emission,
-            p.partNumber, p.partDesc, p.qty, p.action, p.serviceHours,
-            p.altPartNo, p.altDesc, p.altQty, p.altAction, p.altServiceHours, p.schedule,
-        ])));
+        list.forEach((a) => {
+            const push = (p, k, first) => aoa.push([
+                a.segment, a.appCode, a.systemAppCode, a.engineModel, a.kva, a.emission,
+                p.partNumber || '', p.partDesc || '', p.qty || '', p.action || '', p.serviceHours || '',
+                k && first ? (k.kitNumber || '') : '', k && first ? (k.kitDesc || '') : '',
+                k && first ? (k.qty || '') : '', k && first ? (k.action || '') : '',
+                k && first ? (k.serviceHours || '') : '', p.schedule || '',
+            ]);
+            kitsOf(a).forEach((k) => (k.parts || []).forEach((p, i) => push(p, k, i === 0)));
+            loosePartsOf(a).forEach((p) => push(p, looseAsKit(p), true));
+        });
         const ws = XLSX.utils.aoa_to_sheet(aoa);
         ws['!cols'] = ORIG_HEADERS.map((h, i) => ({ wch: [8, 12, 14, 16, 6, 9, 16, 40, 5, 7, 9, 14, 30, 5, 7, 9, 16][i] || 12 }));
         const wb = XLSX.utils.book_new();
@@ -382,6 +470,7 @@ const MasterData = ({ onMasterChanged }) => {
                             {canExportExcel() && (
                                 <button
                                     onClick={() => exportXlsx(selCodes)}
+                                    title="Excel in the original master-file arrangement (kit blocks, then loose parts) so it can be re-imported as-is"
                                     className="export-btn inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-[12px] font-semibold text-white transition"
                                 >
                                     <ArrowUpTrayIcon className="h-4 w-4" /> Export selected
@@ -393,6 +482,7 @@ const MasterData = ({ onMasterChanged }) => {
                     {canExportExcel() && (
                         <button
                             onClick={() => exportXlsx(null)}
+                            title="Excel in the original master-file arrangement (kit blocks, then loose parts) so it can be re-imported as-is"
                             className="export-btn inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-[12px] font-semibold text-white transition"
                         >
                             <ArrowUpTrayIcon className="h-4 w-4" /> Export all
@@ -473,21 +563,20 @@ const MasterData = ({ onMasterChanged }) => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {sheet.map(({ app: a, lines, kitAt }, ai) => {
+                                {sheet.map(({ app: a, rows: srows }, ai) => {
                                     const on = !!sel[a.appCode];
-                                    const span = lines.length;
+                                    const span = srows.length;
                                     const appTd = `px-3 py-1 border border-gray-200 align-middle ${on ? 'bg-indigo-50/50' : 'bg-white'}`;
-                                    return lines.map((p, i) => {
-                                        const kit = kitAt[i];
-                                        // Close the whole application code off with a heavy rule. The
-                                        // merged cells (app block, actions) already end here; the part
-                                        // cells only on the final row, and a kit only if its run ends here.
-                                        const last = i === lines.length - 1;
-                                        const partEnd = last ? BLOCK_END : undefined;
-                                        const kitEnd = kit && i + kit.span === lines.length ? BLOCK_END : undefined;
+                                    return srows.map((r, i) => {
+                                        const p = r.part;
+                                        // Close the whole application code off with a heavy rule; close
+                                        // each kit block with a light dashed one so the blocks stay
+                                        // readable now that the kit cells are no longer merged.
+                                        const last = i === srows.length - 1;
+                                        const rowEnd = last ? BLOCK_END : undefined;
                                         return (
                                             <tr key={`${a.appCode}:${i}`} className={on ? 'bg-indigo-50/30' : 'hover:bg-indigo-50/30 transition'}>
-                                                {/* --- Application code block: merged across all its part rows --- */}
+                                                {/* --- Application code block: merged across all its rows --- */}
                                                 {i === 0 && (
                                                     <>
                                                         <td rowSpan={span} style={BLOCK_END} className={`${appTd} text-center`}>
@@ -508,23 +597,32 @@ const MasterData = ({ onMasterChanged }) => {
                                                     </>
                                                 )}
 
-                                                {/* --- Part line: one row each, never merged --- */}
-                                                <td style={partEnd} className="px-3 py-1 border border-gray-200 font-mono text-gray-800 whitespace-nowrap">{p?.partNumber || '—'}</td>
-                                                <td style={partEnd} className="px-3 py-1 border border-gray-200 text-gray-700 min-w-[240px]">{p?.partDesc || '—'}</td>
-                                                <td style={partEnd} className="px-3 py-1 border border-gray-200 text-center">{p?.qty || '—'}</td>
-                                                <td style={partEnd} className="px-3 py-1 border border-gray-200 text-center"><Chip a={p?.action} /></td>
-                                                <td style={partEnd} className="px-3 py-1 border border-gray-200 text-center font-mono" title={p ? partService(services, p).name : ''}>{p?.serviceHours || '—'}</td>
+                                                {/* --- Part line: strictly one of the code's service parts. Parts
+                                                        that exist only inside a kit never appear here. --- */}
+                                                <td style={rowEnd} className="px-3 py-1 border border-gray-200 font-mono text-gray-800 whitespace-nowrap">{p?.partNumber || '—'}</td>
+                                                <td style={rowEnd} className="px-3 py-1 border border-gray-200 text-gray-700 min-w-[240px]">{p?.partDesc || '—'}</td>
+                                                <td style={rowEnd} className="px-3 py-1 border border-gray-200 text-center">{p?.qty || '—'}</td>
+                                                <td style={rowEnd} className="px-3 py-1 border border-gray-200 text-center"><Chip a={p?.action} /></td>
+                                                <td style={rowEnd} className="px-3 py-1 border border-gray-200 text-center font-mono" title={p ? partService(services, p).name : ''}>{p?.serviceHours || '—'}</td>
 
-                                                {/* --- Kit block: merged down the part rows that share one kit --- */}
-                                                {kit && (
-                                                    <>
-                                                        <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 font-mono text-gray-600 align-middle whitespace-nowrap bg-amber-50/20">{kit.p?.altPartNo || '—'}</td>
-                                                        <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-gray-600 align-middle min-w-[200px] bg-amber-50/20">{kit.p?.altDesc || '—'}</td>
-                                                        <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center text-gray-600 align-middle bg-amber-50/20">{kit.p?.altQty || '—'}</td>
-                                                        <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center align-middle bg-amber-50/20"><Chip a={kit.p?.altAction} /></td>
-                                                        <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center font-mono text-gray-600 align-middle bg-amber-50/20">{kit.p?.altServiceHours || '—'}</td>
-                                                    </>
-                                                )}
+                                                {/* --- Kit columns: its own list — all the kits, then "—" rows,
+                                                        then the loose parts copying themselves across. Nothing
+                                                        here relates to the part row beside it. --- */}
+                                                <td style={rowEnd} className={`px-3 py-1 border border-gray-200 font-mono text-gray-600 whitespace-nowrap bg-amber-50/20`}>
+                                                    {r.kit ? (r.kit.kitNumber || '—') : '—'}
+                                                </td>
+                                                <td style={rowEnd} className={`px-3 py-1 border border-gray-200 text-gray-600 min-w-[200px] bg-amber-50/20`}>
+                                                    {r.kit ? (r.kit.kitDesc || '—') : '—'}
+                                                </td>
+                                                <td style={rowEnd} className={`px-3 py-1 border border-gray-200 text-center text-gray-600 bg-amber-50/20`}>
+                                                    {r.kit ? (r.kit.qty || '—') : '—'}
+                                                </td>
+                                                <td style={rowEnd} className={`px-3 py-1 border border-gray-200 text-center bg-amber-50/20`}>
+                                                    {r.kit ? <Chip a={r.kit.action} /> : '—'}
+                                                </td>
+                                                <td style={rowEnd} className={`px-3 py-1 border border-gray-200 text-center font-mono text-gray-600 bg-amber-50/20`}>
+                                                    {r.kit ? (r.kit.serviceHours || '—') : '—'}
+                                                </td>
 
                                                 {/* --- Row actions: merged, one set per application code --- */}
                                                 {i === 0 && (
@@ -547,8 +645,12 @@ const MasterData = ({ onMasterChanged }) => {
                         </table>
                     </div>
                     <div className="px-4 py-1.5 border-t border-gray-200 bg-gray-50 text-[10.5px] text-gray-400">
-                        {shown.length} application code{shown.length === 1 ? '' : 's'} · {shown.reduce((n, a) => n + a.parts.length, 0)} part lines. Application-code and kit cells span their part rows, the same way the master file merges them.
+                        {shown.length} application code{shown.length === 1 ? '' : 's'} · {shown.reduce((n, a) => n + a.parts.length, 0)} part lines · {shown.reduce((n, a) => n + kitsOf(a).length, 0)} kits.
+                        Two separate lists side by side. Part Details: the service parts a kit copied, then the loose ones. Kit Details: all the kits, then “—” rows, then the loose parts copied across. A kit only copied the part codes — nothing on the right belongs to the part on its left.
                     </div>
+
+                    {/* Floating scroll to top / bottom buttons — draggable horizontally along the bottom */}
+                    <ScrollArrows storageKey="masterDataScrollBtnsPos" targetRef={sheetScrollRef} />
                 </div>
             )}
 
@@ -779,11 +881,13 @@ const AppMapping = ({ onMasterChanged }) => {
         rows.forEach((a) => m.set(String(a.appCode || '').trim().toLowerCase(), a));
         return m;
     }, [rows]);
-    const [editing, setEditing] = useState(null); // master record being edited
+    // { rec, hours } — `hours` seeds the editor's Svc Hrs filter, so the pencil in
+    // a coverage column opens the record showing only that service interval.
+    const [editing, setEditing] = useState(null);
     const [viewing, setViewing] = useState(null);  // master record being previewed (read-only)
-    const openEdit = (r) => {
+    const openEdit = (r, hours = '') => {
         const rec = masterByCode.get(String(r.appCode || '').trim().toLowerCase());
-        if (rec) setEditing(rec);
+        if (rec) setEditing({ rec, hours: String(hours || '') });
     };
     const openView = (r) => {
         const rec = masterByCode.get(String(r.appCode || '').trim().toLowerCase());
@@ -941,6 +1045,13 @@ const AppMapping = ({ onMasterChanged }) => {
     useEffect(() => { setRowLimit(ROWS_CHUNK); }, [remaining]);
     const visibleRows = rowLimit < remaining.length ? remaining.slice(0, rowLimit) : remaining;
 
+    // Totals for the pinned footer row — computed over the WHOLE filtered list,
+    // not just the chunk currently mounted, so "Show more" never changes them.
+    const totals = useMemo(() => ({
+        codes: remaining.length,
+        assets: remaining.reduce((s, r) => s + (Number(r.assets) || 0), 0),
+    }), [remaining]);
+
     // Second horizontal scrollbar ABOVE the table, kept in lockstep with the
     // table's own one, so the wide table can be panned left-to-right without
     // first scrolling to the bottom. The spacer matches the table's scroll width.
@@ -1087,11 +1198,25 @@ const AppMapping = ({ onMasterChanged }) => {
                                         </td>
                                         {view !== 'remaining' && svcCols.map((c) => {
                                             const ids = svcCoverage.get(String(r.appCode || '').trim().toLowerCase());
+                                            const has = !!(ids && ids.has(c.id));
                                             return (
                                                 <td key={c.id} className="px-2 py-2 border border-gray-200 text-center">
-                                                    {ids && ids.has(c.id)
-                                                        ? <span className="font-extrabold text-[15px] text-green-600">✓</span>
-                                                        : <span className="font-medium text-gray-300">✗</span>}
+                                                    <span className="inline-flex items-center justify-center gap-1 whitespace-nowrap">
+                                                        {has
+                                                            ? <span className="font-extrabold text-[15px] text-green-600">✓</span>
+                                                            : <span className="font-medium text-gray-300">✗</span>}
+                                                        {/* Edit just this service interval — opens the editor with its
+                                                            Svc Hrs filter already set to this column. */}
+                                                        {has && rowInMaster(r) && (
+                                                            <button type="button" onClick={() => openEdit(r, c.hours)}
+                                                                title={`Edit only the ${c.hours} Hr parts and kits of ${r.appCode}`}
+                                                                className="rounded p-0.5 text-gray-400 hover:bg-indigo-50 transition"
+                                                                onMouseEnter={(e) => { e.currentTarget.style.color = themeColor; }}
+                                                                onMouseLeave={(e) => { e.currentTarget.style.color = ''; }}>
+                                                                <PencilSquareIcon className="h-3.5 w-3.5" />
+                                                            </button>
+                                                        )}
+                                                    </span>
                                                 </td>
                                             );
                                         })}
@@ -1112,6 +1237,25 @@ const AppMapping = ({ onMasterChanged }) => {
                                     </tr>
                                 ))}
                             </tbody>
+                            {/* Pinned totals — stays parked at the bottom of the scroll
+                                box while the rows scroll underneath it. */}
+                            <tfoot className="sticky bottom-0 z-20">
+                                <tr className="text-[11.5px] font-extrabold text-gray-800">
+                                    <td colSpan={7} className="px-3 py-2 border border-gray-300 bg-gray-100 sticky bottom-0 text-right uppercase tracking-wider whitespace-nowrap">
+                                        Total App Codes
+                                        <span className="ml-2 inline-block rounded-md px-2 py-0.5 font-mono text-[12px]"
+                                            style={{ backgroundColor: themeColor, color: '#fff' }}>{totals.codes.toLocaleString()}</span>
+                                    </td>
+                                    <td className="px-3 py-2 border border-gray-300 bg-gray-100 sticky bottom-0 text-center">
+                                        <span className="inline-block min-w-[30px] rounded-md px-2 py-0.5 font-mono text-[12px]"
+                                            style={{ backgroundColor: themeColor, color: '#fff' }}>{totals.assets.toLocaleString()}</span>
+                                    </td>
+                                    {view !== 'remaining' && svcCols.map((c) => (
+                                        <td key={c.id} className="px-2 py-2 border border-gray-300 bg-gray-100 sticky bottom-0" />
+                                    ))}
+                                    <td className="px-3 py-2 border border-gray-300 bg-gray-100 sticky bottom-0" />
+                                </tr>
+                            </tfoot>
                         </table>
                     </div>
                     {remaining.length > rowLimit && (
@@ -1123,10 +1267,14 @@ const AppMapping = ({ onMasterChanged }) => {
                             </button>
                         </div>
                     )}
+
+                    {/* Floating scroll to top / bottom buttons — draggable horizontally along the bottom */}
+                    <ScrollArrows storageKey="appMappingScrollBtnsPos" targetRef={bodyScrollRef} />
                     </>
                 )}
                 <div className="px-4 py-1.5 border-t border-gray-200 bg-white text-[10.5px] text-gray-400">
                     Codes are compared case-insensitively. Use <b className="font-semibold">Add</b> to bring an asset code into the master (prefilled from the asset data), or <b className="font-semibold">Edit</b> to change a code that is already in the master.
+                    The small pencil next to a <b className="font-semibold text-green-600">✓</b> opens that code with the editor already filtered to <b className="font-semibold">that service interval only</b> — the filter can be changed (or cleared) from the dropdown at the top of the editor.
                 </div>
             </div>
 
@@ -1150,11 +1298,12 @@ const AppMapping = ({ onMasterChanged }) => {
 
             {editing && (
                 <AppFormModal
-                    initial={editing}
+                    initial={editing.rec}
+                    initialHours={editing.hours}
                     opts={opts} existing={existingCodes} remaining={map?.remaining || []}
                     onClose={() => setEditing(null)}
                     onSave={async (rec) => {
-                        await updateAppCode(editing.appCode, rec);
+                        await updateAppCode(editing.rec.appCode, rec);
                         toast.success(`${rec.appCode} updated`);
                         await load(false, true);
                         onMasterChanged?.(); // host page badge / coverage stay live
@@ -1168,125 +1317,210 @@ const AppMapping = ({ onMasterChanged }) => {
                     emission={emissionOf(viewing)}
                     commissioning={commissioningByCode.get(String(viewing.appCode || '').trim().toLowerCase()) || ''}
                     onClose={() => setViewing(null)}
-                    onEdit={() => { const rec = viewing; setViewing(null); setEditing(rec); }} />
+                    onEdit={() => { const rec = viewing; setViewing(null); setEditing({ rec, hours: '' }); }} />
             )}
         </div>
     );
 };
 
-/* ------------- Add / Edit modal with parts editor (dropdowns from data) ------------- */
-// Kit fields (Kit Number / Kit Description / Qty / Action) are stored on the part
-// line as altPartNo / altDesc / altQty / altAction. A part "has a kit" when any of
-// them is filled.
-// NOTE: altServiceHours deliberately does NOT count — the master file fills the
-// kit's Service Hours on every row, including the blank rows a kit merges down
-// across; counting it would break every kit block apart.
+/* ------------- Add / Edit modal with parts + kits editor ------------- */
+// LEGACY (import only): in the uploaded master file the kit columns still sit on
+// the part rows — one kit merged down a run of rows, its values on the run's
+// first row and blanks below, and a row repeating its own part number in the kit
+// columns marking a loose part. That is how the importer still identifies which
+// parts formed a kit; once imported the kit is a standalone record.
+// NOTE: altServiceHours deliberately does NOT count as "has kit data" — the file
+// fills it on every row, including the blank ones a kit merges down across.
 const kitHasData = (p) => !!(String(p.altPartNo || '').trim() || String(p.altDesc || '').trim() || String(p.altQty || '').trim() || String(p.altAction || '').trim());
-
-/* ---------------- Kits <-> stored part lines ----------------
-   The sheet models ONE kit covering SEVERAL parts: the kit's first part carries
-   the kit values and the parts under it are blank (a vertical merge). A part in
-   no kit is "loose" and the sheet repeats the part itself in the kit columns
-   (kit number === part number).
-
-   The editor works in those terms — a list of kits, each owning some parts —
-   and converts back to per-part storage on save. __uid / __kitId are UI-only.
-*/
-const blankPart = (uid) => ({ __uid: uid, partNumber: '', partDesc: '', qty: '1', action: 'R', serviceHours: '500', __kitId: null });
 const isLoosePart = (p) => String(p.altPartNo || '').trim() === String(p.partNumber || '').trim();
 
-// Stored part lines -> { parts, kits } for the editor.
-const partsToModel = (raw) => {
-    if (!raw || !raw.length) return { parts: [blankPart('p0')], kits: [] };
-    const parts = [], kits = [];
-    let curKit = null, n = 0;
-    raw.forEach((p, i) => {
-        const line = {
-            __uid: `p${i}`,
+// File rows (with the legacy per-row kit columns) -> standalone kits, each with
+// its OWN copy of the part lines it covered.
+const kitsFromFileRows = (fileParts) => {
+    const kits = [];
+    let cur = null;
+    (fileParts || []).forEach((p) => {
+        const copy = {
             partNumber: p.partNumber || '', partDesc: p.partDesc || '',
-            qty: String(p.qty ?? ''), action: p.action || '',
-            serviceHours: String(p.serviceHours ?? '500'),
-            __kitId: null,
+            qty: p.qty || '', action: p.action || '', serviceHours: p.serviceHours || '',
         };
-        if (kitHasData(p)) {
-            // A part that repeats itself in the kit columns is loose, and it also
-            // ends whatever kit was running above it.
-            if (isLoosePart(p)) curKit = null;
-            else {
-                const k = {
-                    __id: `k${n++}`, number: String(p.altPartNo || ''), desc: String(p.altDesc || ''),
-                    qty: String(p.altQty ?? ''), action: String(p.altAction || ''),
-                    hours: String(p.altServiceHours ?? ''),
-                };
-                kits.push(k);
-                curKit = k.__id;
-                line.__kitId = k.__id;
-            }
-        } else {
-            line.__kitId = curKit; // blank row -> merged into the kit above
-        }
-        parts.push(line);
+        if (kitHasData(p) && isLoosePart(p)) cur = null;               // loose — ends the run above
+        else if (kitHasData(p)) {
+            cur = {
+                kitNumber: p.altPartNo || '', kitDesc: p.altDesc || '', qty: p.altQty || '',
+                action: p.altAction || '', serviceHours: p.altServiceHours || '', parts: [copy],
+            };
+            kits.push(cur);
+        } else if (cur) cur.parts.push(copy);                          // blank row — part of the kit above
     });
-    return { parts, kits };
+    return kits;
 };
 
-// Keep each kit's parts contiguous, anchored at its first member — the sheet can
-// only merge a kit down a run of adjacent rows.
-const orderParts = (parts) => {
-    const out = [], done = new Set();
-    parts.forEach((p) => {
-        if (done.has(p.__uid)) return;
-        if (p.__kitId) parts.filter((q) => q.__kitId === p.__kitId).forEach((q) => { out.push(q); done.add(q.__uid); });
-        else { out.push(p); done.add(p.__uid); }
-    });
-    return out;
-};
+/* ---------------- Editor model ----------------
+   Parts and kits are two independent lists. A kit holds its own part lines
+   (copied when it was built), so nothing points from a part to a kit or back.
+   __uid / __id are UI identity only and never reach the API. */
+const blankPart = (uid) => ({ __uid: uid, partNumber: '', partDesc: '', qty: '1', action: 'R', serviceHours: '500' });
+const asLine = (uid, p) => ({
+    __uid: uid,
+    partNumber: p.partNumber || '', partDesc: p.partDesc || '',
+    qty: String(p.qty ?? ''), action: p.action || '', serviceHours: String(p.serviceHours ?? ''),
+});
 
-// { parts, kits } -> stored part lines.
-const modelToParts = (parts, kits) => {
-    const ordered = orderParts(parts);
-    const firstOf = {};
-    ordered.forEach((p, i) => { if (p.__kitId && !(p.__kitId in firstOf)) firstOf[p.__kitId] = i; });
-    return ordered.map((p, i) => {
-        const out = {
+// Stored record -> editor model.
+const recordToModel = (rec) => ({
+    parts: (rec?.parts?.length ? rec.parts.map((p, i) => asLine(`p${i}`, p)) : [blankPart('p0')]),
+    kits: kitsOf(rec).map((k, i) => ({
+        __id: `k${i}`,
+        number: k.kitNumber || '', desc: k.kitDesc || '',
+        qty: String(k.qty ?? ''), action: k.action || '', hours: String(k.serviceHours ?? ''),
+        parts: (k.parts || []).map((p, j) => asLine(`k${i}p${j}`, p)),
+    })),
+});
+
+// Editor model -> API payload. The part lines no longer carry any kit data.
+const modelToPayload = (parts, kits) => ({
+    parts: parts.map((p) => ({
+        partNumber: p.partNumber.trim(), partDesc: p.partDesc.trim(), qty: String(p.qty).trim(),
+        action: p.action.trim(), serviceHours: String(p.serviceHours).trim(), schedule: '',
+        altPartNo: '', altDesc: '', altQty: '', altAction: '', altServiceHours: '',
+    })),
+    kits: kits.map((k) => ({
+        kitNumber: k.number.trim(), kitDesc: k.desc.trim(), qty: String(k.qty).trim(),
+        action: k.action.trim(), serviceHours: String(k.hours || '').trim(),
+        parts: k.parts.map((p) => ({
             partNumber: p.partNumber.trim(), partDesc: p.partDesc.trim(), qty: String(p.qty).trim(),
-            action: p.action.trim(), serviceHours: String(p.serviceHours).trim(), schedule: '',
-            altPartNo: '', altDesc: '', altQty: '', altAction: '', altServiceHours: '',
-        };
-        const k = p.__kitId && kits.find((x) => x.__id === p.__kitId);
-        if (k) {
-            // Only the kit's first part carries it; the rest stay blank so the
-            // sheet merges the kit down across them.
-            if (firstOf[p.__kitId] === i) {
-                out.altPartNo = k.number.trim(); out.altDesc = k.desc.trim();
-                out.altQty = String(k.qty).trim(); out.altAction = k.action.trim();
-                out.altServiceHours = String(k.hours || '').trim();
-            }
-        } else {
-            // Loose part — supplied as-is, so the kit columns repeat the part.
-            out.altPartNo = out.partNumber; out.altDesc = out.partDesc;
-            out.altQty = out.qty; out.altAction = out.action;
-            out.altServiceHours = out.serviceHours;
-        }
-        return out;
-    });
+            action: p.action.trim(), serviceHours: String(p.serviceHours || '').trim(),
+        })),
+    })),
+});
+
+// Shared field styling for the editor (also used by KitBox below).
+const INP = 'w-full rounded-md border border-gray-300 px-1.5 py-1 text-[12px] text-black bg-white outline-none focus:ring-1 focus:ring-indigo-200';
+const KIT_INP = 'w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-[12px] text-black outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 transition';
+const KIT_LBL = 'block text-center text-[9.5px] font-bold uppercase tracking-wide text-gray-700 mb-0.5';
+
+// Everything is mandatory. A part line — a service part or a kit's own copy —
+// counts as complete only when all five of its fields are filled.
+const partComplete = (p) =>
+    p.partNumber.trim() && p.partDesc.trim() && String(p.qty).trim() &&
+    p.action.trim() && String(p.serviceHours).trim();
+// A kit needs all five of its own fields AND at least one complete part line.
+const kitComplete = (k) =>
+    k.number.trim() && k.desc.trim() && String(k.qty).trim() && k.action.trim() &&
+    String(k.hours || '').trim() &&
+    k.parts.length > 0 && k.parts.every(partComplete);
+
+/* ------------- One kit: its details + its OWN part lines -------------
+   These part lines are the kit's copies. Editing one, adding a new one or
+   deleting one changes only this kit — never the application code's service
+   parts, and never another kit that happens to hold the same part number. */
+const KitBox = ({ k, index, opts, onSet, onSetPart, onAddPart, onDeletePart, onRemove, onDone, doneLabel = 'OK' }) => {
+    const ready = kitComplete(k);
+    return (
+        <div className="rounded-lg border border-indigo-200 bg-white px-3 py-2.5 mb-2">
+            <div className="flex items-center gap-2 mb-2 max-md:flex-wrap">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-black">Kit {index + 1}</span>
+                <span className="text-[10.5px] font-medium text-gray-700">{k.parts.length} part line{k.parts.length === 1 ? '' : 's'} of its own</span>
+                {!ready && (
+                    <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                        Please complete the kit details (Svc Hrs included) and its part lines
+                    </span>
+                )}
+                {onRemove && (
+                    <button type="button" onClick={onRemove}
+                        className="ml-auto rounded border border-red-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-red-500 hover:bg-red-50 transition">
+                        Remove kit
+                    </button>
+                )}
+            </div>
+            <div className="grid grid-cols-[.9fr_2.1fr_.4fr_.6fr_.5fr] gap-2 max-md:grid-cols-2">
+                <div>
+                    <label className={KIT_LBL}>Kit Number <span className="text-red-500">*</span></label>
+                    <input className={`${KIT_INP} font-mono`} value={k.number} onChange={(e) => onSet('number', e.target.value)} placeholder="e.g. 3H.019.11.0.SP" />
+                </div>
+                <div>
+                    <label className={KIT_LBL}>Kit Description <span className="text-red-500">*</span></label>
+                    <input className={KIT_INP} value={k.desc} onChange={(e) => onSet('desc', e.target.value)} placeholder="e.g. 50 Hrs - A Check Maintenance Kit" />
+                </div>
+                <div>
+                    <label className={KIT_LBL}>Qty <span className="text-red-500">*</span></label>
+                    <input className={`${KIT_INP} font-mono text-center`} value={k.qty} onChange={(e) => onSet('qty', e.target.value)} />
+                </div>
+                <div>
+                    <label className={KIT_LBL}>Action <span className="text-red-500">*</span></label>
+                    <Combo value={k.action} onChange={(v) => onSet('action', v)} options={opts.actOpts} mono fieldCls={KIT_INP} />
+                </div>
+                <div>
+                    <label className={KIT_LBL}>Svc Hrs <span className="text-red-500">*</span></label>
+                    <Combo value={k.hours || ''} onChange={(v) => onSet('hours', v)} options={opts.hrsOpts} mono fieldCls={KIT_INP} />
+                </div>
+            </div>
+
+            {/* The kit's own part lines — fully editable and extendable here */}
+            <div className="mt-2 text-[9.5px] font-bold uppercase tracking-wide text-gray-700">
+                Parts in this kit <span className="font-normal normal-case text-gray-500">— this kit's own copies; editing them does not touch the service parts above</span>
+            </div>
+            <div className="mt-1 border border-gray-200 rounded-lg overflow-x-auto qm-scroll">
+                <table className="min-w-[720px] w-full border-collapse">
+                    <thead>
+                        <tr className="bg-gray-100/80 text-[9.5px] font-bold text-black uppercase tracking-wide border-b border-gray-200">
+                            <th className="px-2 py-1.5 text-center w-44">Part Number <span className="text-red-500">*</span></th>
+                            <th className="px-2 py-1.5 text-center">Description <span className="text-red-500">*</span></th>
+                            <th className="px-2 py-1.5 text-center w-16">Qty <span className="text-red-500">*</span></th>
+                            <th className="px-2 py-1.5 text-center w-20">Action <span className="text-red-500">*</span></th>
+                            <th className="px-2 py-1.5 text-center w-24">Svc Hrs <span className="text-red-500">*</span></th>
+                            <th className="w-9" />
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {k.parts.map((p) => (
+                            <tr key={p.__uid} className="border-t border-gray-100">
+                                <td className="px-1.5 py-1"><input className={`${INP} font-mono`} value={p.partNumber} onChange={(e) => onSetPart(p.__uid, 'partNumber', e.target.value)} /></td>
+                                <td className="px-1.5 py-1"><input className={INP} value={p.partDesc} onChange={(e) => onSetPart(p.__uid, 'partDesc', e.target.value)} /></td>
+                                <td className="px-1.5 py-1"><input className={`${INP} font-mono`} value={p.qty} onChange={(e) => onSetPart(p.__uid, 'qty', e.target.value)} /></td>
+                                <td className="px-1.5 py-1"><Combo value={p.action} onChange={(v) => onSetPart(p.__uid, 'action', v)} options={opts.actOpts} mono fieldCls={INP} /></td>
+                                <td className="px-1.5 py-1"><Combo value={p.serviceHours} onChange={(v) => onSetPart(p.__uid, 'serviceHours', v)} options={opts.hrsOpts} mono fieldCls={INP} /></td>
+                                <td className="px-1.5 py-1 text-center">
+                                    <button type="button" onClick={() => onDeletePart(p.__uid)} title="Remove this part from the kit"
+                                        className="rounded-md border border-gray-200 p-1 text-gray-400 hover:text-red-600 hover:border-red-300 hover:bg-red-50">
+                                        <TrashIcon className="h-3.5 w-3.5" />
+                                    </button>
+                                </td>
+                            </tr>
+                        ))}
+                        {k.parts.length === 0 && (
+                            <tr><td colSpan={6} className="text-center text-gray-400 py-3 text-[12px]">No parts in this kit yet — add a line.</td></tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 mt-2">
+                <button type="button" onClick={onAddPart}
+                    className="inline-flex items-center gap-1 rounded-lg border border-gray-400 bg-white px-2.5 py-0.5 text-[12px] font-bold text-gray-800 hover:bg-gray-50 transition">
+                    <PlusIcon className="h-3.5 w-3.5" /> Add part to this kit
+                </button>
+                {onDone && (
+                    <button type="button" disabled={!ready}
+                        title={ready ? 'Done — this kit is complete' : 'Fill Kit Number, Description, Qty, Action and Svc Hrs, and every field of its part lines'}
+                        onClick={onDone}
+                        className="ml-auto rounded-lg px-4 py-1 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                        style={{ backgroundColor: themeColor }}>
+                        {doneLabel}
+                    </button>
+                )}
+            </div>
+        </div>
+    );
 };
 
 /* ------------- Read-only preview of one master app code (from App Mapping) -------------
-   Uses the SAME sheet layout as the Master Data tab: the application-code columns
-   merge down the code's part rows, and a kit merges down the parts that share it. */
+   Uses the SAME sheet layout as the Master Data tab: each kit lists its own part
+   copies (kit details on the block's first row only), then the loose parts. */
 const AppViewModal = ({ record, services = [], emission, commissioning, onClose, onEdit }) => {
     const a = record || {};
-    const lines = (a.parts && a.parts.length) ? a.parts : [null];
-    // Same kit-block spans as the Master Data sheet: a part carrying kit data opens
-    // a block; each following part with no kit data of its own extends it.
-    const kitAt = {};
-    let start = 0;
-    lines.forEach((p, i) => {
-        if (i === 0 || (p && kitHasData(p))) { kitAt[i] = { p, span: 1 }; start = i; }
-        else kitAt[start].span++;
-    });
-    const span = lines.length;
+    const srows = sheetRowsOf(a);
+    const span = srows.length;
     const appTd = 'px-3 py-1 border border-gray-200 align-middle bg-white';
 
     return (
@@ -1315,6 +1549,10 @@ const AppViewModal = ({ record, services = [], emission, commissioning, onClose,
                         <span><span className="font-semibold text-gray-500">Emission Norm:</span> {emission || a.emission || '—'}</span>
                         <span><span className="font-semibold text-gray-500">Commissioning Date:</span> {commissioning ? fmtDMY(commissioning) : '—'}</span>
                         <span><span className="font-semibold text-gray-500">Part Lines:</span> {a.parts?.length || 0}</span>
+                        <span><span className="font-semibold text-gray-500">Kits:</span> {kitsOf(a).length}</span>
+                        <span><span className="font-semibold text-gray-500">Loose Parts:</span> {loosePartsOf(a).length}</span>
+                        <span><span className="font-semibold text-gray-500">Added by:</span> {a.createdBy || '—'}</span>
+                        <span><span className="font-semibold text-gray-500">Last edited by:</span> {a.updatedBy || '—'}</span>
                     </div>
                     {/* Master-sheet-format table for this single code */}
                     <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto qm-scroll shadow-sm">
@@ -1345,11 +1583,10 @@ const AppViewModal = ({ record, services = [], emission, commissioning, onClose,
                                 </tr>
                             </thead>
                             <tbody>
-                                {lines.map((p, i) => {
-                                    const kit = kitAt[i];
-                                    const last = i === lines.length - 1;
-                                    const partEnd = last ? BLOCK_END : undefined;
-                                    const kitEnd = kit && i + kit.span === lines.length ? BLOCK_END : undefined;
+                                {srows.map((r, i) => {
+                                    const p = r.part;
+                                    const last = i === srows.length - 1;
+                                    const rowEnd = last ? BLOCK_END : undefined;
                                     return (
                                         <tr key={i} className="hover:bg-indigo-50/30 transition">
                                             {i === 0 && (
@@ -1364,20 +1601,16 @@ const AppViewModal = ({ record, services = [], emission, commissioning, onClose,
                                                     <td rowSpan={span} style={BLOCK_END} className={`${appTd} text-center text-gray-600 whitespace-nowrap`}>{a.kva ? `${cleanKva(a.kva)} KVA` : '—'}</td>
                                                 </>
                                             )}
-                                            <td style={partEnd} className="px-3 py-1 border border-gray-200 font-mono text-gray-800 whitespace-nowrap">{p?.partNumber || '—'}</td>
-                                            <td style={partEnd} className="px-3 py-1 border border-gray-200 text-gray-700 min-w-[240px]">{p?.partDesc || '—'}</td>
-                                            <td style={partEnd} className="px-3 py-1 border border-gray-200 text-center">{p?.qty || '—'}</td>
-                                            <td style={partEnd} className="px-3 py-1 border border-gray-200 text-center"><Chip a={p?.action} /></td>
-                                            <td style={partEnd} className="px-3 py-1 border border-gray-200 text-center font-mono" title={p ? partService(services, p).name : ''}>{p?.serviceHours || '—'}</td>
-                                            {kit && (
-                                                <>
-                                                    <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 font-mono text-gray-600 align-middle whitespace-nowrap bg-amber-50/20">{kit.p?.altPartNo || '—'}</td>
-                                                    <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-gray-600 align-middle min-w-[200px] bg-amber-50/20">{kit.p?.altDesc || '—'}</td>
-                                                    <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center text-gray-600 align-middle bg-amber-50/20">{kit.p?.altQty || '—'}</td>
-                                                    <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center align-middle bg-amber-50/20"><Chip a={kit.p?.altAction} /></td>
-                                                    <td rowSpan={kit.span} style={kitEnd} className="px-3 py-1 border border-gray-200 text-center font-mono text-gray-600 align-middle bg-amber-50/20">{kit.p?.altServiceHours || '—'}</td>
-                                                </>
-                                            )}
+                                            <td style={rowEnd} className="px-3 py-1 border border-gray-200 font-mono text-gray-800 whitespace-nowrap">{p?.partNumber || '—'}</td>
+                                            <td style={rowEnd} className="px-3 py-1 border border-gray-200 text-gray-700 min-w-[240px]">{p?.partDesc || '—'}</td>
+                                            <td style={rowEnd} className="px-3 py-1 border border-gray-200 text-center">{p?.qty || '—'}</td>
+                                            <td style={rowEnd} className="px-3 py-1 border border-gray-200 text-center"><Chip a={p?.action} /></td>
+                                            <td style={rowEnd} className="px-3 py-1 border border-gray-200 text-center font-mono" title={p ? partService(services, p).name : ''}>{p?.serviceHours || '—'}</td>
+                                            <td style={rowEnd} className={`px-3 py-1 border border-gray-200 font-mono text-gray-600 whitespace-nowrap bg-amber-50/20`}>{r.kit ? (r.kit.kitNumber || '—') : '—'}</td>
+                                            <td style={rowEnd} className={`px-3 py-1 border border-gray-200 text-gray-600 min-w-[200px] bg-amber-50/20`}>{r.kit ? (r.kit.kitDesc || '—') : '—'}</td>
+                                            <td style={rowEnd} className={`px-3 py-1 border border-gray-200 text-center text-gray-600 bg-amber-50/20`}>{r.kit ? (r.kit.qty || '—') : '—'}</td>
+                                            <td style={rowEnd} className={`px-3 py-1 border border-gray-200 text-center bg-amber-50/20`}>{r.kit ? <Chip a={r.kit.action} /> : '—'}</td>
+                                            <td style={rowEnd} className={`px-3 py-1 border border-gray-200 text-center font-mono text-gray-600 bg-amber-50/20`}>{r.kit ? (r.kit.serviceHours || '—') : '—'}</td>
                                         </tr>
                                     );
                                 })}
@@ -1385,8 +1618,56 @@ const AppViewModal = ({ record, services = [], emission, commissioning, onClose,
                         </table>
                     </div>
                     <div className="px-1 pt-1.5 text-[10.5px] text-gray-400">
-                        Application-code and kit cells span their part rows, the same way the master file merges them.
+                        Two separate lists side by side. Part Details: the service parts a kit copied, then the loose ones. Kit Details: all the kits, then “—” rows, then the loose parts copied across. Nothing on the right belongs to the part on its left. Each kit's own part lines are shown below.
                     </div>
+
+                    {/* Each kit's own part lines — information only, which is why they
+                        are not part of the sheet above. */}
+                    {kitsOf(a).length > 0 && (
+                        <div className="mt-3">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
+                                Kit contents <span className="font-normal normal-case text-gray-400">— each kit's own part lines, kept separately from the service parts above</span>
+                            </div>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+                                {kitsOf(a).map((k, ki) => (
+                                    <div key={ki} className="rounded-xl border border-amber-200 bg-white overflow-hidden shadow-sm">
+                                        <div className="flex flex-wrap items-baseline gap-x-2 px-2.5 py-1.5 bg-amber-50/60 border-b border-amber-200">
+                                            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800">Kit {ki + 1}</span>
+                                            <span className="font-mono text-[12px] font-bold text-gray-800">{k.kitNumber || '—'}</span>
+                                            <span className="text-[11px] text-gray-600 truncate">{k.kitDesc || '—'}</span>
+                                            <span className="ml-auto text-[10.5px] font-mono text-gray-500 whitespace-nowrap">
+                                                Qty {k.qty || '—'} · {k.action || '—'} · {k.serviceHours || '—'} Hr
+                                            </span>
+                                        </div>
+                                        <table className="w-full text-[11.5px]">
+                                            <thead>
+                                                <tr className="bg-gray-50 text-[9.5px] font-semibold text-gray-600 uppercase tracking-wider">
+                                                    <th className="px-2 py-1 border-b border-gray-200 text-left">Part Number</th>
+                                                    <th className="px-2 py-1 border-b border-gray-200 text-left">Description</th>
+                                                    <th className="px-2 py-1 border-b border-gray-200 text-center w-12">Qty</th>
+                                                    <th className="px-2 py-1 border-b border-gray-200 text-center w-12">Act</th>
+                                                    <th className="px-2 py-1 border-b border-gray-200 text-center w-16">Svc Hrs</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {(k.parts || []).length === 0 ? (
+                                                    <tr><td colSpan={5} className="px-2 py-2 text-center text-gray-400">This kit has no part lines.</td></tr>
+                                                ) : k.parts.map((p, pi) => (
+                                                    <tr key={pi} className="border-b border-gray-50 last:border-0">
+                                                        <td className="px-2 py-1 font-mono text-gray-800 whitespace-nowrap">{p.partNumber || '—'}</td>
+                                                        <td className="px-2 py-1 text-gray-600">{p.partDesc || '—'}</td>
+                                                        <td className="px-2 py-1 text-center text-gray-600">{p.qty || '—'}</td>
+                                                        <td className="px-2 py-1 text-center"><Chip a={p.action} /></td>
+                                                        <td className="px-2 py-1 text-center font-mono text-gray-600">{p.serviceHours || '—'}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
                 <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-200 bg-white max-md:px-3">
                     <button onClick={onClose} className="rounded-lg border border-gray-300 bg-white px-4 py-1.5 text-[12px] font-semibold text-gray-700 hover:bg-gray-50 transition">Close</button>
@@ -1399,7 +1680,7 @@ const AppViewModal = ({ record, services = [], emission, commissioning, onClose,
     );
 };
 
-const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClose, onSave }) => {
+const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, remaining = [], onClose, onSave }) => {
     const isEdit = !!initial;
 
     // ---- Local draft (Option 1): auto-save the in-progress form to the browser
@@ -1419,23 +1700,22 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
         systemAppCode: initial ? (initial.systemAppCode || '') : sysOf(prefill?.appCode || ''),
         emission: initial?.emission || prefill?.emission || 'CPCB IV+',
     });
-    // Rebuild the kit-centric editing model from the stored part lines. Pure and
-    // deterministic (ids are positional), so calling it twice — once for state,
-    // once for the pristine baseline — yields identical snapshots.
-    const makeInitialModel = () => partsToModel(initial ? initial.parts : null);
+    // Rebuild the editing model (parts + independent kits) from the stored record.
+    // Pure and deterministic (ids are positional), so calling it twice — once for
+    // state, once for the pristine baseline — yields identical snapshots.
+    const makeInitialModel = () => recordToModel(initial);
     // Add drafts share one slot; edit drafts are keyed per app code.
     const draftKey = isEdit ? `msm:appDraft:edit:${initial.appCode}` : (prefill?.appCode ? `msm:appDraft:new:${prefill.appCode}` : 'msm:appDraft:new');
     // Snapshot of the pristine form — we only persist (and only prompt) when the
     // current form actually differs from this, so blank/no-op drafts never linger.
-    // __uid is stripped (pure UI identity); __kitId is kept, since re-grouping
-    // parts into kits is a real edit.
+    // __uid / __id are stripped (pure UI identity).
     const snap = (h, ps, ks) => JSON.stringify({
         hdr: h,
         parts: (ps || []).map(({ __uid, ...p }) => p),
-        kits: (ks || []).map(({ __id, ...k }) => k),
+        kits: (ks || []).map(({ __id, parts: kps, ...k }) => ({ ...k, parts: (kps || []).map(({ __uid, ...p }) => p) })),
     });
     const baseRef = useRef((() => { const m = makeInitialModel(); return snap(makeInitialHdr(), m.parts, m.kits); })());
-    const uidRef = useRef(1000); // part ids for lines added after mount
+    const uidRef = useRef(1000); // ids for part / kit-part lines added after mount
     const nextUid = () => `p${++uidRef.current}`;
 
     const [hdr, setHdr] = useState(makeInitialHdr);
@@ -1492,7 +1772,10 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
         if (Array.isArray(d?.parts) && d.parts.length) {
             setModel({
                 parts: d.parts.map((p, i) => ({ ...blankPart(p.__uid || `p${i}`), ...p })),
-                kits: Array.isArray(d.kits) ? d.kits : [],
+                kits: (Array.isArray(d.kits) ? d.kits : []).map((k, i) => ({
+                    __id: k.__id || `k${i}`, number: '', desc: '', qty: '', action: '', hours: '', ...k,
+                    parts: (k.parts || []).map((p, j) => ({ ...blankPart(p.__uid || `k${i}p${j}`), ...p })),
+                })),
             });
         }
         setPendingDraft(null);
@@ -1505,60 +1788,92 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
     const setPart = (i, k, v) => setParts((arr) => arr.map((p, j) => (j === i ? { ...p, [k]: v } : p)));
     const setKit = (id, k, v) => setModel((m) => ({ ...m, kits: m.kits.map((x) => (x.__id === id ? { ...x, [k]: v } : x)) }));
 
-    // Only loose parts can be ticked — a part already in a kit is locked until it
-    // is taken out of that kit, so it can never end up in two kits at once.
-    const loosePartsList = parts.filter((p) => !p.__kitId);
-    const checkedUids = loosePartsList.filter((p) => checked[p.__uid]).map((p) => p.__uid);
+    // A kit part line is edited entirely inside its kit — it is a copy, so this
+    // never reaches back into the service-part list.
+    const setKitPart = (kitId, uid, key, v) => setModel((m) => ({
+        ...m,
+        kits: m.kits.map((k) => (k.__id === kitId
+            ? { ...k, parts: k.parts.map((p) => (p.__uid === uid ? { ...p, [key]: v } : p)) }
+            : k)),
+    }));
+    const addKitPart = (kitId) => setModel((m) => ({
+        ...m,
+        kits: m.kits.map((k) => (k.__id === kitId ? { ...k, parts: [...k.parts, blankPart(nextUid())] } : k)),
+    }));
+    const deleteKitPart = (kitId, uid) => setModel((m) => ({
+        ...m,
+        kits: m.kits.map((k) => (k.__id === kitId ? { ...k, parts: k.parts.filter((p) => p.__uid !== uid) } : k)),
+    }));
 
-    // Group the ticked parts into one new kit, dropping any kit left with no
-    // parts. Returns the new kit's id so the flow can open its details form.
+    // EVERY part can be ticked, not just the ones no kit uses yet: the same part
+    // may go into as many kits as needed (1,2,3 can form Kit 1 AND Kit 2).
+    const checkedUids = parts.filter((p) => checked[p.__uid]).map((p) => p.__uid);
+    // Loose = the service parts no kit currently contains (matched by part number,
+    // since the two sides are otherwise unrelated). Display only.
+    const kitPartNos = new Set(kits.flatMap((k) => k.parts.map((p) => normPn(p.partNumber))).filter(Boolean));
+    const loosePartsList = parts.filter((p) => !kitPartNos.has(normPn(p.partNumber)));
+
+    // Build a new kit by COPYING the ticked part lines into it. The copies are
+    // independent from that moment on — editing either side changes only itself.
+    // Returns the new kit's id so the flow can open its details form.
     const addKitFromChecked = () => {
         if (!checkedUids.length) return null;
         const take = new Set(checkedUids);
         const id = `k${Date.now().toString(36)}`;
         setModel((m) => {
-            const nextParts = m.parts.map((p) => (take.has(p.__uid) ? { ...p, __kitId: id } : p));
-            const used = new Set(nextParts.map((p) => p.__kitId).filter(Boolean));
+            const copies = m.parts.filter((p) => take.has(p.__uid)).map((p) => ({ ...p, __uid: nextUid() }));
             return {
-                parts: nextParts,
-                kits: [...m.kits.filter((k) => used.has(k.__id)), { __id: id, number: '', desc: '', qty: '1', action: 'R', hours: '' }],
+                parts: m.parts,
+                kits: [...m.kits, {
+                    __id: id, number: '', desc: '', qty: '1', action: 'R',
+                    // Svc Hrs is mandatory — start it on the copied parts' own
+                    // interval, which is what a kit for those parts normally is.
+                    hours: String(copies[0]?.serviceHours || ''),
+                    parts: copies,
+                }],
             };
         });
         setChecked({});
         return id;
     };
-    // Ungroup: its parts go back to being loose.
-    const removeKit = (id) => setModel((m) => ({
-        parts: m.parts.map((p) => (p.__kitId === id ? { ...p, __kitId: null } : p)),
-        kits: m.kits.filter((k) => k.__id !== id),
-    }));
-    // Drop one part out of its kit, removing the kit if that emptied it.
-    const removeFromKit = (uid) => setModel((m) => {
-        const nextParts = m.parts.map((p) => (p.__uid === uid ? { ...p, __kitId: null } : p));
-        const used = new Set(nextParts.map((p) => p.__kitId).filter(Boolean));
-        return { parts: nextParts, kits: m.kits.filter((k) => used.has(k.__id)) };
-    });
-    const deletePart = (uid) => setModel((m) => {
-        const nextParts = m.parts.filter((p) => p.__uid !== uid);
-        const used = new Set(nextParts.map((p) => p.__kitId).filter(Boolean));
-        return { parts: nextParts, kits: m.kits.filter((k) => used.has(k.__id)) };
-    });
+    const removeKit = (id) => setModel((m) => ({ ...m, kits: m.kits.filter((k) => k.__id !== id) }));
+    // Deleting a service part leaves every kit untouched — a kit holds copies.
+    const deletePart = (uid) => setModel((m) => ({ ...m, parts: m.parts.filter((p) => p.__uid !== uid) }));
 
-    const sel = 'w-full rounded-md border border-gray-300 px-1.5 py-1 text-[12px] text-black bg-white outline-none focus:ring-1 focus:ring-indigo-200';
-    const inp = 'w-full rounded-md border border-gray-300 px-1.5 py-1 text-[12px] text-black bg-white outline-none focus:ring-1 focus:ring-indigo-200';
-    const kitInp = 'w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-[12px] text-black outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 transition';
-    const kitLbl = 'block text-center text-[9.5px] font-bold uppercase tracking-wide text-gray-700 mb-0.5';
+    const inp = INP;
     const field = 'w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-[13px] text-black outline-none focus:border-gray-400 focus:ring-2 focus:ring-indigo-100 transition';
     const label = 'block text-[12px] font-bold text-gray-800 mb-1';
 
-    // Everything is mandatory. A part line is "complete" only when all five fields
-    // are filled; a new line can't be added (and nothing saved) until then.
-    const partComplete = (p) =>
-        p.partNumber.trim() && p.partDesc.trim() && String(p.qty).trim() &&
-        p.action.trim() && String(p.serviceHours).trim();
+    // ---- Svc Hrs filter (top bar) ----------------------------------------
+    // '' = every interval. Set from the App Mapping coverage-column pencil, so
+    // clicking the 500 Hr tick opens this record showing only its 500 Hr work.
+    // DISPLAY ONLY — hidden lines stay in the model and are still saved and
+    // still validated, so a filtered edit can never drop the other intervals.
+    const [hrsFilter, setHrsFilter] = useState(String(initialHours || ''));
+    const hrsEq = (v) => String(v ?? '').trim() === hrsFilter;
+    // Keep each row's real index — setPart / kits are addressed by position.
+    const partRows = parts
+        .map((p, i) => ({ p, i }))
+        .filter(({ p }) => !hrsFilter || hrsEq(p.serviceHours));
+    // A kit belongs to the interval when its own Svc Hrs matches, or when any of
+    // its part copies do (kits built from mixed lines still show up).
+    const kitRows = kits
+        .map((k, ki) => ({ k, ki }))
+        .filter(({ k }) => !hrsFilter || hrsEq(k.hours) || k.parts.some((p) => hrsEq(p.serviceHours)));
+    const hiddenParts = parts.length - partRows.length;
+    const hiddenKits = kits.length - kitRows.length;
+    // Warn when something the filter hides is what is blocking the save.
+    // Changing the filter drops any pending kit selection — a hidden ticked row
+    // must never end up copied into a kit the user cannot see.
+    useEffect(() => { setChecked({}); }, [hrsFilter]);
+    const hiddenIncomplete = !!hrsFilter && (
+        parts.some((p) => !hrsEq(p.serviceHours) && !partComplete(p)) ||
+        kits.some((k) => !(hrsEq(k.hours) || k.parts.some((p) => hrsEq(p.serviceHours))) && !kitComplete(k))
+    );
+
+    // A new part line can't be added (and nothing saved) until the current ones
+    // are complete. partComplete / kitComplete are shared with KitBox.
     const allPartsComplete = parts.length > 0 && parts.every(partComplete);
-    // A kit is only meaningful with all four of its fields filled in.
-    const kitComplete = (k) => k.number.trim() && k.desc.trim() && String(k.qty).trim() && k.action.trim();
     const allKitsComplete = kits.every(kitComplete);
     const hdrComplete =
         hdr.appCode.trim() && hdr.segment.trim() && String(hdr.kva).trim() &&
@@ -1571,11 +1886,11 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
         if (!isEdit && existing.has(code)) { toast.error(`${code} already exists — use Edit`); return; }
         if (parts.length === 0) { toast.error('Add at least one part line.'); return; }
         if (!allPartsComplete) { toast.error('Please fill every field in all part lines.'); return; }
-        if (!allKitsComplete) { toast.error('Please fill every field in all kits.'); return; }
+        if (!allKitsComplete) { toast.error('Please fill every kit — its details and all of its part lines.'); return; }
         const rec = {
             appCode: code, segment: hdr.segment.trim(), kva: String(hdr.kva).trim(), engineModel: hdr.engineModel.trim(),
             systemAppCode: hdr.systemAppCode.trim(), emission: hdr.emission.trim(),
-            parts: modelToParts(parts, kits),
+            ...modelToPayload(parts, kits),
         };
         setSaving(true);
         try {
@@ -1602,7 +1917,18 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                             {isEdit ? hdr.appCode : 'Enter the code, its service parts, and any kits'}
                         </p>
                     </div>
-                    <button onClick={onClose} disabled={saving} className="ml-auto rounded-lg p-1 text-white/70 hover:bg-white/15 hover:text-white transition disabled:opacity-50"><XMarkIcon className="h-5 w-5" /></button>
+                    {/* Service-interval filter — narrows the service parts AND the kits
+                        below to one Svc Hrs. Nothing is removed, only hidden. */}
+                    <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-white/70 max-sm:hidden">Svc Hrs</span>
+                        <select value={hrsFilter} onChange={(e) => setHrsFilter(e.target.value)} disabled={stage !== 'build'}
+                            title="Show only the service parts and kits of one service interval"
+                            className="rounded-lg border border-white/30 bg-white/15 px-2 py-1 text-[12px] font-semibold text-white outline-none transition hover:bg-white/25 focus:bg-white/25 disabled:opacity-50">
+                            <option value="" className="text-gray-800">All service hours</option>
+                            {opts.hrsOpts.map((h) => <option key={h} value={String(h)} className="text-gray-800">{h} Hr</option>)}
+                        </select>
+                    </div>
+                    <button onClick={onClose} disabled={saving} className="rounded-lg p-1 text-white/70 hover:bg-white/15 hover:text-white transition disabled:opacity-50 flex-shrink-0"><XMarkIcon className="h-5 w-5" /></button>
                 </div>
                 <div className="px-5 py-4 max-h-[72vh] overflow-y-auto bg-gray-50/60 max-md:px-3">
                     {pendingDraft && (
@@ -1680,10 +2006,27 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                         <div className="flex items-center gap-2 mb-1 max-md:flex-wrap">
                             <WrenchScrewdriverIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
                             <span className="text-[11px] uppercase tracking-wider font-bold text-black">Service Parts <span className="text-red-500">*</span></span>
-                            <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold text-gray-500">{parts.length}</span>
+                            <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold text-gray-500">
+                                {hrsFilter ? `${partRows.length} of ${parts.length}` : parts.length}
+                            </span>
+                            {hrsFilter && (
+                                <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-[#2f3192]">
+                                    {hrsFilter} Hr only
+                                    <button type="button" onClick={() => setHrsFilter('')} title="Show every service interval"
+                                        className="rounded-full px-1 leading-none hover:bg-indigo-100">✕</button>
+                                </span>
+                            )}
                             <span className="h-px flex-1 bg-gray-100 max-md:hidden" />
                         </div>
-                        <p className="text-[11px] font-medium text-gray-700 mb-2.5">Add every part line first — you can group parts into kits in the step below.</p>
+                        <p className="text-[11px] font-medium text-gray-700 mb-2.5">
+                            {hrsFilter ? (
+                                <>Showing only the <b className="font-mono">{hrsFilter} Hr</b> part lines{hiddenParts > 0 ? <> — {hiddenParts} line{hiddenParts === 1 ? '' : 's'} of the other intervals {hiddenParts === 1 ? 'is' : 'are'} hidden</> : null}.
+                                    They are <b>not</b> removed: everything is still saved with the record.</>
+                            ) : (
+                                <>Add every part line first — you can copy parts into kits in the step below.
+                                    A kit keeps its own copy, so changing a part here never changes a kit.</>
+                            )}
+                        </p>
                     <div className="border border-gray-300 rounded-lg overflow-x-auto qm-scroll">
                         <table className="min-w-[860px] w-full border-collapse">
                             <thead>
@@ -1691,63 +2034,59 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                                     <th className="px-2 py-1.5 text-center w-44">Part Number <span className="text-red-500">*</span></th><th className="px-2 py-1.5 text-center">Description <span className="text-red-500">*</span></th>
                                     <th className="px-2 py-1.5 text-center w-16">Qty <span className="text-red-500">*</span></th><th className="px-2 py-1.5 text-center w-20">Action <span className="text-red-500">*</span></th>
                                     <th className="px-2 py-1.5 text-center w-24">Svc Hrs <span className="text-red-500">*</span></th>
-                                    {kits.length > 0 && <th className="px-2 py-1.5 text-center w-20">Kit</th>}
                                     <th className="w-9" />
                                 </tr>
                             </thead>
                             <tbody>
-                                {parts.map((p, i) => {
-                                    const kIdx = p.__kitId ? kits.findIndex((k) => k.__id === p.__kitId) : -1;
-                                    const inKit = kIdx >= 0;
-                                    return (
-                                        <tr key={p.__uid} className={`border-t border-gray-100 ${inKit ? 'bg-amber-50/20' : ''}`}>
-                                            <td className="px-1.5 py-1"><input className={`${inp} font-mono`} value={p.partNumber} onChange={(e) => setPart(i, 'partNumber', e.target.value)} /></td>
-                                            <td className="px-1.5 py-1"><input className={inp} value={p.partDesc} onChange={(e) => setPart(i, 'partDesc', e.target.value)} /></td>
-                                            <td className="px-1.5 py-1"><input className={`${inp} font-mono`} value={p.qty} onChange={(e) => setPart(i, 'qty', e.target.value)} /></td>
-                                            <td className="px-1.5 py-1"><Combo value={p.action} onChange={(v) => setPart(i, 'action', v)} options={opts.actOpts} mono fieldCls={inp} /></td>
-                                            <td className="px-1.5 py-1"><Combo value={p.serviceHours} onChange={(v) => setPart(i, 'serviceHours', v)} options={opts.hrsOpts} mono fieldCls={inp} /></td>
-                                            {kits.length > 0 && (
-                                                <td className="px-1.5 py-1 text-center">
-                                                    {inKit ? (
-                                                        <span title={`In Kit ${kIdx + 1}${kits[kIdx]?.number ? ` — ${kits[kIdx].number}` : ''}`}
-                                                            className="inline-flex items-center rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 whitespace-nowrap">
-                                                            KIT {kIdx + 1}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-[10.5px] font-semibold text-gray-600">loose</span>
-                                                    )}
-                                                </td>
-                                            )}
-                                            <td className="px-1.5 py-1 text-center">
-                                                <button onClick={() => deletePart(p.__uid)} className="rounded-md border border-gray-200 p-1 text-gray-400 hover:text-red-600 hover:border-red-300 hover:bg-red-50">
-                                                    <TrashIcon className="h-3.5 w-3.5" />
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                                {parts.length === 0 && <tr><td colSpan={kits.length > 0 ? 7 : 6} className="text-center text-gray-400 py-3 text-[12px]">No parts yet — add a line.</td></tr>}
+                                {partRows.map(({ p, i }) => (
+                                    <tr key={p.__uid} className="border-t border-gray-100">
+                                        <td className="px-1.5 py-1"><input className={`${inp} font-mono`} value={p.partNumber} onChange={(e) => setPart(i, 'partNumber', e.target.value)} /></td>
+                                        <td className="px-1.5 py-1"><input className={inp} value={p.partDesc} onChange={(e) => setPart(i, 'partDesc', e.target.value)} /></td>
+                                        <td className="px-1.5 py-1"><input className={`${inp} font-mono`} value={p.qty} onChange={(e) => setPart(i, 'qty', e.target.value)} /></td>
+                                        <td className="px-1.5 py-1"><Combo value={p.action} onChange={(v) => setPart(i, 'action', v)} options={opts.actOpts} mono fieldCls={inp} /></td>
+                                        <td className="px-1.5 py-1"><Combo value={p.serviceHours} onChange={(v) => setPart(i, 'serviceHours', v)} options={opts.hrsOpts} mono fieldCls={inp} /></td>
+                                        <td className="px-1.5 py-1 text-center">
+                                            <button onClick={() => deletePart(p.__uid)} title="Delete this part line (kits keep their own copies)" className="rounded-md border border-gray-200 p-1 text-gray-400 hover:text-red-600 hover:border-red-300 hover:bg-red-50">
+                                                <TrashIcon className="h-3.5 w-3.5" />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                                {partRows.length === 0 && (
+                                    <tr><td colSpan={6} className="text-center text-gray-400 py-3 text-[12px]">
+                                        {hrsFilter ? `No ${hrsFilter} Hr part line — add one, or clear the Svc Hrs filter.` : 'No parts yet — add a line.'}
+                                    </td></tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
-                    <div className="mt-2">
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
                         <button
                             onClick={() => {
                                 if (!allPartsComplete) { toast.error('Please fill every field in the current part line first.'); return; }
-                                setParts((a) => [...a, blankPart(nextUid())]);
+                                // With a filter on, a new line starts on that interval so it
+                                // does not vanish the moment it is created.
+                                setParts((a) => [...a, { ...blankPart(nextUid()), ...(hrsFilter ? { serviceHours: hrsFilter } : {}) }]);
                             }}
                             title={allPartsComplete ? 'Add another part line' : 'Fill every field in the current part line(s) first'}
                             className={`inline-flex items-center gap-1 rounded-lg border border-gray-400 bg-white px-2.5 py-0.5 text-[12px] font-bold text-gray-800 transition ${allPartsComplete ? 'hover:bg-gray-50' : 'cursor-not-allowed'}`}>
-                            <PlusIcon className="h-3.5 w-3.5" /> Add part line
+                            <PlusIcon className="h-3.5 w-3.5" /> Add part line{hrsFilter ? ` (${hrsFilter} Hr)` : ''}
                         </button>
+                        {hiddenIncomplete && (
+                            <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10.5px] font-semibold text-amber-700">
+                                A line or kit outside the {hrsFilter} Hr filter is incomplete — clear the filter to finish it before saving.
+                            </span>
+                        )}
                     </div>
                     </div>
 
                     {/* ---- Guided kit flow + the kits added so far (no standing section box) ---- */}
                     <div className="mt-3">
 
-                    {/* ---- Guided kit flow: ask -> pick parts -> fill kit details -> ask again ---- */}
-                    {allPartsComplete && loosePartsList.length > 0 && kitStep === 'ask' && (
+                    {/* ---- Guided kit flow: ask -> pick parts -> fill kit details -> ask again ----
+                        Every part stays selectable however many kits already use it: picking
+                        parts COPIES them into the new kit, it does not move them. ---- */}
+                    {allPartsComplete && parts.length > 0 && kitStep === 'ask' && (
                         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50/40 px-3 py-2 mb-2">
                             <span className="text-[13px] font-bold text-black">
                                 {kits.length ? 'Do you want to add another kit?' : 'Do you want to add a Kit?'}
@@ -1764,20 +2103,20 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                             </div>
                         </div>
                     )}
-                    {allPartsComplete && loosePartsList.length > 0 && kitStep === 'pick' && (
+                    {allPartsComplete && parts.length > 0 && kitStep === 'pick' && (
                         <div className="rounded-lg border border-indigo-200 bg-white px-3 py-2.5 mb-2">
                             <div className="text-[11px] font-bold uppercase tracking-wide text-black mb-1.5">
-                                Select the parts that come together in this kit <span className="font-normal normal-case text-gray-600">— tick the rows, then press OK</span>
+                                Select the parts that come together in this kit <span className="font-normal normal-case text-gray-600">— tick the rows, then press OK. They are copied into the kit, so a part can be used in more than one kit.{hrsFilter ? ` Only the ${hrsFilter} Hr lines are listed.` : ''}</span>
                             </div>
                             <div className="border border-gray-200 rounded-lg overflow-x-auto qm-scroll mb-2">
-                                <table className="min-w-[720px] w-full border-collapse text-[12px]">
+                                <table className="min-w-[680px] w-full border-collapse text-[12px]">
                                     <thead>
                                         <tr className="bg-gray-100/80 text-[9.5px] font-bold text-black uppercase tracking-wide border-b border-gray-200">
                                             <th className="px-2 py-1.5 text-center w-9">
                                                 {(() => {
-                                                    const allOn = loosePartsList.every((p) => checked[p.__uid]);
+                                                    const allOn = partRows.length > 0 && partRows.every(({ p }) => checked[p.__uid]);
                                                     return (
-                                                        <span onClick={() => setChecked(allOn ? {} : Object.fromEntries(loosePartsList.map((p) => [p.__uid, true])))}
+                                                        <span onClick={() => setChecked(allOn ? {} : Object.fromEntries(partRows.map(({ p }) => [p.__uid, true])))}
                                                             title="Select all / none"
                                                             className="inline-flex h-[15px] w-[15px] cursor-pointer items-center justify-center rounded border border-gray-300 bg-white align-middle">
                                                             {allOn && <CheckIcon className="h-2.5 w-2.5" style={{ color: themeColor }} />}
@@ -1793,7 +2132,7 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {loosePartsList.map((p) => {
+                                        {partRows.map(({ p }) => {
                                             const on = !!checked[p.__uid];
                                             return (
                                                 <tr key={p.__uid} onClick={() => setChecked((c) => ({ ...c, [p.__uid]: !c[p.__uid] }))}
@@ -1831,114 +2170,50 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                         </div>
                     )}
                     {kitStep === 'details' && (() => {
-                        const k = kits.find((x) => x.__id === currentKitId);
-                        if (!k) return null;
-                        const members = parts.filter((p) => p.__kitId === k.__id);
+                        const ki = kits.findIndex((x) => x.__id === currentKitId);
+                        if (ki < 0) return null;
                         return (
-                            <div className="rounded-lg border border-indigo-200 bg-white px-3 py-2.5 mb-2">
-                                <div className="text-[13px] font-bold text-black mb-2">
-                                    Please add kit details <span className="text-[10.5px] font-normal text-gray-600">— for the {members.length} selected part{members.length === 1 ? '' : 's'}</span>
+                            <>
+                                <div className="text-[13px] font-bold text-black mb-1.5">
+                                    Please add kit details <span className="text-[10.5px] font-normal text-gray-600">— and check the part lines copied into this kit</span>
                                 </div>
-                                <div className="grid grid-cols-[.9fr_2.1fr_.4fr_.6fr_.5fr] gap-2 max-md:grid-cols-2">
-                                    <div>
-                                        <label className={kitLbl}>Kit Number <span className="text-red-500">*</span></label>
-                                        <input className={`${kitInp} font-mono`} value={k.number} onChange={(e) => setKit(k.__id, 'number', e.target.value)} placeholder="e.g. 3H.019.11.0.SP" />
-                                    </div>
-                                    <div>
-                                        <label className={kitLbl}>Kit Description <span className="text-red-500">*</span></label>
-                                        <input className={kitInp} value={k.desc} onChange={(e) => setKit(k.__id, 'desc', e.target.value)} placeholder="e.g. 50 Hrs - A Check Maintenance Kit" />
-                                    </div>
-                                    <div>
-                                        <label className={kitLbl}>Qty <span className="text-red-500">*</span></label>
-                                        <input className={`${kitInp} font-mono text-center`} value={k.qty} onChange={(e) => setKit(k.__id, 'qty', e.target.value)} />
-                                    </div>
-                                    <div>
-                                        <label className={kitLbl}>Action <span className="text-red-500">*</span></label>
-                                        <Combo value={k.action} onChange={(v) => setKit(k.__id, 'action', v)} options={opts.actOpts} mono fieldCls={kitInp} />
-                                    </div>
-                                    <div>
-                                        <label className={kitLbl}>Svc Hrs</label>
-                                        <input className={`${kitInp} font-mono text-center`} value={k.hours || ''} onChange={(e) => setKit(k.__id, 'hours', e.target.value)} placeholder="e.g. 50" />
-                                    </div>
-                                </div>
-                                <div className="flex flex-wrap items-center gap-1 mt-2">
-                                    <span className="text-[9.5px] font-bold uppercase tracking-wide text-gray-700 mr-0.5">Parts in this kit</span>
-                                    {members.map((p) => (
-                                        <span key={p.__uid} className="inline-flex items-center rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[12px] font-mono font-bold text-black">
-                                            {p.partNumber || '(unnamed part)'}
-                                        </span>
-                                    ))}
-                                    <button type="button" disabled={!kitComplete(k)}
-                                        title={kitComplete(k) ? 'Done — kit details complete' : 'Fill Kit Number, Description, Qty and Action first'}
-                                        onClick={() => { setCurrentKitId(null); setKitStep('ask'); }}
-                                        className="ml-auto rounded-lg px-4 py-1 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed" style={{ backgroundColor: themeColor }}>
-                                        OK
-                                    </button>
-                                </div>
-                            </div>
+                                <KitBox
+                                    k={kits[ki]} index={ki} opts={opts}
+                                    onSet={(key, v) => setKit(currentKitId, key, v)}
+                                    onSetPart={(uid, key, v) => setKitPart(currentKitId, uid, key, v)}
+                                    onAddPart={() => addKitPart(currentKitId)}
+                                    onDeletePart={(uid) => deleteKitPart(currentKitId, uid)}
+                                    onRemove={() => { removeKit(currentKitId); setCurrentKitId(null); setKitStep('ask'); }}
+                                    onDone={() => { setCurrentKitId(null); setKitStep('ask'); }}
+                                />
+                            </>
                         );
                     })()}
-                    {allPartsComplete && loosePartsList.length > 0 && kitStep === 'idle' && (
+                    {allPartsComplete && parts.length > 0 && kitStep === 'idle' && (
                         <button type="button" onClick={() => { setChecked({}); setKitStep('pick'); }}
                             className="mb-2 inline-flex items-center gap-1 rounded-lg border border-dashed border-gray-400 bg-gray-50/60 px-2.5 py-1 text-[11.5px] font-bold text-gray-700 hover:bg-gray-100 transition">
                             <PlusIcon className="h-3.5 w-3.5" /> Add a kit
                         </button>
                     )}
-                    {kits.map((k, ki) => {
+                    {hrsFilter && kits.length > 0 && (
+                        <div className="mb-2 rounded-lg border border-indigo-100 bg-indigo-50/40 px-3 py-1.5 text-[11px] font-medium text-gray-700">
+                            Kits: showing <b>{kitRows.length}</b> of <b>{kits.length}</b> — a kit is listed when its own Svc Hrs is <b className="font-mono">{hrsFilter}</b> or one of its part lines is.
+                            {hiddenKits > 0 ? ` ${hiddenKits} kit${hiddenKits === 1 ? '' : 's'} hidden (still saved).` : ''}
+                        </div>
+                    )}
+                    {kitRows.map(({ k, ki }) => {
                         // The kit currently in the "Please add kit details" step is edited
                         // there — don't show it twice.
                         if (kitStep === 'details' && k.__id === currentKitId) return null;
-                        const members = parts.filter((p) => p.__kitId === k.__id);
                         return (
-                            <div key={k.__id} className="rounded-lg border border-indigo-100 bg-indigo-50/50 px-2.5 py-2 mb-1.5">
-                                <div className="flex items-center gap-2 mb-1.5 max-md:flex-wrap">
-                                    <span className="text-[11px] font-bold uppercase tracking-wider text-black">Kit {ki + 1}</span>
-                                    <span className="text-[10.5px] font-medium text-gray-700">covers {members.length} part{members.length === 1 ? '' : 's'}</span>
-                                    {!kitComplete(k) && (
-                                        <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                                            Please add kit details
-                                        </span>
-                                    )}
-                                    <button type="button" onClick={() => removeKit(k.__id)}
-                                        className="ml-auto rounded border border-red-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-red-500 hover:bg-red-50 transition">
-                                        Remove kit
-                                    </button>
-                                </div>
-                                <div className="grid grid-cols-[.9fr_2.1fr_.4fr_.6fr_.5fr] gap-2 max-md:grid-cols-2">
-                                    <div>
-                                        <label className={kitLbl}>Kit Number <span className="text-red-500">*</span></label>
-                                        <input className={`${kitInp} font-mono`} value={k.number} onChange={(e) => setKit(k.__id, 'number', e.target.value)} placeholder="e.g. 3H.019.11.0.SP" />
-                                    </div>
-                                    <div>
-                                        <label className={kitLbl}>Kit Description <span className="text-red-500">*</span></label>
-                                        <input className={kitInp} value={k.desc} onChange={(e) => setKit(k.__id, 'desc', e.target.value)} placeholder="e.g. 50 Hrs - A Check Maintenance Kit" />
-                                    </div>
-                                    <div>
-                                        <label className={kitLbl}>Qty <span className="text-red-500">*</span></label>
-                                        <input className={`${kitInp} font-mono text-center`} value={k.qty} onChange={(e) => setKit(k.__id, 'qty', e.target.value)} />
-                                    </div>
-                                    <div>
-                                        <label className={kitLbl}>Action <span className="text-red-500">*</span></label>
-                                        <Combo value={k.action} onChange={(v) => setKit(k.__id, 'action', v)} options={opts.actOpts} mono fieldCls={kitInp} />
-                                    </div>
-                                    <div>
-                                        <label className={kitLbl}>Svc Hrs</label>
-                                        <input className={`${kitInp} font-mono text-center`} value={k.hours || ''} onChange={(e) => setKit(k.__id, 'hours', e.target.value)} placeholder="e.g. 50" />
-                                    </div>
-                                </div>
-                                <div className="flex flex-wrap items-center gap-1 mt-1.5">
-                                    <span className="text-[9.5px] font-semibold uppercase tracking-wide text-gray-400 mr-0.5">Parts in this kit</span>
-                                    {members.length === 0 && <span className="text-[10.5px] text-gray-400">none — this kit will be dropped</span>}
-                                    {members.map((p) => (
-                                        <span key={p.__uid} className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-white px-1.5 py-0.5 text-[12px] font-mono font-bold text-[#2f3192]">
-                                            {p.partNumber || '(unnamed part)'}
-                                            <button type="button" onClick={() => removeFromKit(p.__uid)} title="Remove from this kit" className="text-gray-400 hover:text-red-600">
-                                                <XMarkIcon className="h-2.5 w-2.5" />
-                                            </button>
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
+                            <KitBox
+                                key={k.__id} k={k} index={ki} opts={opts}
+                                onSet={(key, v) => setKit(k.__id, key, v)}
+                                onSetPart={(uid, key, v) => setKitPart(k.__id, uid, key, v)}
+                                onAddPart={() => addKitPart(k.__id)}
+                                onDeletePart={(uid) => deleteKitPart(k.__id, uid)}
+                                onRemove={() => removeKit(k.__id)}
+                            />
                         );
                     })}
 
@@ -1947,22 +2222,19 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
 
                     {/* ---- Stage: review — the record exactly as it will sit in Master Data ---- */}
                     {stage === 'review' && (() => {
-                        const lines = modelToParts(parts, kits);
-                        // Same merge rule as the Master Data sheet: a row carrying kit data
-                        // starts a kit block; blank rows below it extend the block.
-                        const kitAt = {};
-                        let start = 0;
-                        lines.forEach((p, i) => {
-                            if (i === 0 || kitHasData(p)) { kitAt[i] = { p, span: 1 }; start = i; }
-                            else kitAt[start].span++;
-                        });
+                        // Exactly the rows the Master Data sheet will show: each kit's own
+                        // part copies first (kit values on its first row), then the parts no
+                        // kit contains.
+                        const payload = modelToPayload(parts, kits);
+                        const srows = sheetRowsOf(payload);
+                        const looseCount = loosePartsOf(payload).length;
                         const td = 'px-2.5 py-1 border border-gray-200';
                         return (
                             <div>
                                 <div className="mb-3 flex items-start gap-2 rounded-lg border border-indigo-200 bg-indigo-50/60 px-3 py-2">
                                     <CheckCircleIcon className="h-4 w-4 flex-shrink-0 mt-px" style={{ color: themeColor }} />
                                     <p className="text-[12px] font-medium text-gray-700">
-                                        <b>Please review this:</b> this is exactly how <b className="font-mono">{hdr.appCode}</b> will appear in Master Data — one row block per app code, like the master sheet.
+                                        <b>Please review this:</b> this is exactly how <b className="font-mono">{hdr.appCode}</b> will appear in Master Data — all the kits, then the “—” rows, then the loose parts.
                                     </p>
                                 </div>
                                 <div className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm">
@@ -1987,36 +2259,32 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {lines.map((p, i) => {
-                                                    const kit = kitAt[i];
+                                                {srows.map((r, i) => {
+                                                    const p = r.part;
                                                     return (
                                                         <tr key={i}>
                                                             {i === 0 && (
                                                                 <>
-                                                                    <td rowSpan={lines.length} className={`${td} text-center text-gray-600 align-middle`}>{hdr.segment}</td>
-                                                                    <td rowSpan={lines.length} className={`${td} text-center align-middle`}>
+                                                                    <td rowSpan={srows.length} className={`${td} text-center text-gray-600 align-middle`}>{hdr.segment}</td>
+                                                                    <td rowSpan={srows.length} className={`${td} text-center align-middle`}>
                                                                         <span className="inline-flex items-center justify-center font-mono font-bold text-[11px] bg-[#1b2026] text-white px-2 py-0.5 rounded-md whitespace-nowrap">{hdr.appCode}</span>
                                                                     </td>
-                                                                    <td rowSpan={lines.length} className={`${td} text-center font-mono text-gray-600 align-middle whitespace-nowrap`}>{hdr.systemAppCode}</td>
-                                                                    <td rowSpan={lines.length} className={`${td} font-mono text-gray-700 align-middle whitespace-nowrap`}>{hdr.engineModel}</td>
-                                                                    <td rowSpan={lines.length} className={`${td} text-center text-gray-600 align-middle whitespace-nowrap`}>{hdr.kva ? `${hdr.kva} KVA` : '—'}</td>
-                                                                    <td rowSpan={lines.length} className={`${td} text-center text-gray-600 align-middle whitespace-nowrap`}>{hdr.emission}</td>
+                                                                    <td rowSpan={srows.length} className={`${td} text-center font-mono text-gray-600 align-middle whitespace-nowrap`}>{hdr.systemAppCode}</td>
+                                                                    <td rowSpan={srows.length} className={`${td} font-mono text-gray-700 align-middle whitespace-nowrap`}>{hdr.engineModel}</td>
+                                                                    <td rowSpan={srows.length} className={`${td} text-center text-gray-600 align-middle whitespace-nowrap`}>{hdr.kva ? `${hdr.kva} KVA` : '—'}</td>
+                                                                    <td rowSpan={srows.length} className={`${td} text-center text-gray-600 align-middle whitespace-nowrap`}>{hdr.emission}</td>
                                                                 </>
                                                             )}
-                                                            <td className={`${td} font-mono text-gray-800 whitespace-nowrap`}>{p.partNumber || '—'}</td>
-                                                            <td className={`${td} text-gray-700 min-w-[220px]`}>{p.partDesc || '—'}</td>
-                                                            <td className={`${td} text-center`}>{p.qty || '—'}</td>
-                                                            <td className={`${td} text-center`}><Chip a={p.action} /></td>
-                                                            <td className={`${td} text-center font-mono`}>{p.serviceHours || '—'}</td>
-                                                            {kit && (
-                                                                <>
-                                                                    <td rowSpan={kit.span} className={`${td} font-mono text-gray-600 align-middle whitespace-nowrap bg-amber-50/20`}>{kit.p.altPartNo || '—'}</td>
-                                                                    <td rowSpan={kit.span} className={`${td} text-gray-600 align-middle min-w-[180px] bg-amber-50/20`}>{kit.p.altDesc || '—'}</td>
-                                                                    <td rowSpan={kit.span} className={`${td} text-center text-gray-600 align-middle bg-amber-50/20`}>{kit.p.altQty || '—'}</td>
-                                                                    <td rowSpan={kit.span} className={`${td} text-center align-middle bg-amber-50/20`}><Chip a={kit.p.altAction} /></td>
-                                                                    <td rowSpan={kit.span} className={`${td} text-center font-mono text-gray-600 align-middle bg-amber-50/20`}>{kit.p.altServiceHours || '—'}</td>
-                                                                </>
-                                                            )}
+                                                            <td className={`${td} font-mono text-gray-800 whitespace-nowrap`}>{p?.partNumber || '—'}</td>
+                                                            <td className={`${td} text-gray-700 min-w-[220px]`}>{p?.partDesc || '—'}</td>
+                                                            <td className={`${td} text-center`}>{p?.qty || '—'}</td>
+                                                            <td className={`${td} text-center`}><Chip a={p?.action} /></td>
+                                                            <td className={`${td} text-center font-mono`}>{p?.serviceHours || '—'}</td>
+                                                            <td className={`${td} font-mono text-gray-600 whitespace-nowrap bg-amber-50/20`}>{r.kit ? (r.kit.kitNumber || '—') : '—'}</td>
+                                                            <td className={`${td} text-gray-600 min-w-[180px] bg-amber-50/20`}>{r.kit ? (r.kit.kitDesc || '—') : '—'}</td>
+                                                            <td className={`${td} text-center text-gray-600 bg-amber-50/20`}>{r.kit ? (r.kit.qty || '—') : '—'}</td>
+                                                            <td className={`${td} text-center bg-amber-50/20`}>{r.kit ? <Chip a={r.kit.action} /> : '—'}</td>
+                                                            <td className={`${td} text-center font-mono text-gray-600 bg-amber-50/20`}>{r.kit ? (r.kit.serviceHours || '—') : '—'}</td>
                                                         </tr>
                                                     );
                                                 })}
@@ -2024,7 +2292,8 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                                         </table>
                                     </div>
                                     <div className="px-3 py-1.5 border-t border-gray-200 bg-gray-50 text-[10.5px] font-medium text-gray-700">
-                                        {lines.length} part line{lines.length === 1 ? '' : 's'} · {kits.length} kit{kits.length === 1 ? '' : 's'} · {loosePartsList.length} loose. Application-code and kit cells span their part rows, exactly as in the master sheet.
+                                        {parts.length} service part line{parts.length === 1 ? '' : 's'} · {kits.length} kit{kits.length === 1 ? '' : 's'} · {looseCount} loose.
+                                        Two separate lists side by side. Part Details: the service parts a kit copied, then the loose ones. Kit Details: all the kits, then “—” rows, then the loose parts copied across. A kit's own part lines are not printed here — they stay on the kit.
                                     </div>
                                 </div>
                             </div>
@@ -2034,6 +2303,11 @@ const AppFormModal = ({ initial, prefill, opts, existing, remaining = [], onClos
                 <div className="flex items-center gap-2 px-5 py-3 border-t border-gray-200 bg-white max-md:px-3 max-md:flex-wrap">
                     <span className="text-[11px] font-semibold text-gray-700 max-sm:hidden">
                         {parts.length} part line{parts.length === 1 ? '' : 's'} · {kits.length} kit{kits.length === 1 ? '' : 's'} · {loosePartsList.length} loose
+                        {hrsFilter && stage === 'build' && (
+                            <span className="ml-2 font-medium text-[#2f3192]">
+                                (viewing {hrsFilter} Hr only — all intervals are saved)
+                            </span>
+                        )}
                     </span>
                     <div className="ml-auto flex items-center gap-2">
                         {stage === 'build' ? (
@@ -2243,7 +2517,15 @@ const ImportData = ({ onMasterChanged }) => {
                 });
             }
         }
-        const items = order.map((c) => ({ code: c, rec: groups[c], exists: existing.has(c), parts: groups[c].parts.length }));
+        // The uploaded file still carries the kit columns on the part rows — that
+        // is exactly how it tells us which parts made up each kit. Read them once
+        // here and turn them into standalone kits (each with its own copies of
+        // those part lines); after this the two sides are unrelated.
+        order.forEach((c) => { groups[c].kits = kitsFromFileRows(groups[c].parts); });
+        const items = order.map((c) => ({
+            code: c, rec: groups[c], exists: existing.has(c),
+            parts: groups[c].parts.length, kits: groups[c].kits.length,
+        }));
         setPreview({ items, news: items.filter((i) => !i.exists), reps: items.filter((i) => i.exists), fname, sheet });
         setOpenRows({});
     };
@@ -2265,8 +2547,20 @@ const ImportData = ({ onMasterChanged }) => {
         if (!r.isConfirmed) return;
         setBusy(true);
         const t = toast.loading('Uploading…');
+        // Announce the job app-wide: the request below is a fetch that outlives
+        // this panel, so leaving the page does NOT cancel it. UploadGuard shows a
+        // banner wherever the user goes, warns if they navigate away mid-upload,
+        // and blocks a tab close / reload — the one thing that would kill it.
+        const job = startUpload(`Part Detail master import (${items.length} app code${items.length === 1 ? '' : 's'})`);
         try {
-            const res = await importAppCodes(items.map((i) => i.rec));
+            // Kits now travel in their own list, so the part lines are sent clean —
+            // the file's per-row kit columns are not stored on them any more.
+            const res = await importAppCodes(items.map((i) => ({
+                ...i.rec,
+                parts: i.rec.parts.map(({ altPartNo, altDesc, altQty, altAction, altServiceHours, ...p }) => p),
+            })));
+            // The Toaster lives at the app root, so this lands even if the user
+            // has already moved to another page.
             toast.success(`Added ${res.added.length}, replaced ${res.replaced.length}`, { id: t });
             setPreview(null);
             setOpenRows({});
@@ -2275,7 +2569,7 @@ const ImportData = ({ onMasterChanged }) => {
             onMasterChanged?.(); // host page badge (App codes count) stays live
         } catch (e) {
             toast.error(e.message || 'Upload failed', { id: t });
-        } finally { setBusy(false); }
+        } finally { setBusy(false); finishUpload(job); }
     };
 
     return (
@@ -2308,6 +2602,7 @@ const ImportData = ({ onMasterChanged }) => {
                         Column names can be spelled in any case, spacing or punctuation (e.g. "part no." is accepted).
                         <b> {IMPORT_REQUIRED_COLUMN.toUpperCase()}</b> is the only column an import cannot proceed without — every part line is grouped under it.
                         Qty and Action appear twice in the file: the first pair belongs to the part, the pair after Kit Description to the kit.
+                        The kit columns are how the file tells us which parts formed each kit — on import each kit becomes its own record holding its own copies of those part lines, after which parts and kits are independent.
                         Any other column in the file is ignored.
                     </div>
                 </div>
@@ -2343,7 +2638,7 @@ const ImportData = ({ onMasterChanged }) => {
                                 <thead><tr className="bg-gray-50 text-[10px] font-semibold text-black uppercase tracking-wider">
                                     <th className="px-2 py-2 w-8 border-b border-gray-200" />
                                     <th className="px-3 py-2 text-center border-b border-gray-200">App Code</th><th className="px-3 py-2 text-center border-b border-gray-200">Engine Model</th>
-                                    <th className="px-3 py-2 text-center border-b border-gray-200">KVA</th><th className="px-3 py-2 text-center border-b border-gray-200">Parts</th><th className="px-3 py-2 text-center border-b border-gray-200">Action</th>
+                                    <th className="px-3 py-2 text-center border-b border-gray-200">KVA</th><th className="px-3 py-2 text-center border-b border-gray-200">Parts</th><th className="px-3 py-2 text-center border-b border-gray-200">Kits</th><th className="px-3 py-2 text-center border-b border-gray-200">Action</th>
                                 </tr></thead>
                                 <tbody>
                                     {preview.items.map((i) => {
@@ -2358,6 +2653,7 @@ const ImportData = ({ onMasterChanged }) => {
                                                     <td className="px-3 py-2 border-b border-gray-100 text-gray-600">{i.rec.engineModel || '—'}</td>
                                                     <td className="px-3 py-2 border-b border-gray-100 text-center font-mono">{i.rec.kva || '—'}</td>
                                                     <td className="px-3 py-2 border-b border-gray-100 text-center font-mono">{i.parts}</td>
+                                                    <td className="px-3 py-2 border-b border-gray-100 text-center font-mono">{i.kits}</td>
                                                     <td className="px-3 py-2 border-b border-gray-100 text-center">
                                                         {i.exists
                                                             ? <span className="inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase bg-red-50 text-red-600">Replace</span>
@@ -2366,7 +2662,7 @@ const ImportData = ({ onMasterChanged }) => {
                                                 </tr>
                                                 {isOpen && (
                                                     <tr>
-                                                        <td colSpan={6} className="border-b border-gray-100 bg-gray-50/60 p-0">
+                                                        <td colSpan={7} className="border-b border-gray-100 bg-gray-50/60 p-0">
                                                             {i.rec.parts.length === 0 ? (
                                                                 <div className="px-4 py-3 text-[11px] text-gray-400">No part lines found in the file for this code.</div>
                                                             ) : (
@@ -2418,6 +2714,14 @@ const ImportData = ({ onMasterChanged }) => {
                                 </tbody>
                             </table>
                         </div>
+                        {busy && (
+                            <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5">
+                                <span className="mt-0.5 h-4 w-4 flex-shrink-0 animate-spin rounded-full border-2 border-amber-300 border-t-amber-700" />
+                                <p className="text-[12px] font-medium text-amber-900">
+                                    <b>Data is uploading — please wait.</b> You can move to another page if you need to; the upload keeps running in the background and you'll get the result toast wherever you are. Do not close or reload this tab.
+                                </p>
+                            </div>
+                        )}
                         <div className="flex justify-end gap-2 mt-4 max-md:flex-wrap">
                             <button onClick={() => { setPreview(null); setOpenRows({}); if (fileRef.current) fileRef.current.value = ''; }} disabled={busy} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[12px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
                             <button onClick={confirmUpload} disabled={busy || !preview.items.length} className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: themeColor }}>

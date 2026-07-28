@@ -3,6 +3,8 @@ import { Toaster } from 'react-hot-toast';
 import { useState, useEffect, lazy, Suspense } from 'react';
 
 import Navbar from './components/Navbar';
+// Follows the user across pages while a background upload is still running.
+import UploadGuard from './components/UploadGuard';
 // Login is eager: it is the first screen an unauthenticated user sees, so we
 // don't want a lazy-chunk round-trip before it can render.
 import Login from './pages/Login';
@@ -385,6 +387,7 @@ function App() {
   return (
     <div className="App">
       <Layout />
+      <UploadGuard />
       <Toaster
         position="top-right"
         containerClassName="react-hot-toast-container"

@@ -80,7 +80,9 @@ async def update_app_code(
     db: Session = Depends(get_db),
 ):
     _require_master_admin(db, user_id, user_role)
-    return {"success": True, "item": mc.update_app(db, app_code, payload.model_dump())}
+    data = payload.model_dump()
+    data["_updated_by"] = user_id
+    return {"success": True, "item": mc.update_app(db, app_code, data)}
 
 
 @router.delete("/app-codes/{app_code}")

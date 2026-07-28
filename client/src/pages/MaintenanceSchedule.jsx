@@ -7,7 +7,7 @@ import {
 } from '@heroicons/react/24/outline';
 import {
     getAppCodes, getServices, logActivity,
-    servicesForApp, partService, findApp, ACTION, themeColor, themeDark,
+    servicesForApp, partService, serviceForHours, findApp, ACTION, themeColor, themeDark,
 } from '../components/maintenanceApi';
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 
@@ -26,11 +26,27 @@ const Chip = React.memo(({ a }) => {
     return <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold font-mono ${chipCls[k]}`}>{k}</span>;
 });
 
-// Kit lines live on the same part rows (Kit Number / Kit Description / Qty / Action —
-// stored as altPartNo / altDesc / altQty / altAction). A part "has a kit" when either
-// the kit number or the kit description is filled.
-const kitRowsOf = (parts) =>
-    parts.filter((p) => String(p.altPartNo || '').trim() || String(p.altDesc || '').trim());
+// Kits are their own records on the application code (app.kits), independent of
+// the part lines — each carries its own copied parts. A kit's service interval is
+// its own; older kits that never had one fall back to their first part's.
+const kitHoursOf = (k) => String(k.serviceHours || k.parts?.[0]?.serviceHours || '500').trim();
+const normPn = (v) => String(v || '').trim().toLowerCase();
+
+// The Kit section lists the KITS plus the LOOSE parts — the parts no kit
+// contains, each copied across as its own kit line, exactly as the master sheet
+// and the source file show them. Both sides are filtered by the selected
+// service type(s): a kit by its own interval, a loose part by the part's.
+const kitLinesFor = (app, services, effectiveIds) => {
+    const inKit = new Set((app?.kits || [])
+        .flatMap((k) => (k.parts || []).map((p) => normPn(p.partNumber))).filter(Boolean));
+    const kits = (app?.kits || [])
+        .filter((k) => effectiveIds.has(serviceForHours(services, kitHoursOf(k)).id))
+        .map((k) => ({ number: k.kitNumber, desc: k.kitDesc, qty: k.qty, action: k.action, hours: kitHoursOf(k) }));
+    const loose = (app?.parts || [])
+        .filter((p) => !inKit.has(normPn(p.partNumber)) && effectiveIds.has(partService(services, p).id))
+        .map((p) => ({ number: p.partNumber, desc: p.partDesc, qty: p.qty, action: p.action, hours: p.serviceHours }));
+    return [...kits, ...loose];
+};
 
 /* ----------------------------- Application Code picker (tabular dropdown) ----------------------------- */
 const PICKER_CHUNK = 60;
@@ -125,10 +141,9 @@ const AppCodePicker = React.memo(({ master, value, onChange }) => {
 });
 
 /* ----------------------------- Watermarked print sheet ----------------------------- */
-const PrintSheet = ({ app, services, parts, section = 'parts', onClose }) => {
+const PrintSheet = ({ app, services, parts, kits = [], section = 'parts', onClose }) => {
     const svcLabel = services.map((s) => s.name).join(', ') || '—';
     const svcHours = [...new Set(services.map((s) => s.hours))].join(' / ') || '—';
-    const kitParts = kitRowsOf(parts);
     const [logoError, setLogoError] = useState(false);
     const th = 'bg-[#13181d] text-white text-[9.5px] font-semibold px-2 py-1.5 border border-gray-400';
     const td = 'px-2 py-1 border border-gray-300 text-[11px]';
@@ -206,16 +221,16 @@ const PrintSheet = ({ app, services, parts, section = 'parts', onClose }) => {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {kitParts.length === 0 ? (
+                                        {kits.length === 0 ? (
                                             <tr><td colSpan={6} className="text-center py-5 text-gray-400 text-[11px]">No kit details for the selected service type(s).</td></tr>
-                                        ) : kitParts.map((p, i) => (
+                                        ) : kits.map((k, i) => (
                                             <tr key={i} className="even:bg-gray-50">
                                                 <td className={`${td} text-center`}>{i + 1}</td>
-                                                <td className={`${td} font-mono`}>{p.altPartNo || '—'}</td>
-                                                <td className={td}>{p.altDesc || '—'}</td>
-                                                <td className={`${td} text-center`}>{p.altQty || '—'}</td>
-                                                <td className={`${td} text-center`}>{p.altAction || '—'}</td>
-                                                <td className={`${td} text-center font-mono`}>{p.serviceHours}</td>
+                                                <td className={`${td} font-mono`}>{k.number || '—'}</td>
+                                                <td className={td}>{k.desc || '—'}</td>
+                                                <td className={`${td} text-center`}>{k.qty || '—'}</td>
+                                                <td className={`${td} text-center`}>{k.action || '—'}</td>
+                                                <td className={`${td} text-center font-mono`}>{k.hours || '—'}</td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -316,7 +331,7 @@ const MaintenanceScheduleView = () => {
 
     const parts = useMemo(() => (app ? app.parts.filter((p) => effective.has(partService(services, p).id)) : []), [app, services, effective]);
     const chosen = useMemo(() => avail.filter((s) => effective.has(s.id)), [avail, effective]);
-    const kitRows = useMemo(() => kitRowsOf(parts), [parts]);
+    const kitRows = useMemo(() => kitLinesFor(app, services, effective), [app, services, effective]);
 
     // Accordion: at most ONE section open — opening one closes the other; clicking
     // the open header collapses it (both closed is allowed). Starts fully closed.
@@ -519,14 +534,14 @@ const MaintenanceScheduleView = () => {
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {kitRows.map((p, i) => (
+                                                        {kitRows.map((k, i) => (
                                                             <tr key={i} className="hover:bg-indigo-50/40 transition">
                                                                 <td className="px-3 py-2 border border-gray-200 font-mono text-gray-400">{i + 1}</td>
-                                                                <td className="px-3 py-2 border border-gray-200 font-mono text-gray-800 whitespace-nowrap">{p.altPartNo || '—'}</td>
-                                                                <td className="px-3 py-2 border border-gray-200 text-gray-700 min-w-[200px]">{p.altDesc || '—'}</td>
-                                                                <td className="px-3 py-2 border border-gray-200 text-center">{p.altQty || '—'}</td>
-                                                                <td className="px-3 py-2 border border-gray-200 text-center"><Chip a={p.altAction} /></td>
-                                                                <td className="px-3 py-2 border border-gray-200 text-center font-mono">{p.serviceHours}</td>
+                                                                <td className="px-3 py-2 border border-gray-200 font-mono text-gray-800 whitespace-nowrap">{k.number || '—'}</td>
+                                                                <td className="px-3 py-2 border border-gray-200 text-gray-700 min-w-[200px]">{k.desc || '—'}</td>
+                                                                <td className="px-3 py-2 border border-gray-200 text-center">{k.qty || '—'}</td>
+                                                                <td className="px-3 py-2 border border-gray-200 text-center"><Chip a={k.action} /></td>
+                                                                <td className="px-3 py-2 border border-gray-200 text-center font-mono">{k.hours || '—'}</td>
                                                             </tr>
                                                         ))}
                                                     </tbody>
@@ -541,7 +556,7 @@ const MaintenanceScheduleView = () => {
                 )}
             </div>
 
-            {showPrint && app && <PrintSheet app={app} services={chosen} parts={parts} section={openSec || 'parts'} onClose={() => setShowPrint(false)} />}
+            {showPrint && app && <PrintSheet app={app} services={chosen} parts={parts} kits={kitRows} section={openSec || 'parts'} onClose={() => setShowPrint(false)} />}
         </div>
     );
 };

@@ -74,7 +74,8 @@ function MyLimitsModal({ access, onClose }) {
                         <Row label="Max Credit Days" value={fmt(lim.max_credit_days, ' days')} />
                         <Row label="Max Expense Amount (all types combined)" value={fmt(lim.max_expense_amount, 'inr')} />
                     </div>
-                    {/* The hierarchy this user's own records follow */}
+                    {/* The hierarchy this user's own records follow (hidden for L5/COO — top of the chain) */}
+                    {access.level !== 'l5' && (
                     <div className="rounded-xl border border-gray-200 overflow-hidden">
                         <p className="px-3 py-2 bg-gray-50 text-[10px] uppercase tracking-wide font-bold text-gray-800 border-b border-gray-200">
                             My Approval Hierarchy {chain.branch ? `(${chain.branch})` : ''}
@@ -97,6 +98,7 @@ function MyLimitsModal({ access, onClose }) {
                             </>
                         )}
                     </div>
+                    )}
                 </div>
             </div>
         </div>

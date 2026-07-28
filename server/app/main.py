@@ -100,6 +100,22 @@ try:
 except Exception as e:
     print(f"[perf-indexes] skipped: {e}")
 
+# Kits used to live on the part rows (maintenance_parts.alt_*). Lift any code
+# that has not been converted yet into the standalone maintenance_kits tables.
+# Idempotent — each code is flagged with kits_migrated once it has been done.
+try:
+    from app.controllers.maintenance_controller import backfill_kits as _backfill_kits
+
+    _db = SessionLocal()
+    try:
+        _n = _backfill_kits(_db)
+        if _n:
+            print(f"✅ Migrated kits for {_n} application code(s)")
+    finally:
+        _db.close()
+except Exception as e:
+    print(f"[kit-backfill] skipped: {e}")
+
 # ---------------- FASTAPI APP ---------------- #
 
 # orjson serializes large JSON payloads several times faster than the standard

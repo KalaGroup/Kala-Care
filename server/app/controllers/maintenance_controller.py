@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.maintenance_model import (
     MaintenanceAppCode, MaintenancePart, MaintenanceService, MaintenanceActivity,
+    MaintenanceKit, MaintenanceKitPart,
 )
 
 
@@ -21,12 +22,31 @@ def serialize_part(p: MaintenancePart):
     }
 
 
+def serialize_kit_part(kp: MaintenanceKitPart):
+    return {
+        "partNumber": kp.part_number or "", "partDesc": kp.part_desc or "",
+        "qty": kp.qty or "", "action": kp.action or "",
+        "serviceHours": kp.service_hours or "",
+    }
+
+
+def serialize_kit(k: MaintenanceKit):
+    return {
+        "id": k.id, "kitNumber": k.kit_number or "", "kitDesc": k.kit_desc or "",
+        "qty": k.qty or "", "action": k.action or "", "serviceHours": k.service_hours or "",
+        "createdBy": k.created_by or "", "updatedBy": k.updated_by or "",
+        "parts": [serialize_kit_part(p) for p in k.parts],
+    }
+
+
 def serialize_app(a: MaintenanceAppCode):
     return {
         "id": a.id, "appCode": a.app_code, "systemAppCode": a.system_app_code or "",
         "segment": a.segment or "", "engineModel": a.engine_model or "",
         "kva": a.kva or "", "emission": a.emission or "",
+        "createdBy": a.created_by or "", "updatedBy": a.updated_by or "",
         "parts": [serialize_part(p) for p in a.parts],
+        "kits": [serialize_kit(k) for k in a.kits],
     }
 
 
@@ -48,12 +68,42 @@ def _ensure_service_for_hours(db: Session, hours):
     db.flush()
 
 
+def _write_kits(db: Session, app_id: int, kits: list, user_id=None):
+    """Replace an application code's kits with the supplied list.
+
+    Kits are standalone: each carries its OWN copied part lines, so nothing here
+    reads or touches maintenance_parts.
+    """
+    for i, k in enumerate(kits or []):
+        row = MaintenanceKit(
+            app_code_id=app_id,
+            kit_number=k.get("kitNumber"), kit_desc=k.get("kitDesc"),
+            qty=k.get("qty"), action=k.get("action"),
+            service_hours=str(k.get("serviceHours") or "").strip() or None,
+            sort_order=i, created_by=user_id, updated_by=user_id,
+        )
+        db.add(row)
+        db.flush()  # assign row.id
+        for j, kp in enumerate(k.get("parts") or []):
+            db.add(MaintenanceKitPart(
+                kit_id=row.id,
+                part_number=kp.get("partNumber"), part_desc=kp.get("partDesc"),
+                qty=kp.get("qty"), action=kp.get("action"),
+                service_hours=str(kp.get("serviceHours") or "").strip() or None,
+                sort_order=j,
+            ))
+
+
 def _insert_app(db: Session, a: dict, created_by=None):
     row = MaintenanceAppCode(
         app_code=str(a.get("appCode") or "").strip(),
         system_app_code=(a.get("systemAppCode") or None),
         segment=a.get("segment"), engine_model=a.get("engineModel"),
         kva=a.get("kva"), emission=a.get("emission"), created_by=created_by,
+        updated_by=created_by,
+        # Kits arrive in their own list now, so there is no legacy alt_* data on
+        # this record for the backfill to lift.
+        kits_migrated=True,
     )
     db.add(row)
     db.flush()  # assign row.id
@@ -69,6 +119,10 @@ def _insert_app(db: Session, a: dict, created_by=None):
             service_hours=str(p.get("serviceHours") or "500"),
             consumable=p.get("consumable"), schedule=p.get("schedule"), sort_order=i,
         ))
+    for k in a.get("kits") or []:
+        if str(k.get("serviceHours") or "").strip():
+            _ensure_service_for_hours(db, k.get("serviceHours"))
+    _write_kits(db, row.id, a.get("kits"), user_id=created_by)
     return row
 
 
@@ -108,7 +162,10 @@ def list_apps(db: Session, slim: bool = False):
     # Selection and Report screens, which all call this endpoint.
     rows = (
         db.query(MaintenanceAppCode)
-        .options(selectinload(MaintenanceAppCode.parts))
+        .options(
+            selectinload(MaintenanceAppCode.parts),
+            selectinload(MaintenanceAppCode.kits).selectinload(MaintenanceKit.parts),
+        )
         .order_by(MaintenanceAppCode.app_code)
         .all()
     )
@@ -129,10 +186,22 @@ def create_app(db: Session, payload: dict):
 
 def update_app(db: Session, app_code: str, payload: dict):
     row = _get(db, app_code)
+    row.updated_by = payload.get("_updated_by") or row.updated_by
     for attr, key in (("system_app_code", "systemAppCode"), ("segment", "segment"),
                       ("engine_model", "engineModel"), ("kva", "kva"), ("emission", "emission")):
         if payload.get(key) is not None:
             setattr(row, attr, payload.get(key))
+    if payload.get("kits") is not None:
+        # Kits are replaced wholesale — they own their part copies, so nothing
+        # has to be reconciled against maintenance_parts.
+        for k in list(row.kits):
+            db.delete(k)
+        db.flush()
+        for k in payload["kits"]:
+            if str(k.get("serviceHours") or "").strip():
+                _ensure_service_for_hours(db, k.get("serviceHours"))
+        _write_kits(db, row.id, payload["kits"], user_id=payload.get("_updated_by"))
+        row.kits_migrated = True
     if payload.get("parts") is not None:
         for p in list(row.parts):
             db.delete(p)
@@ -171,8 +240,13 @@ def import_apps(db: Session, items: list):
             continue
         existing = db.query(MaintenanceAppCode.id).filter(MaintenanceAppCode.app_code == code).first()
         if existing:
-            # Set-based delete of the old code + its parts — never loads the part
-            # rows into memory (matters on a full re-upload of the master file).
+            # Set-based delete of the old code + its parts and kits — never loads
+            # those rows into memory (matters on a full re-upload of the master
+            # file). Kit parts go first, then kits, then parts, then the code.
+            kit_ids = [k for (k,) in db.query(MaintenanceKit.id).filter(MaintenanceKit.app_code_id == existing.id).all()]
+            if kit_ids:
+                db.query(MaintenanceKitPart).filter(MaintenanceKitPart.kit_id.in_(kit_ids)).delete(synchronize_session=False)
+                db.query(MaintenanceKit).filter(MaintenanceKit.id.in_(kit_ids)).delete(synchronize_session=False)
             db.query(MaintenancePart).filter(MaintenancePart.app_code_id == existing.id).delete(synchronize_session=False)
             db.query(MaintenanceAppCode).filter(MaintenanceAppCode.id == existing.id).delete(synchronize_session=False)
             db.flush()
@@ -182,6 +256,67 @@ def import_apps(db: Session, items: list):
         _insert_app(db, a, created_by=a.get("_created_by") or "import")
     db.commit()
     return {"added": added, "replaced": replaced}
+
+
+# ---------------- ONE-TIME KIT BACKFILL ---------------- #
+
+def _legacy_kits_of(parts: list) -> list:
+    """Rebuild kits from the LEGACY per-part kit columns (alt_*).
+
+    The old master sheet merged one kit down a run of part rows: the run's first
+    row carried the kit values and the rows under it were blank. A row whose kit
+    number repeated its own part number was a "loose" part, and it closed the run
+    above it. This mirrors that exactly, and copies each covered part line into
+    the kit — which is all a kit is now.
+    """
+    def t(v):
+        return str(v or "").strip()
+
+    kits, cur = [], None
+    for p in parts:
+        has_kit = bool(t(p.alt_part_no) or t(p.alt_desc) or t(p.alt_qty) or t(p.alt_action))
+        copy = {
+            "partNumber": p.part_number or "", "partDesc": p.part_desc or "",
+            "qty": p.qty or "", "action": p.action or "",
+            "serviceHours": p.service_hours or "",
+        }
+        if has_kit and t(p.alt_part_no) == t(p.part_number):
+            cur = None                      # loose part — ends the run above it
+        elif has_kit:
+            cur = {
+                "kitNumber": p.alt_part_no or "", "kitDesc": p.alt_desc or "",
+                "qty": p.alt_qty or "", "action": p.alt_action or "",
+                "serviceHours": p.alt_service_hours or "",
+                "parts": [copy],
+            }
+            kits.append(cur)
+        elif cur is not None:
+            cur["parts"].append(copy)       # blank row — merged into the kit above
+    return kits
+
+
+def backfill_kits(db: Session) -> int:
+    """Lift every application code's legacy kit data into maintenance_kits.
+
+    Runs on startup and is idempotent: a code is processed once and flagged via
+    kits_migrated, so kits the Master Admin later deletes are never resurrected.
+    Returns how many codes were converted.
+    """
+    rows = (
+        db.query(MaintenanceAppCode)
+        .options(selectinload(MaintenanceAppCode.parts))
+        .filter((MaintenanceAppCode.kits_migrated == False) | (MaintenanceAppCode.kits_migrated.is_(None)))  # noqa: E712
+        .all()
+    )
+    if not rows:
+        return 0
+    for a in rows:
+        kits = _legacy_kits_of(a.parts)
+        if kits:
+            _write_kits(db, a.id, kits, user_id=a.created_by)
+        a.kits_migrated = True
+    db.commit()
+    return len(rows)
 
 
 # ---------------- SERVICES ---------------- #
@@ -252,6 +387,19 @@ def _clean_code(v) -> str:
     return str(v or "").strip().rstrip(". \u2026").strip()
 
 
+def _active_assets(q):
+    """Restrict an Asset Detailed query to operationally ACTIVE assets only.
+
+    The data hub also carries inactive / blank-status assets; those must not
+    count toward the app-code mapping or the commissioning dates."""
+    from sqlalchemy import func
+    from app.models.customer_model import AssetDetailed
+
+    return q.filter(
+        func.upper(func.ltrim(func.rtrim(AssetDetailed.asset_operational_status))) == "ACTIVE"
+    )
+
+
 def _date_iso(dt) -> str:
     """Serialize a commissioning date to YYYY-MM-DD (the client formats it)."""
     if not dt:
@@ -271,19 +419,19 @@ def asset_commissioning(db: Session):
     Used by the Service Applicability (coverage) tab, which is visible to every
     signed-in user \u2014 so this is intentionally NOT gated to the Master Admin like
     app_mapping is. One grouped, index-covered query; codes are cleaned + upper-
-    cased the same way as app_mapping so the two line up."""
+    cased and restricted to ACTIVE assets the same way as app_mapping so the two
+    line up."""
     from sqlalchemy import func
     from app.models.customer_model import AssetDetailed
 
     norm = func.upper(func.ltrim(func.rtrim(AssetDetailed.application_code)))
-    rows = (
+    q = (
         db.query(norm.label("code"), func.max(AssetDetailed.commissioning_date).label("commissioning"))
         .filter(AssetDetailed.application_code.isnot(None))
         .filter(func.ltrim(func.rtrim(AssetDetailed.application_code)) != "")
         .filter(AssetDetailed.commissioning_date.isnot(None))
-        .group_by(norm)
-        .all()
     )
+    rows = _active_assets(q).group_by(norm).all()
     merged = {}
     for r in rows:
         code = _clean_code(r.code)
@@ -302,14 +450,16 @@ def app_mapping(db: Session):
     Returns counts plus the list of asset app codes that are NOT uploaded to
     the master yet (with a representative engine model / segment / KVA and how
     many assets carry each code) so the Master Admin can add them directly.
-    Codes are compared case-insensitively after trimming and after stripping
-    trailing dots ("3H.8422..." matches "3H.8422").
+    Only assets whose Asset Operational Status is "Active" are considered —
+    inactive / blank-status assets are excluded from the codes, the counts and
+    the commissioning dates. Codes are compared case-insensitively after
+    trimming and after stripping trailing dots ("3H.8422..." matches "3H.8422").
     """
     from sqlalchemy import func
     from app.models.customer_model import AssetDetailed
 
     norm = func.upper(func.ltrim(func.rtrim(AssetDetailed.application_code)))
-    rows = (
+    q = (
         db.query(
             norm.label("code"),
             func.count(AssetDetailed.id).label("assets"),
@@ -321,9 +471,8 @@ def app_mapping(db: Session):
         )
         .filter(AssetDetailed.application_code.isnot(None))
         .filter(func.ltrim(func.rtrim(AssetDetailed.application_code)) != "")
-        .group_by(norm)
-        .all()
     )
+    rows = _active_assets(q).group_by(norm).all()
 
     # Re-aggregate after cleaning: "3H.8422..." and "3H.8422" collapse into one
     # code, summing their asset counts and keeping the first non-empty details.

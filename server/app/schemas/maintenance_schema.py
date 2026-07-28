@@ -17,6 +17,24 @@ class PartIn(BaseModel):
     schedule: Optional[str] = ""
 
 
+class KitPartIn(BaseModel):
+    """A kit's own part line — a standalone copy, not a reference to a PartIn."""
+    partNumber: Optional[str] = ""
+    partDesc: Optional[str] = ""
+    qty: Optional[str] = ""
+    action: Optional[str] = ""
+    serviceHours: Optional[str] = ""
+
+
+class KitIn(BaseModel):
+    kitNumber: Optional[str] = ""
+    kitDesc: Optional[str] = ""
+    qty: Optional[str] = ""
+    action: Optional[str] = ""
+    serviceHours: Optional[str] = ""
+    parts: List[KitPartIn] = []
+
+
 class AppCodeIn(BaseModel):
     appCode: str
     systemAppCode: Optional[str] = ""
@@ -25,6 +43,7 @@ class AppCodeIn(BaseModel):
     kva: Optional[str] = ""
     emission: Optional[str] = ""
     parts: List[PartIn] = []
+    kits: List[KitIn] = []
 
 
 class AppCodeUpdate(BaseModel):
@@ -34,6 +53,7 @@ class AppCodeUpdate(BaseModel):
     kva: Optional[str] = None
     emission: Optional[str] = None
     parts: Optional[List[PartIn]] = None
+    kits: Optional[List[KitIn]] = None
 
 
 class ImportIn(BaseModel):
