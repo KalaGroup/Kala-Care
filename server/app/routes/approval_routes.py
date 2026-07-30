@@ -36,6 +36,15 @@ def get_l4_choices(branch: str = None, request_type: str = None,
     return {"success": True, **ac.get_ho_l4_choices(db, user_id, branch, request_type)}
 
 
+@router.get("/chain-preview")
+def get_chain_preview(branch: str = None, category: str = None, request_type: str = None,
+                      user_id: str = Header(...), db: Session = Depends(get_db)):
+    """The approval path a record of (branch, category) will follow for THIS
+    creator, with the candidate approvers per level — feeds the submit-time
+    CC box (a level with several people offers a dropdown to pick ONE)."""
+    return {"success": True, **ac.get_chain_preview(db, user_id, branch, category, request_type)}
+
+
 # ---------------- RIGHTS MASTER (kala000001 / 31240002 only) ---------------- #
 
 @router.get("/rights")
@@ -106,6 +115,8 @@ async def create_application(
     expense_type: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
     remark: Optional[str] = Form(None),
+    l2_approver_id: Optional[str] = Form(None),
+    l3_approver_id: Optional[str] = Form(None),
     l4_approver_id: Optional[str] = Form(None),
     l5_approver_id: Optional[str] = Form(None),
     cc_emails: Optional[str] = Form(None),
@@ -133,6 +144,8 @@ async def create_application(
         "expense_type": expense_type,
         "description": description,
         "remark": remark,
+        "l2_approver_id": l2_approver_id,
+        "l3_approver_id": l3_approver_id,
         "l4_approver_id": l4_approver_id,
         "l5_approver_id": l5_approver_id,
         "cc_emails": cc_emails,
@@ -161,6 +174,8 @@ async def update_application(
     expense_type: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
     remark: Optional[str] = Form(None),
+    l2_approver_id: Optional[str] = Form(None),
+    l3_approver_id: Optional[str] = Form(None),
     l4_approver_id: Optional[str] = Form(None),
     l5_approver_id: Optional[str] = Form(None),
     cc_emails: Optional[str] = Form(None),
@@ -189,6 +204,8 @@ async def update_application(
         "expense_type": expense_type,
         "description": description,
         "remark": remark,
+        "l2_approver_id": l2_approver_id,
+        "l3_approver_id": l3_approver_id,
         "l4_approver_id": l4_approver_id,
         "l5_approver_id": l5_approver_id,
         "cc_emails": cc_emails,
@@ -326,6 +343,15 @@ def remove_employee_rights(body: dict, user_id: str = Header(...), db: Session =
     hierarchy assignment; they reappear under 'Add employee'."""
     res = ac.remove_employee_rights(db, user_id, body)
     return {"success": True, "message": "Employee removed from the hierarchy", **res}
+
+
+@router.post("/matrix/branch-group")
+def set_branch_group(body: dict, user_id: str = Header(...), db: Session = Depends(get_db)):
+    """Body: { row_branch, branches: [...] } — merge several branches into ONE
+    hierarchy row (replace-all member list). Fewer than two branches
+    dissolves the merged row."""
+    res = ac.set_branch_group(db, user_id, body.get("row_branch"), body.get("branches"))
+    return {"success": True, "message": "Merged branch row saved", **res}
 
 
 @router.post("/matrix/stage-approvers")

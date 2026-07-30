@@ -210,12 +210,12 @@ export default function MomFiles({ apiBase, authHeaders, brand = '#2f3192', bran
           {!open ? (
             <>
               <span className="text-[12px] font-semibold text-gray-600">{folders.length} folder{folders.length === 1 ? '' : 's'}</span>
-              <div className="ml-auto flex items-center gap-2">
+              <div className="ml-auto flex items-center gap-2 flex-wrap min-w-0">
                 {adding ? (
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex items-center gap-1.5 flex-wrap">
                     <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') createFolder(); if (e.key === 'Escape') { setAdding(false); setNewName(''); } }}
-                      placeholder="Folder name" className="rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-indigo-100" />
+                      placeholder="Folder name" className="rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-indigo-100 max-sm:w-full min-w-0" />
                     <button onClick={createFolder} disabled={busy || !newName.trim()} className="rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50" style={{ background: brand }}>Create</button>
                     <button onClick={() => { setAdding(false); setNewName(''); }} className="rounded-lg border border-gray-300 px-2.5 py-1.5 text-[12px] font-medium text-gray-600">Cancel</button>
                   </span>

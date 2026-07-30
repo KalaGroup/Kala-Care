@@ -3643,6 +3643,13 @@ const getPerformanceTitle = () => {
 .custom-calendar .react-datepicker__navigation-icon::before {
     border-color: #2f3192;
 }
+.dash-tabs {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.dash-tabs::-webkit-scrollbar {
+    display: none;
+}
 `}</style>
                         </div>
                     </div>
@@ -3681,14 +3688,14 @@ const getPerformanceTitle = () => {
                         </button>
 
                         <div className={`${isMobileMenuOpen ? 'block' : 'hidden'} lg:block`}>
-                            <nav className="dash-tabs flex flex-col lg:flex-row lg:space-x-2 max-lg:gap-2">
+                            <nav className="dash-tabs flex flex-col lg:flex-row lg:flex-nowrap lg:items-stretch gap-2">
                                 {/* Overall Performance Tab */}
                                 <button
                                     onClick={() => {
                                         setActiveTab('overall');
                                         setIsMobileMenuOpen(false);
                                     }}
-                                    className={`px-4 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm
+                                    className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
                         ${activeTab === 'overall'
                                             ? 'text-white font-bold shadow-md'
                                             : 'text-black bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300'
@@ -3705,7 +3712,7 @@ const getPerformanceTitle = () => {
                                             setActiveTab('branches');
                                             setIsMobileMenuOpen(false);
                                         }}
-                                        className={`px-4 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm
+                                        className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
                             ${activeTab === 'branches'
                                                 ? 'text-white shadow-md'
                                                 : 'text-black bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300'
@@ -3723,7 +3730,7 @@ const getPerformanceTitle = () => {
                                             setActiveTab('branch-report');
                                             setIsMobileMenuOpen(false);
                                         }}
-                                        className={`px-4 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm
+                                        className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
                             ${activeTab === 'branch-report'
                                                 ? 'text-white shadow-md'
                                                 : 'text-black bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300'
@@ -3742,7 +3749,7 @@ const getPerformanceTitle = () => {
                                                 setActiveTab('campaign-success');
                                                 setIsMobileMenuOpen(false);
                                             }}
-                                            className={`px-4 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm
+                                            className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
                                 ${activeTab === 'campaign-success'
                                                     ? 'text-white shadow-md'
                                                     : 'text-black bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300'
@@ -3760,7 +3767,7 @@ const getPerformanceTitle = () => {
                                             setActiveTab('activity');
                                             setIsMobileMenuOpen(false);
                                         }}
-                                        className={`px-5 py-2.5 rounded-[24px] font-medium transition-all duration-200 text-sm
+                                        className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
             ${activeTab === 'activity'
                                                 ? 'text-white shadow-md'
                                                 : 'text-black font-bold bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300'
@@ -3778,7 +3785,7 @@ const getPerformanceTitle = () => {
                                             setActiveTab('rejected-reason');
                                             setIsMobileMenuOpen(false);
                                         }}
-                                        className={`px-5 py-2.5 rounded-[24px] font-medium transition-all duration-200 text-sm
+                                        className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
             ${activeTab === 'rejected-reason'
                                                 ? 'text-white shadow-md'
                                                 : 'text-black bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300'

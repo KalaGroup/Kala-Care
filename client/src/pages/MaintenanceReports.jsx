@@ -157,7 +157,7 @@ const MaintenanceReports = () => {
                 </div>
 
                 {/* ===== Tabs ===== */}
-                <div className="flex items-center gap-1.5 mb-4 border-b border-gray-200 max-sm:flex-wrap">
+                <div className="flex flex-wrap items-center gap-1.5 mb-4 border-b border-gray-200">
                     {[
                         { id: 'coverage', label: 'Service Applicability', Icon: Squares2X2Icon },
                         { id: 'activity', label: 'Search Activity Count', Icon: ClockIcon },
@@ -325,21 +325,21 @@ const CoverageReport = React.memo(({ master, services, commissioning = [] }) => 
 
     return (
         <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm">
-            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 bg-gray-50 max-sm:flex-wrap max-md:px-2">
+            <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-b border-gray-200 bg-gray-50 max-md:px-2">
                 <ChartBarIcon className="h-4 w-4" style={{ color: themeColor }} />
                 <p className="text-[13px] font-semibold text-gray-800">Service Coverage Matrix</p>
                 <span className="text-[11px] text-gray-400 hidden sm:inline">
                     {(search.trim() || segment) ? `${visible.length} of ${master.length}` : master.length} codes × {cols.length} services · ✓ has parts · ✗ none
                 </span>
                 <select value={searchField} onChange={(e) => setSearchField(e.target.value)} title="Search field"
-                    className="ml-auto max-w-[150px] rounded-lg border border-gray-200 bg-white px-2 py-1 text-[12px] text-gray-700 outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition max-sm:ml-0">
+                    className="ml-auto max-w-[150px] rounded-lg border border-gray-200 bg-white px-2 py-1 text-[12px] text-gray-700 outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition max-sm:ml-0 max-sm:w-full max-sm:max-w-full">
                     {SEARCH_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
                 </select>
                 <input value={search} onChange={(e) => setSearch(e.target.value)}
                     placeholder={`Search ${(SEARCH_FIELDS.find((f) => f.key === searchField) || SEARCH_FIELDS[0]).label.toLowerCase()}`}
                     className="w-44 rounded-lg border border-gray-200 bg-white px-2 py-1 text-[12px] text-black outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition max-sm:w-full max-sm:ml-0" />
                 <select value={segment} onChange={(e) => setSegment(e.target.value)}
-                    className="max-w-[160px] rounded-lg border border-gray-200 bg-white px-2 py-1 text-[12px] text-black outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition">
+                    className="max-w-[160px] rounded-lg border border-gray-200 bg-white px-2 py-1 text-[12px] text-black outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition max-sm:w-full max-sm:max-w-full">
                     <option value="">All segments</option>
                     {segments.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>

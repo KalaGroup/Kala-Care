@@ -673,10 +673,10 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
 
     return (
         <div className="fixed inset-0 z-50 overflow-y-auto">
-            <div className="flex items-center justify-center h-screen w-screen p-0">
+            <div className="flex items-center justify-center h-full w-full p-0">
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={onClose}></div>
 
-                <div className="relative w-screen h-screen max-w-none bg-white shadow-2xl overflow-y-auto rounded-none">
+                <div className="relative w-full h-full max-w-none bg-white shadow-2xl overflow-y-auto rounded-none">
                     {/* Header */}
                     <div className="sticky top-0 z-20 px-4 sm:px-5 py-3 border-b border-gray-200" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}>
                         <div className="flex items-center justify-between">

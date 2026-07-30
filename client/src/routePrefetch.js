@@ -19,6 +19,8 @@ export const routeImporters = {
   '/mom-tracking': () => import('./pages/MOMTracking'),
   '/approval-application': () => import('./pages/ApprovalApplication'),
   '/sales-finance': () => import('./pages/SalseANDFinance'),
+  '/aop-master': () => import('./pages/AOPMaster'),
+  '/sales-labour-report': () => import('./pages/SalesLabourReport'),
   '/import': () => import('./pages/Import'),
 };
 

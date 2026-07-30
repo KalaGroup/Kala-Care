@@ -127,12 +127,13 @@ async def edit_meeting(
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    """Edit an already-finalized meeting from MOM History. Admins only.
+    """Edit an already-finalized meeting from MOM History. Master Admin only —
+    branch admins can create meetings but not rewrite history.
 
     Same flaky-link retry story as create_meeting: the transaction rolls back
     on failure, so retrying the whole update is safe."""
-    _require_role(db, user_id, user_role, ADMIN_ROLES,
-                  "Only admins can edit meeting minutes")
+    _require_role(db, user_id, user_role, MASTER_ROLES,
+                  "Only the Master Admin can edit meeting minutes")
     for attempt in range(3):
         try:
             meeting = mc.update_meeting(db, meeting_id, payload.model_dump(exclude_unset=True))

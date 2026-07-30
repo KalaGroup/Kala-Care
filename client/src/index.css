@@ -4,6 +4,13 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Custom `xs:` breakpoint (480px) — several components use xs: variants for
+   small-phone fine-tuning; without this definition Tailwind v4 silently
+   ignores them. */
+@theme {
+  --breakpoint-xs: 30rem;
+}
+
 /* Toast container - top right positioning */
 .react-hot-toast-container {
   top: 1rem !important;

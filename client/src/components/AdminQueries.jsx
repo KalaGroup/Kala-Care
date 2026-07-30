@@ -254,11 +254,11 @@ const AdminQueries = ({ user, onClose, showToast, onUnresolvedCount }) => {
                                     </span>
                                 </div>
 
-                                <h4 className="text-xs font-medium text-black mb-1.5">
+                                <h4 className="text-xs font-medium text-black mb-1.5 break-words">
                                     {q.subject || 'No Subject'}
                                 </h4>
 
-                                <p className="text-xs text-black bg-white p-2 rounded-lg border border-gray-200 mb-2.5">
+                                <p className="text-xs text-black bg-white p-2 rounded-lg border border-gray-200 mb-2.5 break-words">
                                     {q.query}
                                 </p>
 

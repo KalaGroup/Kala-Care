@@ -3358,7 +3358,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2"
                                 style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
                             >
-                                <div className="max-w-[240px] flex-shrink-0">
+                                <div className="max-w-[240px] max-sm:max-w-full flex-shrink-0">
                                     <h3 className="text-base font-semibold text-white">
                                         CSP Status {userData?.branch ? `— ${userData.branch}` : ''}
                                     </h3>
@@ -3640,7 +3640,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                 className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2"
                                 style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
                             >
-                                <div className="max-w-[240px] flex-shrink-0">
+                                <div className="max-w-[240px] max-sm:max-w-full flex-shrink-0">
                                     <h3 className="text-base font-semibold text-white">
                                         Open CSP Status {userData?.branch ? `— ${userData.branch}` : ''}
                                     </h3>

@@ -19,7 +19,7 @@ import {
 import {
     createApplication, updateApplication, approveApplication, rejectApplication,
     deleteApplication, sendResultEmail, attachmentViewUrl, attachmentDownloadUrl,
-    approvalPdfUrl, getExpenseTypes, getAccess, getL4Choices, errText,
+    approvalPdfUrl, getExpenseTypes, getAccess, getChainPreview, errText,
 } from './approvalApi';
 
 export const BRAND = '#2f3192';
@@ -478,7 +478,7 @@ export async function promptResultEmail(app) {
 
 /* ---------------- Detail modal (with approve / reject) ---------------- */
 
-function Step({ label, byName, at, remark, state, pendingNames = null }) {
+function Step({ label, byName, at, remark, state, pendingNames = null, chosenName = null }) {
     const dot = state === 'done' ? 'bg-emerald-500' : state === 'rejected' ? 'bg-amber-500'
         : state === 'current' ? 'bg-amber-400 animate-pulse' : 'bg-gray-300';
     return (
@@ -498,13 +498,19 @@ function Step({ label, byName, at, remark, state, pendingNames = null }) {
                             )}
                         </>
                     )
-                    : <p className="text-[11px] text-gray-600">
-                        {state === 'current'
-                            ? `Awaiting action${pendingNames?.length ? ` — ${pendingNames.join(', ')}` : ''}`
-                            /* auto-skip reasons (e.g. no approver defined) come in `remark` */
-                            : state === 'skipped' ? (remark || 'Skipped — not required or covered by an earlier approval')
-                                : 'Pending'}
-                    </p>}
+                    : <>
+                        <p className="text-[11px] text-gray-600">
+                            {state === 'current'
+                                ? `Awaiting action${pendingNames?.length ? ` — ${pendingNames.join(', ')}` : ''}`
+                                /* auto-skip reasons (e.g. no approver defined) come in `remark` */
+                                : state === 'skipped' ? (remark || 'Skipped — not required or covered by an earlier approval')
+                                    : 'Pending'}
+                        </p>
+                        {/* the person the CREATOR picked for this level (submit box) */}
+                        {chosenName && state !== 'skipped' && (
+                            <p className="text-[10px] text-indigo-700">Creator chose: <b>{chosenName}</b></p>
+                        )}
+                    </>}
             </div>
         </div>
     );
@@ -622,18 +628,18 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
     );
 
     return (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3" onClick={onClose}>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3 max-md:p-2" onClick={onClose}>
             <div
                 className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto"
                 onClick={e => e.stopPropagation()}
             >
-                <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3 rounded-t-2xl text-white" style={{ background: BRAND }}>
-                    <div className="flex items-center gap-2">
+                <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 px-5 max-sm:px-3 py-3 rounded-t-2xl text-white" style={{ background: BRAND }}>
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
                         <FileText size={16} />
                         <span className="font-semibold text-sm">{app.app_no}</span>
                         <StatusBadge status={app.status} />
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-shrink-0">
                         {app.status === 'approved' && (
                             /* full record + trail + attachments as one PDF */
                             <a href={approvalPdfUrl(app.id)}
@@ -646,7 +652,7 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
                     </div>
                 </div>
 
-                <div className="p-5 space-y-5">
+                <div className="p-5 max-sm:p-3 space-y-5">
                     {/* Purpose of approval — the headline of the application */}
                     <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3">
                         <p className="text-[10px] uppercase tracking-wide text-black font-bold">Purpose of Approval</p>
@@ -713,21 +719,18 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
                         ) : (
                             <>
                                 <Step label={`${levelLabel('l2')} Approval`} state={stepState('l2')} pendingNames={app.status === 'pending_l2' ? app.pending_approver_names : null}
+                                    chosenName={app.l2_approver_name}
                                     byName={app.l2_action_by_name} at={app.l2_action_at} remark={app.l2_action_remark} />
                                 <Step label={`${levelLabel('l3')} Approval`} state={stepState('l3')} pendingNames={app.status === 'pending_l3' ? app.pending_approver_names : null}
+                                    chosenName={app.l3_approver_name}
                                     byName={app.l3_action_by_name} at={app.l3_action_at} remark={app.l3_action_remark} />
                                 <Step label={`${levelLabel('l4')} Approval`} state={stepState('l4')} pendingNames={app.status === 'pending_l4' ? app.pending_approver_names : null}
+                                    chosenName={app.l4_approver_name}
                                     byName={app.l4_action_by_name} at={app.l4_action_at} remark={app.l4_action_remark} />
                                 <Step label={`${levelLabel('l5')} Approval (Final)`} state={stepState('l5')} pendingNames={app.status === 'pending_l5' ? app.pending_approver_names : null}
+                                    chosenName={app.l5_approver_name}
                                     byName={app.l5_action_by_name} at={app.l5_action_at} remark={app.l5_action_remark} />
                             </>
-                        )}
-                        {(app.l4_approver_name || app.l5_approver_name) && (
-                            <p className="text-[10px] text-gray-600">
-                                Creator-chosen approvers: {app.l4_approver_name ? `L4 – ${app.l4_approver_name}` : ''}
-                                {app.l4_approver_name && app.l5_approver_name ? ' · ' : ''}
-                                {app.l5_approver_name ? `L5 – ${app.l5_approver_name}` : ''}
-                            </p>
                         )}
                         {app.status === 'rejected' && (
                             <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
@@ -816,28 +819,6 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
     const [files, setFiles] = useState([]);
     const [saving, setSaving] = useState(false);
     const fileInputRef = useRef(null);
-
-    // HO only: the L4 dropdown is filtered PER RECORD — only HO HODs whose
-    // limit for the chosen type is HIGHER than the creator's own. Refetched
-    // whenever the record's branch / type changes; null = fall back to the
-    // unfiltered access list (fetch failed).
-    const [l4Choices, setL4Choices] = useState(null);
-    useEffect(() => {
-        if (!isHO) return;
-        let alive = true;
-        getL4Choices(form.branch, form.request_type)
-            .then(d => {
-                if (!alive) return;
-                const list = d.l4_choices || [];
-                setL4Choices(list);
-                // a previously picked approver may no longer qualify
-                setForm(f => (f.l4_approver_id && !list.some(c => c.user_id === f.l4_approver_id)
-                    ? { ...f, l4_approver_id: '' } : f));
-            })
-            .catch(() => { if (alive) setL4Choices(null); });
-        return () => { alive = false; };
-    }, [isHO, form.branch, form.request_type]);
-    const l4Options = l4Choices ?? access?.l4_choices ?? [];
 
     // Expense: MULTIPLE types picked from ONE dropdown, with ONE amount for
     // all of them together (matching the single expense limit). Stored as
@@ -946,9 +927,6 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
         if (!form.category) return toast.error('Please select Spares / Services');
         if (!form.request_type) return toast.error('Please select Discounting / Credit / Expense');
         if (!form.branch) return toast.error('Please select a branch');
-        // L4 pick is required only when a qualifying HOD exists — with none
-        // (nobody's limit beats the creator's) the record goes straight to L5
-        if (isHO && l4Options.length > 0 && !form.l4_approver_id) return toast.error(`Select your L4 (${levelName('l4')}) approver`);
         if (!form.description.trim()) return toast.error('Purpose of approval is required');
         if (isDnC) {
             // combined type: either one may be blank, but never BOTH
@@ -993,10 +971,6 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
             isCredit && form.credit_days ? li('Credit Period', `${form.credit_days} days`) : '',
             isExpense ? li('Expense Types', expTypes.join(', ')) : '',
             isExpense && form.expense_amount ? li('Expense Amount', `₹${Number(form.expense_amount).toLocaleString('en-IN')}`) : '',
-            isHO ? li(`L4 (${levelName('l4')}) Approver`,
-                l4Options.find(c => c.user_id === form.l4_approver_id)?.name
-                || (l4Options.length === 0 ? `Skipped — goes to L5 (${levelName('l5')})` : '')) : '',
-            isHO ? li(`L5 (${levelName('l5')})`, (access?.l5_choices || []).map(c => c.name).join(', ') || 'Fixed') : '',
             li('Remark', form.remark),
             li('Attachments', files.length ? files.map(f => f.name).join(', ') : ''),
         ].join('');
@@ -1014,15 +988,91 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
         });
         if (!res.isConfirmed) return;
 
-        // creator attaches CC addresses for the future result email (optional)
-        const ccList = await promptCcEmails(
-            String(draft?.cc_emails || '').split(',').map(s => s.trim()).filter(Boolean));
+        // The approval path this record will follow — fetched live so the CC
+        // box's right panel shows the hierarchy and offers a per-level
+        // approver pick where SEVERAL people hold a level. No pick = every
+        // assigned approver may act (the panel just hides on fetch error).
+        let chainLevels = null;
+        try {
+            const d = await getChainPreview(form.branch, form.category, form.request_type);
+            chainLevels = d.levels || null;
+        } catch { /* submit still works without the flow panel */ }
+
+        const pickerLevels = [];
+        const flowRows = (chainLevels || []).map(l => {
+            const tag = `${l.level.toUpperCase()} – ${esc(levelName(l.level))}`;
+            const row = (body) => `<div style="margin:6px 0"><b style="font-size:11px">${tag}</b>${body}</div>`;
+            if (l.skipped)
+                return row(`<div style="font-size:11px;color:#6b7280">${esc(l.skipped)}</div>`);
+            const cands = l.candidates || [];
+            const hoL4 = isHO && l.level === 'l4';
+            if (cands.length <= 1 && !hoL4)
+                return row(`<div style="font-size:11px;color:#374151">${esc(cands.map(c => c.name).join(', ') || '—')}</div>`);
+            pickerLevels.push(l.level);
+            const preset = l.level === 'l4' ? form.l4_approver_id : '';
+            // HO must pick ONE L4 (validated below) — no "all approvers" option
+            const allOpt = hoL4
+                ? '<option value="">Select…</option>'
+                : '<option value="">All approvers — anyone may act</option>';
+            const opts = cands.map(c =>
+                `<option value="${esc(c.user_id)}" ${c.user_id === preset ? 'selected' : ''}>${esc(c.name)} (${esc(c.user_id)})</option>`).join('');
+            return row(`<select id="chainpick_${l.level}" style="display:block;width:100%;border:1px solid #d1d5db;border-radius:8px;padding:5px 8px;font-size:12px;margin-top:2px;background:#fff">${allOpt}${opts}</select>`);
+        }).join('');
+
+        // Creator attaches CC addresses for the future result email (left)
+        // and picks the record's approvers per level (right) — ONE box.
+        const ccAdded = String(draft?.cc_emails || '').split(',').map(s => s.trim()).filter(Boolean);
+        const ccRes = await Swal.fire({
+            title: 'CC emails & approval flow',
+            width: 720,
+            html: `<div style="display:flex;gap:14px;text-align:left;font-size:13px;flex-wrap:wrap">
+                       <div style="flex:1;min-width:230px">
+                           <p style="margin:0 0 2px;font-size:12px;color:#555">
+                               When this NFA is approved / rejected the result email goes
+                               <b>To: you (creator)</b> with the <b>approvers in CC automatically</b>.
+                           </p>
+                           ${emailGroupHtml('apv-ccsub', 'Add more CC emails (optional):')}
+                       </div>
+                       <div style="flex:1;min-width:230px;border-left:1px solid #e5e7eb;padding-left:14px">
+                           <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:#374151">
+                               APPROVAL FLOW — pick who approves where several people hold a level
+                           </p>
+                           ${flowRows || '<p style="font-size:11px;color:#6b7280">Flow preview unavailable — default approvers apply</p>'}
+                       </div>
+                   </div>`,
+            showCancelButton: false,
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            confirmButtonText: 'OK — Continue',
+            confirmButtonColor: BRAND,
+            didOpen: () => wireEmailGroup('apv-ccsub', ccAdded),
+            preConfirm: () => {
+                if (!flushEmailGroup('apv-ccsub', ccAdded)) return false;
+                const picks = {};
+                pickerLevels.forEach(lvl => {
+                    const el = document.getElementById(`chainpick_${lvl}`);
+                    if (el) picks[lvl] = el.value || '';
+                });
+                // HO records need an explicit HOD pick (qualifying HODs exist)
+                if (isHO && pickerLevels.includes('l4') && !picks.l4) {
+                    Swal.showValidationMessage(`Select your L4 (${levelName('l4')}) approver`);
+                    return false;
+                }
+                return picks;
+            },
+        });
+        const approverPicks = (ccRes.value && typeof ccRes.value === 'object') ? ccRes.value : {};
+        const ccList = ccAdded;
 
         setSaving(true);
         try {
             let res;
             const fd = buildFormData();
             fd.set('cc_emails', ccList.join(', '));
+            // chosen approvers from the CC box's flow panel (empty = default)
+            ['l2', 'l3', 'l4', 'l5'].forEach(lvl => {
+                if (lvl in approverPicks) fd.set(`${lvl}_approver_id`, approverPicks[lvl] || '');
+            });
             if (draft) {
                 fd.append('submit', 'true');    // draft becomes a numbered, pending application
                 res = await updateApplication(draft.id, fd);
@@ -1046,11 +1096,11 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
     const label = 'block text-[11px] font-bold text-black mb-1';
 
     return (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3" onClick={handleClose}>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3 max-md:p-2" onClick={handleClose}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto"
                 onClick={e => e.stopPropagation()}>
-                <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3 rounded-t-2xl text-white" style={{ background: BRAND }}>
-                    <span className="font-semibold text-sm flex items-center gap-2">
+                <div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-5 max-sm:px-3 py-3 rounded-t-2xl text-white" style={{ background: BRAND }}>
+                    <span className="font-semibold text-sm flex items-center gap-2 min-w-0">
                         <FileText size={16} /> {draft
                             ? (draft.status === 'rejected' ? `Edit & Resubmit — ${draft.app_no || ''}` : 'Edit Draft Application')
                             : title}
@@ -1059,32 +1109,8 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
                 </div>
 
                 <form onSubmit={submit} className="p-4 space-y-3">
-                    {/* HO members choose who approves their record at L4 / L5 */}
-                    {isHO && (
-                        <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-2.5 grid sm:grid-cols-2 gap-2.5">
-                            <div>
-                                <span className={label}>L4 ({levelName('l4')}) Approver {l4Options.length > 0 ? '*' : ''}</span>
-                                <select className={input} value={form.l4_approver_id} onChange={set('l4_approver_id')}
-                                    disabled={l4Options.length === 0}>
-                                    <option value="">Select…</option>
-                                    {l4Options.map(c => (
-                                        <option key={c.user_id} value={c.user_id}>{c.name} ({c.user_id})</option>
-                                    ))}
-                                </select>
-                                {l4Options.length === 0 && (
-                                    <p className="text-[10px] text-gray-500 mt-1">
-                                        No L4 ({levelName('l4')}) with a higher limit than yours for this type — the record goes straight to L5 ({levelName('l5')})
-                                    </p>
-                                )}
-                            </div>
-                            <div>
-                                <span className={label}>L5 ({levelName('l5')})</span>
-                                <div className={`${input} bg-gray-50 text-gray-700 flex items-center min-h-[30px]`}>
-                                    {(access?.l5_choices || []).map(c => c.name).join(', ') || levelName('l5')}
-                                </div>
-                            </div>
-                        </div>
-                    )}
+                    {/* HO members pick their L4 (HOD) approver in the submit-time
+                        "CC emails & approval flow" box — no form field needed */}
 
                     {/* ONE lined grid (like the detail view) — Purpose & Remark
                         span the full width, every other field is one cell */}
@@ -1281,7 +1307,7 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
                         )}
                     </div>
 
-                    <div className="flex justify-end gap-2 pt-1">
+                    <div className="flex flex-wrap justify-end gap-2 pt-1">
                         {draft && draft.status !== 'rejected' && (
                             <button type="button" onClick={handleDeleteDraft} disabled={saving}
                                 className="mr-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 disabled:opacity-50">

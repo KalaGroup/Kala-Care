@@ -26,7 +26,10 @@ const ExDashboard = () => {
       display: 'flex',
       justifyContent: 'center',
       alignItems: 'center',
-      height: '100vh',
+      height: '100%',
+      minHeight: '60vh',
+      padding: '1rem',
+      textAlign: 'center',
       fontSize: '2rem',
       fontWeight: 'bold',
       color: '#555'

@@ -1,0 +1,1 @@
+import{j as e}from"./vendor-chartjs-DaFCGlIH.js";import"./vendor-react-Chjj6F22.js";const i=()=>e.jsx("div",{style:{display:"flex",justifyContent:"center",alignItems:"center",height:"100%",minHeight:"60vh",padding:"1rem",textAlign:"center",fontSize:"2rem",fontWeight:"bold",color:"#555"},children:"Sales & Finance — Coming Soon..."});export{i as default};

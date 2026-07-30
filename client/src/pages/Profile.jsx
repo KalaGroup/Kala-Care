@@ -2024,7 +2024,7 @@ const Profile = () => {
     // Grant/revoke the Part Detail Info or MOM Tracking pages for a user.
     // Master Admin only; page is 'part_detail' | 'mom'.
     const handleTogglePageAccess = async (id, page, currentStatus) => {
-        const label = { part_detail: 'Part Detail Info', approval: 'Approval Application' }[page] || 'MOM Tracking';
+        const label = { part_detail: 'Part Detail Info', approval: 'Note For Approval' }[page] || 'MOM Tracking';
         if (!isMasterAdmin) {
             Swal.fire({
                 title: 'Access Denied',
@@ -2718,7 +2718,7 @@ const Profile = () => {
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Expense</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Part Detail Info</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">MOM Tracking</th>
-                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Approval Application</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Note For Approval</th>
                                                         {!isRestrictedUser && (
                                                             <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap">Actions</th>
                                                         )}
@@ -2927,7 +2927,7 @@ const Profile = () => {
 
             {/* Add Employee Modal */}
             {showAddModal && (isMasterAdmin || isITAdmin) && (
-                <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center p-4 z-50">
+                <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center p-4 max-md:p-2 z-50">
                     <div className="bg-white rounded-xl p-5 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto">
                         <div className="flex justify-between items-center mb-4 max-md:flex-wrap max-md:gap-2">
                             <h3 className="text-base sm:text-lg font-semibold text-black flex items-center space-x-2">
@@ -3117,7 +3117,7 @@ const Profile = () => {
 
             {/* Edit Employee Modal */}
             {editingUser && (
-                <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center p-4 z-50">
+                <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center p-4 max-md:p-2 z-50">
                     {/* Fixed header + fixed footer; the two form columns scroll
                         independently (each its own scrollbar) in between. */}
                     <div className="bg-white rounded-xl max-w-4xl w-full shadow-2xl max-h-[90vh] flex flex-col overflow-hidden max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh]">
@@ -3502,8 +3502,8 @@ const Profile = () => {
                                                 <div className="flex items-center space-x-3">
                                                     <FaBuilding className={`text-sm ${editingUser.can_access_approval ? 'text-emerald-500' : 'text-gray-400'}`} />
                                                     <div>
-                                                        <p className="text-xs font-medium text-black">Approval Application Access</p>
-                                                        <p className="text-xs text-black">Show the Approval Application page (view depends on rights given in its Rights Master)</p>
+                                                        <p className="text-xs font-medium text-black">Note For Approval Access</p>
+                                                        <p className="text-xs text-black">Show the Note For Approval page (view depends on rights given in its Rights Master)</p>
                                                     </div>
                                                 </div>
                                                 <button
@@ -3568,7 +3568,7 @@ const Profile = () => {
 
             {/* Import Employees Modal */}
             {showImportModal && (isMasterAdmin || isITAdmin) && (
-                <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center p-4 z-50">
+                <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center p-4 max-md:p-2 z-50">
                     <div className="bg-white rounded-xl p-5 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto">
                         <div className="flex justify-between items-center mb-4 max-md:flex-wrap max-md:gap-2">
                             <h3 className="text-base sm:text-lg font-semibold text-black flex items-center space-x-2">
@@ -3694,7 +3694,7 @@ const Profile = () => {
 
             {/* Banner Management Modal */}
             {showBannerModal && (isMasterAdmin || isITAdmin || isBranchAdmin) && (
-                <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center p-4 z-50">
+                <div className="fixed inset-0 backdrop-blur-sm bg-black/30 flex items-center justify-center p-4 max-md:p-2 z-50">
                     <div className="bg-white rounded-xl p-5 max-w-4xl w-full shadow-2xl max-h-[90vh] overflow-y-auto max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh] max-md:px-2">
                         <div className="flex justify-between items-center mb-4 max-md:flex-wrap max-md:gap-2">
                             <h3 className="text-base sm:text-lg font-semibold text-black flex items-center space-x-2">

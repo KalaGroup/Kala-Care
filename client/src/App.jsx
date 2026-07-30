@@ -36,6 +36,9 @@ const KnowledgeBook = lazy(routeImporters['/knowledge-book']);
 //added by nik
 const MaintenanceSchedule = lazy(routeImporters['/maintenance-schedule']);
 const MaintenanceReports = lazy(routeImporters['/maintenance-reports']);
+// PMS module pages — master admin only for now.
+const AOPMaster = lazy(routeImporters['/aop-master']);
+const SalesLabourReport = lazy(routeImporters['/sales-labour-report']);
 
 // Route chunks to warm during idle time, most-visited first, so a later navbar
 // click finds the chunk already cached. Order roughly by how often pages are hit.
@@ -54,6 +57,8 @@ const ROUTE_PREFETCHERS = [
   routeImporters['/mom-tracking'],
   routeImporters['/approval-application'],
   routeImporters['/sales-finance'],
+  routeImporters['/aop-master'],
+  routeImporters['/sales-labour-report'],
   routeImporters['/import'],
 ];
 
@@ -342,6 +347,19 @@ function Layout() {
       <Route path="/campaigns" element={
         <ProtectedRoute allowedRoles={['master_admin']}>
           <Campaign />
+        </ProtectedRoute>
+      } />
+
+      {/* PMS Pages - ONLY master_admin for now (view opens to other roles later) */}
+      <Route path="/aop-master" element={
+        <ProtectedRoute allowedRoles={['master_admin']}>
+          <AOPMaster />
+        </ProtectedRoute>
+      } />
+
+      <Route path="/sales-labour-report" element={
+        <ProtectedRoute allowedRoles={['master_admin']}>
+          <SalesLabourReport />
         </ProtectedRoute>
       } />
 

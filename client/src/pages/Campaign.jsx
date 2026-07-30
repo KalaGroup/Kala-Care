@@ -5667,7 +5667,7 @@ const Campaign = () => {
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-3 ml-auto">
+                    <div className="flex items-center gap-3 ml-auto max-sm:flex-wrap max-sm:gap-2">
                       <button
                         onClick={(e) => openFollowupModal(campaign, e)}
                         className="px-2 py-1 text-xs font-medium text-white bg-[#2f3192] rounded-md hover:bg-[#2f3192]/90 transition-all whitespace-nowrap"

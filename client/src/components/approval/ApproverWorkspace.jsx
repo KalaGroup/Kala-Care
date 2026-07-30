@@ -97,14 +97,14 @@ export default function ApproverWorkspace({ pendingStatus, pendingLabel, headerA
                     <TypeTabs value={typeFilter} onChange={setTypeFilter} counts={typeCounts} />
                 </div>
 
-                <div className="relative">
+                <div className="relative max-sm:w-full">
                     <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…"
-                        className="pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-xs w-56 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                        className="pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-xs w-56 max-sm:w-full focus:outline-none focus:ring-2 focus:ring-indigo-300" />
                 </div>
                 {tab !== 'pending' && (
                     <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-                        className="border border-gray-300 rounded-lg px-2.5 py-2 text-xs bg-white">
+                        className="border border-gray-300 rounded-lg px-2.5 py-2 text-xs bg-white max-sm:w-full">
                         <option value="">All Statuses</option>
                         {Object.keys(STATUS_META).map(v => <option key={v} value={v}>{statusLabel(v)}</option>)}
                     </select>

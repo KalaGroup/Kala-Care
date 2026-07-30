@@ -1006,7 +1006,7 @@ const KnowledgeBook = () => {
 
             {/* ===== Category master modal ===== */}
             {isAdmin && showCatModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setShowCatModal(false)}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 max-md:p-2" onClick={() => setShowCatModal(false)}>
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
                             <div className="flex items-center gap-2">
@@ -1060,7 +1060,7 @@ const KnowledgeBook = () => {
 
             {/* ===== Preview modal ===== */}
             {preview && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setPreview(null)}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 max-md:p-2" onClick={() => setPreview(null)}>
                     <div className="bg-white rounded-2xl shadow-2xl max-w-[95vw] w-full max-h-[95vh] overflow-hidden flex flex-col max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh] max-lg:overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 max-md:flex-wrap max-md:gap-2">
                             <div className="flex items-center gap-2.5 min-w-0">

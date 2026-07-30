@@ -391,6 +391,26 @@ COLUMN_STATEMENTS = [
         "add": "ALTER TABLE dbo.approval_applications ADD auto_approved BIT NOT NULL CONSTRAINT DF_apv_apps_auto_approved DEFAULT 0",
     },
     {
+        "name": "approval_applications.l2_approver_id",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l2_approver_id'",
+        "add": "ALTER TABLE dbo.approval_applications ADD l2_approver_id NVARCHAR(50) NULL",
+    },
+    {
+        "name": "approval_applications.l2_approver_name",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l2_approver_name'",
+        "add": "ALTER TABLE dbo.approval_applications ADD l2_approver_name NVARCHAR(100) NULL",
+    },
+    {
+        "name": "approval_applications.l3_approver_id",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l3_approver_id'",
+        "add": "ALTER TABLE dbo.approval_applications ADD l3_approver_id NVARCHAR(50) NULL",
+    },
+    {
+        "name": "approval_applications.l3_approver_name",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l3_approver_name'",
+        "add": "ALTER TABLE dbo.approval_applications ADD l3_approver_name NVARCHAR(100) NULL",
+    },
+    {
         "name": "approval_applications.l4_approver_id",
         "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.approval_applications') AND name = 'l4_approver_id'",
         "add": "ALTER TABLE dbo.approval_applications ADD l4_approver_id NVARCHAR(50) NULL",

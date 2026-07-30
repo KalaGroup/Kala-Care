@@ -102,7 +102,7 @@ const AppCodePicker = React.memo(({ master, value, onChange }) => {
                 <ChevronDownIcon className={`h-4 w-4 flex-shrink-0 text-gray-400 transition ${open ? 'rotate-180' : ''}`} />
             </button>
             {open && (
-                <div className="absolute z-50 mt-1 w-full min-w-[420px] max-w-[calc(100vw-24px)] rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden">
+                <div className="absolute z-50 mt-1 w-full sm:min-w-[420px] max-w-[calc(100vw-24px)] rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden">
                     <div className="p-2 border-b border-gray-100">
                         <input autoFocus value={q} onChange={(e) => setQ(e.target.value)}
                             placeholder="Search code, KVA, emission…"
@@ -401,7 +401,7 @@ const MaintenanceScheduleView = () => {
                 ) : loading ? (
                     <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm animate-pulse space-y-3">
                         <div className="h-10 rounded bg-gray-100" />
-                        <div className="grid grid-cols-4 gap-2">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-14 rounded bg-gray-50" />)}</div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-14 rounded bg-gray-50" />)}</div>
                         <div className="h-40 rounded bg-gray-50" />
                     </div>
                 ) : !app ? (

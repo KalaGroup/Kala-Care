@@ -7,6 +7,7 @@ import {
     PencilSquareIcon, TrashIcon, ChevronRightIcon, ChevronDownIcon, ArrowPathIcon,
     CircleStackIcon, WrenchScrewdriverIcon, ArrowUpTrayIcon, CheckIcon, XMarkIcon, DocumentTextIcon,
     ArrowsRightLeftIcon, Squares2X2Icon, CheckCircleIcon, ExclamationTriangleIcon,
+    CubeIcon, FunnelIcon,
 } from '@heroicons/react/24/outline';
 import {
     getAppCodes, createAppCode, updateAppCode, deleteAppCode, importAppCodes,
@@ -216,7 +217,7 @@ const MaintenanceScheduleMaster = ({ onBack, initialTab, initialTabNonce, embedd
                 </div>
 
                 {/* Tabs */}
-                <div className="flex items-center gap-1.5 mb-4 border-b border-gray-200 max-sm:flex-wrap">
+                <div className="flex flex-wrap items-center gap-1.5 mb-4 border-b border-gray-200">
                     {tabs.map(({ id, label, Icon }) => (
                         <button key={id} onClick={() => setTab(id)}
                             className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-[13px] font-semibold border-b-2 -mb-px transition ${tab === id ? 'border-current' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
@@ -1117,7 +1118,7 @@ const AppMapping = ({ onMasterChanged }) => {
                     <ArrowsRightLeftIcon className="h-4 w-4" style={{ color: themeColor }} />
                     <p className="text-[13px] font-bold text-gray-800">{VIEWS[view].title}</p>
                     <span className="text-[11px] text-gray-400 font-mono">{remaining.length} of {source.length}</span>
-                    <div className="ml-auto flex items-center gap-2 max-sm:w-full">
+                    <div className="ml-auto flex items-center gap-2 max-sm:w-full max-sm:flex-wrap">
                         <select value={searchField} onChange={(e) => setSearchField(e.target.value)} title="Search field"
                             className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[12px] text-gray-700 outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition">
                             {SEARCH_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
@@ -1395,10 +1396,33 @@ const modelToPayload = (parts, kits) => ({
     })),
 });
 
-// Shared field styling for the editor (also used by KitBox below).
-const INP = 'w-full rounded-md border border-gray-300 px-1.5 py-1 text-[12px] text-black bg-white outline-none focus:ring-1 focus:ring-indigo-200';
-const KIT_INP = 'w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-[12px] text-black outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 transition';
-const KIT_LBL = 'block text-center text-[9.5px] font-bold uppercase tracking-wide text-gray-700 mb-0.5';
+/* ------------- Shared editor styling -------------
+   One vocabulary for the whole Add/Edit popup — cards, table chrome, buttons
+   and prompts — so the form reads as one surface instead of a stack of
+   differently-styled boxes. Used by both AppFormModal and KitBox. */
+const INP = 'w-full rounded-md border border-gray-300 px-2 py-1 text-[12px] text-gray-900 bg-white outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 hover:border-gray-400';
+const KIT_INP = 'w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-[12px] text-gray-900 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 hover:border-gray-400';
+const KIT_LBL = 'block text-[9.5px] font-bold uppercase tracking-wider text-gray-500 mb-1';
+
+// Cards
+const CARD = 'rounded-xl border border-gray-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,.06)]';
+const CARD_HEAD = 'flex items-center gap-2 border-b border-gray-100 px-4 py-2.5 max-md:px-3 max-md:flex-wrap';
+const CARD_TITLE = 'text-[11.5px] font-bold uppercase tracking-wider text-gray-900';
+const CARD_ICON = 'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg';
+const PILL = 'rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-600';
+// Buttons — one height (h-8) everywhere so rows line up.
+const BTN_PRIMARY = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-3.5 text-[12px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed';
+const BTN_GHOST = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3.5 text-[12px] font-semibold text-gray-700 transition hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50';
+const BTN_DASHED = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 bg-gray-50/70 px-3 text-[12px] font-semibold text-gray-600 transition hover:bg-gray-100 hover:border-gray-400';
+const BTN_ICON = 'inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-400 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600';
+// Tables
+const TABLE_WRAP = 'overflow-x-auto qm-scroll rounded-lg border border-gray-200';
+const THEAD = 'bg-slate-50/90 text-[9.5px] font-bold uppercase tracking-wider text-gray-500';
+const TH = 'px-2.5 py-2 text-left font-bold';
+const TR = 'border-t border-gray-100 transition hover:bg-slate-50/70';
+const REQ = <span className="text-red-400">*</span>;
+// A Yes/No prompt strip.
+const PROMPT = 'flex flex-wrap items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2';
 
 // Everything is mandatory. A part line — a service part or a kit's own copy —
 // counts as complete only when all five of its fields are filled.
@@ -1415,99 +1439,219 @@ const kitComplete = (k) =>
    These part lines are the kit's copies. Editing one, adding a new one or
    deleting one changes only this kit — never the application code's service
    parts, and never another kit that happens to hold the same part number. */
-const KitBox = ({ k, index, opts, onSet, onSetPart, onAddPart, onDeletePart, onRemove, onDone, doneLabel = 'OK' }) => {
+const KitBox = ({ k, index, opts, loose = [], onAddParts, onSet, onSetPart, onAddPart, onDeletePart, onRemove, onDone, doneLabel = 'OK' }) => {
     const ready = kitComplete(k);
+    // "Do you want to add loose parts in this kit?" — 'ask' -> 'pick' -> 'idle'.
+    // `loose` is THIS kit's own list: the service parts it does not hold. What
+    // any other kit holds is irrelevant — kits are independent — so a part can
+    // be loose for one kit and inside another at the same time. Removing a part
+    // from this kit puts it straight back in this list.
+    const [looseStep, setLooseStep] = useState('ask');
+    const [pick, setPick] = useState({});
+    const picked = loose.filter((p) => pick[p.__uid]);
+    const allPicked = loose.length > 0 && loose.every((p) => pick[p.__uid]);
+    const addPicked = () => {
+        if (!picked.length) return;
+        onAddParts(picked.map((p) => p.__uid));
+        setPick({}); setLooseStep('idle');
+    };
     return (
-        <div className="rounded-lg border border-indigo-200 bg-white px-3 py-2.5 mb-2">
-            <div className="flex items-center gap-2 mb-2 max-md:flex-wrap">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-black">Kit {index + 1}</span>
-                <span className="text-[10.5px] font-medium text-gray-700">{k.parts.length} part line{k.parts.length === 1 ? '' : 's'} of its own</span>
-                {!ready && (
-                    <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                        Please complete the kit details (Svc Hrs included) and its part lines
+        <div className={`${CARD} mb-2.5 overflow-hidden border-l-[3px]`} style={{ borderLeftColor: themeColor }}>
+            {/* Kit header — badge, line count, status, remove */}
+            <div className={CARD_HEAD}>
+                <span className="inline-flex h-6 items-center rounded-lg px-2 text-[10.5px] font-extrabold uppercase tracking-wider text-white"
+                    style={{ backgroundColor: themeColor }}>
+                    Kit {index + 1}
+                </span>
+                <span className={PILL}>{k.parts.length} part line{k.parts.length === 1 ? '' : 's'}</span>
+                {ready ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                        <CheckCircleIcon className="h-3 w-3" /> Complete
+                    </span>
+                ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                        <ExclamationTriangleIcon className="h-3 w-3" /> Fill the kit details and every part line
                     </span>
                 )}
                 {onRemove && (
-                    <button type="button" onClick={onRemove}
-                        className="ml-auto rounded border border-red-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-red-500 hover:bg-red-50 transition">
-                        Remove kit
+                    <button type="button" onClick={onRemove} title="Delete this kit — the service parts are untouched"
+                        className="ml-auto inline-flex h-7 items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 text-[11px] font-semibold text-red-600 transition hover:bg-red-50 hover:border-red-300">
+                        <TrashIcon className="h-3.5 w-3.5" /> Remove kit
                     </button>
                 )}
             </div>
-            <div className="grid grid-cols-[.9fr_2.1fr_.4fr_.6fr_.5fr] gap-2 max-md:grid-cols-2">
-                <div>
-                    <label className={KIT_LBL}>Kit Number <span className="text-red-500">*</span></label>
-                    <input className={`${KIT_INP} font-mono`} value={k.number} onChange={(e) => onSet('number', e.target.value)} placeholder="e.g. 3H.019.11.0.SP" />
-                </div>
-                <div>
-                    <label className={KIT_LBL}>Kit Description <span className="text-red-500">*</span></label>
-                    <input className={KIT_INP} value={k.desc} onChange={(e) => onSet('desc', e.target.value)} placeholder="e.g. 50 Hrs - A Check Maintenance Kit" />
-                </div>
-                <div>
-                    <label className={KIT_LBL}>Qty <span className="text-red-500">*</span></label>
-                    <input className={`${KIT_INP} font-mono text-center`} value={k.qty} onChange={(e) => onSet('qty', e.target.value)} />
-                </div>
-                <div>
-                    <label className={KIT_LBL}>Action <span className="text-red-500">*</span></label>
-                    <Combo value={k.action} onChange={(v) => onSet('action', v)} options={opts.actOpts} mono fieldCls={KIT_INP} />
-                </div>
-                <div>
-                    <label className={KIT_LBL}>Svc Hrs <span className="text-red-500">*</span></label>
-                    <Combo value={k.hours || ''} onChange={(v) => onSet('hours', v)} options={opts.hrsOpts} mono fieldCls={KIT_INP} />
-                </div>
-            </div>
 
-            {/* The kit's own part lines — fully editable and extendable here */}
-            <div className="mt-2 text-[9.5px] font-bold uppercase tracking-wide text-gray-700">
-                Parts in this kit <span className="font-normal normal-case text-gray-500">— this kit's own copies; editing them does not touch the service parts above</span>
-            </div>
-            <div className="mt-1 border border-gray-200 rounded-lg overflow-x-auto qm-scroll">
-                <table className="min-w-[720px] w-full border-collapse">
-                    <thead>
-                        <tr className="bg-gray-100/80 text-[9.5px] font-bold text-black uppercase tracking-wide border-b border-gray-200">
-                            <th className="px-2 py-1.5 text-center w-44">Part Number <span className="text-red-500">*</span></th>
-                            <th className="px-2 py-1.5 text-center">Description <span className="text-red-500">*</span></th>
-                            <th className="px-2 py-1.5 text-center w-16">Qty <span className="text-red-500">*</span></th>
-                            <th className="px-2 py-1.5 text-center w-20">Action <span className="text-red-500">*</span></th>
-                            <th className="px-2 py-1.5 text-center w-24">Svc Hrs <span className="text-red-500">*</span></th>
-                            <th className="w-9" />
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {k.parts.map((p) => (
-                            <tr key={p.__uid} className="border-t border-gray-100">
-                                <td className="px-1.5 py-1"><input className={`${INP} font-mono`} value={p.partNumber} onChange={(e) => onSetPart(p.__uid, 'partNumber', e.target.value)} /></td>
-                                <td className="px-1.5 py-1"><input className={INP} value={p.partDesc} onChange={(e) => onSetPart(p.__uid, 'partDesc', e.target.value)} /></td>
-                                <td className="px-1.5 py-1"><input className={`${INP} font-mono`} value={p.qty} onChange={(e) => onSetPart(p.__uid, 'qty', e.target.value)} /></td>
-                                <td className="px-1.5 py-1"><Combo value={p.action} onChange={(v) => onSetPart(p.__uid, 'action', v)} options={opts.actOpts} mono fieldCls={INP} /></td>
-                                <td className="px-1.5 py-1"><Combo value={p.serviceHours} onChange={(v) => onSetPart(p.__uid, 'serviceHours', v)} options={opts.hrsOpts} mono fieldCls={INP} /></td>
-                                <td className="px-1.5 py-1 text-center">
-                                    <button type="button" onClick={() => onDeletePart(p.__uid)} title="Remove this part from the kit"
-                                        className="rounded-md border border-gray-200 p-1 text-gray-400 hover:text-red-600 hover:border-red-300 hover:bg-red-50">
-                                        <TrashIcon className="h-3.5 w-3.5" />
-                                    </button>
-                                </td>
+            <div className="px-4 py-3 max-md:px-3">
+                <div className="grid grid-cols-[1fr_2.2fr_.45fr_.65fr_.65fr] gap-2.5 max-md:grid-cols-2 max-sm:grid-cols-1">
+                    <div>
+                        <label className={KIT_LBL}>Kit Number {REQ}</label>
+                        <input className={`${KIT_INP} font-mono`} value={k.number} onChange={(e) => onSet('number', e.target.value)} placeholder="e.g. 3H.019.11.0.SP" />
+                    </div>
+                    <div>
+                        <label className={KIT_LBL}>Kit Description {REQ}</label>
+                        <input className={KIT_INP} value={k.desc} onChange={(e) => onSet('desc', e.target.value)} placeholder="e.g. 50 Hrs - A Check Maintenance Kit" />
+                    </div>
+                    <div>
+                        <label className={KIT_LBL}>Qty {REQ}</label>
+                        <input className={`${KIT_INP} font-mono text-center`} value={k.qty} onChange={(e) => onSet('qty', e.target.value)} />
+                    </div>
+                    <div>
+                        <label className={KIT_LBL}>Action {REQ}</label>
+                        <Combo value={k.action} onChange={(v) => onSet('action', v)} options={opts.actOpts} mono fieldCls={KIT_INP} />
+                    </div>
+                    <div>
+                        <label className={KIT_LBL}>Svc Hrs {REQ}</label>
+                        <Combo value={k.hours || ''} onChange={(v) => onSet('hours', v)} options={opts.hrsOpts} mono fieldCls={KIT_INP} />
+                    </div>
+                </div>
+
+                {/* The kit's own part lines — fully editable and extendable here */}
+                <div className="mt-3 mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className="text-[9.5px] font-bold uppercase tracking-wider text-gray-500">Parts in this kit</span>
+                    <span className="text-[10.5px] text-gray-400">this kit's own copies — editing them does not touch the service parts above</span>
+                </div>
+                <div className={TABLE_WRAP}>
+                    <table className="min-w-[720px] w-full border-collapse">
+                        <thead>
+                            <tr className={THEAD}>
+                                <th className={`${TH} w-44`}>Part Number {REQ}</th>
+                                <th className={TH}>Description {REQ}</th>
+                                <th className={`${TH} w-16 text-center`}>Qty {REQ}</th>
+                                <th className={`${TH} w-20 text-center`}>Action {REQ}</th>
+                                <th className={`${TH} w-24 text-center`}>Svc Hrs {REQ}</th>
+                                <th className="w-10" />
                             </tr>
-                        ))}
-                        {k.parts.length === 0 && (
-                            <tr><td colSpan={6} className="text-center text-gray-400 py-3 text-[12px]">No parts in this kit yet — add a line.</td></tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 mt-2">
-                <button type="button" onClick={onAddPart}
-                    className="inline-flex items-center gap-1 rounded-lg border border-gray-400 bg-white px-2.5 py-0.5 text-[12px] font-bold text-gray-800 hover:bg-gray-50 transition">
-                    <PlusIcon className="h-3.5 w-3.5" /> Add part to this kit
-                </button>
-                {onDone && (
-                    <button type="button" disabled={!ready}
-                        title={ready ? 'Done — this kit is complete' : 'Fill Kit Number, Description, Qty, Action and Svc Hrs, and every field of its part lines'}
-                        onClick={onDone}
-                        className="ml-auto rounded-lg px-4 py-1 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-                        style={{ backgroundColor: themeColor }}>
-                        {doneLabel}
+                        </thead>
+                        <tbody>
+                            {k.parts.map((p) => (
+                                <tr key={p.__uid} className={TR}>
+                                    <td className="px-1.5 py-1"><input className={`${INP} font-mono`} value={p.partNumber} onChange={(e) => onSetPart(p.__uid, 'partNumber', e.target.value)} /></td>
+                                    <td className="px-1.5 py-1"><input className={INP} value={p.partDesc} onChange={(e) => onSetPart(p.__uid, 'partDesc', e.target.value)} /></td>
+                                    <td className="px-1.5 py-1"><input className={`${INP} font-mono text-center`} value={p.qty} onChange={(e) => onSetPart(p.__uid, 'qty', e.target.value)} /></td>
+                                    <td className="px-1.5 py-1"><Combo value={p.action} onChange={(v) => onSetPart(p.__uid, 'action', v)} options={opts.actOpts} mono fieldCls={INP} /></td>
+                                    <td className="px-1.5 py-1"><Combo value={p.serviceHours} onChange={(v) => onSetPart(p.__uid, 'serviceHours', v)} options={opts.hrsOpts} mono fieldCls={INP} /></td>
+                                    <td className="px-1.5 py-1 text-center">
+                                        <button type="button" onClick={() => onDeletePart(p.__uid)} title="Remove this part from the kit — a part that came from the service list goes back to the loose parts"
+                                            className={BTN_ICON}>
+                                            <TrashIcon className="h-3.5 w-3.5" />
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                            {k.parts.length === 0 && (
+                                <tr><td colSpan={6} className="text-center text-gray-400 py-4 text-[12px]">No parts in this kit yet — add a line.</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+            {/* ---- Loose parts -> this kit ----------------------------------
+                Loose is scoped to THIS kit: the service parts it does not hold,
+                matched by part number. Removing a part from the kit above puts
+                it straight back in this list; a part number typed by hand into
+                the kit counts as held, so it never shows up as loose here.
+                Order: "Add part to this kit" first, the loose-parts question (or,
+                once answered, its button) right beside it, then the picker when
+                it is open. */}
+                <div className="flex flex-wrap items-center gap-2 mt-2.5">
+                    <button type="button" onClick={onAddPart} className={BTN_GHOST}>
+                        <PlusIcon className="h-3.5 w-3.5" /> Add part to this kit
                     </button>
+                    {onAddParts && loose.length > 0 && looseStep === 'ask' && (
+                        <span className="inline-flex h-8 flex-wrap items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50/50 pl-3 pr-1.5">
+                            <span className="text-[12px] font-semibold text-gray-800">Do you want to add loose parts in this kit?</span>
+                            <span className="rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-bold text-gray-500">{loose.length} not in Kit {index + 1}</span>
+                            <button type="button" onClick={() => { setPick({}); setLooseStep('pick'); }}
+                                className="h-6 rounded-md px-2.5 text-[11.5px] font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: themeColor }}>
+                                Yes
+                            </button>
+                            <button type="button" onClick={() => setLooseStep('idle')}
+                                className="h-6 rounded-md border border-gray-300 bg-white px-2.5 text-[11.5px] font-semibold text-gray-700 transition hover:bg-gray-50">
+                                No
+                            </button>
+                        </span>
+                    )}
+                    {onAddParts && loose.length > 0 && looseStep === 'idle' && (
+                        <button type="button" onClick={() => { setPick({}); setLooseStep('pick'); }}
+                            title={`${loose.length} service part${loose.length === 1 ? '' : 's'} not in this kit`}
+                            className={BTN_DASHED}>
+                            <PlusIcon className="h-3.5 w-3.5" /> Add loose parts to this kit ({loose.length})
+                        </button>
+                    )}
+                    {onDone && (
+                        <button type="button" disabled={!ready}
+                            title={ready ? 'Done — this kit is complete' : 'Fill Kit Number, Description, Qty, Action and Svc Hrs, and every field of its part lines'}
+                            onClick={onDone}
+                            className={`${BTN_PRIMARY} ml-auto px-5`} style={{ backgroundColor: themeColor }}>
+                            <CheckIcon className="h-3.5 w-3.5" /> {doneLabel}
+                        </button>
+                    )}
+                </div>
+
+                {onAddParts && looseStep === 'pick' && (
+                    <div className="mt-2.5 rounded-lg border border-indigo-200 bg-indigo-50/40 p-2.5">
+                        <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: themeColor }}>Loose parts for Kit {index + 1}</span>
+                            <span className="text-[10.5px] text-gray-500">the service parts this kit does not hold — tick to copy them in; what another kit holds makes no difference</span>
+                        </div>
+                        <div className={`${TABLE_WRAP} bg-white`}>
+                            <table className="min-w-[640px] w-full border-collapse text-[12px]">
+                                <thead>
+                                    <tr className={THEAD}>
+                                        <th className="px-2.5 py-2 text-center w-9">
+                                            <span onClick={() => setPick(allPicked ? {} : Object.fromEntries(loose.map((p) => [p.__uid, true])))}
+                                                title="Select all / none"
+                                                className="inline-flex h-[15px] w-[15px] cursor-pointer items-center justify-center rounded border border-gray-300 bg-white align-middle">
+                                                {allPicked && <CheckIcon className="h-2.5 w-2.5" style={{ color: themeColor }} />}
+                                            </span>
+                                        </th>
+                                        <th className={`${TH} w-44`}>Part Number</th>
+                                        <th className={TH}>Description</th>
+                                        <th className={`${TH} w-14 text-center`}>Qty</th>
+                                        <th className={`${TH} w-16 text-center`}>Action</th>
+                                        <th className={`${TH} w-20 text-center`}>Svc Hrs</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {loose.map((p) => {
+                                        const on = !!pick[p.__uid];
+                                        return (
+                                            <tr key={p.__uid} onClick={() => setPick((c) => ({ ...c, [p.__uid]: !c[p.__uid] }))}
+                                                className={`border-t border-gray-100 cursor-pointer transition ${on ? 'bg-indigo-50/70' : 'hover:bg-slate-50/70'}`}>
+                                                <td className="px-2.5 py-1.5 text-center">
+                                                    <span className={`inline-flex h-[15px] w-[15px] items-center justify-center rounded border align-middle transition ${on ? 'bg-[#2f3192] border-[#2f3192]' : 'border-gray-300 bg-white'}`}>
+                                                        {on && <CheckIcon className="h-2.5 w-2.5 text-white" />}
+                                                    </span>
+                                                </td>
+                                                <td className="px-2.5 py-1.5 font-mono font-semibold text-gray-800 whitespace-nowrap">{p.partNumber || '—'}</td>
+                                                <td className="px-2.5 py-1.5 text-gray-600">{p.partDesc || '—'}</td>
+                                                <td className="px-2.5 py-1.5 text-center text-gray-700">{p.qty || '—'}</td>
+                                                <td className="px-2.5 py-1.5 text-center"><Chip a={p.action} /></td>
+                                                <td className="px-2.5 py-1.5 text-center font-mono text-gray-700">{p.serviceHours || '—'}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                    {loose.length === 0 && (
+                                        <tr><td colSpan={6} className="text-center text-gray-400 py-4 text-[12px]">
+                                            Nothing loose for this kit — it already holds every service part.
+                                        </td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div className="flex items-center gap-2 mt-2">
+                            <span className="text-[11px] font-semibold text-gray-600">{picked.length} selected</span>
+                            <div className="ml-auto flex items-center gap-2">
+                                <button type="button" onClick={() => { setPick({}); setLooseStep('idle'); }} className={BTN_GHOST}>
+                                    Cancel
+                                </button>
+                                <button type="button" disabled={!picked.length} onClick={addPicked}
+                                    className={BTN_PRIMARY} style={{ backgroundColor: themeColor }}>
+                                    <PlusIcon className="h-3.5 w-3.5" /> Add to this kit
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 )}
             </div>
         </div>
@@ -1639,7 +1783,8 @@ const AppViewModal = ({ record, services = [], emission, commissioning, onClose,
                                                 Qty {k.qty || '—'} · {k.action || '—'} · {k.serviceHours || '—'} Hr
                                             </span>
                                         </div>
-                                        <table className="w-full text-[11.5px]">
+                                        <div className="overflow-x-auto qm-scroll">
+                                        <table className="min-w-[420px] w-full text-[11.5px]">
                                             <thead>
                                                 <tr className="bg-gray-50 text-[9.5px] font-semibold text-gray-600 uppercase tracking-wider">
                                                     <th className="px-2 py-1 border-b border-gray-200 text-left">Part Number</th>
@@ -1663,6 +1808,7 @@ const AppViewModal = ({ record, services = [], emission, commissioning, onClose,
                                                 ))}
                                             </tbody>
                                         </table>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -1680,8 +1826,85 @@ const AppViewModal = ({ record, services = [], emission, commissioning, onClose,
     );
 };
 
+/* ------------- Drag-to-resize shell -------------
+   The form gets long (many part lines, several kits), so the popup can be
+   dragged bigger or smaller from its bottom-right corner and remembers the
+   size. Purely presentational — nothing about the record depends on it. */
+const MODAL_SIZE_KEY = 'msm:modalSize';
+const MIN_MODAL_W = 720;
+const MIN_MODAL_H = 340;
+// Never let a stored size outgrow the window, and never let the minimum push
+// the popup wider than the screen (small laptops / phones).
+const clampSize = (s) => {
+    if (!s || !s.w || !s.h) return null;
+    const maxW = window.innerWidth - 16;
+    const maxH = window.innerHeight - 16;
+    return {
+        w: Math.max(Math.min(MIN_MODAL_W, maxW), Math.min(s.w, maxW)),
+        h: Math.max(Math.min(MIN_MODAL_H, maxH), Math.min(s.h, maxH)),
+    };
+};
+
+const useResizableModal = () => {
+    const shellRef = useRef(null);
+    const lastRef = useRef(null);
+    const [size, setSize] = useState(() => {
+        try { return clampSize(JSON.parse(localStorage.getItem(MODAL_SIZE_KEY) || 'null')); }
+        catch { return null; }
+    });
+    // A stored size must stay sensible when the window itself is resized.
+    useEffect(() => {
+        const onResize = () => setSize((s) => (s ? clampSize(s) : s));
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+    }, []);
+
+    // Pointer events, so a mouse, a pen and a touch drag all work.
+    const onGripDown = (e) => {
+        e.preventDefault();
+        const el = shellRef.current;
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        const start = { x: e.clientX, y: e.clientY, w: r.width, h: r.height };
+        const move = (ev) => {
+            const next = clampSize({ w: start.w + (ev.clientX - start.x), h: start.h + (ev.clientY - start.y) });
+            lastRef.current = next;
+            setSize(next);
+        };
+        const up = () => {
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', up);
+            document.body.style.userSelect = '';
+            if (lastRef.current) {
+                try { localStorage.setItem(MODAL_SIZE_KEY, JSON.stringify(lastRef.current)); } catch { /* quota — ignore */ }
+            }
+        };
+        document.body.style.userSelect = 'none';   // no text selection while dragging
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+    };
+    const resetSize = () => {
+        lastRef.current = null;
+        setSize(null);
+        try { localStorage.removeItem(MODAL_SIZE_KEY); } catch { /* ignore */ }
+    };
+    return { shellRef, size, onGripDown, resetSize };
+};
+
+// The grip itself — bottom-right corner, drag to resize, double-click to reset.
+const ResizeGrip = ({ onGripDown, onReset }) => (
+    <div onPointerDown={onGripDown} onDoubleClick={onReset}
+        title="Drag to resize · double-click to reset"
+        className="absolute bottom-0 right-0 z-20 flex h-5 w-5 cursor-nwse-resize items-end justify-end p-[3px] text-gray-400 hover:text-gray-700 max-md:hidden">
+        <svg viewBox="0 0 10 10" className="h-3 w-3" aria-hidden="true">
+            <path d="M9.2 2.6 2.6 9.2M9.2 6.4 6.4 9.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" fill="none" />
+        </svg>
+    </div>
+);
+
 const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, remaining = [], onClose, onSave }) => {
     const isEdit = !!initial;
+    const { shellRef, size, onGripDown, resetSize } = useResizableModal();
 
     // ---- Local draft (Option 1): auto-save the in-progress form to the browser
     // so an interruption (refresh, crash, session timeout, accidental Cancel)
@@ -1804,6 +2027,15 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
         ...m,
         kits: m.kits.map((k) => (k.__id === kitId ? { ...k, parts: k.parts.filter((p) => p.__uid !== uid) } : k)),
     }));
+    // Copy the picked LOOSE service parts into a kit. Same rule as building a
+    // kit: the kit gets its own copies, the service list keeps its originals —
+    // they simply stop counting as loose while a kit holds that part number.
+    const addLooseToKit = (kitId, uids) => setModel((m) => {
+        const take = new Set(uids);
+        const copies = m.parts.filter((p) => take.has(p.__uid)).map((p) => ({ ...p, __uid: nextUid() }));
+        if (!copies.length) return m;
+        return { ...m, kits: m.kits.map((k) => (k.__id === kitId ? { ...k, parts: [...k.parts, ...copies] } : k)) };
+    });
 
     // EVERY part can be ticked, not just the ones no kit uses yet: the same part
     // may go into as many kits as needed (1,2,3 can form Kit 1 AND Kit 2).
@@ -1866,6 +2098,14 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
     // Changing the filter drops any pending kit selection — a hidden ticked row
     // must never end up copied into a kit the user cannot see.
     useEffect(() => { setChecked({}); }, [hrsFilter]);
+    // Loose is PER KIT — the service parts THIS kit does not hold, matched by
+    // part number. Kits are unrelated: with 6 parts, kit 1 holding 1-3 offers
+    // 4-6, and kit 2 holding 4-6 offers 1-3, each unaware of the other. Kept in
+    // step with the Svc Hrs filter.
+    const looseForKit = (k) => {
+        const own = new Set((k?.parts || []).map((p) => normPn(p.partNumber)).filter(Boolean));
+        return parts.filter((p) => !own.has(normPn(p.partNumber)) && (!hrsFilter || hrsEq(p.serviceHours)));
+    };
     const hiddenIncomplete = !!hrsFilter && (
         parts.some((p) => !hrsEq(p.serviceHours) && !partComplete(p)) ||
         kits.some((k) => !(hrsEq(k.hours) || k.parts.some((p) => hrsEq(p.serviceHours))) && !kitComplete(k))
@@ -1905,56 +2145,67 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
 
     return (
         <div className="fixed inset-0 z-[120] flex justify-center overflow-y-auto p-4 max-md:p-2" style={{ background: 'rgba(20,26,32,.55)' }}>
-            <div className="msm-modal bg-white rounded-2xl shadow-2xl w-full max-w-6xl my-auto max-xl:max-w-[95vw] overflow-hidden">
-                <div className="flex items-center gap-3 px-5 py-3 text-white max-md:px-3"
+            <div ref={shellRef}
+                className="msm-modal relative flex flex-col bg-white rounded-2xl shadow-2xl w-full max-w-6xl my-auto max-xl:max-w-[95vw] overflow-hidden"
+                style={size ? { width: size.w, height: size.h, maxWidth: 'none' } : undefined}>
+                <div className="flex items-center gap-3 px-5 py-3 text-white max-md:px-3 flex-shrink-0"
                     style={{ background: `linear-gradient(120deg, ${themeColor} 0%, ${themeDark} 100%)` }}>
-                    <div className="h-8 w-8 rounded-lg flex items-center justify-center bg-white/15 flex-shrink-0">
+                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-white/15 ring-1 ring-white/20">
                         {isEdit ? <PencilSquareIcon className="h-4 w-4" /> : <PlusIcon className="h-4 w-4" />}
                     </div>
                     <div className="min-w-0">
-                        <h3 className="text-[15px] font-bold leading-tight">{isEdit ? 'Edit' : 'Add'} Application Code</h3>
-                        <p className="text-[11px] text-white/70 leading-tight">
-                            {isEdit ? hdr.appCode : 'Enter the code, its service parts, and any kits'}
+                        <h3 className="text-[15px] font-bold leading-tight tracking-tight">{isEdit ? 'Edit' : 'Add'} Application Code</h3>
+                        <p className="text-[11px] leading-tight text-white/65">
+                            {isEdit
+                                ? <span className="font-mono font-semibold tracking-wide text-white/85">{hdr.appCode}</span>
+                                : 'Enter the code, its service parts, and any kits'}
                         </p>
                     </div>
                     {/* Service-interval filter — narrows the service parts AND the kits
                         below to one Svc Hrs. Nothing is removed, only hidden. */}
-                    <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-white/70 max-sm:hidden">Svc Hrs</span>
+                    <div className="ml-auto flex flex-shrink-0 items-center gap-2">
+                        <span className="text-[9.5px] font-bold uppercase tracking-widest text-white/55 max-sm:hidden">Svc Hrs</span>
                         <select value={hrsFilter} onChange={(e) => setHrsFilter(e.target.value)} disabled={stage !== 'build'}
                             title="Show only the service parts and kits of one service interval"
-                            className="rounded-lg border border-white/30 bg-white/15 px-2 py-1 text-[12px] font-semibold text-white outline-none transition hover:bg-white/25 focus:bg-white/25 disabled:opacity-50">
+                            className="h-8 cursor-pointer rounded-lg border border-white/25 bg-white/15 px-2.5 text-[12px] font-semibold text-white outline-none transition hover:bg-white/25 focus:bg-white/25 focus:ring-2 focus:ring-white/30 disabled:cursor-not-allowed disabled:opacity-50">
                             <option value="" className="text-gray-800">All service hours</option>
                             {opts.hrsOpts.map((h) => <option key={h} value={String(h)} className="text-gray-800">{h} Hr</option>)}
                         </select>
+                        <span className="h-6 w-px bg-white/20 max-sm:hidden" />
+                        <button onClick={onClose} disabled={saving} title="Close"
+                            className="flex h-8 w-8 items-center justify-center rounded-lg text-white/70 transition hover:bg-white/15 hover:text-white disabled:opacity-50">
+                            <XMarkIcon className="h-5 w-5" />
+                        </button>
                     </div>
-                    <button onClick={onClose} disabled={saving} className="rounded-lg p-1 text-white/70 hover:bg-white/15 hover:text-white transition disabled:opacity-50 flex-shrink-0"><XMarkIcon className="h-5 w-5" /></button>
                 </div>
-                <div className="px-5 py-4 max-h-[72vh] overflow-y-auto bg-gray-50/60 max-md:px-3">
+                <div className={`px-5 py-4 overflow-y-auto bg-slate-50 max-md:px-3 ${size ? 'flex-1 min-h-0' : 'max-h-[72vh]'}`}>
                     {pendingDraft && (
-                        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 shadow-[0_1px_2px_rgba(16,24,40,.06)]">
+                            <ExclamationTriangleIcon className="h-4 w-4 flex-shrink-0 text-amber-600" />
                             <span className="flex-1 text-[12px] font-medium text-amber-900">
                                 You have an unsaved draft{pendingDraft.savedAt ? ` from ${new Date(pendingDraft.savedAt).toLocaleString()}` : ''}. Restore it?
                             </span>
                             <button type="button" onClick={restoreDraft}
-                                className="rounded-md bg-amber-600 px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-amber-700 transition">
+                                className="inline-flex h-8 items-center rounded-lg bg-amber-600 px-3 text-[12px] font-semibold text-white shadow-sm transition hover:bg-amber-700">
                                 Restore
                             </button>
                             <button type="button" onClick={discardDraft}
-                                className="rounded-md border border-amber-300 bg-white px-2.5 py-1 text-[12px] font-medium text-amber-800 hover:bg-amber-100 transition">
+                                className="inline-flex h-8 items-center rounded-lg border border-amber-300 bg-white px-3 text-[12px] font-semibold text-amber-800 transition hover:bg-amber-100">
                                 Discard
                             </button>
                         </div>
                     )}
                     {stage === 'build' && (<>
                     {/* ---- Section: application code ---- */}
-                    <div className="rounded-xl border border-gray-300 bg-white p-3.5 shadow-sm">
-                        <div className="flex items-center gap-2 mb-3">
-                            <CircleStackIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
-                            <span className="text-[11px] uppercase tracking-wider font-bold text-black">Application Code</span>
-                            <span className="h-px flex-1 bg-gray-100" />
+                    <div className={CARD}>
+                        <div className={CARD_HEAD}>
+                            <span className={CARD_ICON} style={{ background: themeSoft }}>
+                                <CircleStackIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
+                            </span>
+                            <span className={CARD_TITLE}>Application Code</span>
+                            <span className="text-[10.5px] text-gray-400 max-md:w-full">identity of the record — all six fields are required</span>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3 px-4 py-3.5 max-md:px-3">
                             <div>
                                 <label className={`${label} flex items-center gap-1.5`}>
                                     <span>App Code <span className="text-red-500">*</span></span>
@@ -2002,65 +2253,65 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
                     </div>
 
                     {/* ---- Section: service parts ---- */}
-                    <div className="rounded-xl border border-gray-300 bg-white p-3.5 shadow-sm mt-3">
-                        <div className="flex items-center gap-2 mb-1 max-md:flex-wrap">
-                            <WrenchScrewdriverIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
-                            <span className="text-[11px] uppercase tracking-wider font-bold text-black">Service Parts <span className="text-red-500">*</span></span>
-                            <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold text-gray-500">
-                                {hrsFilter ? `${partRows.length} of ${parts.length}` : parts.length}
+                    <div className={`${CARD} mt-3`}>
+                        <div className={CARD_HEAD}>
+                            <span className={CARD_ICON} style={{ background: themeSoft }}>
+                                <WrenchScrewdriverIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
                             </span>
+                            <span className={CARD_TITLE}>Service Parts {REQ}</span>
+                            <span className={PILL}>{hrsFilter ? `${partRows.length} of ${parts.length}` : parts.length}</span>
                             {hrsFilter && (
-                                <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-[#2f3192]">
+                                <span className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 py-0.5 pl-2 pr-1 text-[10px] font-bold" style={{ color: themeColor }}>
                                     {hrsFilter} Hr only
                                     <button type="button" onClick={() => setHrsFilter('')} title="Show every service interval"
-                                        className="rounded-full px-1 leading-none hover:bg-indigo-100">✕</button>
+                                        className="inline-flex h-4 w-4 items-center justify-center rounded-full leading-none transition hover:bg-indigo-200/70">
+                                        <XMarkIcon className="h-2.5 w-2.5" />
+                                    </button>
                                 </span>
                             )}
-                            <span className="h-px flex-1 bg-gray-100 max-md:hidden" />
+                            <span className="ml-auto text-[10.5px] text-gray-400 max-lg:hidden">
+                                {hrsFilter
+                                    ? `${hiddenParts} line${hiddenParts === 1 ? '' : 's'} of other intervals hidden — still saved`
+                                    : 'a kit keeps its own copy, so editing here never changes a kit'}
+                            </span>
                         </div>
-                        <p className="text-[11px] font-medium text-gray-700 mb-2.5">
-                            {hrsFilter ? (
-                                <>Showing only the <b className="font-mono">{hrsFilter} Hr</b> part lines{hiddenParts > 0 ? <> — {hiddenParts} line{hiddenParts === 1 ? '' : 's'} of the other intervals {hiddenParts === 1 ? 'is' : 'are'} hidden</> : null}.
-                                    They are <b>not</b> removed: everything is still saved with the record.</>
-                            ) : (
-                                <>Add every part line first — you can copy parts into kits in the step below.
-                                    A kit keeps its own copy, so changing a part here never changes a kit.</>
-                            )}
-                        </p>
-                    <div className="border border-gray-300 rounded-lg overflow-x-auto qm-scroll">
+                        <div className="px-4 py-3 max-md:px-3">
+                    <div className={TABLE_WRAP}>
                         <table className="min-w-[860px] w-full border-collapse">
                             <thead>
-                                <tr className="bg-gray-100/80 text-[9.5px] font-bold text-black uppercase tracking-wide border-b border-gray-200">
-                                    <th className="px-2 py-1.5 text-center w-44">Part Number <span className="text-red-500">*</span></th><th className="px-2 py-1.5 text-center">Description <span className="text-red-500">*</span></th>
-                                    <th className="px-2 py-1.5 text-center w-16">Qty <span className="text-red-500">*</span></th><th className="px-2 py-1.5 text-center w-20">Action <span className="text-red-500">*</span></th>
-                                    <th className="px-2 py-1.5 text-center w-24">Svc Hrs <span className="text-red-500">*</span></th>
-                                    <th className="w-9" />
+                                <tr className={THEAD}>
+                                    <th className={`${TH} w-44`}>Part Number {REQ}</th>
+                                    <th className={TH}>Description {REQ}</th>
+                                    <th className={`${TH} w-16 text-center`}>Qty {REQ}</th>
+                                    <th className={`${TH} w-20 text-center`}>Action {REQ}</th>
+                                    <th className={`${TH} w-24 text-center`}>Svc Hrs {REQ}</th>
+                                    <th className="w-10" />
                                 </tr>
                             </thead>
                             <tbody>
                                 {partRows.map(({ p, i }) => (
-                                    <tr key={p.__uid} className="border-t border-gray-100">
+                                    <tr key={p.__uid} className={TR}>
                                         <td className="px-1.5 py-1"><input className={`${inp} font-mono`} value={p.partNumber} onChange={(e) => setPart(i, 'partNumber', e.target.value)} /></td>
                                         <td className="px-1.5 py-1"><input className={inp} value={p.partDesc} onChange={(e) => setPart(i, 'partDesc', e.target.value)} /></td>
-                                        <td className="px-1.5 py-1"><input className={`${inp} font-mono`} value={p.qty} onChange={(e) => setPart(i, 'qty', e.target.value)} /></td>
+                                        <td className="px-1.5 py-1"><input className={`${inp} font-mono text-center`} value={p.qty} onChange={(e) => setPart(i, 'qty', e.target.value)} /></td>
                                         <td className="px-1.5 py-1"><Combo value={p.action} onChange={(v) => setPart(i, 'action', v)} options={opts.actOpts} mono fieldCls={inp} /></td>
                                         <td className="px-1.5 py-1"><Combo value={p.serviceHours} onChange={(v) => setPart(i, 'serviceHours', v)} options={opts.hrsOpts} mono fieldCls={inp} /></td>
                                         <td className="px-1.5 py-1 text-center">
-                                            <button onClick={() => deletePart(p.__uid)} title="Delete this part line (kits keep their own copies)" className="rounded-md border border-gray-200 p-1 text-gray-400 hover:text-red-600 hover:border-red-300 hover:bg-red-50">
+                                            <button onClick={() => deletePart(p.__uid)} title="Delete this part line (kits keep their own copies)" className={BTN_ICON}>
                                                 <TrashIcon className="h-3.5 w-3.5" />
                                             </button>
                                         </td>
                                     </tr>
                                 ))}
                                 {partRows.length === 0 && (
-                                    <tr><td colSpan={6} className="text-center text-gray-400 py-3 text-[12px]">
+                                    <tr><td colSpan={6} className="text-center text-gray-400 py-4 text-[12px]">
                                         {hrsFilter ? `No ${hrsFilter} Hr part line — add one, or clear the Svc Hrs filter.` : 'No parts yet — add a line.'}
                                     </td></tr>
                                 )}
                             </tbody>
                         </table>
                     </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <div className="mt-2.5 flex flex-wrap items-center gap-2">
                         <button
                             onClick={() => {
                                 if (!allPartsComplete) { toast.error('Please fill every field in the current part line first.'); return; }
@@ -2069,15 +2320,17 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
                                 setParts((a) => [...a, { ...blankPart(nextUid()), ...(hrsFilter ? { serviceHours: hrsFilter } : {}) }]);
                             }}
                             title={allPartsComplete ? 'Add another part line' : 'Fill every field in the current part line(s) first'}
-                            className={`inline-flex items-center gap-1 rounded-lg border border-gray-400 bg-white px-2.5 py-0.5 text-[12px] font-bold text-gray-800 transition ${allPartsComplete ? 'hover:bg-gray-50' : 'cursor-not-allowed'}`}>
+                            className={`${BTN_GHOST} ${allPartsComplete ? '' : 'cursor-not-allowed opacity-60'}`}>
                             <PlusIcon className="h-3.5 w-3.5" /> Add part line{hrsFilter ? ` (${hrsFilter} Hr)` : ''}
                         </button>
                         {hiddenIncomplete && (
-                            <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10.5px] font-semibold text-amber-700">
+                            <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10.5px] font-semibold text-amber-700">
+                                <ExclamationTriangleIcon className="h-3.5 w-3.5 flex-shrink-0" />
                                 A line or kit outside the {hrsFilter} Hr filter is incomplete — clear the filter to finish it before saving.
                             </span>
                         )}
                     </div>
+                        </div>
                     </div>
 
                     {/* ---- Guided kit flow + the kits added so far (no standing section box) ---- */}
@@ -2087,32 +2340,36 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
                         Every part stays selectable however many kits already use it: picking
                         parts COPIES them into the new kit, it does not move them. ---- */}
                     {allPartsComplete && parts.length > 0 && kitStep === 'ask' && (
-                        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50/40 px-3 py-2 mb-2">
-                            <span className="text-[13px] font-bold text-black">
+                        <div className={`${PROMPT} mb-2.5`}>
+                            <span className={CARD_ICON} style={{ background: '#fff' }}>
+                                <CubeIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
+                            </span>
+                            <span className="text-[13px] font-bold text-gray-900">
                                 {kits.length ? 'Do you want to add another kit?' : 'Do you want to add a Kit?'}
                             </span>
+                            <span className="text-[10.5px] text-gray-500 max-sm:hidden">the ticked parts are copied into it — the service list above is left alone</span>
                             <div className="ml-auto flex items-center gap-2">
                                 <button type="button" onClick={() => { setChecked({}); setKitStep('pick'); }}
-                                    className="rounded-lg px-3 py-1 text-[12px] font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: themeColor }}>
+                                    className={BTN_PRIMARY} style={{ backgroundColor: themeColor }}>
                                     Yes
                                 </button>
-                                <button type="button" onClick={() => setKitStep('idle')}
-                                    className="rounded-lg border border-gray-400 bg-white px-3 py-1 text-[12px] font-semibold text-gray-800 hover:bg-gray-50 transition">
+                                <button type="button" onClick={() => setKitStep('idle')} className={BTN_GHOST}>
                                     No
                                 </button>
                             </div>
                         </div>
                     )}
                     {allPartsComplete && parts.length > 0 && kitStep === 'pick' && (
-                        <div className="rounded-lg border border-indigo-200 bg-white px-3 py-2.5 mb-2">
-                            <div className="text-[11px] font-bold uppercase tracking-wide text-black mb-1.5">
-                                Select the parts that come together in this kit <span className="font-normal normal-case text-gray-600">— tick the rows, then press OK. They are copied into the kit, so a part can be used in more than one kit.{hrsFilter ? ` Only the ${hrsFilter} Hr lines are listed.` : ''}</span>
+                        <div className={`${CARD} mb-2.5 p-3 max-md:p-2.5`}>
+                            <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                                <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: themeColor }}>Select the parts that come together in this kit</span>
+                                <span className="text-[10.5px] text-gray-500">tick the rows, then press OK — they are copied in, so a part can be used in more than one kit{hrsFilter ? `; only the ${hrsFilter} Hr lines are listed` : ''}</span>
                             </div>
-                            <div className="border border-gray-200 rounded-lg overflow-x-auto qm-scroll mb-2">
+                            <div className={`${TABLE_WRAP} mb-2`}>
                                 <table className="min-w-[680px] w-full border-collapse text-[12px]">
                                     <thead>
-                                        <tr className="bg-gray-100/80 text-[9.5px] font-bold text-black uppercase tracking-wide border-b border-gray-200">
-                                            <th className="px-2 py-1.5 text-center w-9">
+                                        <tr className={THEAD}>
+                                            <th className="px-2.5 py-2 text-center w-9">
                                                 {(() => {
                                                     const allOn = partRows.length > 0 && partRows.every(({ p }) => checked[p.__uid]);
                                                     return (
@@ -2124,11 +2381,11 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
                                                     );
                                                 })()}
                                             </th>
-                                            <th className="px-2 py-1.5 text-left w-44">Part Number</th>
-                                            <th className="px-2 py-1.5 text-left">Description</th>
-                                            <th className="px-2 py-1.5 text-center w-14">Qty</th>
-                                            <th className="px-2 py-1.5 text-center w-16">Action</th>
-                                            <th className="px-2 py-1.5 text-center w-20">Svc Hrs</th>
+                                            <th className={`${TH} w-44`}>Part Number</th>
+                                            <th className={TH}>Description</th>
+                                            <th className={`${TH} w-14 text-center`}>Qty</th>
+                                            <th className={`${TH} w-16 text-center`}>Action</th>
+                                            <th className={`${TH} w-20 text-center`}>Svc Hrs</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -2136,17 +2393,17 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
                                             const on = !!checked[p.__uid];
                                             return (
                                                 <tr key={p.__uid} onClick={() => setChecked((c) => ({ ...c, [p.__uid]: !c[p.__uid] }))}
-                                                    className={`border-t border-gray-100 cursor-pointer transition ${on ? 'bg-indigo-50/60' : 'hover:bg-gray-50'}`}>
-                                                    <td className="px-2 py-1 text-center">
-                                                        <span className={`inline-flex h-[15px] w-[15px] items-center justify-center rounded border align-middle ${on ? 'bg-[#2f3192] border-[#2f3192]' : 'border-gray-300 bg-white'}`}>
+                                                    className={`border-t border-gray-100 cursor-pointer transition ${on ? 'bg-indigo-50/70' : 'hover:bg-slate-50/70'}`}>
+                                                    <td className="px-2.5 py-1.5 text-center">
+                                                        <span className={`inline-flex h-[15px] w-[15px] items-center justify-center rounded border align-middle transition ${on ? 'bg-[#2f3192] border-[#2f3192]' : 'border-gray-300 bg-white'}`}>
                                                             {on && <CheckIcon className="h-2.5 w-2.5 text-white" />}
                                                         </span>
                                                     </td>
-                                                    <td className="px-2 py-1 font-mono text-black whitespace-nowrap">{p.partNumber || '—'}</td>
-                                                    <td className="px-2 py-1 text-gray-900">{p.partDesc || '—'}</td>
-                                                    <td className="px-2 py-1 text-center text-gray-900">{p.qty || '—'}</td>
-                                                    <td className="px-2 py-1 text-center"><Chip a={p.action} /></td>
-                                                    <td className="px-2 py-1 text-center font-mono text-gray-900">{p.serviceHours || '—'}</td>
+                                                    <td className="px-2.5 py-1.5 font-mono font-semibold text-gray-800 whitespace-nowrap">{p.partNumber || '—'}</td>
+                                                    <td className="px-2.5 py-1.5 text-gray-600">{p.partDesc || '—'}</td>
+                                                    <td className="px-2.5 py-1.5 text-center text-gray-700">{p.qty || '—'}</td>
+                                                    <td className="px-2.5 py-1.5 text-center"><Chip a={p.action} /></td>
+                                                    <td className="px-2.5 py-1.5 text-center font-mono text-gray-700">{p.serviceHours || '—'}</td>
                                                 </tr>
                                             );
                                         })}
@@ -2154,15 +2411,14 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
                                 </table>
                             </div>
                             <div className="flex items-center gap-2">
-                                <span className="text-[11px] font-medium text-gray-700">{checkedUids.length} part{checkedUids.length === 1 ? '' : 's'} selected</span>
+                                <span className="text-[11px] font-semibold text-gray-600">{checkedUids.length} part{checkedUids.length === 1 ? '' : 's'} selected</span>
                                 <div className="ml-auto flex items-center gap-2">
-                                    <button type="button" onClick={() => { setChecked({}); setKitStep('ask'); }}
-                                        className="rounded-lg border border-gray-400 bg-white px-3 py-1 text-[12px] font-semibold text-gray-800 hover:bg-gray-50 transition">
+                                    <button type="button" onClick={() => { setChecked({}); setKitStep('ask'); }} className={BTN_GHOST}>
                                         Cancel
                                     </button>
                                     <button type="button" disabled={!checkedUids.length}
                                         onClick={() => { const id = addKitFromChecked(); if (id) { setCurrentKitId(id); setKitStep('details'); } }}
-                                        className="rounded-lg px-4 py-1 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed" style={{ backgroundColor: themeColor }}>
+                                        className={`${BTN_PRIMARY} px-6`} style={{ backgroundColor: themeColor }}>
                                         OK
                                     </button>
                                 </div>
@@ -2174,11 +2430,14 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
                         if (ki < 0) return null;
                         return (
                             <>
-                                <div className="text-[13px] font-bold text-black mb-1.5">
-                                    Please add kit details <span className="text-[10.5px] font-normal text-gray-600">— and check the part lines copied into this kit</span>
+                                <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                                    <span className="text-[13px] font-bold text-gray-900">Please add kit details</span>
+                                    <span className="text-[10.5px] text-gray-500">and check the part lines copied into this kit</span>
                                 </div>
                                 <KitBox
                                     k={kits[ki]} index={ki} opts={opts}
+                                    loose={looseForKit(kits[ki])}
+                                    onAddParts={(uids) => addLooseToKit(currentKitId, uids)}
                                     onSet={(key, v) => setKit(currentKitId, key, v)}
                                     onSetPart={(uid, key, v) => setKitPart(currentKitId, uid, key, v)}
                                     onAddPart={() => addKitPart(currentKitId)}
@@ -2191,14 +2450,17 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
                     })()}
                     {allPartsComplete && parts.length > 0 && kitStep === 'idle' && (
                         <button type="button" onClick={() => { setChecked({}); setKitStep('pick'); }}
-                            className="mb-2 inline-flex items-center gap-1 rounded-lg border border-dashed border-gray-400 bg-gray-50/60 px-2.5 py-1 text-[11.5px] font-bold text-gray-700 hover:bg-gray-100 transition">
+                            className={`${BTN_DASHED} mb-2.5`}>
                             <PlusIcon className="h-3.5 w-3.5" /> Add a kit
                         </button>
                     )}
                     {hrsFilter && kits.length > 0 && (
-                        <div className="mb-2 rounded-lg border border-indigo-100 bg-indigo-50/40 px-3 py-1.5 text-[11px] font-medium text-gray-700">
-                            Kits: showing <b>{kitRows.length}</b> of <b>{kits.length}</b> — a kit is listed when its own Svc Hrs is <b className="font-mono">{hrsFilter}</b> or one of its part lines is.
-                            {hiddenKits > 0 ? ` ${hiddenKits} kit${hiddenKits === 1 ? '' : 's'} hidden (still saved).` : ''}
+                        <div className="mb-2.5 flex items-start gap-2 rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2 text-[11px] text-gray-600">
+                            <FunnelIcon className="h-3.5 w-3.5 flex-shrink-0 mt-px" style={{ color: themeColor }} />
+                            <span>
+                                Showing <b className="text-gray-900">{kitRows.length}</b> of <b className="text-gray-900">{kits.length}</b> kits — a kit is listed when its own Svc Hrs is <b className="font-mono text-gray-900">{hrsFilter}</b> or one of its part lines is.
+                                {hiddenKits > 0 ? ` ${hiddenKits} kit${hiddenKits === 1 ? '' : 's'} hidden — still saved.` : ''}
+                            </span>
                         </div>
                     )}
                     {kitRows.map(({ k, ki }) => {
@@ -2208,6 +2470,8 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
                         return (
                             <KitBox
                                 key={k.__id} k={k} index={ki} opts={opts}
+                                loose={looseForKit(k)}
+                                onAddParts={(uids) => addLooseToKit(k.__id, uids)}
                                 onSet={(key, v) => setKit(k.__id, key, v)}
                                 onSetPart={(uid, key, v) => setKitPart(k.__id, uid, key, v)}
                                 onAddPart={() => addKitPart(k.__id)}
@@ -2231,13 +2495,14 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
                         const td = 'px-2.5 py-1 border border-gray-200';
                         return (
                             <div>
-                                <div className="mb-3 flex items-start gap-2 rounded-lg border border-indigo-200 bg-indigo-50/60 px-3 py-2">
+                                <div className="mb-3 flex items-start gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50/60 px-3.5 py-2.5">
                                     <CheckCircleIcon className="h-4 w-4 flex-shrink-0 mt-px" style={{ color: themeColor }} />
-                                    <p className="text-[12px] font-medium text-gray-700">
-                                        <b>Please review this:</b> this is exactly how <b className="font-mono">{hdr.appCode}</b> will appear in Master Data — all the kits, then the “—” rows, then the loose parts.
+                                    <p className="text-[12px] text-gray-600">
+                                        <b className="text-gray-900">Please review this:</b> exactly how <b className="font-mono text-gray-900">{hdr.appCode}</b> will appear in Master Data — all the kits, then the “—” rows, then the loose parts.
+                                        {hrsFilter ? <> The <b className="text-gray-900">{hrsFilter} Hr</b> view does not apply here: every interval is shown, and every one is saved.</> : null}
                                     </p>
                                 </div>
-                                <div className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm">
+                                <div className={`${CARD} overflow-hidden`}>
                                     <div className="overflow-x-auto qm-scroll">
                                         <table className="min-w-[1460px] w-full text-[11.5px]">
                                             <thead>
@@ -2300,42 +2565,53 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
                         );
                     })()}
                 </div>
-                <div className="flex items-center gap-2 px-5 py-3 border-t border-gray-200 bg-white max-md:px-3 max-md:flex-wrap">
-                    <span className="text-[11px] font-semibold text-gray-700 max-sm:hidden">
-                        {parts.length} part line{parts.length === 1 ? '' : 's'} · {kits.length} kit{kits.length === 1 ? '' : 's'} · {loosePartsList.length} loose
+                <div className="flex items-center gap-3 px-5 py-2.5 pr-8 border-t border-gray-200 bg-white max-md:px-3 max-md:flex-wrap flex-shrink-0">
+                    {/* Live counts — one pill each, so they read at a glance */}
+                    <div className="flex items-center gap-1.5 max-sm:hidden">
+                        {[
+                            ['Parts', parts.length],
+                            ['Kits', kits.length],
+                            ['Loose', loosePartsList.length],
+                        ].map(([lbl, n]) => (
+                            <span key={lbl} className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[10.5px] font-bold text-gray-500">
+                                {lbl}
+                                <span className="rounded bg-white px-1.5 py-px font-mono text-[11px] text-gray-800">{n}</span>
+                            </span>
+                        ))}
                         {hrsFilter && stage === 'build' && (
-                            <span className="ml-2 font-medium text-[#2f3192]">
-                                (viewing {hrsFilter} Hr only — all intervals are saved)
+                            <span className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 text-[10.5px] font-bold" style={{ color: themeColor }}>
+                                <FunnelIcon className="h-3 w-3" /> {hrsFilter} Hr view — all intervals saved
                             </span>
                         )}
-                    </span>
+                    </div>
                     <div className="ml-auto flex items-center gap-2">
                         {stage === 'build' ? (
                             <>
-                                <span className="text-[13px] font-bold text-black">Do you want to store in master?</span>
+                                <span className="text-[12.5px] font-bold text-gray-900 max-sm:hidden">Do you want to store in master?</span>
                                 <button
                                     onClick={() => {
                                         if (!canSave) { toast.error('Please fill every required field first.'); return; }
                                         setStage('review');
                                     }}
                                     title={canSave ? 'Review the record before it is saved' : 'Fill every required field first'}
-                                    className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-[12px] font-bold text-white transition hover:opacity-90 ${canSave ? '' : 'cursor-not-allowed'}`} style={{ backgroundColor: themeColor }}>
+                                    className={`${BTN_PRIMARY} px-5 ${canSave ? '' : 'cursor-not-allowed opacity-60'}`} style={{ backgroundColor: themeColor }}>
                                     Yes <ChevronRightIcon className="h-3.5 w-3.5" />
                                 </button>
-                                <button onClick={onClose} disabled={saving} className="rounded-lg border border-gray-400 bg-white px-3 py-1.5 text-[12px] font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+                                <button onClick={onClose} disabled={saving} className={BTN_GHOST}>Cancel</button>
                             </>
                         ) : (
                             <>
-                                <button onClick={() => setStage('build')} disabled={saving} className="rounded-lg border border-gray-400 bg-white px-3 py-1.5 text-[12px] font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50">
-                                    Back — edit
+                                <button onClick={() => setStage('build')} disabled={saving} className={BTN_GHOST}>
+                                    <ChevronRightIcon className="h-3.5 w-3.5 rotate-180" /> Back — edit
                                 </button>
-                                <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed" style={{ backgroundColor: themeColor }}>
+                                <button onClick={save} disabled={saving} className={`${BTN_PRIMARY} px-5`} style={{ backgroundColor: themeColor }}>
                                     <CheckCircleIcon className="h-4 w-4" /> {saving ? 'Saving…' : 'Save in Master'}
                                 </button>
                             </>
                         )}
                     </div>
                 </div>
+                <ResizeGrip onGripDown={onGripDown} onReset={resetSize} />
             </div>
         </div>
     );

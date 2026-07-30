@@ -7354,7 +7354,7 @@ const HOExpense = () => {
               </div>
 
               {/* Table */}
-              <div style={{ flex: 1, overflowY: 'auto' }}>
+              <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', maxWidth: '100%' }}>
                 {loadingDayLimits ? (
                   <div style={{ padding: '40px', textAlign: 'center', color: '#888' }}>Loading…</div>
                 ) : (

@@ -11,7 +11,7 @@ from app.time_utils import now_ist
 RIGHTS_MASTER_IDS = ("kala000001", "31240002")
 
 # Approval levels — the Employee Hierarchy is a 5-stage ladder:
-#   l1 -> Employee (creates applications; a self limit auto-approves own records)
+#   l1 -> Employee (creates applications; the next level always approves them)
 #   l2 -> L2 approver (first branch-level approval stage)
 #   l3 -> L3 approver (second branch-level approval stage)
 #   l4 -> HOD (fixed for L4; assigned per branch PER CATEGORY)
@@ -120,8 +120,7 @@ class ApprovalRight(Base):
     user_name = Column(String(100), nullable=True)
     branch = Column(String(20), nullable=True)
     level = Column(String(20), nullable=False, default="l1")  # l1|l2|l3|l4|l5
-    # Authority limits (Authority Matrix), for EVERY level — an L1 employee's
-    # own limit auto-approves their own records within it. An approver whose
+    # Authority limits (Authority Matrix), for EVERY level — an approver whose
     # limit covers the record's value FINALIZES it; a value beyond the limit
     # escalates to the next level in the chain. NULL = 0 (nothing) except for
     # the rights masters, who are unlimited.
@@ -147,6 +146,28 @@ class ApprovalRight(Base):
             "granted_by_name": self.granted_by_name,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class ApprovalBranchGroup(Base):
+    """Merged hierarchy rows — several branches sharing ONE Authority Matrix
+    row. Every member branch (including the row branch itself) maps to the
+    group's ROW branch, whose stage / HOD / level-limit rows govern records
+    of ALL member branches. A branch can belong to at most one group; a
+    multi-branch employee appears only ONCE in the merged row."""
+    __tablename__ = "approval_branch_groups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    row_branch = Column(String(20), nullable=False, index=True)   # the row's key branch
+    branch = Column(String(20), nullable=False, unique=True)      # member branch
+    created_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=now_ist)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "row_branch": self.row_branch,
+            "branch": self.branch,
         }
 
 
@@ -325,7 +346,8 @@ class ApprovalApplication(Base):
     """One approval application raised by any user and pushed through the
     L2 -> L3 -> L4 (HOD) -> L5 (COO) chain of its branch's hierarchy row.
     Self-approval is removed: the creator never acts on their own record —
-    a value within the creator's OWN limit is auto-approved at submit.
+    every record (even within the creator's OWN limit) needs the next
+    level's approval to finalize.
     HO-branch creators skip L2/L3 and pick their own L4 / L5 approvers.
 
     Discounting / Credit share the same columns; Expense additionally fills
@@ -375,14 +397,22 @@ class ApprovalApplication(Base):
     created_by_level = Column(String(20), nullable=True)  # level of creator at submit time
 
     # True when the record was approved at submit because its value was within
-    # the creator's OWN authority limit (self-approval replaced by auto-approve)
+    # Historical flag: records finalized at submit under the old within-own-
+    # limit rule (now only the rights-master no-value case sets it)
     auto_approved = Column(Boolean, default=False)
 
     # Extra CC addresses the CREATOR attached at submit — automatically added
     # to the result email's CC when the record is approved / rejected
     cc_emails = Column(String(500), nullable=True)
 
-    # HO-branch creators choose who approves their record at L4 / L5
+    # Creator-chosen approvers (submit-time CC box). L4/L5: HO creators
+    # always choose their HOD; non-HO creators may pick ONE person per level
+    # when it has several approvers (NULL = any assigned approver may act).
+    # L2/L3 choices apply to non-HO records only (HO skips those stages).
+    l2_approver_id = Column(String(50), nullable=True)
+    l2_approver_name = Column(String(100), nullable=True)
+    l3_approver_id = Column(String(50), nullable=True)
+    l3_approver_name = Column(String(100), nullable=True)
     l4_approver_id = Column(String(50), nullable=True)
     l4_approver_name = Column(String(100), nullable=True)
     l5_approver_id = Column(String(50), nullable=True)
@@ -453,6 +483,10 @@ class ApprovalApplication(Base):
             "created_by_level": self.created_by_level,
             "auto_approved": bool(self.auto_approved),
             "cc_emails": self.cc_emails,
+            "l2_approver_id": self.l2_approver_id,
+            "l2_approver_name": self.l2_approver_name,
+            "l3_approver_id": self.l3_approver_id,
+            "l3_approver_name": self.l3_approver_name,
             "l4_approver_id": self.l4_approver_id,
             "l4_approver_name": self.l4_approver_name,
             "l5_approver_id": self.l5_approver_id,

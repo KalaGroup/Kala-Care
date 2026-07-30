@@ -173,7 +173,7 @@ const EmpQuery = ({ user, onClose, showToast }) => {
                                     <div key={q.id} className="border border-gray-300 rounded-xl p-3 hover:shadow-sm transition-shadow bg-white">
                                         <div className="flex justify-between items-start mb-1.5">
                                             <div className="flex-1 min-w-0">
-                                                <h4 className="text-sm font-semibold text-black flex items-center gap-1.5 flex-wrap">
+                                                <h4 className="text-sm font-semibold text-black flex items-center gap-1.5 flex-wrap break-words min-w-0">
                                                     {q.subject}
                                                     {q.is_resolved && (
                                                         <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-xs rounded-full font-bold">✓ Resolved</span>
@@ -191,7 +191,7 @@ const EmpQuery = ({ user, onClose, showToast }) => {
                                                 <FaTrash className="text-xs" />
                                             </button>
                                         </div>
-                                        <p className="text-sm text-black bg-gray-50 p-2 rounded-lg leading-relaxed">{q.query}</p>
+                                        <p className="text-sm text-black bg-gray-50 p-2 rounded-lg leading-relaxed break-words">{q.query}</p>
                                     </div>
                                 ))}
                             </div>

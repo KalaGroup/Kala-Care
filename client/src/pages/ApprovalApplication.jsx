@@ -57,7 +57,7 @@ function MyLimitsModal({ access, onClose }) {
         </div>
     );
     return (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3" onClick={onClose}>
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3 max-md:p-2" onClick={onClose}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <div className="sticky top-0 flex items-center justify-between px-4 py-3 text-white" style={{ background: themeColor }}>
                     <span className="font-semibold text-sm flex items-center gap-2">
@@ -67,7 +67,7 @@ function MyLimitsModal({ access, onClose }) {
                 </div>
                 <div className="p-4 space-y-3">
                     <p className="text-[11px] text-gray-700">
-                        You act as <b>{levelLabel(access.level)}</b>. Within these limits = <b>auto approved</b>; above = next level.
+                        You act as <b>{levelLabel(access.level)}</b>. Your own records go to the <b>next level</b> for approval; as an approver you finalize records within these limits — above them they forward onward.
                     </p>
                     <div className="rounded-xl border border-gray-200 overflow-hidden">
                         <Row label="Max Discounting %" value={fmt(lim.max_discount_percent, '%')} />
@@ -80,7 +80,7 @@ function MyLimitsModal({ access, onClose }) {
                         <p className="px-3 py-2 bg-gray-50 text-[10px] uppercase tracking-wide font-bold text-gray-800 border-b border-gray-200">
                             My Approval Hierarchy {chain.branch ? `(${chain.branch})` : ''}
                         </p>
-                        <ChainStep tag="L1" text={`${access.name} — creates (within own limit = auto approved)`} />
+                        <ChainStep tag="L1" text={`${access.name} — creates the record (approved by the next level)`} />
                         {chain.is_ho ? (
                             <>
                                 <ChainStep tag="L2 · L3" text="Skipped — Head Office records go directly to L4/L5" />
@@ -197,8 +197,7 @@ export default function ApprovalApplication() {
                         )}
                         {access.level === 'l5' && (
                             <button onClick={() => setShowMatrix(true)}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-[12px] font-semibold transition hover:bg-white/90"
-                                style={{ color: themeColor }}>
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1.5 text-[12px] font-semibold text-white transition">
                                 <Network size={14} /> Authority Matrix
                             </button>
                         )}

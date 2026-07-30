@@ -34,6 +34,7 @@ import {
   BookOpenIcon,
   BuildingOffice2Icon,
   CheckBadgeIcon,
+  PresentationChartLineIcon,
   EyeIcon,
   PencilSquareIcon,
   DocumentTextIcon
@@ -241,6 +242,12 @@ const partDetailItems = [
   { path: '/maintenance-reports', name: 'Master Report' },
 ];
 
+// PMS dropdown items — master admin only for now (view opens to other roles later).
+const pmsItems = [
+  { path: '/aop-master', name: 'AOP Master' },
+  { path: '/sales-labour-report', name: 'Sales & Labour Report' },
+];
+
 function Navbar({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [logoError, setLogoError] = useState(false);
@@ -253,6 +260,7 @@ function Navbar({ children }) {
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
   const [partInfoDropdownOpen, setPartInfoDropdownOpen] = useState(false);   // ← added
   const [engagementMastersDropdownOpen, setEngagementMastersDropdownOpen] = useState(false);   // ← added
+  const [pmsDropdownOpen, setPmsDropdownOpen] = useState(false);   // ← added (PMS)
 
   // Drive List modal
   const [showDriveNamesModal, setShowDriveNamesModal] = useState(false);
@@ -334,6 +342,7 @@ function Navbar({ children }) {
       else if (isPartInfoActive()) setPartInfoDropdownOpen(true);
       else if (isEngagementActive()) setEngagementDropdownOpen(true);
       else if (isEngagementMastersActive()) setEngagementMastersDropdownOpen(true);
+      else if (isPmsActive()) setPmsDropdownOpen(true);
       setSidebarOpen(true);
     }
   };
@@ -354,6 +363,7 @@ function Navbar({ children }) {
     setPartInfoDropdownOpen(which === 'partinfo');
     setEngagementDropdownOpen(which === 'engagement');
     setExpenseDropdownOpen(which === 'expense');
+    setPmsDropdownOpen(which === 'pms');
   };
 
   // Read the raw string every render (cheap) but only JSON.parse when the
@@ -491,6 +501,7 @@ function Navbar({ children }) {
       setBranchDropdownOpen(false);
       setPartInfoDropdownOpen(false);   // ← added
       setEngagementMastersDropdownOpen(false);   // ← added
+      setPmsDropdownOpen(false);   // ← added (PMS)
     }
   }, [sidebarOpen]);
 
@@ -951,7 +962,7 @@ function Navbar({ children }) {
       },
       {
         path: '/approval-application',
-        name: 'Approval Application',
+        name: 'Note For Approval',
         icon: CheckBadgeIcon,
         description: 'Discounting / Credit / Expense approvals (Branch → HOD → COO)',
         // any role — but only when Master Admin granted the page (can_access_approval)
@@ -985,6 +996,10 @@ function Navbar({ children }) {
   const isPartInfoActive = () =>
     location.pathname === '/maintenance-schedule' ||
     location.pathname === '/maintenance-reports';
+
+  const isPmsActive = () =>
+    location.pathname === '/aop-master' ||
+    location.pathname === '/sales-labour-report';
 
   // Master Admin / IT Admin always have access.
   // Branch Admin and Employee need explicit permission (can_access_expense)
@@ -2155,6 +2170,121 @@ function Navbar({ children }) {
                 </div>
               )}
 
+              {/* PMS — Master Admin only for now (view opens to other roles later). */}
+              {isMasterAdmin && (
+                sidebarOpen ? (
+                  <div className="mt-1">
+                    <button
+                      onClick={() => setPmsDropdownOpen(!pmsDropdownOpen)}
+                      onMouseEnter={() => { setHoveredItem('pms'); hoverOpenDropdown('pms'); }}
+                      onMouseLeave={() => setHoveredItem(null)}
+                      className={`
+          min-w-full w-max group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200
+          ${isPmsActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
+        `}
+                      style={{
+                        backgroundColor: (isPmsActive() || pmsDropdownOpen) ? themeShades.light : 'transparent'
+                      }}
+                    >
+                      <PresentationChartLineIcon
+                        className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
+                        style={{
+                          color: isPmsActive() ? themeColor :
+                            hoveredItem === 'pms' ? themeColor : '#6B7280'
+                        }}
+                      />
+                      <span className="nav-label-fade flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
+                        PMS
+                      </span>
+                      {pmsDropdownOpen ? (
+                        <ChevronUpIcon className="h-2.5 w-2.5 text-black" />
+                      ) : (
+                        <ChevronDownIcon className="h-2.5 w-2.5 text-black" />
+                      )}
+                    </button>
+
+                    <div className={`nav-dd-wrap ${(pmsDropdownOpen || isPmsActive()) ? 'nav-dd-open' : ''}`}>
+                      <div className="nav-dd-inner">
+                        <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
+                        {pmsItems.map((item) => (
+                          <NavLink
+                            key={item.path}
+                            to={item.path}
+                            onClick={() => {
+                              if (isMobile) setSidebarOpen(false);
+                            }}
+                            className={({ isActive }) =>
+                              `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
+                                ? 'text-black font-medium'
+                                : 'text-black hover:text-black'
+                              }`
+                            }
+                            style={({ isActive }) => ({
+                              backgroundColor: isActive ? themeShades.light : 'transparent',
+                              color: isActive ? 'var(--erp-ink)' : undefined
+                            })}
+                          >
+                            {({ isActive }) => (
+                              <>
+                                <div
+                                  className="w-1 h-1 rounded-full"
+                                  style={{
+                                    backgroundColor: isActive ? 'var(--erp-ink)' : '#D1D5DB'
+                                  }}
+                                />
+                                <span className="flex-1 whitespace-nowrap">{item.name}</span>
+                              </>
+                            )}
+                          </NavLink>
+                        ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* Collapsed mode */
+                  <div className="relative mt-2 group/flyout">
+                    <button
+                      onClick={() => setPmsDropdownOpen(!pmsDropdownOpen)}
+                      className="w-full group relative flex items-center justify-center px-2 py-1 rounded-lg transition-all duration-200"
+                      title="PMS"
+                    >
+                      <PresentationChartLineIcon
+                        className="h-3.5 w-3.5 transition-all duration-200"
+                        style={{ color: isPmsActive() ? themeColor : '#6B7280' }}
+                      />
+                      {/* Tooltip removed — the hover flyout already shows the submenu. */}
+                    </button>
+
+                    {/* Hover the icon to reveal this submenu; hidden otherwise. */}
+                    <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
+                        {pmsItems.map((item) => (
+                          <NavLink
+                            key={item.path}
+                            to={item.path}
+                            onClick={() => {
+                              setPmsDropdownOpen(false);
+                              if (isMobile) setSidebarOpen(false);
+                            }}
+                            className={({ isActive }) =>
+                              `block px-2 py-1 text-sm transition-colors ${isActive
+                                ? 'text-black font-medium'
+                                : 'text-black hover:text-black hover:bg-gray-50'
+                              }`
+                            }
+                            style={({ isActive }) => ({
+                              color: isActive ? 'var(--erp-ink)' : undefined,
+                              backgroundColor: isActive ? themeShades.light : 'transparent'
+                            })}
+                          >
+                            {item.name}
+                          </NavLink>
+                        ))}
+                      </div>
+                  </div>
+                )
+              )}
+
               {/* Other Pages (MOM Tracking, Sales) - Only show if user has access */}
               {otherPagesItems.length > 0 && (
                 <div className="mt-1 pt-0">
@@ -2531,8 +2661,10 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
         />
       )}
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col h-full overflow-auto">
+      {/* Main Content — min-w-0 lets this flex item shrink/grow with the
+          sidebar (collapsed w-14 ↔ expanded w-56) so pages always take the
+          full remaining width instead of overflowing the viewport. */}
+      <main className="flex-1 min-w-0 flex flex-col h-full overflow-auto">
         {/* Mobile Header */}
         {isMobile && (
           <header className="sticky top-0 z-10 bg-white backdrop-blur-xl border-b border-gray-200/50 px-3 h-14 max-sm:h-16 flex items-center justify-between">

@@ -1,1 +1,0 @@
-import{j as e}from"./vendor-chartjs-DaFCGlIH.js";import"./vendor-react-Chjj6F22.js";const o=()=>e.jsx("div",{style:{display:"flex",justifyContent:"center",alignItems:"center",height:"100vh",fontSize:"2rem",fontWeight:"bold",color:"#555"},children:"Sales & Finance — Coming Soon..."});export{o as default};

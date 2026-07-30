@@ -21,7 +21,7 @@ import {
 import {
     getMatrix, setAuthority, setEmployeeRule, setHodCategory, setStageApprovers,
     setLevelConfig, removeEmployeeRights, addExpenseType, removeExpenseType,
-    renameExpenseType, setApproverExclusion, errText,
+    renameExpenseType, setApproverExclusion, setBranchGroup, errText,
 } from './approvalApi';
 import { BRAND, CATEGORY_OPTIONS, catLabel, levelLabel, levelName, setLevelNames } from './ApprovalShared';
 
@@ -34,6 +34,9 @@ const td = 'px-2.5 py-1.5 border-b border-r border-gray-200 text-center align-to
 
 const LEVELS = ['l1', 'l2', 'l3', 'l4', 'l5'];
 const ROW_LEVELS = ['l1', 'l2', 'l3', 'l4'];   // assignable per employee (L5 fixed)
+// HO records skip L2/L3 (creator picks the HOD at submit) — the HO row only
+// assigns L1 (plain member) or L4 (HOD offered in the submit-time dropdown)
+const HO_ROW_LEVELS = ['l1', 'l4'];
 const LIMIT_KEYS = ['max_discount_percent', 'max_credit_days', 'max_expense_amount'];
 
 // Which branches are shown as hierarchy rows — UI-only state, kept per
@@ -44,7 +47,7 @@ export default function AuthorityMatrix({ onClose }) {
     const [data, setData] = useState({
         users: [], branches: [], hod_categories: {}, expense_types: [],
         level_configs: [], chain_data: null, exclusions: {}, branch_members: {},
-        ho_branch: 'HO',
+        branch_groups: {}, ho_branch: 'HO',
     });
     const [loading, setLoading] = useState(true);
     const [tab, setTab] = useState('hierarchy');   // hierarchy | expense
@@ -60,6 +63,13 @@ export default function AuthorityMatrix({ onClose }) {
     // Pending PER-EMPLOYEE limit edits, scoped per row so typing in one
     // branch row never marks/saves the other rows: {code: {user_id: {max_*}}}
     const [rowUserEdits, setRowUserEdits] = useState({});
+    // Add Row checkbox picker: open state + picked branch codes (in pick
+    // order — the FIRST pick becomes the row's key branch). The panel is
+    // position:fixed (anchored to the button) so the table's scroll
+    // container never clips it; pos = {left, top} or {left, bottom, up}.
+    const [addPickerOpen, setAddPickerOpen] = useState(false);
+    const [addPickerPos, setAddPickerPos] = useState(null);
+    const [addPicks, setAddPicks] = useState([]);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -73,6 +83,7 @@ export default function AuthorityMatrix({ onClose }) {
                 chain_data: d.chain_data || null,
                 exclusions: d.exclusions || {},
                 branch_members: d.branch_members || {},
+                branch_groups: d.branch_groups || {},
                 ho_branch: d.ho_branch || 'HO',
             });
         } catch (err) {
@@ -88,11 +99,15 @@ export default function AuthorityMatrix({ onClose }) {
         if (addedBranches !== null || loading) return;
         let stored = null;
         try { stored = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch { /* ignore */ }
-        if (Array.isArray(stored)) {
-            setAddedBranches(stored);
-            return;
-        }
-        setAddedBranches(Object.keys(data.chain_data?.stage_approvers || {}));
+        const groups = data.branch_groups || {};
+        const inOtherRow = (code) =>
+            Object.entries(groups).some(([row, ms]) => row !== code && ms.includes(code));
+        const base = Array.isArray(stored)
+            ? stored
+            : Object.keys(data.chain_data?.stage_approvers || {});
+        // merged member branches never show as their own row; merged ROW
+        // branches always show (the group exists server-side)
+        setAddedBranches([...new Set([...base.filter(c => !inOtherRow(c)), ...Object.keys(groups)])]);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [loading, data]);
 
@@ -104,7 +119,25 @@ export default function AuthorityMatrix({ onClose }) {
     const branchName = (code) => data.branches.find(b => b.branch === code)?.branch_name || '';
     const userOf = (id) => data.users.find(x => x.user_id === id);
     const nameOf = (id) => userOf(id)?.name || id;
-    const membersOf = (code) => data.branch_members[code] || [];
+    // Branches shown in a row: the merged group's member branches, else itself
+    const groupOf = (code) => data.branch_groups[code] || [code];
+    // Merged into some OTHER branch's row — never offered / shown as own row
+    const groupedElsewhere = (code) =>
+        Object.entries(data.branch_groups).some(([row, ms]) => row !== code && ms.includes(code));
+    // The ROW branch governing a branch's records (itself when not merged)
+    const rowOf = (code) => {
+        for (const [row, ms] of Object.entries(data.branch_groups))
+            if (ms.includes(code)) return row;
+        return code;
+    };
+    // Employees of a row = union across its member branches; a person with
+    // access to several member branches appears only ONCE
+    const membersOf = (code) => {
+        const seen = new Map();
+        groupOf(code).forEach(b =>
+            (data.branch_members[b] || []).forEach(m => { if (!seen.has(m.user_id)) seen.set(m.user_id, m); }));
+        return [...seen.values()];
+    };
     const cooNames = data.chain_data?.coo_names?.length ? data.chain_data.coo_names : ['COO'];
     const stageOf = (code, stage) => ((data.chain_data?.stage_approvers || {})[code] || {})[stage] || [];
     const hodMapsOf = (branchCode, cat) => ((data.hod_categories[branchCode] || {})[cat] || []);
@@ -447,11 +480,76 @@ export default function AuthorityMatrix({ onClose }) {
 
     const rows = addedBranches || [];
     const hoCode = data.ho_branch;
+    // HO is offered too — its row grants HO members their level + limits
+    // (HO records still skip L2/L3); HO just can never be MERGED.
     const remainingBranches = useMemo(() =>
         data.branches.filter(b => !rows.includes(b.branch)
+            && !groupedElsewhere(b.branch)
             && membersOf(b.branch).length > 0),
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [data, rows]);
+
+    // Add ONE row from the checkbox picker. Several picked branches = a
+    // MERGED row keyed by the first pick; every picked branch's employees
+    // are taken in (each person once, multi-branch users included).
+    const addRow = async (picks) => {
+        if (!picks.length) return;
+        if (picks.length > 1 && picks.includes(hoCode))
+            return toast.error('HO cannot be merged with other branches — add it as its own row');
+        const code = picks[0];
+        setSavingId('addrow');
+        try {
+            if (picks.length > 1) await setBranchGroup(code, picks);
+            persistBranches([...rows, code]);
+            setEditingRow(code);
+            // take in every employee of ALL picked branches (dedup by user) —
+            // computed from the already-loaded members, not the stale state
+            const seen = new Map();
+            picks.forEach(b => (data.branch_members[b] || []).forEach(m => {
+                if (!seen.has(m.user_id)) seen.set(m.user_id, m);
+            }));
+            const fresh = [...seen.values()].filter(m => !userOf(m.user_id)?.has_right);
+            for (const m of fresh) {
+                const u = userOf(m.user_id);
+                await setAuthority({ user_id: m.user_id, level: u?.level || 'l1' });
+            }
+            await load();
+            toast.success(picks.length > 1
+                ? `Merged row ${code} created (${picks.join(' + ')}) — ${fresh.length} employee(s) loaded`
+                : `${fresh.length} employee(s) loaded into ${code}`);
+        } catch (err) {
+            toast.error(errText(err, 'Failed to add the hierarchy row'));
+        } finally {
+            setSavingId(null);
+            setAddPicks([]);
+            setAddPickerOpen(false);
+        }
+    };
+
+    // Branches that can still be MERGED into row `code`: not HO, not already
+    // in this row, not part of (or heading) another merged row. A branch that
+    // currently is its own PLAIN row may be merged in — it leaves the row list.
+    const mergeCandidates = (code) =>
+        data.branches.filter(b => b.branch !== hoCode
+            && !groupOf(code).includes(b.branch)
+            && !groupedElsewhere(b.branch)
+            && !data.branch_groups[b.branch]);
+
+    // Replace the FULL member list of row `code` (fewer than two = un-merge)
+    const saveGroup = async (code, branches) => {
+        setSavingId(`grp_${code}`);
+        try {
+            const res = await setBranchGroup(code, branches);
+            // a merged-in branch that was its own row leaves the row list
+            persistBranches(rows.filter(b => b === code
+                || !(branches.includes(b) && b !== code)));
+            await load();
+            if (res?.moved) await doneAlert(res.moved, `Row ${code} branches`);
+            else toast.success(`Row ${code} branches updated`);
+        } catch (err) {
+            toast.error(errText(err, 'Failed to update the row branches'));
+        } finally { setSavingId(null); }
+    };
 
     /* ------- small UI pieces ------- */
 
@@ -479,30 +577,30 @@ export default function AuthorityMatrix({ onClose }) {
 
     /* ================= RENDER ================= */
     return (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3" onClick={onClose}>
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3 max-md:p-2" onClick={onClose}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[96vw] h-[94vh] flex flex-col overflow-hidden"
                 onClick={e => e.stopPropagation()}>
                 {/* Blue bar: title + tabs + close, in ONE row */}
-                <div className="sticky top-0 z-30 flex flex-nowrap items-center gap-3 px-5 py-2.5 rounded-t-2xl text-white overflow-x-auto" style={{ background: BRAND, scrollbarWidth: 'thin' }}>
+                <div className="sticky top-0 z-30 flex flex-wrap md:flex-nowrap items-center gap-3 max-md:gap-2 px-3 sm:px-5 py-2.5 rounded-t-2xl text-white md:overflow-x-auto" style={{ background: BRAND, scrollbarWidth: 'thin' }}>
                     <span className="font-semibold text-sm flex items-center gap-2 whitespace-nowrap flex-shrink-0">
                         <Network size={16} /> Authority Matrix
                     </span>
-                    <div className="ml-auto flex flex-nowrap items-center gap-2">
+                    <div className="ml-auto flex flex-wrap md:flex-nowrap items-center gap-2 max-md:order-last max-md:w-full max-md:ml-0">
                         {tabBtn('hierarchy', 'Employee Hierarchy & Limits', GitBranch)}
                         {tabBtn('expense', 'Expense Type Master', Wallet)}
                     </div>
-                    <button onClick={onClose} className="p-1.5 rounded-lg bg-white hover:bg-white/90 transition flex-shrink-0" style={{ color: '#2f3192' }}><X size={15} /></button>
+                    <button onClick={onClose} className="p-1.5 rounded-lg bg-white hover:bg-white/90 transition flex-shrink-0 max-md:ml-auto" style={{ color: '#2f3192' }}><X size={15} /></button>
                 </div>
 
                 {/* content fills the rest of the box */}
-                <div className="px-5 py-2.5 flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto">
+                <div className="px-3 sm:px-5 py-2.5 flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto">
                     {loading || addedBranches === null ? (
                         <div className="py-16 text-center text-sm text-gray-600">Loading authority matrix…</div>
                     ) : tab === 'hierarchy' ? (
                         <>
                             <div className="flex items-center gap-2">
                                 <p className="text-[11px] text-gray-700 flex-1 min-w-0">
-                                    Set each employee's <b>Level</b> per branch. Limits are <b>per-employee</b> — blank inherits the level's shared value; expense amount applies to all types.
+                                    Set each employee's <b>Level</b> per row. Limits are <b>per-employee</b> — blank inherits the level's shared value. Edit a row to <b>merge branches</b> into it — one shared flow for all.
                                 </p>
                                 <button type="button" onClick={renameLevels} disabled={savingId === 'lvlnames'}
                                     className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50">
@@ -576,8 +674,40 @@ export default function AuthorityMatrix({ onClose }) {
                                             return (
                                                 <tr key={code} className={isEditing ? 'bg-amber-50/60' : 'hover:bg-gray-50/60'}>
                                                     <td className={`${td} !align-middle`}>
-                                                        <p className="font-bold text-black">{code}</p>
-                                                        <p className="text-[10px] text-gray-600">{branchName(code)}</p>
+                                                        {groupOf(code).map(b => (
+                                                            <div key={b} className="mb-1 last:mb-0">
+                                                                <p className="font-bold text-black flex items-center justify-center gap-1">
+                                                                    {branchName(b) || b}
+                                                                    {isEditing && groupOf(code).length > 1 && b !== code && (
+                                                                        <button type="button"
+                                                                            title={`Un-merge ${b} from this row`}
+                                                                            disabled={savingId === `grp_${code}`}
+                                                                            onClick={() => saveGroup(code, groupOf(code).filter(x => x !== b))}
+                                                                            className="p-0.5 rounded text-gray-400 hover:text-amber-600 hover:bg-amber-50 disabled:opacity-50">
+                                                                            <X size={11} />
+                                                                        </button>
+                                                                    )}
+                                                                </p>
+                                                                <p className="text-[10px] text-gray-600">{b}</p>
+                                                            </div>
+                                                        ))}
+                                                        {isEditing && mergeCandidates(code).length > 0 && (
+                                                            <select className="mt-1 border border-dashed border-indigo-300 rounded-lg px-1.5 py-1 text-[10px] bg-white text-indigo-700 font-semibold max-w-[120px] focus:outline-none"
+                                                                value=""
+                                                                title="Merge another branch into this row — its employees join this row and its records follow this row's levels"
+                                                                disabled={savingId === `grp_${code}`}
+                                                                onChange={e => {
+                                                                    if (e.target.value)
+                                                                        saveGroup(code, [...groupOf(code), e.target.value]);
+                                                                }}>
+                                                                <option value="">
+                                                                    {savingId === `grp_${code}` ? 'Saving…' : '＋ Merge branch…'}
+                                                                </option>
+                                                                {mergeCandidates(code).map(b => (
+                                                                    <option key={b.branch} value={b.branch}>{b.branch_name || b.branch} ({b.branch})</option>
+                                                                ))}
+                                                            </select>
+                                                        )}
                                                     </td>
                                                     <td className={`${td} text-left`}>
                                                         {members.length === 0 && (
@@ -632,9 +762,13 @@ export default function AuthorityMatrix({ onClose }) {
                                                                         <select className={`${input} max-w-[140px]`}
                                                                             value={lvl}
                                                                             onChange={e => setLevelInRow(code, m.user_id, e.target.value)}>
-                                                                            {ROW_LEVELS.map(l => (
+                                                                            {(code === data.ho_branch ? HO_ROW_LEVELS : ROW_LEVELS).map(l => (
                                                                                 <option key={l} value={l}>{levelLabel(l)}</option>
                                                                             ))}
+                                                                            {/* legacy value outside the HO list stays visible until corrected */}
+                                                                            {code === data.ho_branch && !HO_ROW_LEVELS.includes(lvl) && (
+                                                                                <option value={lvl}>{levelLabel(lvl)}</option>
+                                                                            )}
                                                                         </select>
                                                                     ) : (
                                                                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 whitespace-nowrap">
@@ -719,7 +853,7 @@ export default function AuthorityMatrix({ onClose }) {
                                                                 onClick={async () => {
                                                                     const res = await Swal.fire({
                                                                         title: 'Delete this hierarchy row?',
-                                                                        text: `${code} — ${branchName(code)}: ALL its L2 / L3 / L4 assignments AND its limits will be removed (employees return to L1, limits reset to 0). Pending records are re-routed to the next available authority.`,
+                                                                        text: `${groupOf(code).join(' + ')}: ALL its L2 / L3 / L4 assignments AND its limits will be removed (employees return to L1, limits reset to 0)${groupOf(code).length > 1 ? '; the merged branches split up again' : ''}. Pending records are re-routed to the next available authority.`,
                                                                         icon: 'warning',
                                                                         showCancelButton: true,
                                                                         confirmButtonText: 'Delete Row',
@@ -754,6 +888,9 @@ export default function AuthorityMatrix({ onClose }) {
                                                                                     max_discount_percent: '', max_credit_days: '', max_expense_amount: '',
                                                                                 });
                                                                         }
+                                                                        // dissolve the merged row — member branches are on their own again
+                                                                        if (groupOf(code).length > 1)
+                                                                            moved += (await setBranchGroup(code, []))?.moved || 0;
                                                                         persistBranches(rows.filter(b => b !== code));
                                                                         if (isEditing) setEditingRow(null);
                                                                         await load();
@@ -782,22 +919,69 @@ export default function AuthorityMatrix({ onClose }) {
                                                 {remainingBranches.length > 0 ? (
                                                     <div className="flex items-center gap-2">
                                                         <Plus size={13} className="text-indigo-600 flex-shrink-0" />
-                                                        <select className="border border-dashed border-indigo-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-indigo-700 font-semibold w-72 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                                                            value=""
-                                                            onChange={e => {
-                                                                if (e.target.value) {
-                                                                    persistBranches([...rows, e.target.value]);
-                                                                    // new rows open straight in edit mode with their Save button
-                                                                    setEditingRow(e.target.value);
-                                                                    // load ALL the branch's current employees into the row
-                                                                    takeInAll(e.target.value);
-                                                                }
-                                                            }}>
-                                                            <option value="">Add Row — select a branch…</option>
-                                                            {remainingBranches.map(b => (
-                                                                <option key={b.branch} value={b.branch}>{b.branch} — {b.branch_name}</option>
-                                                            ))}
-                                                        </select>
+                                                        <button type="button"
+                                                            disabled={savingId === 'addrow'}
+                                                            onClick={(e) => {
+                                                                if (addPickerOpen) { setAddPickerOpen(false); return; }
+                                                                // anchor the fixed panel to the button; open upward
+                                                                // when there is not enough room below it
+                                                                const r = e.currentTarget.getBoundingClientRect();
+                                                                const up = window.innerHeight - r.bottom < 300;
+                                                                setAddPickerPos(up
+                                                                    ? { left: r.left, bottom: window.innerHeight - r.top + 4 }
+                                                                    : { left: r.left, top: r.bottom + 4 });
+                                                                setAddPickerOpen(true);
+                                                            }}
+                                                            className="border border-dashed border-indigo-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-indigo-700 font-semibold w-72 max-w-full text-left focus:outline-none focus:ring-2 focus:ring-indigo-300 disabled:opacity-50">
+                                                            {savingId === 'addrow'
+                                                                ? 'Adding row…'
+                                                                : addPicks.length
+                                                                    ? `Selected: ${addPicks.join(' + ')}`
+                                                                    : 'Add Row — select branch(es)…'}
+                                                        </button>
+                                                        {addPickerOpen && savingId !== 'addrow' && addPickerPos && (<>
+                                                            {/* click-away backdrop */}
+                                                            <div className="fixed inset-0 z-[84]"
+                                                                onClick={() => setAddPickerOpen(false)} />
+                                                            <div className="fixed z-[85] w-80 max-w-[calc(100vw-16px)] bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden"
+                                                                style={{ left: addPickerPos.left, top: addPickerPos.top, bottom: addPickerPos.bottom }}>
+                                                                <div className="max-h-56 overflow-y-auto p-1.5">
+                                                                    {remainingBranches.map(b => (
+                                                                        <label key={b.branch}
+                                                                            className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-gray-800 hover:bg-indigo-50 cursor-pointer">
+                                                                            <input type="checkbox" className="accent-indigo-600"
+                                                                                checked={addPicks.includes(b.branch)}
+                                                                                onChange={() => setAddPicks(prev => prev.includes(b.branch)
+                                                                                    ? prev.filter(x => x !== b.branch)
+                                                                                    : [...prev, b.branch])} />
+                                                                            <span className="truncate">
+                                                                                <b>{b.branch_name || b.branch}</b>
+                                                                                <span className="text-gray-500"> ({b.branch})</span>
+                                                                            </span>
+                                                                        </label>
+                                                                    ))}
+                                                                </div>
+                                                                <div className="flex items-center gap-2 px-2.5 py-2 border-t border-gray-200 bg-gray-50">
+                                                                    <p className="flex-1 text-[10px] text-gray-600">
+                                                                        {addPicks.length > 1
+                                                                            ? `One MERGED row — ${addPicks[0]} is the row key`
+                                                                            : 'Tick several branches to merge them into ONE row'}
+                                                                    </p>
+                                                                    <button type="button"
+                                                                        onClick={() => { setAddPicks([]); setAddPickerOpen(false); }}
+                                                                        className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-gray-600 hover:bg-gray-200">
+                                                                        Cancel
+                                                                    </button>
+                                                                    <button type="button"
+                                                                        disabled={!addPicks.length}
+                                                                        onClick={() => addRow(addPicks)}
+                                                                        className="px-3 py-1 rounded-lg text-[11px] font-semibold text-white disabled:opacity-50"
+                                                                        style={{ background: BRAND }}>
+                                                                        Add Row{addPicks.length > 1 ? ` (${addPicks.length} branches)` : ''}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </>)}
                                                     </div>
                                                 ) : (
                                                     <span className="text-[11px] text-gray-600">All branches with employees are already added.</span>
@@ -825,7 +1009,7 @@ export default function AuthorityMatrix({ onClose }) {
                                     {savingId === 'newtype' ? 'Adding…' : 'Add Type'}
                                 </button>
                             </form>
-                            <div className="rounded-xl border border-gray-200 overflow-hidden">
+                            <div className="rounded-xl border border-gray-200 overflow-x-auto max-w-full">
                                 <table className="min-w-full border-separate" style={{ borderSpacing: 0 }}>
                                     <thead>
                                         <tr>
@@ -915,12 +1099,14 @@ export default function AuthorityMatrix({ onClose }) {
 
                 const stageCard = (stage, req) => {
                     const label = `${stage.toUpperCase()} – ${levelName(stage)}`;
-                    const people = stageOf(u.branch, stage).filter(p => p.user_id !== u.user_id);
-                    const selfIn = stageOf(u.branch, stage).some(p => p.user_id === u.user_id);
+                    // a merged member branch follows its ROW branch's stages
+                    const rowBranch = rowOf(u.branch);
+                    const people = stageOf(rowBranch, stage).filter(p => p.user_id !== u.user_id);
+                    const selfIn = stageOf(rowBranch, stage).some(p => p.user_id === u.user_id);
                     if (isHOUser) return <OrgCard skipped title={label} names={[{ name: 'Skipped — HO records go to L4/L5 directly' }]} />;
                     if (!req) return <OrgCard skipped title={label} names={[{ name: 'Skipped — not required' }]} />;
                     if (people.length) return (
-                        <OrgCard title={label} badge={u.branch}
+                        <OrgCard title={label} badge={rowBranch === u.branch ? u.branch : groupOf(rowBranch).join(' + ')}
                             names={people.map(p => ({ name: p.name }))} />
                     );
                     return <OrgCard skipped title={label}
@@ -930,13 +1116,58 @@ export default function AuthorityMatrix({ onClose }) {
                 const req = { l2: reqL2, l3: reqL3, l4: reqL4 };
                 const stagesAbove = ['l2', 'l3', 'l4'];
 
+                /* ---- positional tree: the clicked person sits at THEIR level ---- */
+                const rowBranch = isCoo ? hoCode : rowOf(u.branch);
+                const levelRank = { l1: 1, l2: 2, l3: 3, l4: 4, l5: 5 };
+                const myLevel = isCoo ? 'l5'
+                    : isHOUser ? (LEVELS.includes(u.level) ? u.level : 'l1')
+                        : serverLevelInRow(rowBranch, u.user_id);
+                const myRank = levelRank[myLevel] || 1;
+                // Every L4 (HOD) of the row — union across the three categories
+                const l4People = (() => {
+                    const seen = new Map();
+                    CATEGORY_OPTIONS.forEach(c =>
+                        (((data.chain_data?.hod_by_branch || {})[rowBranch] || {})[c.value] || [])
+                            .forEach(p => { if (p.user_id && !seen.has(p.user_id)) seen.set(p.user_id, p); }));
+                    return [...seen.values()];
+                })();
+                const stagePeers = (lvl) =>
+                    (lvl === 'l4' ? l4People : stageOf(rowBranch, lvl)).filter(p => p.user_id !== u.user_id);
+                const l1People = rowMembers(rowBranch)
+                    .filter(m => m.user_id !== u.user_id && serverLevelInRow(rowBranch, m.user_id) === 'l1');
+                const lvlTitle = (lvl) => `${lvl.toUpperCase()} – ${levelName(lvl)}`;
+                const rowBadge = rowBranch === u.branch ? u.branch : groupOf(rowBranch).join(' + ');
+
+                // The BLUE card — the clicked person rendered at their own level,
+                // with any same-level colleagues in a card beside it
+                const selfSlot = (note, peers = []) => (
+                    <div className="flex flex-wrap items-start justify-center gap-3">
+                        <OrgCard dark title={u.name} badge={`${levelLabel(myLevel)} · ${u.branch || '—'}`}
+                            names={[{ name: note }]} />
+                        {peers.length > 0 && (
+                            <OrgCard title={`${lvlTitle(myLevel)} — also at this level`}
+                                names={peers.map(p => ({ name: p.name }))} />
+                        )}
+                    </div>
+                );
+                // A level BELOW the person — plain listing of who sits there
+                const belowSlot = (lvl) => {
+                    if (isHOUser && (lvl === 'l2' || lvl === 'l3'))
+                        return <OrgCard skipped title={lvlTitle(lvl)} names={[{ name: 'Skipped — HO records go to L4/L5 directly' }]} />;
+                    const people = lvl === 'l1' ? l1People : (lvl === 'l4' ? l4People : stageOf(rowBranch, lvl));
+                    return people.length
+                        ? <OrgCard wide={lvl === 'l1'} title={lvlTitle(lvl)} badge={rowBadge}
+                            names={people.map(p => ({ name: p.name }))} />
+                        : <OrgCard skipped title={lvlTitle(lvl)} names={[{ name: 'No one at this level yet' }]} />;
+                };
+
                 return (
-                    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-3"
+                    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-3 max-md:p-2"
                         onClick={() => setTreeFor(null)}>
                         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-y-auto"
                             onClick={e => e.stopPropagation()}>
-                            <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3 rounded-t-2xl text-white" style={{ background: BRAND }}>
-                                <span className="font-semibold text-sm flex items-center gap-2">
+                            <div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-5 max-sm:px-3 py-3 rounded-t-2xl text-white" style={{ background: BRAND }}>
+                                <span className="font-semibold text-sm flex items-center gap-2 min-w-0">
                                     <GitBranch size={15} /> Approval Hierarchy — {u.name}
                                 </span>
                                 <button onClick={() => setTreeFor(null)} className="p-1.5 rounded-lg bg-white hover:bg-white/90 transition flex-shrink-0" style={{ color: '#2f3192' }}><X size={15} /></button>
@@ -955,28 +1186,33 @@ export default function AuthorityMatrix({ onClose }) {
                                     </div>
                                 )}
 
-                                {/* L1..L5 chart for the records this user creates */}
+                                {/* Org chart — TOP-DOWN positional tree: L5 (COO) always on
+                                    top, L1 at the base; the clicked person's BLUE card sits at
+                                    their own level, approvers above it, their people below it */}
                                 <div className="flex flex-col items-center py-2">
-                                    <OrgCard dark title={u.name} badge={`${levelLabel(u.level)} · ${u.branch || '—'}`}
-                                        names={[{
-                                            name: isCoo
-                                                ? 'Final approval authority — own records auto-approve within limit'
-                                                : 'Creates the record — within own limit (home branch) = auto approved',
-                                        }]} />
+                                    {/* L5 — COO */}
+                                    {myLevel === 'l5' ? (
+                                        selfSlot('Final approval authority — own records still need another approver',
+                                            cooNames.filter(n => n !== u.name).map(n => ({ name: n })))
+                                    ) : (
+                                        <OrgCard title={lvlTitle('l5')} names={cooNames.map(n => ({ name: n }))} />
+                                    )}
                                     <VLine />
-                                    {stageCard('l2', reqL2)}
-                                    <VLine />
-                                    {stageCard('l3', reqL3)}
-                                    <VLine />
-                                    {isHOUser ? (
-                                        <OrgCard wide title={`L4 – ${levelName('l4')}`} badge="CHOSEN AT SUBMIT"
+                                    {/* L4 — HOD */}
+                                    {myLevel === 'l4' ? (
+                                        selfSlot(`HOD for: ${serverCatsInRow(rowBranch, u.user_id).map(catLabel).join(', ') || 'no category yet'}`,
+                                            stagePeers('l4'))
+                                    ) : myRank > 4 ? (
+                                        belowSlot('l4')
+                                    ) : isHOUser ? (
+                                        <OrgCard wide title={lvlTitle('l4')} badge="CHOSEN AT SUBMIT"
                                             names={[{ name: 'HO members pick their L4 approver on the form' }]} />
                                     ) : !reqL4 ? (
-                                        <OrgCard skipped title={`L4 – ${levelName('l4')}`} names={[{ name: 'Skipped — not required' }]} />
+                                        <OrgCard skipped title={lvlTitle('l4')} names={[{ name: 'Skipped — not required' }]} />
                                     ) : (
                                         <div className="flex flex-wrap justify-center gap-3">
                                             {CATEGORY_OPTIONS.map(c => {
-                                                const hods = (((data.chain_data?.hod_by_branch || {})[u.branch] || {})[c.value] || [])
+                                                const hods = (((data.chain_data?.hod_by_branch || {})[rowOf(u.branch)] || {})[c.value] || [])
                                                     .filter(p => p.user_id !== u.user_id);
                                                 return hods.length ? (
                                                     <OrgCard key={c.value} wide title={c.label} badge={`L4 – ${levelName('l4')}`}
@@ -996,13 +1232,27 @@ export default function AuthorityMatrix({ onClose }) {
                                         </div>
                                     )}
                                     <VLine />
-                                    <OrgCard title={`L5 – ${levelName('l5')}`}
-                                        names={cooNames.map(n => ({ name: n }))} />
+                                    {/* L3 */}
+                                    {myLevel === 'l3'
+                                        ? selfSlot('Approves at this step — own records go to the next level', stagePeers('l3'))
+                                        : myRank > 3 ? belowSlot('l3') : stageCard('l3', reqL3)}
+                                    <VLine />
+                                    {/* L2 */}
+                                    {myLevel === 'l2'
+                                        ? selfSlot('Approves at this step — own records go to the next level', stagePeers('l2'))
+                                        : myRank > 2 ? belowSlot('l2') : stageCard('l2', reqL2)}
+                                    <VLine />
+                                    {/* L1 — the base */}
+                                    {myLevel === 'l1'
+                                        ? selfSlot('Creates the record — approved by the next level in the chain', l1People)
+                                        : belowSlot('l1')}
                                 </div>
                                 <p className="text-[10px] text-gray-600 text-center">
-                                    View only — build the hierarchy in the Employee Hierarchy &amp; Limits tab. Click an L4 name to
-                                    exclude / re-allow that approver for this employee's records of that category
-                                    (struck-out = excluded).
+                                    View only — build the hierarchy in the Employee Hierarchy &amp; Limits tab.
+                                    {!isHOUser && myRank < 4 && reqL4 && (
+                                        <> Click an L4 name to exclude / re-allow that approver for this employee's
+                                            records of that category (struck-out = excluded).</>
+                                    )}
                                 </p>
                             </div>
                         </div>

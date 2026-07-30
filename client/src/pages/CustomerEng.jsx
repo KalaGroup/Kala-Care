@@ -6230,7 +6230,7 @@ ${f.start_para}`;
         const boxesContent = {
             branch: (
                 <div className="p-3 sm:p-4">
-                    <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-40">
+                    <div className="grid grid-cols-1 min-[480px]:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-40">
                         <div className="space-y-0.5">
                             <p className="text-[11px] font-bold text-black uppercase tracking-wide">Branch ID</p>
                             <p className="text-xs text-black font-normal break-words">{customerDetails?.branch_id || '-'}</p>
@@ -6252,7 +6252,7 @@ ${f.start_para}`;
             ),
             asset: (
                 <div className="p-3 sm:p-4">
-                    <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 gap-y-3">
+                    <div className="grid grid-cols-1 min-[480px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 gap-y-3">
                         <div className="space-y-0.5">
                             <p className="text-[11px] font-bold text-black uppercase tracking-wide">Instance ID</p>
                             <p className="text-xs text-black font-normal break-words">{customerDetails?.instance_id || '-'}</p>
@@ -6326,7 +6326,7 @@ ${f.start_para}`;
             ),
             agreement: (
                 <div className="p-3 sm:p-4">
-                    <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-40">
+                    <div className="grid grid-cols-1 min-[480px]:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-40">
                         <div className="space-y-0.5">
                             <p className="text-[11px] font-bold text-black uppercase tracking-wide">Agreement No.</p>
                             <p className="text-xs text-black font-normal break-words">{latestAMC?.agreement_number || '-'}</p>
@@ -10345,7 +10345,7 @@ ${f.start_para}`;
                 {/* PDF Chat Panel */}
                 {showPdfViewer && pdfViewerCampaign && (
                     <div
-                        className={`fixed z-50 transition-all duration-300 ease-in-out max-sm:max-w-[calc(100vw-8px)] ${isDragging ? 'cursor-grabbing' : ''
+                        className={`fixed z-50 transition-all duration-300 ease-in-out max-w-[calc(100vw-8px)] ${isDragging ? 'cursor-grabbing' : ''
                             } ${isPdfPanelMinimized
                                 ? 'w-48 sm:w-72 h-12'
                                 : `${pdfPanelWidth} h-[400px] sm:h-[450px] md:h-[500px] lg:h-[550px]`

@@ -179,19 +179,19 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
     );
 
     return (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3" onClick={onClose}>
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3 max-md:p-2" onClick={onClose}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[96vw] h-[94vh] flex flex-col overflow-hidden"
                 onClick={e => e.stopPropagation()}>
                 {/* Blue bar: title + search + branch + type tabs + export + close */}
-                <div className="flex flex-nowrap items-center gap-2 px-5 py-2.5 rounded-t-2xl text-white overflow-x-auto"
+                <div className="flex flex-wrap md:flex-nowrap items-center gap-2 px-3 sm:px-5 py-2.5 rounded-t-2xl text-white md:overflow-x-auto"
                     style={{ background: BRAND, scrollbarWidth: 'thin' }}>
                     <span className="font-semibold text-sm flex items-center gap-2 whitespace-nowrap flex-shrink-0">
                         <BarChart3 size={16} /> {title}
                     </span>
-                    <div className="ml-auto flex flex-nowrap items-center gap-2 flex-shrink-0">
-                        <div className="relative">
+                    <div className="ml-auto flex flex-wrap md:flex-nowrap items-center gap-2 md:flex-shrink-0 min-w-0 max-md:order-last max-md:w-full max-md:ml-0">
+                        <div className="relative max-sm:w-full">
                             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-600" />
-                            <input className={`${input} pl-8 w-44`} placeholder="Search…"
+                            <input className={`${input} pl-8 w-44 max-sm:w-full`} placeholder="Search…"
                                 value={f.search} onChange={set('search')} />
                         </div>
                         <select className={`${input} max-w-[170px]`} value={f.branch} onChange={set('branch')}>
@@ -212,7 +212,7 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
                             <RotateCcw size={14} />
                         </button>
                     </div>
-                    <button onClick={onClose} className="p-1.5 rounded-lg bg-white hover:bg-white/90 transition flex-shrink-0" style={{ color: '#2f3192' }}><X size={15} /></button>
+                    <button onClick={onClose} className="p-1.5 rounded-lg bg-white hover:bg-white/90 transition flex-shrink-0 max-md:ml-auto" style={{ color: '#2f3192' }}><X size={15} /></button>
                 </div>
 
                 <div className="p-4 flex-1 min-h-0 flex flex-col gap-3">

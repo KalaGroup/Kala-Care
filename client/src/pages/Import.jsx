@@ -1289,7 +1289,7 @@ const Import = () => {
             {/* Upload Confirmation Modal */}
             {showUploadConfirm && files[0] && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-4 sm:p-5">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-4 sm:p-5 max-h-[90vh] overflow-y-auto">
                         <div className="flex items-start gap-2">
                             <InformationCircleIcon className="h-5 w-5 flex-shrink-0" style={{ color: themeColor }} />
                             <div className="min-w-0 flex-1">

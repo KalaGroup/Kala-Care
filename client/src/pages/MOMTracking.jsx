@@ -653,6 +653,63 @@ function Dropdown({ trigger, children, panelClass = '', panelStyle, hover = fals
     </div>
   );
 }
+/* Multi-select branch filter (MOM History tab row + Reports scope) —
+   empty selection = all branches; picking several COMBINES their data:
+   every count, list and export below reflects the union of the selection */
+const FilterRow = ({ on, onPick, children }) => (
+  <div role="button" tabIndex={0} onClick={onPick}
+    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(); } }}
+    className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50 cursor-pointer">
+    <span className="h-4 w-4 rounded border flex items-center justify-center flex-shrink-0" style={on ? { background: BRAND, borderColor: BRAND } : { borderColor: '#cfcfe0' }}>
+      {on && <Check size={11} color="#fff" className="kc-pop" />}
+    </span>
+    {children}
+  </div>
+);
+function BranchMultiFilter({ options, selected, onChange, allLabel = 'All branches', countOf = null, maxWidth = '16rem' }) {
+  const names = options.filter((b) => selected.includes(b.code)).map((b) => b.name);
+  const label = selected.length ? names.join(' + ') : allLabel;
+  const toggleCode = (code) => onChange(selected.includes(code) ? selected.filter((c) => c !== code) : [...selected, code]);
+  return (
+    <Dropdown panelClass="w-64 max-w-[90vw]"
+      trigger={({ open, toggle }) => (
+        <button type="button" onClick={toggle}
+          className="kc-input flex items-center gap-1.5 px-2 py-1.5 fs-12 font-bold text-gray-800 bg-white shadow-sm text-left"
+          title="Filter by branch — select one or more; their data is combined"
+          style={{ maxWidth, ...(open ? { borderColor: BRAND, boxShadow: '0 0 0 3px rgba(47,49,146,.10)' } : {}) }}>
+          <span className="truncate flex-1 min-w-0" title={label}>{label}</span>
+          {selected.length > 0 && <span className="rounded-full px-1.5 py-0.5 fs-9 font-bold flex-shrink-0" style={{ background: BRAND_SOFT, color: INK }}>{selected.length}</span>}
+          <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
+        </button>
+      )}>
+      <div className="px-3 py-1.5 fs-9 font-bold uppercase tracking-wide text-black border-b border-gray-100 flex items-center justify-between gap-2">
+        <span>Branches — one or more</span>
+        {selected.length > 0 && <button type="button" onClick={() => onChange([])} className="fs-9 font-bold hover:underline" style={{ color: BRAND }}>Clear</button>}
+      </div>
+      <div className="max-h-56 overflow-y-auto kc-scroll py-1">
+        <FilterRow on={!selected.length} onPick={() => onChange([])}>
+          <span className={`fs-12 flex-1 min-w-0 truncate text-gray-800 ${!selected.length ? 'font-semibold' : ''}`}>{allLabel}</span>
+        </FilterRow>
+        {options.map((b) => {
+          const on = selected.includes(b.code);
+          const sub = [countOf ? countOf(b) : '', b.manual ? 'manual' : ''].filter(Boolean).join(' · ');
+          return (
+            <FilterRow key={b.code} on={on} onPick={() => toggleCode(b.code)}>
+              <span className="min-w-0 flex-1">
+                <span className={`fs-12 block truncate text-gray-800 ${on ? 'font-semibold' : ''}`} title={b.name}>{b.name}</span>
+                {sub && <span className="fs-9 text-gray-400 block truncate">{sub}</span>}
+              </span>
+            </FilterRow>
+          );
+        })}
+      </div>
+      <div className="px-3 py-1.5 border-t border-gray-100 fs-10 text-gray-400" style={{ background: '#fafbfd' }}>
+        {selected.length ? 'Counts & data combine the selected branches' : 'Select branches to combine their counts & data'}
+      </div>
+    </Dropdown>
+  );
+}
+
 /* previous remarks chips (the accumulating "Remarks - date" columns) */
 /* multi-line bullet text — every line is its own block with a hanging
    indent, so when a bulleted line wraps, the wrapped text lines up after
@@ -905,9 +962,10 @@ export default function MOMTracking() {
   const [confirmBusy, setConfirmBusy] = useState(false);  // async onYes running → spinner on the Yes button
   const [viewMtg, setViewMtg] = useState(null);
   const [editMtg, setEditMtg] = useState(null);   // meeting being edited from MOM History
-  // branch pre-selected when Reports jumps to History; branch admins start on
-  // their login branch instead of "All branches"
-  const [histBranch, setHistBranch] = useState(isMaster ? null : (me?.branch || null));
+  // branches pre-selected when Reports jumps to History; branch admins start
+  // on their login branch instead of "All branches". MULTI-select — empty
+  // array = all branches; several codes combine their counts & data.
+  const [histBranches, setHistBranches] = useState(isMaster ? [] : (me?.branch ? [me.branch] : []));
   const [histFrom, setHistFrom] = useState('');          // MOM History meeting-date range — lives in the tab row
   const [histTo, setHistTo] = useState('');
   const [histSource, setHistSource] = useState('loading'); // loading | api | error
@@ -1842,14 +1900,9 @@ export default function MOMTracking() {
                   Clear
                 </button>
               )}
-              <select value={histBranch || '__all__'} onChange={(e) => setHistBranch(e.target.value)}
-                className="kc-input px-2 py-1.5 fs-12 font-bold text-gray-800 bg-white shadow-sm"
-                title="Filter MOM History by branch" style={{ maxWidth: '16rem' }}>
-                <option value="__all__">{isMaster ? 'All branches' : 'All my branches'} - {stats.meetings}</option>
-                {histAllBranches.map((b) => (
-                  <option key={b.code} value={b.code}>{b.name} - {(history[b.code] || []).length}{b.manual ? ' · manual' : ''}</option>
-                ))}
-              </select>
+              <BranchMultiFilter options={histAllBranches} selected={histBranches} onChange={setHistBranches}
+                allLabel={`${isMaster ? 'All branches' : 'All my branches'} - ${stats.meetings}`}
+                countOf={(b) => { const n = (history[b.code] || []).length; return `${n} meeting${n === 1 ? '' : 's'}`; }} />
             </div>
           )}
           {isMomAdmin && view === 'new' && (
@@ -2474,10 +2527,10 @@ export default function MOMTracking() {
         )}
 
         {/* ===== HISTORY ===== */}
-        {view === 'history' && <HistoryView history={scopedHistory} branches={branchOptions} onView={setViewMtg} onEdit={setEditMtg} canEdit={histSource === 'api' && isMaster} onDelete={deleteMeeting} canDelete={histSource === 'api' && me?.role === 'master_admin'} canExport={canExport} onExport={doExport} source={histSource} initialCode={histBranch} fromD={histFrom} toD={histTo} />}
+        {view === 'history' && <HistoryView history={scopedHistory} branches={branchOptions} onView={setViewMtg} onEdit={setEditMtg} canEdit={histSource === 'api' && isMaster} onDelete={deleteMeeting} canDelete={histSource === 'api' && me?.role === 'master_admin'} canExport={canExport} onExport={doExport} source={histSource} initialCodes={histBranches} fromD={histFrom} toD={histTo} />}
 
         {/* ===== REPORTS ===== */}
-        {view === 'reports' && <ReportsView history={scopedHistory} branches={branchOptions} canExport={canExport} onView={setViewMtg} onOpenBranch={(code) => { setHistBranch(code); setView('history'); }} />}
+        {view === 'reports' && <ReportsView history={scopedHistory} branches={branchOptions} canExport={canExport} onView={setViewMtg} onOpenBranch={(code) => { setHistBranches([code]); setView('history'); }} />}
 
         {/* ===== MY MOM / EMPLOYEE REPORT ===== */}
         {view === 'mine' && (
@@ -2520,7 +2573,7 @@ export default function MOMTracking() {
 
       {/* ===== CONFIRM (finalize) ===== */}
       {confirm && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setConfirm(null)}>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 max-md:p-2" onClick={() => setConfirm(null)}>
           <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-lg:max-h-[90vh] max-lg:overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             {/* header */}
             <div className="px-5 pt-5 pb-4 flex items-start gap-3">
@@ -2592,7 +2645,7 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
     [data],
   );
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 max-md:p-2" onClick={onClose}>
       <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-7xl flex flex-col" style={{ maxHeight: '96vh' }} onClick={(e) => e.stopPropagation()}>
         {/* header */}
         <div className="mom-view-head px-4 py-3 flex items-start justify-between rounded-t-2xl border-b border-gray-100 max-md:flex-wrap max-md:gap-2" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
@@ -2828,7 +2881,7 @@ function MeetingEditModal({ data, employees = [], categories, master = [], authH
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 max-md:p-2" onClick={onClose}>
       <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-7xl flex flex-col" style={{ maxHeight: '96vh' }} onClick={(e) => e.stopPropagation()}>
         {/* header — read-only meeting details */}
         <div className="px-4 py-3 flex items-start justify-between rounded-t-2xl border-b border-gray-100 gap-2" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
@@ -3067,7 +3120,7 @@ function MeetingEditModal({ data, employees = [], categories, master = [], authH
 /* ============================================================
    HISTORY VIEW — branch sidebar + searchable, sortable table
    ============================================================ */
-function HistoryView({ history, branches, onView, onEdit, canEdit, onDelete, canDelete, canExport, onExport, source, initialCode, fromD = '', toD = '' }) {
+function HistoryView({ history, branches, onView, onEdit, canEdit, onDelete, canDelete, canExport, onExport, source, initialCodes = [], fromD = '', toD = '' }) {
   /* the sidebar also lists branches that ONLY exist in history
      (e.g. manually added ones) */
   const allBranches = useMemo(() => {
@@ -3082,14 +3135,24 @@ function HistoryView({ history, branches, onView, onEdit, canEdit, onDelete, can
     return [...map.values()];
   }, [branches, history]);
 
-  const ALL_CODE = '__all__';
-  const [code, setCode] = useState(initialCode || ALL_CODE);
-  useEffect(() => { if (initialCode) setCode(initialCode); }, [initialCode]);
-  useEffect(() => { if (code !== ALL_CODE && allBranches.length && !allBranches.some((b) => b.code === code)) setCode(ALL_CODE); }, [allBranches, code]);
+  /* selected branch codes (mirrors the multi-select in the tab row) —
+     empty array = all branches; several codes COMBINE their data: every
+     KPI count, the meetings list, drill-downs and exports reflect the
+     union of the selection */
+  const [selCodes, setSelCodes] = useState(initialCodes || []);
+  useEffect(() => { setSelCodes(initialCodes || []); }, [initialCodes]);
+  /* drop selections whose branch disappeared (e.g. manual branch whose last meeting was deleted) */
+  useEffect(() => {
+    if (!allBranches.length) return;
+    setSelCodes((p) => { const n = p.filter((c) => allBranches.some((b) => b.code === c)); return n.length === p.length ? p : n; });
+  }, [allBranches]);
+  const isAll = selCodes.length === 0;
+  const selKey = selCodes.join('|');
   const [q, setQ] = useState('');
   const [typeF, setTypeF] = useState('all');
   const [asc, setAsc] = useState(false);
-  useEffect(() => { setQ(''); setTypeF('all'); }, [code]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setQ(''); setTypeF('all'); }, [selKey]);
   /* meeting-date range (From/To in the tab row) — scopes the KPI cards,
      the meetings table, the drill-downs and the Excel exports all at once */
   const inRange = (m) => (!fromD || (m.date || '') >= fromD) && (!toD || (m.date || '') <= toD);
@@ -3105,7 +3168,9 @@ function HistoryView({ history, branches, onView, onEdit, canEdit, onDelete, can
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const datedList = useMemo(() => allMeetingsList.filter(inRange), [allMeetingsList, fromD, toD]);
 
-  const meetings = (code === ALL_CODE ? datedList : (history[code] || []).filter(inRange));
+  /* a meeting is in scope when ANY of its branches is selected */
+  const mtgCodes = (m) => (m.branches?.length ? m.branches.map((b) => b.code) : [m.branchCode]);
+  const meetings = (isAll ? datedList : datedList.filter((m) => mtgCodes(m).some((c) => selCodes.includes(c))));
   const types = useMemo(() => [...new Set(meetings.map((m) => m.type).filter(Boolean))], [meetings]);
   const shown = useMemo(() => meetings
     .filter((m) => (typeF === 'all' || m.type === typeF)
@@ -3120,7 +3185,7 @@ function HistoryView({ history, branches, onView, onEdit, canEdit, onDelete, can
   const HIST_CHUNK = 40;
   const [histCount, setHistCount] = useState(HIST_CHUNK);
   const histMoreRef = useRef(null);
-  useEffect(() => { setHistCount(HIST_CHUNK); }, [code, q, typeF, asc, fromD, toD]);
+  useEffect(() => { setHistCount(HIST_CHUNK); }, [selKey, q, typeF, asc, fromD, toD]);
   useEffect(() => {
     const ob = new IntersectionObserver((es) => {
       if (es[0].isIntersecting) setHistCount((n) => (n < shown.length ? Math.min(n + HIST_CHUNK, shown.length) : n));
@@ -3131,10 +3196,11 @@ function HistoryView({ history, branches, onView, onEdit, canEdit, onDelete, can
   const shownRows = useMemo(() => shown.slice(0, histCount), [shown, histCount]);
 
   /* KPI stats — tasks are attributed to the branch(es) the MEETING covers
-     (same rule as Reports), scoped to the branch picked in the dropdown */
+     (same rule as Reports), scoped to the branches picked in the dropdown;
+     a multi-selection counts a row when ANY selected branch covers it */
   const rowCodes = rowBranchCodes;
   const scopeStats = useMemo(() => {
-    const inBranch = (r, m) => code === ALL_CODE || rowCodes(r, m).has(code);
+    const inBranch = (r, m) => isAll || selCodes.some((c) => rowCodes(r, m).has(c));
     /* one entry per tracked task: its LATEST state (datedList is newest
        first) plus the UNION of branches of every meeting that discussed
        it — a carried task counts for each branch it was reviewed in */
@@ -3148,7 +3214,7 @@ function HistoryView({ history, branches, onView, onEdit, canEdit, onDelete, can
     }));
     let tasks = 0, done = 0, wip = 0, pending = 0, overdue = 0;
     tracked.forEach(({ r, codes }) => {
-      if (code !== ALL_CODE && !codes.has(code)) return;
+      if (!isAll && !selCodes.some((c) => codes.has(c))) return;
       tasks++;
       if (r.status === 'completed') done++;
       else if (isOverdue(r)) overdue++;
@@ -3156,17 +3222,19 @@ function HistoryView({ history, branches, onView, onEdit, canEdit, onDelete, can
       else pending++;
     });
     return { meetings: meetings.length, tasks, info, wip, pending, done, overdue, completion: tasks ? Math.round(done / tasks * 100) : 0 };
-  }, [datedList, meetings.length, code, rowCodes]);
+  }, [datedList, meetings.length, isAll, selCodes, rowCodes]);
 
   /* drill-down box — opened by clicking a KPI count */
   const [drill, setDrill] = useState(null);   // { filter }
   const DRILL_LABEL = { tasks: 'All tasks', done: 'Completed tasks', wip: 'WIP tasks', pending: 'Pending tasks', overdue: 'Overdue tasks', info: 'Information rows' };
-  const selBranchName = code === ALL_CODE ? 'All branches' : (allBranches.find((b) => b.code === code)?.name || code);
+  const selBranchName = isAll ? 'All branches' : selCodes.map((c) => allBranches.find((b) => b.code === c)?.name || c).join(' + ');
+  /* the Branch column stays visible whenever rows can span several branches */
+  const showBranchCol = isAll || selCodes.length > 1;
   const drillRows = useMemo(() => {
     if (!drill) return [];
     /* same attribution as the KPI counts — latest state per tracked task,
        shown under every branch whose meetings discussed it */
-    const inBranch = (r, m) => code === ALL_CODE || rowCodes(r, m).has(code);
+    const inBranch = (r, m) => isAll || selCodes.some((c) => rowCodes(r, m).has(c));
     const out = [];
     if (drill.filter === 'info') {
       datedList.forEach((m) => m.rows.forEach((r) => { if (r.flag === 'I' && inBranch(r, m)) out.push({ ...r, meeting: m }); }));
@@ -3179,14 +3247,14 @@ function HistoryView({ history, branches, onView, onEdit, canEdit, onDelete, can
       if (!t) { t = { row: { ...r, meeting: m }, codes: new Set() }; tracked.set(r.trackId, t); }   // first hit = latest state
       rowCodes(r, m).forEach((c) => t.codes.add(c));
     }));
-    tracked.forEach(({ row, codes }) => { if (code === ALL_CODE || codes.has(code)) out.push(row); });
+    tracked.forEach(({ row, codes }) => { if (isAll || selCodes.some((c) => codes.has(c))) out.push(row); });
     return out.filter((t) =>
       drill.filter === 'done' ? t.status === 'completed'
         : drill.filter === 'overdue' ? isOverdue(t)
           : drill.filter === 'wip' ? (t.status === 'in_progress' && !isOverdue(t))
             : drill.filter === 'pending' ? (t.status === 'pending' && !isOverdue(t))
               : true);
-  }, [drill, code, datedList, rowCodes]);
+  }, [drill, isAll, selCodes, datedList, rowCodes]);
   const KPI_COLS = [
     { key: 'meetings', label: 'Meetings', icon: CalendarDays, color: BRAND },
     { key: 'tasks', label: 'Tasks', icon: ListChecks, color: BRAND },
@@ -3253,9 +3321,9 @@ function HistoryView({ history, branches, onView, onEdit, canEdit, onDelete, can
                 <Upload size={11} /> Export Excel
               </button>
             )}
-            <span className="kc-input flex items-center gap-1.5 px-2 py-1.5">
+            <span className="kc-input flex items-center gap-1.5 px-2 py-1.5 max-sm:w-full">
               <Search size={12} className="text-gray-400" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search type / location / person…" className="fs-11 bg-transparent outline-none text-gray-700" style={{ width: '11rem' }} />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search type / location / person…" className="fs-11 bg-transparent outline-none text-gray-700 w-44 max-sm:w-full min-w-0" />
             </span>
             <select value={typeF} onChange={(e) => setTypeF(e.target.value)} className="kc-input px-2 py-1.5 fs-11 text-gray-700">
               <option value="all">All types</option>
@@ -3355,22 +3423,21 @@ function HistoryView({ history, branches, onView, onEdit, canEdit, onDelete, can
             <div className="px-4 py-3 flex items-center justify-between gap-2 flex-wrap border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
               <div className="min-w-0">
                 <div className="text-base font-bold text-gray-800 truncate">{selBranchName} — {DRILL_LABEL[drill.filter]}</div>
-                <div className="fs-10 text-black">{drillRows.length} row{drillRows.length === 1 ? '' : 's'} · latest state per tracked task{code !== ALL_CODE ? " · counted here because this branch's meetings discussed it" : ''} · click View to open the meeting sheet · click the Meetings box above to go back to the list</div>
+                <div className="fs-10 text-black">{drillRows.length} row{drillRows.length === 1 ? '' : 's'} · latest state per tracked task{!isAll ? " · counted here because the selected branches' meetings discussed it" : ''} · click View to open the meeting sheet · click the Meetings box above to go back to the list</div>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 {canExport && drillRows.length > 0 && (
                   <button type="button" onClick={() => {
                     const gs = groupConsecutive(drillRows, (t) => (t.area || '').toLowerCase());
-                    const isAll = code === ALL_CODE;
                     exportTableExcel(`MOM_${(DRILL_LABEL[drill.filter] || 'report').replace(/\s+/g, '_')}`,
-                      ['Sr. No.', ...(isAll ? ['Branch'] : []), 'Discussion Area', 'Discussion Points', 'Category', 'Assigned to', 'Meeting', 'Due Date', 'Status', 'Remarks'],
+                      ['Sr. No.', ...(showBranchCol ? ['Branch'] : []), 'Discussion Area', 'Discussion Points', 'Category', 'Assigned to', 'Meeting', 'Due Date', 'Status', 'Remarks'],
                       gs.flatMap((g, gIdx) => g.items.map((t) => {
                         const rem = [...(t.prevRemarks || [])];
                         if (t.remark?.trim()) rem.push({ date: t.meeting.date, text: t.remark, status: t.status, by: (t.meeting.heads || [])[0] || t.meeting.conductedBy });
                         const brName = t.meeting.branches?.length ? t.meeting.branches.map((b) => b.name || b.code).join(', ') : (t.meeting.branchName || t.meeting.branchCode || '');
-                        return [gIdx + 1, ...(isAll ? [brName] : []), t.area, t.point || '', t.category || '', respArr(t.resp).join(', '), `${t.meeting.type || 'Meeting'} · ${fmtDDMMYY(t.meeting.date)}`, t.due ? fmtDDMMYY(t.due) : '', isOverdue(t) ? 'Overdue' : (STATUS[t.status]?.label || t.status), remarksText(rem)];
+                        return [gIdx + 1, ...(showBranchCol ? [brName] : []), t.area, t.point || '', t.category || '', respArr(t.resp).join(', '), `${t.meeting.type || 'Meeting'} · ${fmtDDMMYY(t.meeting.date)}`, t.due ? fmtDDMMYY(t.due) : '', isOverdue(t) ? 'Overdue' : (STATUS[t.status]?.label || t.status), remarksText(rem)];
                       })),
-                      { mergeCols: isAll ? [0, 2] : [0, 1], leftCols: [isAll ? 2 : 1], groupSizes: gs.map((g) => g.items.length) }).catch(() => toast.error('Could not generate the Excel file'));
+                      { mergeCols: showBranchCol ? [0, 2] : [0, 1], leftCols: [showBranchCol ? 2 : 1], groupSizes: gs.map((g) => g.items.length) }).catch(() => toast.error('Could not generate the Excel file'));
                   }}
                     className={XL_BTN} title="Download this report as Excel">
                     <Upload size={11} /> Export Excel
@@ -3383,7 +3450,7 @@ function HistoryView({ history, branches, onView, onEdit, canEdit, onDelete, can
                   <thead>
                     <tr style={{ background: '#f1f3fb', color: INK }}>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '2.6rem' }}>Sr. No.</th>
-                      {code === ALL_CODE && <th className="px-2 py-2 fs-11 font-bold" style={{ width: '9rem' }}>Branch</th>}
+                      {showBranchCol && <th className="px-2 py-2 fs-11 font-bold" style={{ width: '9rem' }}>Branch</th>}
                       <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '8rem' }}>Discussion Area</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ minWidth: '11rem' }}>Discussion Points</th>
                       <th className="px-2 py-2 fs-11 font-bold" style={{ width: '5.5rem' }}>Category</th>
@@ -3395,7 +3462,7 @@ function HistoryView({ history, branches, onView, onEdit, canEdit, onDelete, can
                     </tr>
                   </thead>
                   <tbody>
-                    {drillRows.length === 0 && <tr><td colSpan={code === ALL_CODE ? 10 : 9} className="px-3 py-6 text-center fs-12 text-gray-400">No rows in this bucket.</td></tr>}
+                    {drillRows.length === 0 && <tr><td colSpan={showBranchCol ? 10 : 9} className="px-3 py-6 text-center fs-12 text-gray-400">No rows in this bucket.</td></tr>}
                     {groupConsecutive(drillRows, (t) => (t.area || '').toLowerCase()).flatMap((g, gIdx) => g.items.map((t, gi) => {
                       /* all remarks on this task — carried history plus the one
                          from its latest meeting — each with date, status and head */
@@ -3405,7 +3472,7 @@ function HistoryView({ history, branches, onView, onEdit, canEdit, onDelete, can
                       return (
                         <tr key={`${t.meeting.id}-${t.trackId || t.id || gi}`}>
                           {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 text-center text-black align-middle">{gIdx + 1}</td>}
-                          {code === ALL_CODE && <td className="px-2 py-2 text-center fs-11 text-black">{brName}</td>}
+                          {showBranchCol && <td className="px-2 py-2 text-center fs-11 text-black">{brName}</td>}
                           {gi === 0 && <td rowSpan={g.items.length} className="px-2 py-2 align-middle text-left">
                             <div className="font-semibold text-black">{t.area}</div>
                           </td>}
@@ -3748,10 +3815,18 @@ function ReportsView({ history, branches, canExport, onView, onOpenBranch }) {
     });
     return [...map.values()];
   }, [branches, history]);
-  const [scope, setScope] = useState('all');
+  /* scope — MULTI-select branch codes; empty array = all branches, several
+     codes COMBINE their data across every KPI, chart and table below */
+  const [scopes, setScopes] = useState([]);
+  /* drop selections whose branch disappeared (e.g. manual branch whose last meeting was deleted) */
+  useEffect(() => {
+    if (!allBranches.length) return;
+    setScopes((p) => { const n = p.filter((c) => allBranches.some((b) => b.code === c)); return n.length === p.length ? p : n; });
+  }, [allBranches]);
 
   const d = useMemo(() => {
-    const inScope = (m) => scope === 'all' || (m.branches?.length ? m.branches.some((b) => b.code === scope) : m.branchCode === scope);
+    const noSel = scopes.length === 0;
+    const inScope = (m) => noSel || (m.branches?.length ? m.branches.some((b) => scopes.includes(b.code)) : scopes.includes(m.branchCode));
     /* multi-branch meetings are filed under several branches — count each once */
     const uniq = new Map();
     Object.values(history).forEach((ms) => ms.forEach((m) => { if (!uniq.has(m.id)) uniq.set(m.id, m); }));
@@ -3762,7 +3837,7 @@ function ReportsView({ history, branches, canExport, onView, onOpenBranch }) {
     /* tasks are attributed to the branch(es) the MEETING covers — a joint
        meeting held for two branches counts its rows for both branches */
     const rowCodes = rowBranchCodes;
-    const inBranch = (r, m) => scope === 'all' || rowCodes(r, m).has(scope);
+    const inBranch = (r, m) => noSel || scopes.some((c) => rowCodes(r, m).has(c));
 
     /* one entry per tracked task: its LATEST state ('all' is newest first)
        plus the UNION of branches of every meeting that discussed it — a
@@ -3778,7 +3853,7 @@ function ReportsView({ history, branches, canExport, onView, onOpenBranch }) {
       });
     });
     const latestAll = [...tracked.values()];
-    const latest = latestAll.filter(({ codes }) => scope === 'all' || codes.has(scope)).map((x) => x.r);
+    const latest = latestAll.filter(({ codes }) => noSel || scopes.some((c) => codes.has(c))).map((x) => x.r);
     const completed = latest.filter((r) => r.status === 'completed').length;
     const overRows = latest.filter((r) => isOverdue(r));
     const inProg = latest.filter((r) => r.status === 'in_progress' && !isOverdue(r)).length;
@@ -3813,7 +3888,7 @@ function ReportsView({ history, branches, canExport, onView, onOpenBranch }) {
     overRows.forEach((r) => { const dd = daysFromDue(r.due); aging[dd <= 7 ? 0 : dd <= 14 ? 1 : dd <= 30 ? 2 : 3].v++; });
 
     /* completion % per branch — same meeting-branch attribution */
-    const per = new Map((scope === 'all' ? allBranches : allBranches.filter((b) => b.code === scope))
+    const per = new Map((noSel ? allBranches : allBranches.filter((b) => scopes.includes(b.code)))
       .map((b) => [b.code, { name: b.name, done: 0, tot: 0 }]));
     latestAll.forEach(({ r, codes }) => codes.forEach((c) => {
       const s = per.get(c); if (!s) return;
@@ -3837,7 +3912,7 @@ function ReportsView({ history, branches, canExport, onView, onOpenBranch }) {
       cats: Object.values(catMap).sort((a, b) => (b.done + b.open) - (a.done + a.open)),
       trend, owners, aging, compBar,
     };
-  }, [history, allBranches, scope]);
+  }, [history, allBranches, scopes]);
 
   const KPI = ({ icon: Icon, label, value, color, hint }) => (
     <div className="kc-lift flex items-center gap-3 rounded-2xl border border-gray-200 bg-white shadow-sm px-3.5 py-3" title={hint || ''}>
@@ -3853,10 +3928,8 @@ function ReportsView({ history, branches, canExport, onView, onOpenBranch }) {
         <div className="fs-12 font-bold text-gray-700 flex items-center gap-2">
           <BarChart3 size={15} style={{ color: INK }} /> Detailed reports
         </div>
-        <select value={scope} onChange={(e) => setScope(e.target.value)} className="kc-input px-2.5 py-1.5 fs-11 font-semibold text-gray-700">
-          <option value="all">All branches</option>
-          {allBranches.map((b) => <option key={b.code} value={b.code}>{b.name}</option>)}
-        </select>
+        <BranchMultiFilter options={allBranches} selected={scopes} onChange={setScopes} maxWidth="20rem"
+          countOf={(b) => { const n = (history[b.code] || []).length; return `${n} meeting${n === 1 ? '' : 's'}`; }} />
       </div>
 
       {/* KPI grid — one row of six */}
@@ -4093,7 +4166,7 @@ function MasterModal({ master, setMaster, categories, setCategories, meetingType
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 max-md:p-2" onClick={onClose}>
       <div className="kc-scale-in bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col" style={{ maxHeight: '86vh' }} onClick={(e) => e.stopPropagation()}>
         <div className="mom-view-head px-4 py-3 flex items-center justify-between rounded-t-2xl border-b border-gray-100" style={{ background: 'linear-gradient(120deg, #f6f7fd, #eef0fa)' }}>
           <div>

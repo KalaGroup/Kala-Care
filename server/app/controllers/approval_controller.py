@@ -26,7 +26,7 @@ from app.models.approval_application_model import (
     ApprovalRight, ApprovalApplication, ApprovalAttachment, ApprovalExpenseType,
     ApprovalEmployeeRule, ApprovalHODCategory, ApprovalExpenseTypeLimit,
     ApprovalApproverExclusion, ApprovalStageApprover,
-    ApprovalLevelConfig, ApprovalLevelExpenseLimit,
+    ApprovalLevelConfig, ApprovalLevelExpenseLimit, ApprovalBranchGroup,
     RIGHTS_MASTER_IDS, APPROVAL_LEVELS, LEGACY_LEVEL_MAP, HO_BRANCH,
     DEFAULT_LEVEL_NAMES,
 )
@@ -166,22 +166,57 @@ def _level_user_ids(db: Session, level: str) -> set:
     ).all()}
 
 
+# ---------------- MERGED BRANCH ROWS ---------------- #
+# Several branches may share ONE hierarchy row (ApprovalBranchGroup). Every
+# branch-scoped lookup (stage approvers, HOD map, level-wise limits) resolves
+# the record's branch to its ROW branch first, so records of every member
+# branch follow the merged row's chain and limits.
+
+def _branch_group_map(db: Session) -> dict:
+    """{member branch -> row branch} for every branch merged into a row."""
+    return {r.branch: r.row_branch for r in db.query(ApprovalBranchGroup).all()}
+
+
+def _row_branch(db: Session, branch: str, gmap: dict = None) -> str:
+    """The hierarchy ROW governing `branch` — the merged row's key branch
+    when the branch is part of a group, else the branch itself."""
+    if not branch:
+        return branch
+    gmap = _branch_group_map(db) if gmap is None else gmap
+    return gmap.get(branch, branch)
+
+
+def _row_member_branches(db: Session, row_branch: str) -> list:
+    """All branches merged into `row_branch`'s row ([row_branch] if none)."""
+    members = [r.branch for r in db.query(ApprovalBranchGroup).filter(
+        ApprovalBranchGroup.row_branch == row_branch).all()]
+    return sorted(set(members) | {row_branch}) if members else [row_branch]
+
+
 def _stage_approver_ids(db: Session, branch: str, stage: str) -> list:
     return [r.user_id for r in db.query(ApprovalStageApprover).filter(
-        ApprovalStageApprover.branch == branch,
+        ApprovalStageApprover.branch == _row_branch(db, branch),
         ApprovalStageApprover.stage == stage,
     ).all()]
 
 
 def _available_approvers(db: Session, level: str, branch: str, category: str,
-                         creator_id: str, l4_choice: str = None, l5_choice: str = None) -> set:
+                         creator_id: str, l4_choice: str = None, l5_choice: str = None,
+                         l2_choice: str = None, l3_choice: str = None) -> set:
     """The USABLE approver ids who may act at `level` for a record of this
     branch+category. Self-approval removed: the creator never appears.
-    Blocked / deleted users and excluded approvers do not count."""
+    Blocked / deleted users and excluded approvers do not count. A creator's
+    CHOSEN approver narrows a level to that one person — while the choice is
+    still among the level's valid approvers (else the full list applies
+    again, so the record never strands)."""
     excl = _exclusions_for(db, creator_id, category)
+    branch = _row_branch(db, branch)   # merged rows govern their member branches
 
     if level in ("l2", "l3"):
         ids = _usable_ids(db, _stage_approver_ids(db, branch, level))
+        choice = l2_choice if level == "l2" else l3_choice
+        if choice and choice in ids:
+            ids = {choice}
     elif level == "l4":
         all_l4 = _usable_ids(db, _level_user_ids(db, "l4"))
         # HO creators may choose ANY HO member as their L4 approver — the
@@ -197,8 +232,15 @@ def _available_approvers(db: Session, level: str, branch: str, category: str,
             if mappings:
                 ids = {m.user_id for m in mappings} & all_l4
             else:
-                # no mapping rows for the branch+category = any L4 user may act
-                ids = all_l4
+                # No mapping rows for THIS branch+category: fall back to the
+                # L4 users covering this CATEGORY on any row (an NFA goes
+                # only to the HODs of its category), and only when NO row
+                # maps the category at all may any L4 user act.
+                cat_ids = {r.user_id for r in db.query(ApprovalHODCategory).filter(
+                    ApprovalHODCategory.category == category,
+                    ApprovalHODCategory.user_id.isnot(None),
+                ).all()} & all_l4
+                ids = cat_ids or all_l4
     else:  # l5 — rights masters + any explicitly granted L5 users
         ids = _usable_ids(db, set(RIGHTS_MASTER_IDS) | _level_user_ids(db, "l5"))
         if l5_choice and l5_choice in ids:
@@ -254,13 +296,13 @@ def _next_pending_status(db: Session, app_row: ApprovalApplication, after_level,
             continue
         ids = _available_approvers(
             db, lvl, app_row.branch, app_row.category, creator_id,
-            l4_choice=app_row.l4_approver_id, l5_choice=app_row.l5_approver_id)
+            l4_choice=app_row.l4_approver_id, l5_choice=app_row.l5_approver_id,
+            l2_choice=app_row.l2_approver_id, l3_choice=app_row.l3_approver_id)
         if ids:
             return f"pending_{lvl}"
         reason = SKIP_REASONS[lvl]
         if lvl in ("l2", "l3") and creator_id in _stage_approver_ids(db, app_row.branch, lvl):
-            reason = (f"Skipped — self approval removed (the creator is this branch's "
-                      f"{lvl.upper()} approver)")
+            reason = "Skipped — self approval removed"
         skip_notes.append((lvl, reason))
     return "pending_l5"
 
@@ -315,6 +357,7 @@ def reroute_pending(db: Session) -> int:
         if still_required and _available_approvers(
             db, lvl, app_row.branch, app_row.category, app_row.created_by,
             l4_choice=app_row.l4_approver_id, l5_choice=app_row.l5_approver_id,
+            l2_choice=app_row.l2_approver_id, l3_choice=app_row.l3_approver_id,
         ):
             continue
         reason = (SKIP_REASONS[lvl] if still_required
@@ -367,11 +410,12 @@ def _has_value(app_row):
 
 
 def _branch_level_cfg(db: Session, branch: str, level: str):
-    """The (branch, level) limits row — limits are scoped PER BRANCH ROW."""
+    """The (branch, level) limits row — limits are scoped PER BRANCH ROW.
+    A branch merged into a row shares that ROW's limits."""
     if not branch:
         return None
     return db.query(ApprovalLevelConfig).filter(
-        ApprovalLevelConfig.branch == branch,
+        ApprovalLevelConfig.branch == _row_branch(db, branch),
         ApprovalLevelConfig.level == level,
     ).first()
 
@@ -590,11 +634,19 @@ def _my_chain(db: Session, user: User, is_ho: bool) -> dict:
 
 
 def _all_branch_options(db: Session):
-    """Every branch code + name in the system (for HO users' create form)."""
-    seen = {}
-    for b, n in db.query(User.branch, User.branch_name).filter(
+    """Every branch code + name in the system (for HO users' create form).
+    Primary branches AND multi-branch access branches — a branch whose only
+    member holds it as a non-primary branch still counts."""
+    pairs = db.query(User.branch, User.branch_name).filter(
         User.is_deleted == False,   # noqa: E712
-    ).all():
+    ).all()
+    pairs += db.query(UserBranchAccess.branch, UserBranchAccess.branch_name).join(
+        User, User.user_id == UserBranchAccess.user_id,
+    ).filter(
+        User.is_deleted == False,   # noqa: E712
+    ).all()
+    seen = {}
+    for b, n in pairs:
         code = (b or "").strip()
         if code and (code not in seen or not seen[code]):
             seen[code] = (n or "").strip()
@@ -664,6 +716,56 @@ def get_ho_l4_choices(db: Session, user_id: str, branch: str = None, request_typ
     rows = db.query(User).filter(User.user_id.in_(list(ids))).all() if ids else []
     return {"l4_choices": sorted(({"user_id": u.user_id, "name": u.name} for u in rows),
                                  key=lambda x: x["name"])}
+
+
+def get_chain_preview(db: Session, user_id: str, branch: str = None,
+                      category: str = None, request_type: str = None):
+    """The approval path ONE record of (branch, category) follows for THIS
+    creator, with candidate approvers per level — feeds the submit-time CC
+    box: a level with several people offers a dropdown to pick ONE
+    (optional; no pick = every assigned approver may act)."""
+    user = _get_user(db, user_id)
+    branch = (branch or "").strip() or (user.branch or "")
+    category = (category or "").strip() or None
+    rule = _employee_rule(db, user.user_id)
+    is_ho = _is_ho_user(db, user)
+
+    def _people(ids):
+        rows = db.query(User).filter(User.user_id.in_(list(ids))).all() if ids else []
+        return sorted(({"user_id": u.user_id, "name": u.name} for u in rows),
+                      key=lambda x: x["name"])
+
+    levels = []
+    if is_ho:
+        levels.append({"level": "l2", "skipped": "Head Office records go directly to L4/L5"})
+        levels.append({"level": "l3", "skipped": "Head Office records go directly to L4/L5"})
+        ids = _qualifying_ho_l4_ids(db, user, branch, request_type)
+        if ids:
+            levels.append({"level": "l4", "candidates": _people(ids), "required_pick": True})
+        else:
+            levels.append({"level": "l4",
+                           "skipped": "No L4 with higher authority than yours — goes straight to L5"})
+    else:
+        for lvl in ("l2", "l3"):
+            if not rule[f"require_{lvl}"]:
+                levels.append({"level": lvl, "skipped": "Not required"})
+                continue
+            ids = _available_approvers(db, lvl, branch, category, user.user_id)
+            levels.append({"level": lvl, "candidates": _people(ids)} if ids
+                          else {"level": lvl, "skipped": "No approver — auto skips"})
+        if not rule["require_l4"]:
+            levels.append({"level": "l4", "skipped": "Not required"})
+        else:
+            ids = _available_approvers(db, "l4", branch, category, user.user_id)
+            levels.append({"level": "l4", "candidates": _people(ids)} if ids
+                          else {"level": "l4", "skipped": "No approver — auto skips"})
+    # kala000001 (master admin) never shows as a COO choice — same convention
+    # as the l5_choices / pending-approver displays
+    levels.append({"level": "l5",
+                   "candidates": _people(
+                       _available_approvers(db, "l5", branch, category, user.user_id)
+                       - {"kala000001"})})
+    return {"is_ho": is_ho, "levels": levels}
 
 
 # ---------------- RIGHTS MASTER ---------------- #
@@ -945,16 +1047,25 @@ def get_authority_matrix(db: Session, user_id: str):
         for et in db.query(ApprovalExpenseType).order_by(ApprovalExpenseType.name).all()
     ]
 
-    # One entry per branch CODE (users of the same branch may carry different
-    # branch_name spellings — first non-empty name wins, no duplicates)
-    seen_branches = {}
-    for u in users:
-        code = (u.branch or "").strip()
-        if code and (code not in seen_branches or not seen_branches[code]):
-            seen_branches[code] = (u.branch_name or "").strip()
-
     name_by_id_all = {u["user_id"]: u["name"] for u in out}
     active_ids = set(name_by_id_all)
+
+    # Multi-branch access rows (Profile page): a user may belong to branches
+    # beyond their primary one — those branches count everywhere below.
+    access_rows = db.query(UserBranchAccess).filter(
+        UserBranchAccess.user_id.in_(list(active_ids))
+    ).all() if active_ids else []
+
+    # One entry per branch CODE (users of the same branch may carry different
+    # branch_name spellings — first non-empty name wins, no duplicates).
+    # Access branches included: a branch whose only member holds it as a
+    # NON-primary branch must still appear in the dropdown.
+    seen_branches = {}
+    for code, bname in ([(u.branch, u.branch_name) for u in users]
+                        + [(r.branch, r.branch_name) for r in access_rows]):
+        code = (code or "").strip()
+        if code and (code not in seen_branches or not seen_branches[code]):
+            seen_branches[code] = (bname or "").strip()
 
     # ---- L2 / L3 stage approvers per branch: {branch: {stage: [{user_id,name}]}}
     stage_approvers = {}
@@ -966,14 +1077,25 @@ def get_authority_matrix(db: Session, user_id: str):
         for lst in cats.values():
             lst.sort(key=lambda x: x["name"])
 
-    # ---- L4 (HOD) approvers per branch+category (assigned people, else any L4)
+    # ---- L4 (HOD) approvers per branch+category. A branch without its own
+    # map falls back CATEGORY-WISE: the L4 users covering that category on
+    # any row; only a category mapped nowhere falls back to every L4 user.
     l4_users = [u for u in out if u["level"] == "l4"]
     l4_ids = {u["user_id"] for u in l4_users}
     l4_name_by_id = {u["user_id"]: u["name"] for u in l4_users}
     l4_all = sorted(({"user_id": u["user_id"], "name": u["name"]} for u in l4_users),
                     key=lambda x: x["name"])
+    cat_l4_fallback = {}
+    for b_maps in hod_cats.values():
+        for cat, maps in b_maps.items():
+            for m in maps:
+                if m["user_id"] in l4_ids:
+                    cat_l4_fallback.setdefault(cat, {})[m["user_id"]] = {
+                        "user_id": m["user_id"], "name": l4_name_by_id[m["user_id"]]}
+    cat_l4_fallback = {cat: sorted(users.values(), key=lambda x: x["name"])
+                       for cat, users in cat_l4_fallback.items()}
     hod_by_branch = {}
-    for b in {u["branch"] for u in out if u["branch"]} | set(hod_cats.keys()):
+    for b in set(seen_branches) | set(hod_cats.keys()):
         per_cat = {}
         for cat in CATEGORIES:
             maps = hod_cats.get(b, {}).get(cat, [])
@@ -983,7 +1105,7 @@ def get_authority_matrix(db: Session, user_id: str):
                      for m in maps if m["user_id"] in l4_ids),
                     key=lambda x: x["name"])
             else:
-                per_cat[cat] = l4_all
+                per_cat[cat] = cat_l4_fallback.get(cat) or l4_all
         hod_by_branch[b] = per_cat
 
     # Every member of every branch (primary + multi-branch access) — feeds the
@@ -993,11 +1115,8 @@ def get_authority_matrix(db: Session, user_id: str):
     for u in out:
         if u["branch"]:
             member_ids.setdefault(u["branch"], set()).add(u["user_id"])
-    if name_by_id_all:
-        for row in db.query(UserBranchAccess).filter(
-            UserBranchAccess.user_id.in_(list(name_by_id_all))
-        ).all():
-            member_ids.setdefault(row.branch, set()).add(row.user_id)
+    for row in access_rows:
+        member_ids.setdefault(row.branch, set()).add(row.user_id)
     branch_members = {
         b: sorted(({"user_id": i, "name": name_by_id_all[i]} for i in ids), key=lambda x: x["name"])
         for b, ids in member_ids.items()
@@ -1019,9 +1138,16 @@ def get_authority_matrix(db: Session, user_id: str):
         "max_expense_amount": c.max_expense_amount,
     } for c in db.query(ApprovalLevelConfig).all()]
 
+    # Merged rows: {row branch: [every member branch, row branch included]}
+    branch_groups = {}
+    for g in db.query(ApprovalBranchGroup).all():
+        branch_groups.setdefault(g.row_branch, set()).update({g.branch, g.row_branch})
+    branch_groups = {rb: sorted(ms) for rb, ms in branch_groups.items()}
+
     return {
         "users": out,
         "branches": [{"branch": b, "branch_name": n} for b, n in sorted(seen_branches.items())],
+        "branch_groups": branch_groups,
         "ho_branch": HO_BRANCH,
         "hod_categories": hod_cats,
         "expense_types": expense_types,
@@ -1139,6 +1265,57 @@ def remove_employee_rights(db: Session, admin_id: str, payload: dict):
     cleanup_user_config(db, target_id)
     moved = reroute_pending(db)
     return {"moved": moved}
+
+
+def set_branch_group(db: Session, admin_id: str, row_branch: str, branches):
+    """Create / replace / dissolve ONE merged hierarchy row. `branches` is the
+    FULL member list wanted for `row_branch`'s row (replace-all semantics);
+    fewer than two distinct branches dissolves the group — every branch is
+    its own row again. The row branch's stage / HOD / limit rows govern all
+    members; a member's own dormant rows revive when it is un-merged.
+    Pending records are re-routed against the updated chains."""
+    admin = _require_coo(db, admin_id)
+    row_branch = (row_branch or "").strip()
+    if not row_branch:
+        raise HTTPException(status_code=400, detail="row_branch is required")
+
+    wanted = []
+    for b in (branches or []):
+        code = (b or "").strip()
+        if code and code not in wanted:
+            wanted.append(code)
+    if wanted and row_branch not in wanted:
+        wanted.insert(0, row_branch)
+    if HO_BRANCH in wanted or row_branch == HO_BRANCH:
+        raise HTTPException(status_code=400, detail="The Head Office branch cannot be part of a merged row")
+
+    # a branch already merged into ANOTHER row (as member or row branch)
+    # cannot be taken — un-merge it there first
+    if wanted:
+        taken = db.query(ApprovalBranchGroup).filter(
+            ApprovalBranchGroup.branch.in_(wanted),
+            ApprovalBranchGroup.row_branch != row_branch,
+        ).all()
+        if taken:
+            codes = ", ".join(sorted({t.branch for t in taken}))
+            raise HTTPException(
+                status_code=400,
+                detail=f"Already part of another merged row: {codes} — remove them there first")
+
+    db.query(ApprovalBranchGroup).filter(
+        ApprovalBranchGroup.row_branch == row_branch).delete(synchronize_session=False)
+    if len(wanted) >= 2:
+        for code in wanted:
+            db.add(ApprovalBranchGroup(row_branch=row_branch, branch=code,
+                                       created_by=admin.user_id))
+    db.commit()
+
+    # chains changed for every member branch — self-heal pending records
+    moved = reroute_pending(db)
+    members = _row_member_branches(db, row_branch)
+    return {"row_branch": row_branch,
+            "branches": members if len(members) > 1 else [row_branch],
+            "moved": moved}
 
 
 def set_stage_approvers(db: Session, admin_id: str, branch: str, stage: str, user_ids):
@@ -1376,6 +1553,11 @@ def set_authority(db: Session, admin_id: str, payload: dict):
             ApprovalStageApprover.user_id == target_id,
             ApprovalStageApprover.stage == level,
         ).all()}
+        # stage rows live on the ROW branch — count records of every branch
+        # merged into those rows too
+        if branches:
+            branches |= {r.branch for r in db.query(ApprovalBranchGroup).filter(
+                ApprovalBranchGroup.row_branch.in_(list(branches))).all()}
         pending_here = db.query(ApprovalApplication).filter(
             ApprovalApplication.status == f"pending_{level}",
             ApprovalApplication.branch.in_(list(branches)),
@@ -1498,55 +1680,75 @@ def _validate_for_submit(db, user, fields, request_type):
 
 
 def _resolve_chosen_approvers(db: Session, user: User, fields: dict, strict: bool = True):
-    """Validate + name-resolve the HO creator's chosen L4 / L5 approvers.
-    Non-HO creators cannot choose (their branch row decides). strict=False
-    (drafts) skips the limit-qualification check — it is re-run at submit."""
-    l4_id = (fields.get("l4_approver_id") or "").strip() or None
-    l5_id = (fields.get("l5_approver_id") or "").strip() or None
-    if not _is_ho_user(db, user):
-        return None, None, None, None
-    l4_name = l5_name = None
-    if l4_id:
-        if l4_id == user.user_id:
+    """Validate + name-resolve the creator's CHOSEN approvers (submit box).
+    HO creators: L4 / L5 only (L2/L3 skip for HO). Non-HO creators may pick
+    ONE person per level when the level has several approvers — the choice
+    must be among that level's valid approvers for the record. Empty choice
+    = every assigned approver may act. Returns {lvl_id, lvl_name} per level.
+    strict=False (drafts) skips the validity checks — re-run at submit."""
+    out = {f"{lvl}_{k}": None for lvl in ("l2", "l3", "l4", "l5") for k in ("id", "name")}
+
+    def _pick(key):
+        return (fields.get(key) or "").strip() or None
+
+    def _name_of(uid):
+        target = db.query(User).filter(User.user_id == uid).first()
+        return target.name if target else None
+
+    branch = (fields.get("branch") or "").strip()
+    category = (fields.get("category") or "").strip()
+    is_ho = _is_ho_user(db, user)
+
+    l4_id = _pick("l4_approver_id")
+    l5_id = _pick("l5_approver_id")
+
+    if is_ho:
+        if l4_id:
+            if l4_id == user.user_id:
+                raise HTTPException(status_code=400, detail="You cannot choose yourself as approver")
+            if l4_id not in _ho_member_ids(db):
+                raise HTTPException(status_code=400, detail="Chosen L4 approver must be a Head Office member")
+            # the choice must hold L4 AND beat the creator's own limit for the
+            # record's type — same rule the dropdown is filtered by
+            if strict and l4_id not in _qualifying_ho_l4_ids(
+                db, user, branch, (fields.get("request_type") or "").strip(),
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Chosen L4 approver must be a Head Office HOD with higher authority than yours for this record type",
+                )
+            out["l4_id"], out["l4_name"] = l4_id, _name_of(l4_id)
+        if l5_id:
+            if l5_id == user.user_id:
+                raise HTTPException(status_code=400, detail="You cannot choose yourself as approver")
+            if l5_id not in (set(RIGHTS_MASTER_IDS) | _level_user_ids(db, "l5")):
+                raise HTTPException(status_code=400, detail="Chosen L5 approver does not hold COO (L5) authority")
+            out["l5_id"], out["l5_name"] = l5_id, _name_of(l5_id)
+        return out
+
+    # Non-HO: every level may carry a choice — validated against the level's
+    # actual approver set for THIS record (branch + category)
+    for lvl, chosen in (("l2", _pick("l2_approver_id")), ("l3", _pick("l3_approver_id")),
+                        ("l4", l4_id), ("l5", l5_id)):
+        if not chosen:
+            continue
+        if chosen == user.user_id:
             raise HTTPException(status_code=400, detail="You cannot choose yourself as approver")
-        if l4_id not in _ho_member_ids(db):
-            raise HTTPException(status_code=400, detail="Chosen L4 approver must be a Head Office member")
-        # the choice must hold L4 AND beat the creator's own limit for the
-        # record's type — same rule the dropdown is filtered by
-        if strict and l4_id not in _qualifying_ho_l4_ids(
-            db, user, (fields.get("branch") or "").strip(),
-            (fields.get("request_type") or "").strip(),
-        ):
+        if strict and chosen not in _available_approvers(db, lvl, branch, category, user.user_id):
             raise HTTPException(
                 status_code=400,
-                detail="Chosen L4 approver must be a Head Office HOD with higher authority than yours for this record type",
-            )
-        target = db.query(User).filter(User.user_id == l4_id).first()
-        l4_name = target.name if target else None
-    if l5_id:
-        if l5_id == user.user_id:
-            raise HTTPException(status_code=400, detail="You cannot choose yourself as approver")
-        if l5_id not in (set(RIGHTS_MASTER_IDS) | _level_user_ids(db, "l5")):
-            raise HTTPException(status_code=400, detail="Chosen L5 approver does not hold COO (L5) authority")
-        target = db.query(User).filter(User.user_id == l5_id).first()
-        l5_name = target.name if target else None
-    return l4_id, l4_name, l5_id, l5_name
+                detail=f"Chosen {lvl.upper()} approver is not an available approver for this record")
+        out[f"{lvl}_id"], out[f"{lvl}_name"] = chosen, _name_of(chosen)
+    return out
 
 
 def _finalize_submit(db: Session, user: User, app_row: ApprovalApplication):
-    """Route a submitted application: AUTO-APPROVE when its value(s) are
-    within the creator's OWN authority limit (self-approval replaced),
-    otherwise start the chain at the first available level. For the combined
-    Discounting & Credit type EVERY filled value must be within limit.
-
-    NON-HO creators with multi-branch access: the self-limit auto-approval
-    counts ONLY for their HOME branch's records — an NFA filed for another
-    access branch always goes to the next level, even within their limit."""
-    home_branch_ok = _is_ho_user(db, user) or (app_row.branch or "") == (user.branch or "")
-    if home_branch_ok and _has_value(app_row) and _within_limit(db, user, app_row):
-        app_row.status = "approved"
-        app_row.auto_approved = True
-        return
+    """Route a submitted application: EVERY record starts the chain at the
+    first available level — a value within the creator's OWN authority limit
+    no longer finalizes at submit; the NEXT level's approval is always
+    required for full approval (their limit check applies as usual). The
+    `auto_approved` flag stays only for the rights-master no-value case and
+    for historical records approved under the old rule."""
     if not _has_value(app_row) and user.user_id in RIGHTS_MASTER_IDS:
         # rights master submitting a record with no measurable ask
         app_row.status = "approved"
@@ -1570,8 +1772,8 @@ async def create_application(db: Session, user_id: str, fields: dict, files, as_
     is_expense = request_type == "expense"
 
     # ALL users can create applications — even L4 (HOD) and L5 (COO).
-    # Self-approval is removed: within their own limit = auto-approved,
-    # beyond it the record goes to the remaining chain above them.
+    # Self-approval is removed: every record needs the NEXT level's approval
+    # to finalize — the creator's own limit never approves their own record.
 
     def _num(key):
         v = fields.get(key)
@@ -1591,7 +1793,7 @@ async def create_application(db: Session, user_id: str, fields: dict, files, as_
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail=f"{key} must be a number")
 
-    l4_id, l4_name, l5_id, l5_name = _resolve_chosen_approvers(db, user, fields, strict=not as_draft)
+    chosen = _resolve_chosen_approvers(db, user, fields, strict=not as_draft)
 
     app_row = ApprovalApplication(
         category=category,
@@ -1616,10 +1818,14 @@ async def create_application(db: Session, user_id: str, fields: dict, files, as_
         created_by=user.user_id,
         created_by_name=user.name,
         created_by_level=level,
-        l4_approver_id=l4_id,
-        l4_approver_name=l4_name,
-        l5_approver_id=l5_id,
-        l5_approver_name=l5_name,
+        l2_approver_id=chosen["l2_id"],
+        l2_approver_name=chosen["l2_name"],
+        l3_approver_id=chosen["l3_id"],
+        l3_approver_name=chosen["l3_name"],
+        l4_approver_id=chosen["l4_id"],
+        l4_approver_name=chosen["l4_name"],
+        l5_approver_id=chosen["l5_id"],
+        l5_approver_name=chosen["l5_name"],
     )
     # Drafts take no App No — the number (and FY sequence slot) is only
     # consumed when the application is actually submitted for approval.
@@ -1686,7 +1892,7 @@ async def update_application(db: Session, user_id: str, app_id: int, fields: dic
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail=f"{key} must be a number")
 
-    l4_id, l4_name, l5_id, l5_name = _resolve_chosen_approvers(db, user, fields, strict=submit)
+    chosen = _resolve_chosen_approvers(db, user, fields, strict=submit)
 
     app_row.category = (fields.get("category") or "").strip()
     app_row.request_type = request_type
@@ -1707,10 +1913,14 @@ async def update_application(db: Session, user_id: str, app_id: int, fields: dic
     app_row.remark = (fields.get("remark") or "").strip() or None
     if "cc_emails" in fields:
         app_row.cc_emails = (fields.get("cc_emails") or "").strip() or None
-    app_row.l4_approver_id = l4_id
-    app_row.l4_approver_name = l4_name
-    app_row.l5_approver_id = l5_id
-    app_row.l5_approver_name = l5_name
+    app_row.l2_approver_id = chosen["l2_id"]
+    app_row.l2_approver_name = chosen["l2_name"]
+    app_row.l3_approver_id = chosen["l3_id"]
+    app_row.l3_approver_name = chosen["l3_name"]
+    app_row.l4_approver_id = chosen["l4_id"]
+    app_row.l4_approver_name = chosen["l4_name"]
+    app_row.l5_approver_id = chosen["l5_id"]
+    app_row.l5_approver_name = chosen["l5_name"]
 
     for f in files or []:
         content = await f.read()
@@ -1760,6 +1970,24 @@ def list_applications(db: Session, user_id: str, status_filter=None, request_typ
     all_stage_rows = db.query(ApprovalStageApprover).all()
     all_excl_rows = db.query(ApprovalApproverExclusion).filter(
         ApprovalApproverExclusion.category.isnot(None)).all()
+    # Merged rows: stage / HOD config lives on the ROW branch while records
+    # carry their real branch — resolve through the group map both ways.
+    gmap = _branch_group_map(db)
+    members_by_row = {}
+    for member, rb in gmap.items():
+        members_by_row.setdefault(rb, set()).add(member)
+
+    def _rowb(branch):
+        return gmap.get(branch, branch)
+
+    def _expand_rows(branches):
+        """Row branches -> every member branch they govern (self included)."""
+        out = set()
+        for b in branches:
+            out.add(b)
+            out |= members_by_row.get(b, set())
+        return out
+
     my_stage_branches = {
         st: {r.branch for r in all_stage_rows if r.user_id == user.user_id and r.stage == st}
         for st in ("l2", "l3")
@@ -1776,13 +2004,16 @@ def list_applications(db: Session, user_id: str, status_filter=None, request_typ
             ApprovalApplication.l2_action_by == user.user_id,
             ApprovalApplication.l3_action_by == user.user_id,
             ApprovalApplication.l4_action_by == user.user_id,
-            # records whose creator CHOSE this user as the L4 / L5 approver
+            # records whose creator CHOSE this user as an approver
+            ApprovalApplication.l2_approver_id == user.user_id,
+            ApprovalApplication.l3_approver_id == user.user_id,
             ApprovalApplication.l4_approver_id == user.user_id,
             ApprovalApplication.l5_approver_id == user.user_id,
         ]
         # records waiting at a stage where THIS user is an assigned approver
+        # (a merged row's approver sees every member branch's records)
         for stage in ("l2", "l3"):
-            branches = list(my_stage_branches[stage])
+            branches = list(_expand_rows(my_stage_branches[stage]))
             if branches:
                 conds.append(and_(
                     ApprovalApplication.status == f"pending_{stage}",
@@ -1841,9 +2072,13 @@ def list_applications(db: Session, user_id: str, status_filter=None, request_typ
     all_maps = db.query(ApprovalHODCategory).filter(ApprovalHODCategory.user_id.isnot(None)).all()
     usable_map_ids = _usable_ids(db, [m.user_id for m in all_maps])
     mapped = {}
+    # category-wise fallback: {category: L4 users covering it on ANY row} —
+    # a branch without its own L4 map routes to the category's HODs only
+    cat_l4 = {}
     for m in all_maps:
         if m.user_id in usable_map_ids:
             mapped.setdefault((m.branch, m.category), set()).add(m.user_id)
+            cat_l4.setdefault(m.category, set()).add(m.user_id)
     am_l4, am_l5 = level == "l4", level == "l5"
 
     # context for naming WHO can act on each pending record (detail modal) —
@@ -1862,12 +2097,17 @@ def list_applications(db: Session, user_id: str, status_filter=None, request_typ
         if not acting:
             return set()
         if acting in ("l2", "l3"):
-            ids = set(stage_map.get((a.branch, acting), set()))
+            ids = set(stage_map.get((_rowb(a.branch), acting), set()))
+            # creator's chosen approver narrows the stage to that ONE person
+            # (while the choice is still among the stage's assigned approvers)
+            choice = a.l2_approver_id if acting == "l2" else a.l3_approver_id
+            if choice and choice in ids:
+                ids = {choice}
         elif acting == "l4":
             if a.l4_approver_id:
                 ids = {a.l4_approver_id}
             else:
-                m = mapped.get((a.branch, a.category))
+                m = mapped.get((_rowb(a.branch), a.category)) or cat_l4.get(a.category)
                 ids = set(m) if m else set(l4_all)
         else:
             ids = {a.l5_approver_id} if a.l5_approver_id else set(l5_all)
@@ -1892,16 +2132,20 @@ def list_applications(db: Session, user_id: str, status_filter=None, request_typ
             return False
         if (a.created_by, a.category) in my_excl:
             return False
-        if acting == "l2":
-            return a.branch in my_l2
-        if acting == "l3":
-            return a.branch in my_l3
+        if acting in ("l2", "l3"):
+            rb = _rowb(a.branch)
+            if rb not in (my_l2 if acting == "l2" else my_l3):
+                return False
+            # chosen approver: only that person may act (while still assigned)
+            choice = a.l2_approver_id if acting == "l2" else a.l3_approver_id
+            return (not choice or choice == user.user_id
+                    or choice not in stage_map.get((rb, acting), set()))
         if acting == "l4":
             if a.l4_approver_id:
                 return a.l4_approver_id == user.user_id
             if not am_l4:
                 return False
-            ids = mapped.get((a.branch, a.category))
+            ids = mapped.get((_rowb(a.branch), a.category)) or cat_l4.get(a.category)
             return True if not ids else user.user_id in ids
         # l5
         if a.l5_approver_id:
@@ -1939,7 +2183,8 @@ def _check_can_act(db: Session, user: User, app_row: ApprovalApplication) -> str
         )
     available = _available_approvers(
         db, acting, app_row.branch, app_row.category, app_row.created_by,
-        l4_choice=app_row.l4_approver_id, l5_choice=app_row.l5_approver_id)
+        l4_choice=app_row.l4_approver_id, l5_choice=app_row.l5_approver_id,
+        l2_choice=app_row.l2_approver_id, l3_choice=app_row.l3_approver_id)
     if user.user_id not in available:
         names = ", ".join(_names_of(db, available)) or "nobody (step will auto-forward)"
         raise HTTPException(

@@ -36,6 +36,13 @@ export const getL4Choices = (branch, requestType) =>
         headers: authHeaders(), params: { branch, request_type: requestType },
     }).then(r => r.data);
 
+// The approval path a record of (branch, category) will follow for the
+// caller, with candidate approvers per level — feeds the submit-time CC box.
+export const getChainPreview = (branch, category, requestType) =>
+    axios.get(`${BASE}/chain-preview`, {
+        headers: authHeaders(), params: { branch, category, request_type: requestType },
+    }).then(r => r.data);
+
 // Warm-up cache: the page fires prefetchApplications() in PARALLEL with the
 // access call, and the view's first plain getApplications() consumes the
 // in-flight request instead of starting a second one (no waterfall). The
@@ -132,6 +139,11 @@ export const removeEmployeeRights = (userId) =>
 
 export const setStageApprovers = (branch, stage, userIds) =>
     axios.post(`${BASE}/matrix/stage-approvers`, { branch, stage, user_ids: userIds }, { headers: authHeaders() }).then(r => r.data);
+
+// Merge several branches into ONE hierarchy row (replace-all member list);
+// fewer than two branches dissolves the merged row.
+export const setBranchGroup = (rowBranch, branches) =>
+    axios.post(`${BASE}/matrix/branch-group`, { row_branch: rowBranch, branches }, { headers: authHeaders() }).then(r => r.data);
 
 export const approvalPdfUrl = (id) => `${BASE}/applications/${id}/pdf`;
 
