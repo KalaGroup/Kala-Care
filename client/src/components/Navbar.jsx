@@ -132,7 +132,7 @@ const NavLinks = ({ items, collapsed = false, onClick = () => { }, hoveredItem, 
 
             {!collapsed && (
               <>
-                <span className="nav-label-fade flex-1 text-sm font-medium whitespace-nowrap">
+                <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap">
                   {item.name}
                 </span>
               </>
@@ -1689,7 +1689,7 @@ function Navbar({ children }) {
                             hoveredItem === 'engagement-masters' ? themeColor : '#6B7280'
                         }}
                       />
-                      <span className="nav-label-fade flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
+                      <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap text-left text-black">
                         Engagement Masters
                       </span>
                       {engagementMastersDropdownOpen ? (
@@ -1708,7 +1708,7 @@ function Navbar({ children }) {
                             to={item.path}
                             onClick={() => { if (isMobile) setSidebarOpen(false); }}
                             className={({ isActive }) =>
-                              `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
+                              `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] min-w-full w-max ${isActive
                                 ? 'text-gray-900 font-medium'
                                 : 'text-black hover:text-gray-900'
                               }`
@@ -1760,7 +1760,7 @@ function Navbar({ children }) {
                               if (isMobile) setSidebarOpen(false);
                             }}
                             className={({ isActive }) =>
-                              `flex items-center gap-2 px-2 py-1 text-sm transition-colors ${isActive
+                              `flex items-center gap-2 px-2 py-1 text-[13px] transition-colors ${isActive
                                 ? 'text-gray-900 font-medium'
                                 : 'text-black hover:text-gray-900 hover:bg-gray-50'
                               }`
@@ -1811,7 +1811,7 @@ function Navbar({ children }) {
                             hoveredItem === 'part-detail-info' ? themeColor : '#6B7280'
                         }}
                       />
-                      <span className="nav-label-fade flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
+                      <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap text-left text-black">
                         Part Detail Info
                       </span>
                       {partInfoDropdownOpen ? (
@@ -1832,7 +1832,7 @@ function Navbar({ children }) {
                               if (isMobile) setSidebarOpen(false);
                             }}
                             className={({ isActive }) =>
-                              `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
+                              `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] min-w-full w-max ${isActive
                                 ? 'text-black font-medium'
                                 : 'text-black hover:text-black'
                               }`
@@ -1885,7 +1885,7 @@ function Navbar({ children }) {
                               if (isMobile) setSidebarOpen(false);
                             }}
                             className={({ isActive }) =>
-                              `block px-2 py-1 text-sm transition-colors ${isActive
+                              `block px-2 py-1 text-[13px] transition-colors ${isActive
                                 ? 'text-black font-medium'
                                 : 'text-black hover:text-black hover:bg-gray-50'
                               }`
@@ -1927,7 +1927,7 @@ function Navbar({ children }) {
                           hoveredItem === 'customer-engagement' ? 'var(--erp-ink)' : 'var(--erp-ink)'
                       }}
                     />
-                    <span className="nav-label-fade flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
+                    <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap text-left text-black">
                       Customer Engagement
                     </span>
                     {engagementDropdownOpen ? (
@@ -1947,7 +1947,7 @@ function Navbar({ children }) {
                         <button
                           type="button"
                           onClick={() => { setShowDriveNamesModal(true); if (isMobile) setSidebarOpen(false); }}
-                          className="min-w-full w-max group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-sm text-black hover:text-black hover:bg-gray-50"
+                          className="min-w-full w-max group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] text-black hover:text-black hover:bg-gray-50"
                         >
                           <div className="w-1 h-1 rounded-full" style={{ backgroundColor: '#D1D5DB' }} />
                           <span className="flex-1 whitespace-nowrap text-left">Drive List Info</span>
@@ -1962,7 +1962,7 @@ function Navbar({ children }) {
                             if (isMobile) setSidebarOpen(false);
                           }}
                           className={({ isActive }) =>
-                            `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
+                            `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] min-w-full w-max ${isActive
                               ? 'text-black font-medium'
                               : 'text-black hover:text-black'
                             }`
@@ -2018,7 +2018,7 @@ function Navbar({ children }) {
                             setEngagementDropdownOpen(false);
                             if (isMobile) setSidebarOpen(false);
                           }}
-                          className="block w-full text-left px-2 py-1.5 text-sm text-black hover:bg-gray-50"
+                          className="block w-full text-left px-2 py-1.5 text-[13px] text-black hover:bg-gray-50"
                         >
                           Drive List Info
                         </button>
@@ -2033,7 +2033,7 @@ function Navbar({ children }) {
                             if (isMobile) setSidebarOpen(false);
                           }}
                           className={({ isActive }) =>
-                            `block px-2 py-1 text-sm transition-colors ${isActive
+                            `block px-2 py-1 text-[13px] transition-colors ${isActive
                               ? 'text-black font-medium'
                               : 'text-black hover:text-black hover:bg-gray-50'
                             }`
@@ -2074,7 +2074,7 @@ function Navbar({ children }) {
                               hoveredItem === 'expense-tracking' ? 'var(--erp-ink)' : 'var(--erp-ink)'
                           }}
                         />
-                        <span className="nav-label-fade flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
+                        <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap text-left text-black">
                           Expense Tracking
                         </span>
                         {expenseDropdownOpen ? (
@@ -2096,7 +2096,7 @@ function Navbar({ children }) {
                                 if (isMobile) setSidebarOpen(false);
                               }}
                               className={({ isActive }) =>
-                                `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
+                                `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] min-w-full w-max ${isActive
                                   ? 'text-black font-medium'
                                   : 'text-black hover:text-black'
                                 }`
@@ -2151,7 +2151,7 @@ function Navbar({ children }) {
                                 if (isMobile) setSidebarOpen(false);
                               }}
                               className={({ isActive }) =>
-                                `block px-2 py-1 text-sm transition-colors ${isActive
+                                `block px-2 py-1 text-[13px] transition-colors ${isActive
                                   ? 'text-black font-medium'
                                   : 'text-black hover:text-black hover:bg-gray-50'
                                 }`
@@ -2193,7 +2193,7 @@ function Navbar({ children }) {
                             hoveredItem === 'pms' ? themeColor : '#6B7280'
                         }}
                       />
-                      <span className="nav-label-fade flex-1 text-sm font-medium whitespace-nowrap text-left text-black">
+                      <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap text-left text-black">
                         PMS
                       </span>
                       {pmsDropdownOpen ? (
@@ -2214,7 +2214,7 @@ function Navbar({ children }) {
                               if (isMobile) setSidebarOpen(false);
                             }}
                             className={({ isActive }) =>
-                              `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-sm min-w-full w-max ${isActive
+                              `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] min-w-full w-max ${isActive
                                 ? 'text-black font-medium'
                                 : 'text-black hover:text-black'
                               }`
@@ -2267,7 +2267,7 @@ function Navbar({ children }) {
                               if (isMobile) setSidebarOpen(false);
                             }}
                             className={({ isActive }) =>
-                              `block px-2 py-1 text-sm transition-colors ${isActive
+                              `block px-2 py-1 text-[13px] transition-colors ${isActive
                                 ? 'text-black font-medium'
                                 : 'text-black hover:text-black hover:bg-gray-50'
                               }`
@@ -2317,7 +2317,7 @@ function Navbar({ children }) {
                                     hoveredItem === item.path ? themeColor : '#6B7280'
                                 }}
                               />
-                              <span className="flex-1 text-sm font-medium whitespace-nowrap">
+                              <span className="flex-1 text-[13px] font-medium whitespace-nowrap">
                                 {item.name}
                               </span>
                             </>

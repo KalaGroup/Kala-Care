@@ -24,6 +24,7 @@ class KitPartIn(BaseModel):
     qty: Optional[str] = ""
     action: Optional[str] = ""
     serviceHours: Optional[str] = ""
+    loose: Optional[bool] = False
 
 
 class KitIn(BaseModel):

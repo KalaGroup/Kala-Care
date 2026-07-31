@@ -55,8 +55,10 @@ const prevMonthOf = (ym) => {
 
 const inputCls =
   'w-full border border-gray-300 rounded px-2 py-1 text-xs text-black bg-white focus:outline-none focus:ring-1';
+// Grid-style tables — every cell bordered.
 const thCls =
-  'px-2 py-1.5 text-left text-[11px] font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap bg-gray-50 border-b border-gray-200';
+  'px-2 py-1.5 text-center text-[11px] font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap bg-gray-50 border border-gray-200';
+const tdCls = 'px-2 py-1 border border-gray-200';
 
 // ---------------------------------------------------------------------------
 
@@ -334,14 +336,19 @@ const AOPMaster = () => {
               </thead>
               <tbody>
                 {loadingTargets ? (
-                  <tr><td colSpan={7} className="text-center py-8 text-gray-500">Loading targets…</td></tr>
+                  <tr><td colSpan={7} className="text-center py-24 text-gray-500 border border-gray-200">Loading targets…</td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center py-8 text-gray-500">
-                    No targets set for {month}. Use “Load ERP Branches”, “Copy {prevMonthOf(month)}” or “Add Row”.
+                  <tr><td colSpan={7} className="border border-gray-200">
+                    <div className="h-56 flex flex-col items-center justify-center gap-2 text-gray-400">
+                      <BuildingOffice2Icon className="h-8 w-8" />
+                      <p className="text-sm text-center px-4">
+                        No targets set for {month}. Use “Load ERP Branches”, “Copy {prevMonthOf(month)}” or “Add Row”.
+                      </p>
+                    </div>
                   </td></tr>
                 ) : rows.map((r, idx) => (
                   <tr key={r.id ?? `new-${idx}`} className="border-b border-gray-100 hover:bg-gray-50/60">
-                    <td className="px-2 py-1">
+                    <td className={tdCls}>
                       <select value={r.region || ''} onChange={(e) => setRow(idx, 'region', e.target.value)}
                         className={inputCls} style={{ '--tw-ring-color': themeColor }}>
                         <option value="">—</option>
@@ -349,27 +356,27 @@ const AOPMaster = () => {
                         <option value="KA">KA</option>
                       </select>
                     </td>
-                    <td className="px-2 py-1">
+                    <td className={tdCls}>
                       <input value={r.branch_id || ''} onChange={(e) => setRow(idx, 'branch_id', e.target.value)}
                         placeholder="420435_1" className={inputCls} style={{ '--tw-ring-color': themeColor }} />
                     </td>
-                    <td className="px-2 py-1">
+                    <td className={tdCls}>
                       <input value={r.branch_name || ''} onChange={(e) => setRow(idx, 'branch_name', e.target.value)}
                         placeholder="Branch name" className={inputCls} style={{ '--tw-ring-color': themeColor }} />
                     </td>
-                    <td className="px-2 py-1">
+                    <td className={tdCls}>
                       <input value={r.responsible_person || ''} onChange={(e) => setRow(idx, 'responsible_person', e.target.value)}
                         placeholder="Branch manager" className={inputCls} style={{ '--tw-ring-color': themeColor }} />
                     </td>
-                    <td className="px-2 py-1">
+                    <td className={tdCls}>
                       <input type="number" min="0" value={r.spare_target ?? ''} onChange={(e) => setRow(idx, 'spare_target', e.target.value)}
                         placeholder="0" className={`${inputCls} text-right`} style={{ '--tw-ring-color': themeColor }} />
                     </td>
-                    <td className="px-2 py-1">
+                    <td className={tdCls}>
                       <input type="number" min="0" value={r.labour_target ?? ''} onChange={(e) => setRow(idx, 'labour_target', e.target.value)}
                         placeholder="0" className={`${inputCls} text-right`} style={{ '--tw-ring-color': themeColor }} />
                     </td>
-                    <td className="px-2 py-1 text-center">
+                    <td className={`${tdCls} text-center`}>
                       <button onClick={() => removeRow(idx)} title="Delete row"
                         className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-600">
                         <TrashIcon className="h-3.5 w-3.5" />
@@ -429,18 +436,23 @@ const AOPMaster = () => {
               </thead>
               <tbody>
                 {loadingSr ? (
-                  <tr><td colSpan={3} className="text-center py-8 text-gray-500">Loading SR types…</td></tr>
+                  <tr><td colSpan={3} className="text-center py-24 text-gray-500 border border-gray-200">Loading SR types…</td></tr>
                 ) : srItems.length === 0 ? (
-                  <tr><td colSpan={3} className="text-center py-8 text-gray-500">No SR types yet.</td></tr>
+                  <tr><td colSpan={3} className="border border-gray-200">
+                    <div className="h-56 flex flex-col items-center justify-center gap-2 text-gray-400">
+                      <TagIcon className="h-8 w-8" />
+                      <p className="text-sm">No SR types yet.</p>
+                    </div>
+                  </td></tr>
                 ) : srItems.map((it, idx) => (
                   <tr key={it.id ?? `new-${idx}`} className="border-b border-gray-100 hover:bg-gray-50/60">
-                    <td className="px-2 py-1 text-center text-gray-500">{idx + 1}</td>
-                    <td className="px-2 py-1">
+                    <td className={`${tdCls} text-center text-gray-500`}>{idx + 1}</td>
+                    <td className={tdCls}>
                       <input value={it.sr_type || ''} onChange={(e) => setSrItem(idx, 'sr_type', e.target.value)}
                         placeholder="e.g. Bandhan Premium" className={inputCls}
                         style={{ '--tw-ring-color': themeColor }} disabled={!!it.id} />
                     </td>
-                    <td className="px-2 py-1">
+                    <td className={tdCls}>
                       <select value={it.head || ''} onChange={(e) => setSrItem(idx, 'head', e.target.value)}
                         className={inputCls} style={{ '--tw-ring-color': themeColor }}>
                         <option value="">— select head —</option>

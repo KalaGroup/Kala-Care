@@ -60,6 +60,7 @@ class PmsUploadBatch(Base):
     file_name = Column(String(255), nullable=True)
     total_rows = Column(Integer, nullable=False, default=0)
     inserted_rows = Column(Integer, nullable=False, default=0)
+    updated_rows = Column(Integer, nullable=False, default=0)   # same invoice, new values
     duplicate_rows = Column(Integer, nullable=False, default=0)
     skipped_rows = Column(Integer, nullable=False, default=0)   # unparseable rows
     uploaded_by = Column(String(50), nullable=True)

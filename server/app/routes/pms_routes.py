@@ -172,6 +172,16 @@ async def get_uploads(
     return {"success": True, "items": pc.list_batches(db)}
 
 
+@router.delete("/data")
+async def clear_data(
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_master_admin(db, user_id, user_role)
+    return pc.clear_all_data(db)
+
+
 @router.get("/data/summary")
 async def get_data_summary(
     user_id: Optional[str] = Header(None),
@@ -199,12 +209,13 @@ async def get_data_preview(
 @router.get("/report")
 async def get_report(
     as_on: date,
+    from_date: Optional[date] = None,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
     _require_master_admin(db, user_id, user_role)
-    return pc.generate_report(db, as_on)
+    return pc.generate_report(db, as_on, from_date)
 
 
 @router.post("/report/save")

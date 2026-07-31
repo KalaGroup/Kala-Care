@@ -237,12 +237,27 @@ def ensure_performance_indexes(engine):
 # ---------------------------------------------------------------------------
 COLUMN_STATEMENTS = [
     {
+        # PMS upload batches — count of rows updated in place (same CLAIM
+        # INVOICE NO re-uploaded later with changed values).
+        "name": "pms_upload_batches.updated_rows",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_upload_batches') AND name = 'updated_rows'",
+        "add": "ALTER TABLE dbo.pms_upload_batches ADD updated_rows INT NOT NULL CONSTRAINT DF_pms_batches_updated_rows DEFAULT 0",
+    },
+    {
         # Kit-level Service Hours — the master file now carries a second
         # "Service Hours" column after the kit's Action; the part's own
         # service_hours keeps driving service mapping / coverage.
         "name": "maintenance_parts.alt_service_hours",
         "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.maintenance_parts') AND name = 'alt_service_hours'",
         "add": "ALTER TABLE dbo.maintenance_parts ADD alt_service_hours NVARCHAR(20) NULL",
+    },
+    {
+        # Marks a kit part line the user copied/typed into the kit as a LOOSE
+        # addition — the kit's built-in members stay 0/NULL. The edit form lists
+        # only these lines under a kit.
+        "name": "maintenance_kit_parts.is_loose",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.maintenance_kit_parts') AND name = 'is_loose'",
+        "add": "ALTER TABLE dbo.maintenance_kit_parts ADD is_loose BIT NULL",
     },
     {
         # Approval Application page visibility flag (granted from Profile).

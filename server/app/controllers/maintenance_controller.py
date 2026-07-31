@@ -27,6 +27,7 @@ def serialize_kit_part(kp: MaintenanceKitPart):
         "partNumber": kp.part_number or "", "partDesc": kp.part_desc or "",
         "qty": kp.qty or "", "action": kp.action or "",
         "serviceHours": kp.service_hours or "",
+        "loose": bool(kp.is_loose),
     }
 
 
@@ -148,7 +149,7 @@ def _write_kits(db: Session, app_id: int, kits: list, user_id=None):
                 part_number=kp.get("partNumber"), part_desc=kp.get("partDesc"),
                 qty=kp.get("qty"), action=kp.get("action"),
                 service_hours=str(kp.get("serviceHours") or "").strip() or None,
-                sort_order=j,
+                sort_order=j, is_loose=bool(kp.get("loose")),
             ))
 
 

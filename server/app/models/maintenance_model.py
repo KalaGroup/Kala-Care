@@ -100,6 +100,9 @@ class MaintenanceKitPart(Base):
     action = Column(String(10), nullable=True)          # R / C / T
     service_hours = Column(String(20), nullable=True)
     sort_order = Column(Integer, nullable=True, default=0)
+    # A loose part copied (or typed) into the kit AFTER it was built — the kit's
+    # built-in members carry False. Drives which lines the edit form lists.
+    is_loose = Column(Boolean, nullable=True, default=False)
 
     kit = relationship("MaintenanceKit", back_populates="parts")
 

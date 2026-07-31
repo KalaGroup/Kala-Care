@@ -66,7 +66,9 @@ export const SortTh = ({ label, sortKey, sort, onSort, className = '', style, al
             <button type="button" onClick={() => onSort(sortKey)}
                 title={`Sort by ${label} — ${dirLabel}`}
                 className={`inline-flex w-full items-center gap-1 select-none transition hover:opacity-70 ${align === 'left' ? 'justify-start' : 'justify-center'}`}
-                style={active ? { color: THEME } : undefined}>
+                // Tailwind's preflight puts `text-transform: none` on buttons, which
+                // silently cancelled the header row's `uppercase` — inherit it back.
+                style={{ textTransform: 'inherit', ...(active ? { color: THEME } : null) }}>
                 <span className={wrap ? 'whitespace-normal break-words leading-tight text-center' : 'truncate'}>{label}</span>
                 <SortIcon active={active} dir={sort?.dir} />
             </button>

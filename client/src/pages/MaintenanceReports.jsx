@@ -295,6 +295,27 @@ const CoverageReport = React.memo(({ master, services, commissioning = [] }) => 
     const [visibleCount, setVisibleCount] = useState(ROW_CHUNK);
     const loadMoreRef = useRef(null);
     const tableScrollRef = useRef(null);
+
+    // Second horizontal scrollbar ABOVE the matrix, kept in lockstep with the
+    // table's own one, so the wide table can be panned without first scrolling
+    // to the bottom (same pattern as the Master Data sheet). The spacer is
+    // sized to the table's real scroll width.
+    const topScrollRef = useRef(null);
+    const [tableW, setTableW] = useState(0);
+    useEffect(() => {
+        const el = tableScrollRef.current;
+        if (!el) return;
+        const measure = () => setTableW(el.scrollWidth);
+        measure();
+        const ro = new ResizeObserver(measure);
+        ro.observe(el);
+        if (el.firstElementChild) ro.observe(el.firstElementChild);
+        return () => ro.disconnect();
+    }, [visible, visibleCount, cols]);
+    const mirrorScroll = (from, to) => () => {
+        if (from.current && to.current && to.current.scrollLeft !== from.current.scrollLeft)
+            to.current.scrollLeft = from.current.scrollLeft;
+    };
     useEffect(() => { setVisibleCount(ROW_CHUNK); }, [search, segment, sort, searchField]);
     useEffect(() => {
         const observer = new IntersectionObserver((entries) => {
@@ -357,7 +378,11 @@ const CoverageReport = React.memo(({ master, services, commissioning = [] }) => 
                     </button>
                 )}
             </div>
-            <div ref={tableScrollRef} className="overflow-auto r-scroll max-h-[70vh]">
+            {/* Top horizontal scrollbar — spacer as wide as the table, mirrored with it */}
+            <div ref={topScrollRef} onScroll={mirrorScroll(topScrollRef, tableScrollRef)} className="overflow-x-auto overflow-y-hidden r-scroll border-b border-gray-100">
+                <div style={{ width: tableW }} className="h-px" />
+            </div>
+            <div ref={tableScrollRef} onScroll={mirrorScroll(tableScrollRef, topScrollRef)} className="overflow-auto r-scroll max-h-[82vh]">
                 <table className="min-w-[900px] w-full border-collapse text-[12px]">
                     <thead className="sticky top-0 z-10">
                         <tr className="bg-gray-50 text-[10px] sm:text-[11px] font-semibold text-black uppercase tracking-wider">

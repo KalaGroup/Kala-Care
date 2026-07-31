@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
 import {
   ChartBarSquareIcon, ArrowUpTrayIcon, DocumentMagnifyingGlassIcon,
   ClockIcon, PrinterIcon, BookmarkSquareIcon, XMarkIcon, TrashIcon,
-  DocumentCheckIcon, TableCellsIcon, ArrowPathIcon,
+  DocumentCheckIcon, TableCellsIcon, ArrowPathIcon, CalendarDaysIcon,
+  ChevronDownIcon,
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
@@ -47,14 +50,21 @@ const fmtFull = (iso) => {
   const d = new Date(iso + 'T00:00:00');
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
 };
-const todayISO = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
-
+// Grid-style tables — every cell bordered.
 const thCls =
-  'px-2 py-1.5 text-left text-[11px] font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap bg-gray-50 border-b border-gray-200';
-const tdCls = 'px-2 py-1.5 whitespace-nowrap border-b border-gray-100';
+  'px-2 py-1.5 text-center text-[11px] font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap bg-gray-50 border border-gray-200';
+const tdCls = 'px-2 py-1.5 whitespace-nowrap border border-gray-200';
+
+// Expected file format (shown by "Check file format") — same idea as the
+// Import page's format panel. Critical columns are marked with *.
+const EXPECTED_FORMAT = {
+  critical: ['BRANCH ID', 'CLAIM INVOICE DATE', 'NET TAXABLE AMOUNT'],
+  columns: [
+    'ZONE NAME', 'SOID', 'SD NAME', 'BRANCH ID', 'BRANCH NAME',
+    'CLAIM INVOICE NO', 'CLAIM INVOICE DATE', 'PRODUCT SEGMENT',
+    'SEGMENT', 'SERVICE REPORT TYPE', 'NET TAXABLE AMOUNT',
+  ],
+};
 
 const REPORT_TYPES = [
   { key: 'spare', name: 'Spare Part Sales' },
@@ -73,31 +83,44 @@ const PREVIEW_COLS = [
 ];
 
 // ---- one upload box (Part Sale / Labour Revenue) ---------------------------
-const UploadBox = ({ label, recordType, onUploaded }) => {
+const UploadBox = ({ label, recordType, onUploaded, onCheckFormat }) => {
   const [file, setFile] = useState(null);
   const [checking, setChecking] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [checkResult, setCheckResult] = useState(null);
   const inputRef = useRef(null);
 
-  const send = async (validateOnly) => {
-    if (!file) { toast.error('Choose a file first'); return; }
-    const fd = new FormData();
-    fd.append('file', file);
-    fd.append('record_type', recordType);
-    fd.append('validate_only', validateOnly ? 'true' : 'false');
-    validateOnly ? setChecking(true) : setUploading(true);
-    try {
+  const send = async (validateOnly, fileArg = file) => {
+    if (!fileArg) { toast.error('Choose a file first'); return; }
+    const post = async (validate) => {
+      const fd = new FormData();
+      fd.append('file', fileArg);
+      fd.append('record_type', recordType);
+      fd.append('validate_only', validate ? 'true' : 'false');
       const res = await fetch(`${API}/pms/upload`, { method: 'POST', headers: authHeaders(), body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || data.message || 'Request failed');
+      return data;
+    };
+
+    validateOnly ? setChecking(true) : setUploading(true);
+    try {
       if (validateOnly) {
+        const data = await post(true);
         setCheckResult(data);
         data.success ? toast.success(`${label}: format OK (${data.rows} rows × ${data.columns} cols)`)
           : toast.error(data.message);
       } else {
+        // The format is ALWAYS validated first — an invalid file is never uploaded.
+        const check = await post(true);
+        setCheckResult(check);
+        if (!check.success) {
+          toast.error(`${label}: file not uploaded — ${check.message}`);
+          return;
+        }
+        const data = await post(false);
         if (!data.success) throw new Error(data.message);
-        toast.success(`${label}: ${data.inserted} new, ${data.duplicates} duplicates skipped`);
+        toast.success(`${label}: ${data.inserted} new, ${data.updated ?? 0} updated, ${data.duplicates} duplicates skipped`);
         setCheckResult(null);
         setFile(null);
         if (inputRef.current) inputRef.current.value = '';
@@ -115,15 +138,24 @@ const UploadBox = ({ label, recordType, onUploaded }) => {
       <p className="text-xs font-semibold text-gray-800">{label}</p>
       <div className="mt-2 flex items-center gap-2">
         <input ref={inputRef} type="file" accept=".xlsx,.xls"
-          onChange={(e) => { setFile(e.target.files?.[0] || null); setCheckResult(null); }}
+          onChange={(e) => {
+            const f = e.target.files?.[0] || null;
+            setFile(f);
+            setCheckResult(null);
+            if (f) send(true, f);   // validate immediately on choose
+          }}
           className="text-[11px] text-gray-600 file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:text-[11px] file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 w-full" />
       </div>
       <div className="mt-2 flex gap-1.5">
-        <button onClick={() => send(true)} disabled={checking || !file}
+        <button
+          onClick={() => { onCheckFormat?.(label); if (file) send(true); }}
+          disabled={checking}
           className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-gray-700 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40">
           <DocumentCheckIcon className="h-3 w-3" /> {checking ? 'Checking…' : 'Check file format'}
         </button>
-        <button onClick={() => send(false)} disabled={uploading || !file}
+        <button onClick={() => send(false)}
+          disabled={uploading || !file || (checkResult && !checkResult.success)}
+          title={checkResult && !checkResult.success ? 'Fix the file format first' : undefined}
           className="flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-white rounded hover:opacity-90 disabled:opacity-40"
           style={{ backgroundColor: themeColor }}>
           <ArrowUpTrayIcon className="h-3 w-3" /> {uploading ? 'Uploading…' : 'Upload'}
@@ -135,6 +167,22 @@ const UploadBox = ({ label, recordType, onUploaded }) => {
           {checkResult.success && (
             <span className="text-gray-500"> — {checkResult.rows} rows × {checkResult.columns} columns</span>
           )}
+          {/* Expected columns the file does NOT have — those show as “—” after upload */}
+          {checkResult.mapped && (() => {
+            const FIELD_LABEL = {
+              zone_name: 'ZONE NAME', soid: 'SOID', sd_name: 'SD NAME',
+              branch_id: 'BRANCH ID', branch_name: 'BRANCH NAME',
+              claim_invoice_no: 'CLAIM INVOICE NO', claim_invoice_date: 'CLAIM INVOICE DATE',
+              product_segment: 'PRODUCT SEGMENT', segment: 'SEGMENT',
+              sr_type: 'SERVICE REPORT TYPE', net_taxable_amount: 'NET TAXABLE AMOUNT',
+            };
+            const notFound = Object.keys(FIELD_LABEL).filter((f) => !checkResult.mapped[f]);
+            return notFound.length > 0 && checkResult.success ? (
+              <div className="mt-1 text-amber-700">
+                Not found in this file (will show as “—”): {notFound.map((f) => FIELD_LABEL[f]).join(', ')}
+              </div>
+            ) : null;
+          })()}
         </div>
       )}
     </div>
@@ -153,9 +201,23 @@ const SalesLabourReport = () => {
   const [showBatches, setShowBatches] = useState(false);
 
   // report
-  const [asOn, setAsOn] = useState(todayISO());
   const [report, setReport] = useState(null);
   const [generating, setGenerating] = useState(false);
+  // 'data' shows the Uploaded File Preview box; 'report' replaces it with the
+  // generated report (Back to Data returns).
+  const [view, setView] = useState('data');
+  // Which file's expected-format panel is open (label string or null)
+  const [formatFor, setFormatFor] = useState(null);
+  // Report period — applied range (ISO strings) + the range-picker popover
+  // (Quick Select presets or a custom calendar range, like the Dashboard's).
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [showRangePicker, setShowRangePicker] = useState(false);
+  const [activePeriod, setActivePeriod] = useState('current_month');
+  const [pickStart, setPickStart] = useState(null);   // calendar Date objects
+  const [pickEnd, setPickEnd] = useState(null);
+  // Whether the CURRENT report has been saved to history (drives step ④)
+  const [savedHist, setSavedHist] = useState(false);
   const [reportType, setReportType] = useState('spare');
   const [regionFilter, setRegionFilter] = useState('All');
   const [savingReport, setSavingReport] = useState(false);
@@ -194,15 +256,87 @@ const SalesLabourReport = () => {
   useEffect(() => { loadSummary(); loadBatches(); }, [loadSummary, loadBatches]);
   useEffect(() => { loadPreview(previewType); }, [previewType, loadPreview]);
 
+  // The uploaded data's overall date range — presets and pickers stay inside it.
+  const dataRange = (() => {
+    if (!summary) return { min: null, max: null };
+    const froms = [summary.part?.from_date, summary.labour?.from_date].filter(Boolean).sort();
+    const tos = [summary.part?.to_date, summary.labour?.to_date].filter(Boolean).sort();
+    return { min: froms[0] || null, max: tos[tos.length - 1] || null };
+  })();
+
+  const isoOf = (d) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const clampToData = (from, to) => {
+    let f = from, t = to;
+    if (dataRange.min && f < dataRange.min) f = dataRange.min;
+    if (dataRange.max && t > dataRange.max) t = dataRange.max;
+    if (f > t) f = t;
+    return [f, t];
+  };
+
+  // Default period once data arrives: current month of the latest data date.
+  useEffect(() => {
+    if (!dataRange.max) return;
+    let f = dataRange.max.slice(0, 8) + '01';
+    if (dataRange.min && f < dataRange.min) f = dataRange.min;
+    setFromDate((cur) => cur || f);
+    setToDate((cur) => cur || dataRange.max);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataRange.min, dataRange.max]);
+
+  // Quick Select presets — computed from the latest uploaded data date and
+  // clamped inside the uploaded range.
+  const QUICK_OPTIONS = [
+    { key: 'current_month', label: 'Current Month' },
+    { key: 'last_month', label: 'Last Month' },
+    { key: 'last_quarter', label: 'Last Quarter' },
+    { key: 'last_6m', label: 'Last 6 Months' },
+    { key: 'last_year', label: 'Last 1 Year' },
+    { key: 'full', label: 'Full Data' },
+  ];
+  const applyQuick = (key) => {
+    if (!dataRange.max) return;
+    const max = dataRange.max;
+    const d = new Date(max + 'T00:00:00');
+    let from = max.slice(0, 8) + '01', to = max;
+    if (key === 'last_month') {
+      const s = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+      from = isoOf(s);
+      to = isoOf(new Date(d.getFullYear(), d.getMonth(), 0)); // last day of prev month
+    } else if (key === 'last_quarter') from = isoOf(new Date(d.getFullYear(), d.getMonth() - 3, d.getDate() + 1));
+    else if (key === 'last_6m') from = isoOf(new Date(d.getFullYear(), d.getMonth() - 6, d.getDate() + 1));
+    else if (key === 'last_year') from = isoOf(new Date(d.getFullYear() - 1, d.getMonth(), d.getDate() + 1));
+    else if (key === 'full') from = dataRange.min || max;
+    const [f, t] = clampToData(from, to);
+    setFromDate(f);
+    setToDate(t);
+    setActivePeriod(key);
+    setShowRangePicker(false);
+  };
+
+  const applyCustomRange = () => {
+    if (!pickStart || !pickEnd) return;
+    const [f, t] = clampToData(isoOf(pickStart), isoOf(pickEnd));
+    setFromDate(f);
+    setToDate(t);
+    setActivePeriod('custom');
+    setShowRangePicker(false);
+  };
+
   const onUploaded = () => { loadSummary(); loadBatches(); loadPreview(previewType); };
 
   const generate = async () => {
+    if (!dataRange.max) { toast.error('Upload data first'); return; }
+    const to = toDate || dataRange.max;
+    const from = fromDate || to.slice(0, 8) + '01';
     setGenerating(true);
     try {
-      const res = await fetch(`${API}/pms/report?as_on=${asOn}`, { headers: authHeaders() });
+      const res = await fetch(`${API}/pms/report?as_on=${to}&from_date=${from}`, { headers: authHeaders() });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Report failed');
       setReport(data);
+      setView('report');
+      setSavedHist(false);
       if (!data.spare_rows.length && !data.labour_rows.length) {
         toast('No data / targets found for ' + data.month, { icon: 'ℹ️' });
       } else {
@@ -229,6 +363,7 @@ const SalesLabourReport = () => {
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Save failed');
+      setSavedHist(true);
       toast.success('Report saved to history');
     } catch (e) {
       toast.error(e.message);
@@ -254,7 +389,8 @@ const SalesLabourReport = () => {
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.message || 'Could not open report');
       setReport(data.payload);
-      setAsOn(data.payload.as_on);
+      setView('report');
+      setSavedHist(true);   // it came from history, so it is already saved
       setShowHistory(false);
       toast.success(`Opened: ${data.title}`);
     } catch (e) {
@@ -300,7 +436,19 @@ const SalesLabourReport = () => {
       <style>{`@media print {
         .pms-no-print { display: none !important; }
         .pms-print-area { box-shadow: none !important; border: none !important; }
-      }`}</style>
+      }
+      /* Compact range calendar — same look as the Dashboard's picker */
+      .custom-calendar { border: none !important; font-size: 0.7rem !important; background: transparent !important; }
+      .custom-calendar .react-datepicker__header { background-color: white; border-bottom: 1px solid #e5e7eb; font-size: 0.7rem; padding-top: 0.3rem; }
+      .custom-calendar .react-datepicker__current-month { font-size: 0.7rem; font-weight: 500; }
+      .custom-calendar .react-datepicker__day-name,
+      .custom-calendar .react-datepicker__day { font-size: 0.65rem; width: 1.7rem; line-height: 1.7rem; margin: 0.08rem; }
+      .custom-calendar .react-datepicker__day--selected,
+      .custom-calendar .react-datepicker__day--range-start,
+      .custom-calendar .react-datepicker__day--range-end { background-color: ${themeColor} !important; color: white !important; }
+      .custom-calendar .react-datepicker__day--in-range,
+      .custom-calendar .react-datepicker__day--in-selecting-range { background-color: rgba(47,49,146,0.15); color: #1f2937; }
+      `}</style>
 
       {/* ===== Hero header (same style as Knowledge Bank) ===== */}
       <div className="pms-no-print rounded-2xl px-3 sm:px-5 py-3 mb-3 text-white relative overflow-hidden"
@@ -320,16 +468,6 @@ const SalesLabourReport = () => {
             </div>
           </div>
           <div className="flex items-center flex-wrap gap-2">
-            {summary && (
-              <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium bg-white/15 text-white">
-                Part rows: <b className="font-bold">{inr(summary.part?.rows)}</b>
-              </span>
-            )}
-            {summary && (
-              <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium bg-white/15 text-white">
-                Labour rows: <b className="font-bold">{inr(summary.labour?.rows)}</b>
-              </span>
-            )}
             <button onClick={openHistory}
               className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-[12px] font-semibold transition hover:bg-white/90"
               style={{ color: themeColor }}>
@@ -340,55 +478,236 @@ const SalesLabourReport = () => {
       </div>
 
       {/* ============ ① Report Setup ============ */}
-      <div className="pms-no-print bg-white rounded-2xl border border-gray-200 mb-3 overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2">
+      <div className="pms-no-print bg-white rounded-2xl border border-gray-200 mb-3">
+        <div className="px-4 py-2.5 border-b border-gray-100 flex flex-wrap items-center gap-2">
           <ArrowUpTrayIcon className="h-4 w-4" style={{ color: themeColor }} />
           <h2 className="text-sm font-semibold text-gray-900">Report Setup</h2>
-          <span className="text-[11px] text-gray-400">
-            Upload the source files → ② preview data → ③ generate the report → ④ save
-          </span>
+          {/* Progress stepper — completed steps turn green */}
+          {(() => {
+            const hasData = !!dataRange.max;
+            const steps = [
+              { label: 'Upload files', done: hasData },
+              { label: 'Preview data', done: hasData },
+              { label: 'Generate report', done: !!report },
+              { label: 'Save', done: savedHist },
+            ];
+            const current = steps.findIndex((s) => !s.done);
+            return (
+              <div className="ml-auto flex items-center flex-wrap gap-0.5">
+                {steps.map((s, i) => (
+                  <React.Fragment key={s.label}>
+                    {i > 0 && (
+                      <div className={`h-0.5 w-4 sm:w-6 rounded transition-colors ${steps[i - 1].done ? 'bg-emerald-500' : 'bg-gray-200'}`} />
+                    )}
+                    <div className="flex items-center gap-1 px-0.5" title={`Step ${i + 1}: ${s.label}`}>
+                      <span
+                        className={`h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold border transition-colors ${
+                          s.done ? 'bg-emerald-500 border-emerald-500 text-white'
+                            : current === i ? 'bg-white border-2' : 'bg-gray-100 border-gray-200 text-gray-400'}`}
+                        style={!s.done && current === i ? { borderColor: themeColor, color: themeColor } : {}}>
+                        {s.done ? '✓' : i + 1}
+                      </span>
+                      <span className={`text-[10px] font-bold whitespace-nowrap max-sm:hidden ${
+                        s.done ? 'text-emerald-600' : current === i ? 'text-gray-800' : 'text-gray-400'}`}>
+                        {s.label}
+                      </span>
+                    </div>
+                  </React.Fragment>
+                ))}
+              </div>
+            );
+          })()}
         </div>
         <div className="p-3 flex flex-wrap gap-3">
-          <UploadBox label="Part Sale file" recordType="part" onUploaded={onUploaded} />
-          <UploadBox label="Labour Revenue file" recordType="labour" onUploaded={onUploaded} />
+          <UploadBox label="Part Sale file" recordType="part" onUploaded={onUploaded}
+            onCheckFormat={(l) => setFormatFor((cur) => (cur === l ? null : l))} />
+          <UploadBox label="Labour Revenue file" recordType="labour" onUploaded={onUploaded}
+            onCheckFormat={(l) => setFormatFor((cur) => (cur === l ? null : l))} />
           {/* Generate */}
           <div className="flex-1 min-w-[220px] border border-dashed border-gray-300 rounded-lg p-3">
             <p className="text-xs font-semibold text-gray-800">Generate report</p>
-            <div className="mt-2 flex items-end gap-2 flex-wrap">
-              <div className="flex flex-col">
-                <label className="text-[10px] font-medium text-gray-500 mb-0.5">As on date</label>
-                <input type="date" value={asOn} onChange={(e) => setAsOn(e.target.value)}
-                  className="border border-gray-300 rounded px-2 py-1 text-xs text-black focus:outline-none focus:ring-1"
-                  style={{ '--tw-ring-color': themeColor }} />
-              </div>
-              <button onClick={generate} disabled={generating}
-                className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white rounded-md hover:opacity-90 disabled:opacity-50"
+            {/* Only the uploaded data range is shown — the report runs as on
+                the latest uploaded invoice date automatically. */}
+            <div className="mt-2 text-[11px] text-gray-500 space-y-0.5">
+              {summary?.part?.rows > 0 && (
+                <div>Part sale data: <b>{inr(summary.part.rows)}</b> rows
+                  ({fmtDay(summary.part.from_date)} → {fmtDay(summary.part.to_date)})</div>
+              )}
+              {summary?.labour?.rows > 0 && (
+                <div>Labour data: <b>{inr(summary.labour.rows)}</b> rows
+                  ({fmtDay(summary.labour.from_date)} → {fmtDay(summary.labour.to_date)})</div>
+              )}
+              {summary && !dataRange.max && <div>No data uploaded yet — upload a file first.</div>}
+            </div>
+            {/* Period picker + Generate — one row */}
+            <div className="mt-2 relative flex items-center gap-2">
+              <button onClick={() => setShowRangePicker(!showRangePicker)} disabled={!dataRange.max}
+                className="flex-1 min-w-0 flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-white shadow-md hover:opacity-90 disabled:opacity-50 transition-all"
+                style={{ backgroundColor: themeColor }}>
+                <CalendarDaysIcon className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="truncate">
+                  {fromDate && toDate ? `${fmtDay(fromDate)} → ${fmtDay(toDate)}` : 'Select period'}
+                </span>
+                <ChevronDownIcon className={`h-3 w-3 flex-shrink-0 transition-transform ${showRangePicker ? 'rotate-180' : ''}`} />
+              </button>
+              <button onClick={generate} disabled={generating || !dataRange.max}
+                className="flex-shrink-0 flex items-center gap-1 px-4 py-1.5 text-xs font-semibold text-white rounded-full shadow-md hover:opacity-90 disabled:opacity-50"
                 style={{ backgroundColor: themeColor }}>
                 {generating ? 'Generating…' : 'Generate →'}
               </button>
+
+              {showRangePicker && (
+                <>
+                  {/* click-outside closes */}
+                  <div className="fixed inset-0 z-40" onClick={() => setShowRangePicker(false)} />
+                  <div className="absolute z-50 left-0 right-0 sm:left-auto sm:right-0 mt-2 sm:w-[440px] max-w-[92vw] bg-white rounded-xl shadow-xl border border-gray-200">
+                    <div className="p-3 max-h-[75vh] overflow-y-auto">
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        {/* Quick Select */}
+                        <div className="sm:w-[34%]">
+                          <h3 className="text-xs font-semibold text-gray-800 mb-2 text-center">Quick Select</h3>
+                          <div className="space-y-1.5 w-full">
+                            {QUICK_OPTIONS.map((o) => (
+                              <button key={o.key} onClick={() => applyQuick(o.key)}
+                                className={`w-full px-2 py-1.5 rounded-lg text-xs font-medium transition-all text-center ${
+                                  activePeriod === o.key
+                                    ? 'text-white'
+                                    : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200'}`}
+                                style={activePeriod === o.key ? { backgroundColor: themeColor } : {}}>
+                                {o.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Custom Range calendar */}
+                        <div className="sm:w-[66%]">
+                          <h3 className="text-xs font-semibold text-gray-800 mb-2 text-center">Custom Range</h3>
+                          <div className="flex gap-2 mb-2">
+                            <div className="flex-1">
+                              <label className="block text-[11px] text-gray-500 mb-0.5 text-center">Start Date</label>
+                              <div className="px-1.5 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-center truncate">
+                                {pickStart ? pickStart.toLocaleDateString('en-GB') : 'Not selected'}
+                              </div>
+                            </div>
+                            <div className="flex-1">
+                              <label className="block text-[11px] text-gray-500 mb-0.5 text-center">End Date</label>
+                              <div className="px-1.5 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-center truncate">
+                                {pickEnd ? pickEnd.toLocaleDateString('en-GB') : 'Not selected'}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="border border-gray-200 rounded-lg p-1 bg-gray-50/50 flex justify-center">
+                            <DatePicker
+                              selected={pickStart}
+                              onChange={(dates) => { const [s, e] = dates; setPickStart(s); setPickEnd(e); }}
+                              startDate={pickStart}
+                              endDate={pickEnd}
+                              selectsRange
+                              inline
+                              minDate={dataRange.min ? new Date(dataRange.min + 'T00:00:00') : undefined}
+                              maxDate={dataRange.max ? new Date(dataRange.max + 'T00:00:00') : undefined}
+                              calendarClassName="custom-calendar"
+                              dateFormat="dd/MM/yyyy"
+                            />
+                          </div>
+                          <div className="flex gap-2 mt-2.5">
+                            <button onClick={() => setShowRangePicker(false)}
+                              className="flex-1 px-2 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-xs font-medium">
+                              Cancel
+                            </button>
+                            <button onClick={applyCustomRange} disabled={!pickStart || !pickEnd}
+                              className="flex-1 px-2 py-1.5 text-white rounded-lg hover:opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium"
+                              style={{ backgroundColor: themeColor }}>
+                              Apply
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-            {summary && (
-              <div className="mt-2 text-[11px] text-gray-500 space-y-0.5">
-                <div>Part sale data: <b>{inr(summary.part?.rows)}</b> rows
-                  {summary.part?.from_date && <> ({fmtDay(summary.part.from_date)} → {fmtDay(summary.part.to_date)})</>}</div>
-                <div>Labour data: <b>{inr(summary.labour?.rows)}</b> rows
-                  {summary.labour?.from_date && <> ({fmtDay(summary.labour.from_date)} → {fmtDay(summary.labour.to_date)})</>}</div>
-              </div>
-            )}
           </div>
         </div>
+
+        {/* ===== Expected File Format (opens from "Check file format") ===== */}
+        {formatFor && (
+          <div className="px-3 pb-3">
+            <div className="rounded-lg border border-sky-200 overflow-hidden">
+              <div className="flex items-center justify-between gap-2 px-3 py-2 bg-sky-50 border-b border-sky-200">
+                <div className="flex items-center gap-2">
+                  <DocumentCheckIcon className="h-4 w-4 text-sky-700" />
+                  <span className="text-xs font-bold text-sky-900">
+                    Expected File Format for: {formatFor}
+                  </span>
+                </div>
+                <button onClick={() => setFormatFor(null)} className="p-0.5 rounded hover:bg-sky-100">
+                  <XMarkIcon className="h-3.5 w-3.5 text-sky-700" />
+                </button>
+              </div>
+              <div className="p-3 bg-white">
+                <p className="text-xs font-bold text-gray-800 mb-2">
+                  Important columns in this file: {EXPECTED_FORMAT.columns.length}
+                </p>
+                <div className="flex flex-wrap gap-1.5 rounded-lg border border-gray-200 p-2">
+                  {EXPECTED_FORMAT.columns.map((c) => {
+                    const critical = EXPECTED_FORMAT.critical.includes(c);
+                    return (
+                      <span key={c}
+                        className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-mono font-semibold tracking-wide border ${
+                          critical
+                            ? 'bg-amber-50 border-amber-300 text-amber-900'
+                            : 'bg-rose-50/60 border-rose-200 text-gray-800'}`}>
+                        {c}{critical && ' *'}
+                      </span>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-[11px] text-sky-800">
+                  Column names can be spelled in any case, spacing or punctuation
+                  (e.g. “branch id.” is accepted). Columns marked <b>*</b> are mandatory —
+                  the file is rejected without them. Every other column in the file is
+                  imported automatically as a dynamic column.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Recent uploads */}
         <div className="px-4 pb-3">
-          <button onClick={() => setShowBatches(!showBatches)}
-            className="text-[11px] font-medium text-gray-500 hover:text-gray-800">
-            {showBatches ? '▾' : '▸'} Recent uploads ({batches.length})
-          </button>
+          <div className="flex items-center justify-between gap-2">
+            <button onClick={() => setShowBatches(!showBatches)}
+              className="text-[11px] font-medium text-gray-500 hover:text-gray-800">
+              {showBatches ? '▾' : '▸'} Recent uploads ({batches.length})
+            </button>
+            {dataRange.max && (
+              <button
+                onClick={async () => {
+                  if (!window.confirm('Delete ALL uploaded Part Sale and Labour data? Targets, SR mapping and saved reports are kept. You can re-upload the files after.')) return;
+                  try {
+                    const res = await fetch(`${API}/pms/data`, { method: 'DELETE', headers: authHeaders() });
+                    const data = await res.json();
+                    if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Clear failed');
+                    toast.success(`Cleared ${inr(data.deleted_rows)} rows`);
+                    setReport(null); setView('data');
+                    onUploaded();
+                  } catch (e) { toast.error(e.message); }
+                }}
+                className="flex items-center gap-1 text-[11px] font-medium text-red-500 hover:text-red-700">
+                <TrashIcon className="h-3 w-3" /> Clear all data
+              </button>
+            )}
+          </div>
           {showBatches && batches.length > 0 && (
             <div className="mt-1.5 overflow-x-auto border border-gray-200 rounded">
               <table className="w-full text-[11px] border-collapse min-w-[640px]">
                 <thead><tr>
                   <th className={thCls}>File</th><th className={thCls}>Type</th>
                   <th className={thCls}>Total</th><th className={thCls}>New</th>
+                  <th className={thCls}>Updated</th>
                   <th className={thCls}>Duplicates</th><th className={thCls}>Skipped</th>
                   <th className={thCls}>Uploaded</th>
                 </tr></thead>
@@ -399,6 +718,7 @@ const SalesLabourReport = () => {
                       <td className={tdCls}>{b.record_type === 'part' ? 'Part Sale' : 'Labour'}</td>
                       <td className={tdCls}>{inr(b.total_rows)}</td>
                       <td className={`${tdCls} text-green-700 font-medium`}>{inr(b.inserted_rows)}</td>
+                      <td className={`${tdCls} text-blue-700 font-medium`}>{inr(b.updated_rows)}</td>
                       <td className={tdCls}>{inr(b.duplicate_rows)}</td>
                       <td className={tdCls}>{inr(b.skipped_rows)}</td>
                       <td className={tdCls}>{b.uploaded_at ? new Date(b.uploaded_at).toLocaleString('en-GB') : '—'}</td>
@@ -411,7 +731,8 @@ const SalesLabourReport = () => {
         </div>
       </div>
 
-      {/* ============ ② Uploaded data preview ============ */}
+      {/* ============ ② Uploaded data preview (hidden while viewing report) ============ */}
+      {view === 'data' && (
       <div className="pms-no-print bg-white rounded-2xl border border-gray-200 mb-3 overflow-hidden">
         <div className="px-4 py-2.5 border-b border-gray-100 flex flex-wrap items-center gap-2">
           <TableCellsIcon className="h-4 w-4" style={{ color: themeColor }} />
@@ -431,39 +752,53 @@ const SalesLabourReport = () => {
             <ArrowPathIcon className="h-3.5 w-3.5" />
           </button>
         </div>
-        <div className="overflow-x-auto max-h-[320px] overflow-y-auto">
-          <table className="w-full text-[11px] border-collapse min-w-[1050px]">
-            <thead className="sticky top-0"><tr>
-              {PREVIEW_COLS.map(([k, label]) => <th key={k} className={thCls}>{label}</th>)}
-            </tr></thead>
-            <tbody>
-              {previewLoading ? (
-                <tr><td colSpan={PREVIEW_COLS.length} className="text-center py-6 text-gray-500">Loading…</td></tr>
-              ) : previewRows.length === 0 ? (
-                <tr><td colSpan={PREVIEW_COLS.length} className="text-center py-6 text-gray-500">
-                  No {previewType === 'part' ? 'Part Sale' : 'Labour'} data uploaded yet.
-                </td></tr>
-              ) : previewRows.map((r, i) => (
-                <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60">
-                  {PREVIEW_COLS.map(([k]) => (
-                    <td key={k} className={`${tdCls} ${k === 'net_taxable_amount' ? 'text-right font-medium' : ''}`}>
-                      {k === 'net_taxable_amount' ? inr(r[k]) : (r[k] ?? '—')}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {previewLoading ? (
+          <div className="h-72 flex items-center justify-center text-sm text-gray-400">Loading…</div>
+        ) : previewRows.length === 0 ? (
+          /* Empty state — tall box with the message centered */
+          <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
+            <TableCellsIcon className="h-8 w-8" />
+            <p className="text-sm">No {previewType === 'part' ? 'Part Sale' : 'Labour'} data added yet</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto max-h-[320px] overflow-y-auto">
+            <table className="w-full text-[11px] border-collapse min-w-[1050px]">
+              <thead className="sticky top-0"><tr>
+                {PREVIEW_COLS.map(([k, label]) => <th key={k} className={thCls}>{label}</th>)}
+              </tr></thead>
+              <tbody>
+                {previewRows.map((r, i) => (
+                  <tr key={i} className="hover:bg-gray-50/60">
+                    {PREVIEW_COLS.map(([k]) => (
+                      <td key={k} className={`${tdCls} ${k === 'net_taxable_amount' ? 'text-right font-medium' : ''}`}>
+                        {k === 'net_taxable_amount' ? inr(r[k]) : (r[k] ?? '—')}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
+      )}
 
-      {/* ============ ③ Generated Report ============ */}
-      {report && (
+      {/* ============ ③ Generated Report (replaces the preview box) ============ */}
+      {view === 'report' && report && (
         <div className="pms-print-area bg-white rounded-2xl border border-gray-200 mb-3 overflow-hidden">
           <div className="px-4 py-2.5 border-b border-gray-100 flex flex-wrap items-center gap-2">
+            <button onClick={() => setView('data')}
+              className="pms-no-print flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
+              ← Back to Data
+            </button>
             <DocumentMagnifyingGlassIcon className="h-4 w-4 pms-no-print" style={{ color: themeColor }} />
             <h2 className="text-sm font-semibold text-gray-900">
               Generated Report : As on {fmtFull(report.as_on)}
+              {report.from_date && (
+                <span className="ml-2 text-[11px] font-medium text-gray-500">
+                  (Period: {fmtDay(report.from_date)} → {fmtDay(report.as_on)})
+                </span>
+              )}
             </h2>
             <div className="flex-1" />
             <button onClick={saveToHistory} disabled={savingReport}
@@ -524,13 +859,13 @@ const SalesLabourReport = () => {
                   <th className={thCls}>Responsible Person</th>
                   <th className={thCls}>Branch</th>
                   <th className={thCls}>Region</th>
-                  <th className={`${thCls} text-right`}>Monthly Target</th>
-                  <th className={`${thCls} text-right`}>Daily Target</th>
-                  <th className={`${thCls} text-right`}>Achi. on {dayLabel}</th>
-                  <th className={`${thCls} text-right`}>Target Till {dayLabel}</th>
-                  <th className={`${thCls} text-right`}>Achi. Till {dayLabel}</th>
-                  <th className={`${thCls} text-right`}>Invoice Count Till {dayLabel}</th>
-                  <th className={`${thCls} text-right`}>% Achieved Till Date</th>
+                  <th className={thCls}>Target</th>
+                  <th className={thCls}>Daily Target</th>
+                  <th className={thCls}>Achi. on {dayLabel}</th>
+                  <th className={thCls}>Target Till {dayLabel}</th>
+                  <th className={thCls}>Achi. Till {dayLabel}</th>
+                  <th className={thCls}>Invoice Count Till {dayLabel}</th>
+                  <th className={thCls}>% Achieved Till Date</th>
                 </tr></thead>
                 <tbody>
                   {branchRows.length === 0 ? (
@@ -581,10 +916,10 @@ const SalesLabourReport = () => {
                   <th className={thCls}>
                     {reportType === 'regional' ? 'Region' : reportType === 'segment' ? 'Segment' : 'Service Head'}
                   </th>
-                  <th className={`${thCls} text-right`}>Spare Sale</th>
-                  <th className={`${thCls} text-right`}>Labour Sale</th>
-                  <th className={`${thCls} text-right`}>Total</th>
-                  <th className={`${thCls} text-right`}>Invoices</th>
+                  <th className={thCls}>Spare Sale</th>
+                  <th className={thCls}>Labour Sale</th>
+                  <th className={thCls}>Total</th>
+                  <th className={thCls}>Invoices</th>
                 </tr></thead>
                 <tbody>
                   {breakdownRows.length === 0 ? (

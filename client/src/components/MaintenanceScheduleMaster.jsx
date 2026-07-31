@@ -150,6 +150,8 @@ const ErrorBox = ({ msg, onRetry }) => (
 /* ===================================================================== */
 const PanelStyles = () => (
     <style>{`.qm-scroll{scrollbar-width:thin;scrollbar-color:#c7c9e0 transparent}.qm-scroll::-webkit-scrollbar{height:6px;width:6px}.qm-scroll::-webkit-scrollbar-thumb{background:#c7c9e0;border-radius:9999px}
+/* One font for the whole page — font-mono falls back to different fonts per machine, making this page look unlike the rest of the app */
+.msm-font,.msm-font *{font-family:'Inter','Segoe UI',Arial,sans-serif !important}
 .msm-modal input::placeholder{font-size:10.5px;font-style:italic;color:#8f96a3;font-family:inherit}
 .kit-wrap{display:grid;grid-template-rows:0fr;transition:grid-template-rows .32s cubic-bezier(.4,0,.2,1)}
 .kit-wrap.kit-open{grid-template-rows:1fr}
@@ -188,10 +190,10 @@ const MaintenanceScheduleMaster = ({ onBack, initialTab, initialTabNonce, embedd
     // Embedded mode: the host page (Activity Reports) provides the header and
     // the tab bar — render only the active panel (plus the shared styles the
     // modal / tables depend on).
-    if (embedded) return (<><PanelStyles />{body}</>);
+    if (embedded) return (<div className="msm-font"><PanelStyles />{body}</div>);
 
     return (
-        <div className="min-h-screen">
+        <div className="msm-font min-h-screen">
             <PanelStyles />
             <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10 max-md:px-2">
                 {/* Intro */}
@@ -520,7 +522,7 @@ const MasterData = ({ onMasterChanged }) => {
                     <div ref={topScrollRef} onScroll={mirrorScroll(topScrollRef, sheetScrollRef)} className="overflow-x-auto overflow-y-hidden qm-scroll border-b border-gray-100">
                         <div style={{ width: sheetW }} className="h-px" />
                     </div>
-                    <div ref={sheetScrollRef} onScroll={mirrorScroll(sheetScrollRef, topScrollRef)} className="overflow-auto qm-scroll max-h-[70vh]">
+                    <div ref={sheetScrollRef} onScroll={mirrorScroll(sheetScrollRef, topScrollRef)} className="overflow-auto qm-scroll max-h-[82vh]">
                         <table className="master-sheet-table min-w-[1660px] w-full text-[12px]">
                             <thead className="sticky top-0 z-10">
                                 {/* Two-tier header: "Qty" and "Action" appear under both Part
@@ -1090,7 +1092,7 @@ const AppMapping = ({ onMasterChanged }) => {
                 </div>
                 <div className="min-w-0">
                     <div className="text-[10px] font-bold uppercase tracking-wider text-gray-600 truncate">{label}</div>
-                    <div className="text-[17px] font-extrabold leading-tight" style={{ color }}>{value}</div>
+                    <div className="text-[17px] font-extrabold leading-tight text-black">{value}</div>
                 </div>
             </button>
         );
@@ -1157,7 +1159,7 @@ const AppMapping = ({ onMasterChanged }) => {
                     <div ref={topScrollRef} onScroll={mirrorScroll(topScrollRef, bodyScrollRef)} className="overflow-x-auto overflow-y-hidden qm-scroll border-b border-gray-100">
                         <div style={{ width: tableW }} className="h-px" />
                     </div>
-                    <div ref={bodyScrollRef} onScroll={mirrorScroll(bodyScrollRef, topScrollRef)} className="overflow-auto qm-scroll max-h-[62vh]">
+                    <div ref={bodyScrollRef} onScroll={mirrorScroll(bodyScrollRef, topScrollRef)} className="overflow-auto qm-scroll max-h-[74vh]">
                         <table className="min-w-[980px] w-full border-collapse text-[12px]">
                             <thead className="sticky top-0 z-10">
                                 <tr className="bg-gray-50 text-[10px] sm:text-[11px] font-semibold text-black uppercase tracking-wider">
@@ -1375,7 +1377,9 @@ const recordToModel = (rec) => ({
         __id: `k${i}`,
         number: k.kitNumber || '', desc: k.kitDesc || '',
         qty: String(k.qty ?? ''), action: k.action || '', hours: String(k.serviceHours ?? ''),
-        parts: (k.parts || []).map((p, j) => asLine(`k${i}p${j}`, p)),
+        // `loose` marks a line copied/typed into the kit AFTER it was built — the
+        // kit's built-in members stay false and are not listed in the edit form.
+        parts: (k.parts || []).map((p, j) => ({ ...asLine(`k${i}p${j}`, p), loose: !!p.loose })),
     })),
 });
 
@@ -1392,6 +1396,7 @@ const modelToPayload = (parts, kits) => ({
         parts: k.parts.map((p) => ({
             partNumber: p.partNumber.trim(), partDesc: p.partDesc.trim(), qty: String(p.qty).trim(),
             action: p.action.trim(), serviceHours: String(p.serviceHours || '').trim(),
+            loose: !!p.loose,
         })),
     })),
 });
@@ -1439,21 +1444,24 @@ const kitComplete = (k) =>
    These part lines are the kit's copies. Editing one, adding a new one or
    deleting one changes only this kit — never the application code's service
    parts, and never another kit that happens to hold the same part number. */
-const KitBox = ({ k, index, opts, loose = [], onAddParts, onSet, onSetPart, onAddPart, onDeletePart, onRemove, onDone, doneLabel = 'OK' }) => {
+const KitBox = ({ k, index, opts, loose = [], onAddParts, onSet, onSetPart, onDeletePart, onRemove, onDone, doneLabel = 'OK' }) => {
     const ready = kitComplete(k);
-    // "Do you want to add loose parts in this kit?" — 'ask' -> 'pick' -> 'idle'.
+    // The kit's built-in members (copied when it was built) are NOT listed —
+    // they come with the kit. Only its loose additions are shown and editable.
+    const members = k.parts.filter((p) => !p.loose);
+    const looseIn = k.parts.filter((p) => p.loose);
     // `loose` is THIS kit's own list: the service parts it does not hold. What
     // any other kit holds is irrelevant — kits are independent — so a part can
     // be loose for one kit and inside another at the same time. Removing a part
-    // from this kit puts it straight back in this list.
-    const [looseStep, setLooseStep] = useState('ask');
+    // from this kit puts it straight back in this list. Tick rows in the
+    // always-visible list, then answer the question at the bottom to add them.
     const [pick, setPick] = useState({});
     const picked = loose.filter((p) => pick[p.__uid]);
     const allPicked = loose.length > 0 && loose.every((p) => pick[p.__uid]);
     const addPicked = () => {
         if (!picked.length) return;
         onAddParts(picked.map((p) => p.__uid));
-        setPick({}); setLooseStep('idle');
+        setPick({});
     };
     return (
         <div className={`${CARD} mb-2.5 overflow-hidden border-l-[3px]`} style={{ borderLeftColor: themeColor }}>
@@ -1463,7 +1471,13 @@ const KitBox = ({ k, index, opts, loose = [], onAddParts, onSet, onSetPart, onAd
                     style={{ backgroundColor: themeColor }}>
                     Kit {index + 1}
                 </span>
-                <span className={PILL}>{k.parts.length} part line{k.parts.length === 1 ? '' : 's'}</span>
+                <span className={PILL}>{members.length} part line{members.length === 1 ? '' : 's'} in kit</span>
+                {/* Every loose part this kit can see — the added copies plus the
+                    ones still tickable below — so the pill matches the list. */}
+                <span className={PILL}>{looseIn.length + loose.length} loose</span>
+                {looseIn.length > 0 && (
+                    <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-700">{looseIn.length} added</span>
+                )}
                 {ready ? (
                     <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
                         <CheckCircleIcon className="h-3 w-3" /> Complete
@@ -1505,78 +1519,100 @@ const KitBox = ({ k, index, opts, loose = [], onAddParts, onSet, onSetPart, onAd
                     </div>
                 </div>
 
-                {/* The kit's own part lines — fully editable and extendable here */}
+                {/* ---- Loose parts — ONE always-visible list -------------------
+                    First the loose parts already added to this kit (editable, with
+                    a remove), then every service part this kit does not hold, each
+                    with a tick. The question at the bottom copies the ticked ones
+                    in. The kit's built-in members are not listed — they come with
+                    the kit. */}
                 <div className="mt-3 mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                    <span className="text-[9.5px] font-bold uppercase tracking-wider text-gray-500">Parts in this kit</span>
-                    <span className="text-[10.5px] text-gray-400">this kit's own copies — editing them does not touch the service parts above</span>
+                    <span className="text-[9.5px] font-bold uppercase tracking-wider text-gray-500">Loose parts</span>
                 </div>
                 <div className={TABLE_WRAP}>
-                    <table className="min-w-[720px] w-full border-collapse">
+                    <table className="min-w-[760px] w-full border-collapse text-[12px]">
                         <thead>
                             <tr className={THEAD}>
-                                <th className={`${TH} w-44`}>Part Number {REQ}</th>
-                                <th className={TH}>Description {REQ}</th>
-                                <th className={`${TH} w-16 text-center`}>Qty {REQ}</th>
-                                <th className={`${TH} w-20 text-center`}>Action {REQ}</th>
-                                <th className={`${TH} w-24 text-center`}>Svc Hrs {REQ}</th>
+                                <th className="px-2.5 py-2 text-center w-9">
+                                    {loose.length > 0 && (
+                                        <span onClick={() => setPick(allPicked ? {} : Object.fromEntries(loose.map((p) => [p.__uid, true])))}
+                                            title="Select all / none"
+                                            className="inline-flex h-[15px] w-[15px] cursor-pointer items-center justify-center rounded border border-gray-300 bg-white align-middle">
+                                            {allPicked && <CheckIcon className="h-2.5 w-2.5" style={{ color: themeColor }} />}
+                                        </span>
+                                    )}
+                                </th>
+                                <th className={`${TH} w-44`}>Part Number</th>
+                                <th className={TH}>Description</th>
+                                <th className={`${TH} w-16 text-center`}>Qty</th>
+                                <th className={`${TH} w-20 text-center`}>Action</th>
+                                <th className={`${TH} w-24 text-center`}>Svc Hrs</th>
                                 <th className="w-10" />
                             </tr>
                         </thead>
                         <tbody>
-                            {k.parts.map((p) => (
-                                <tr key={p.__uid} className={TR}>
+                            {/* Already added to this kit — the kit's own editable copies */}
+                            {looseIn.map((p) => (
+                                <tr key={p.__uid} className="border-t border-gray-100 bg-emerald-50/40">
+                                    <td className="px-2.5 py-1.5 text-center" title="Added in this kit">
+                                        <CheckCircleIcon className="inline h-4 w-4 text-emerald-500" />
+                                    </td>
                                     <td className="px-1.5 py-1"><input className={`${INP} font-mono`} value={p.partNumber} onChange={(e) => onSetPart(p.__uid, 'partNumber', e.target.value)} /></td>
                                     <td className="px-1.5 py-1"><input className={INP} value={p.partDesc} onChange={(e) => onSetPart(p.__uid, 'partDesc', e.target.value)} /></td>
                                     <td className="px-1.5 py-1"><input className={`${INP} font-mono text-center`} value={p.qty} onChange={(e) => onSetPart(p.__uid, 'qty', e.target.value)} /></td>
                                     <td className="px-1.5 py-1"><Combo value={p.action} onChange={(v) => onSetPart(p.__uid, 'action', v)} options={opts.actOpts} mono fieldCls={INP} /></td>
                                     <td className="px-1.5 py-1"><Combo value={p.serviceHours} onChange={(v) => onSetPart(p.__uid, 'serviceHours', v)} options={opts.hrsOpts} mono fieldCls={INP} /></td>
                                     <td className="px-1.5 py-1 text-center">
-                                        <button type="button" onClick={() => onDeletePart(p.__uid)} title="Remove this part from the kit — a part that came from the service list goes back to the loose parts"
+                                        <button type="button" onClick={() => onDeletePart(p.__uid)} title="Remove this loose part from the kit — it goes back to the loose list below"
                                             className={BTN_ICON}>
                                             <TrashIcon className="h-3.5 w-3.5" />
                                         </button>
                                     </td>
                                 </tr>
                             ))}
-                            {k.parts.length === 0 && (
-                                <tr><td colSpan={6} className="text-center text-gray-400 py-4 text-[12px]">No parts in this kit yet — add a line.</td></tr>
+                            {/* Still loose for this kit — tick to add */}
+                            {loose.map((p) => {
+                                const on = !!pick[p.__uid];
+                                return (
+                                    <tr key={p.__uid} onClick={() => setPick((c) => ({ ...c, [p.__uid]: !c[p.__uid] }))}
+                                        className={`border-t border-gray-100 cursor-pointer transition ${on ? 'bg-indigo-50/70' : 'hover:bg-slate-50/70'}`}>
+                                        <td className="px-2.5 py-1.5 text-center">
+                                            <span className={`inline-flex h-[15px] w-[15px] items-center justify-center rounded border align-middle transition ${on ? 'bg-[#2f3192] border-[#2f3192]' : 'border-gray-300 bg-white'}`}>
+                                                {on && <CheckIcon className="h-2.5 w-2.5 text-white" />}
+                                            </span>
+                                        </td>
+                                        <td className="px-2.5 py-1.5 font-mono text-gray-800 whitespace-nowrap">{p.partNumber || '—'}</td>
+                                        <td className="px-2.5 py-1.5 text-gray-600">{p.partDesc || '—'}</td>
+                                        <td className="px-2.5 py-1.5 text-center text-gray-700">{p.qty || '—'}</td>
+                                        <td className="px-2.5 py-1.5 text-center"><Chip a={p.action} /></td>
+                                        <td className="px-2.5 py-1.5 text-center font-mono text-gray-700">{p.serviceHours || '—'}</td>
+                                        <td />
+                                    </tr>
+                                );
+                            })}
+                            {looseIn.length === 0 && loose.length === 0 && (
+                                <tr><td colSpan={7} className="text-center text-gray-400 py-4 text-[12px]">
+                                    Nothing loose for this kit — it already holds every service part.
+                                </td></tr>
                             )}
                         </tbody>
                     </table>
                 </div>
 
-            {/* ---- Loose parts -> this kit ----------------------------------
-                Loose is scoped to THIS kit: the service parts it does not hold,
-                matched by part number. Removing a part from the kit above puts
-                it straight back in this list; a part number typed by hand into
-                the kit counts as held, so it never shows up as loose here.
-                Order: "Add part to this kit" first, the loose-parts question (or,
-                once answered, its button) right beside it, then the picker when
-                it is open. */}
+            {/* ---- Last: the loose-parts question + the kit's Done ----------
+                Tick rows in the list above, then confirm here — "Add parts in
+                kit" copies the ticked loose parts into this kit. */}
                 <div className="flex flex-wrap items-center gap-2 mt-2.5">
-                    <button type="button" onClick={onAddPart} className={BTN_GHOST}>
-                        <PlusIcon className="h-3.5 w-3.5" /> Add part to this kit
-                    </button>
-                    {onAddParts && loose.length > 0 && looseStep === 'ask' && (
-                        <span className="inline-flex h-8 flex-wrap items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50/50 pl-3 pr-1.5">
-                            <span className="text-[12px] font-semibold text-gray-800">Do you want to add loose parts in this kit?</span>
-                            <span className="rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-bold text-gray-500">{loose.length} not in Kit {index + 1}</span>
-                            <button type="button" onClick={() => { setPick({}); setLooseStep('pick'); }}
-                                className="h-6 rounded-md px-2.5 text-[11.5px] font-semibold text-white transition hover:opacity-90" style={{ backgroundColor: themeColor }}>
-                                Yes
-                            </button>
-                            <button type="button" onClick={() => setLooseStep('idle')}
-                                className="h-6 rounded-md border border-gray-300 bg-white px-2.5 text-[11.5px] font-semibold text-gray-700 transition hover:bg-gray-50">
-                                No
+                    {onAddParts && loose.length > 0 && (
+                        <span className={PROMPT}>
+                            <span className="text-[12px] font-semibold text-gray-800">Do you want to add this loose part in this kit?</span>
+                            <span className="rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-bold text-gray-500">{picked.length} of {loose.length} selected</span>
+                            <button type="button" disabled={!picked.length} onClick={addPicked}
+                                title={picked.length ? `Copy the ${picked.length} ticked loose part${picked.length === 1 ? '' : 's'} into Kit ${index + 1}` : 'Tick a loose part in the list above first'}
+                                className="inline-flex h-7 items-center justify-center gap-1.5 rounded-lg px-3 text-[11.5px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                                style={{ backgroundColor: themeColor }}>
+                                <PlusIcon className="h-3.5 w-3.5" /> Add parts in kit
                             </button>
                         </span>
-                    )}
-                    {onAddParts && loose.length > 0 && looseStep === 'idle' && (
-                        <button type="button" onClick={() => { setPick({}); setLooseStep('pick'); }}
-                            title={`${loose.length} service part${loose.length === 1 ? '' : 's'} not in this kit`}
-                            className={BTN_DASHED}>
-                            <PlusIcon className="h-3.5 w-3.5" /> Add loose parts to this kit ({loose.length})
-                        </button>
                     )}
                     {onDone && (
                         <button type="button" disabled={!ready}
@@ -1587,72 +1623,6 @@ const KitBox = ({ k, index, opts, loose = [], onAddParts, onSet, onSetPart, onAd
                         </button>
                     )}
                 </div>
-
-                {onAddParts && looseStep === 'pick' && (
-                    <div className="mt-2.5 rounded-lg border border-indigo-200 bg-indigo-50/40 p-2.5">
-                        <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: themeColor }}>Loose parts for Kit {index + 1}</span>
-                            <span className="text-[10.5px] text-gray-500">the service parts this kit does not hold — tick to copy them in; what another kit holds makes no difference</span>
-                        </div>
-                        <div className={`${TABLE_WRAP} bg-white`}>
-                            <table className="min-w-[640px] w-full border-collapse text-[12px]">
-                                <thead>
-                                    <tr className={THEAD}>
-                                        <th className="px-2.5 py-2 text-center w-9">
-                                            <span onClick={() => setPick(allPicked ? {} : Object.fromEntries(loose.map((p) => [p.__uid, true])))}
-                                                title="Select all / none"
-                                                className="inline-flex h-[15px] w-[15px] cursor-pointer items-center justify-center rounded border border-gray-300 bg-white align-middle">
-                                                {allPicked && <CheckIcon className="h-2.5 w-2.5" style={{ color: themeColor }} />}
-                                            </span>
-                                        </th>
-                                        <th className={`${TH} w-44`}>Part Number</th>
-                                        <th className={TH}>Description</th>
-                                        <th className={`${TH} w-14 text-center`}>Qty</th>
-                                        <th className={`${TH} w-16 text-center`}>Action</th>
-                                        <th className={`${TH} w-20 text-center`}>Svc Hrs</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {loose.map((p) => {
-                                        const on = !!pick[p.__uid];
-                                        return (
-                                            <tr key={p.__uid} onClick={() => setPick((c) => ({ ...c, [p.__uid]: !c[p.__uid] }))}
-                                                className={`border-t border-gray-100 cursor-pointer transition ${on ? 'bg-indigo-50/70' : 'hover:bg-slate-50/70'}`}>
-                                                <td className="px-2.5 py-1.5 text-center">
-                                                    <span className={`inline-flex h-[15px] w-[15px] items-center justify-center rounded border align-middle transition ${on ? 'bg-[#2f3192] border-[#2f3192]' : 'border-gray-300 bg-white'}`}>
-                                                        {on && <CheckIcon className="h-2.5 w-2.5 text-white" />}
-                                                    </span>
-                                                </td>
-                                                <td className="px-2.5 py-1.5 font-mono font-semibold text-gray-800 whitespace-nowrap">{p.partNumber || '—'}</td>
-                                                <td className="px-2.5 py-1.5 text-gray-600">{p.partDesc || '—'}</td>
-                                                <td className="px-2.5 py-1.5 text-center text-gray-700">{p.qty || '—'}</td>
-                                                <td className="px-2.5 py-1.5 text-center"><Chip a={p.action} /></td>
-                                                <td className="px-2.5 py-1.5 text-center font-mono text-gray-700">{p.serviceHours || '—'}</td>
-                                            </tr>
-                                        );
-                                    })}
-                                    {loose.length === 0 && (
-                                        <tr><td colSpan={6} className="text-center text-gray-400 py-4 text-[12px]">
-                                            Nothing loose for this kit — it already holds every service part.
-                                        </td></tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                        <div className="flex items-center gap-2 mt-2">
-                            <span className="text-[11px] font-semibold text-gray-600">{picked.length} selected</span>
-                            <div className="ml-auto flex items-center gap-2">
-                                <button type="button" onClick={() => { setPick({}); setLooseStep('idle'); }} className={BTN_GHOST}>
-                                    Cancel
-                                </button>
-                                <button type="button" disabled={!picked.length} onClick={addPicked}
-                                    className={BTN_PRIMARY} style={{ backgroundColor: themeColor }}>
-                                    <PlusIcon className="h-3.5 w-3.5" /> Add to this kit
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
             </div>
         </div>
     );
@@ -2019,10 +1989,6 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
             ? { ...k, parts: k.parts.map((p) => (p.__uid === uid ? { ...p, [key]: v } : p)) }
             : k)),
     }));
-    const addKitPart = (kitId) => setModel((m) => ({
-        ...m,
-        kits: m.kits.map((k) => (k.__id === kitId ? { ...k, parts: [...k.parts, blankPart(nextUid())] } : k)),
-    }));
     const deleteKitPart = (kitId, uid) => setModel((m) => ({
         ...m,
         kits: m.kits.map((k) => (k.__id === kitId ? { ...k, parts: k.parts.filter((p) => p.__uid !== uid) } : k)),
@@ -2032,7 +1998,7 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
     // they simply stop counting as loose while a kit holds that part number.
     const addLooseToKit = (kitId, uids) => setModel((m) => {
         const take = new Set(uids);
-        const copies = m.parts.filter((p) => take.has(p.__uid)).map((p) => ({ ...p, __uid: nextUid() }));
+        const copies = m.parts.filter((p) => take.has(p.__uid)).map((p) => ({ ...p, __uid: nextUid(), loose: true }));
         if (!copies.length) return m;
         return { ...m, kits: m.kits.map((k) => (k.__id === kitId ? { ...k, parts: [...k.parts, ...copies] } : k)) };
     });
@@ -2432,7 +2398,7 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
                             <>
                                 <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                                     <span className="text-[13px] font-bold text-gray-900">Please add kit details</span>
-                                    <span className="text-[10.5px] text-gray-500">and check the part lines copied into this kit</span>
+                                    <span className="text-[10.5px] text-gray-500">the ticked parts are stored on the kit — only its loose additions are listed below</span>
                                 </div>
                                 <KitBox
                                     k={kits[ki]} index={ki} opts={opts}
@@ -2440,7 +2406,6 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
                                     onAddParts={(uids) => addLooseToKit(currentKitId, uids)}
                                     onSet={(key, v) => setKit(currentKitId, key, v)}
                                     onSetPart={(uid, key, v) => setKitPart(currentKitId, uid, key, v)}
-                                    onAddPart={() => addKitPart(currentKitId)}
                                     onDeletePart={(uid) => deleteKitPart(currentKitId, uid)}
                                     onRemove={() => { removeKit(currentKitId); setCurrentKitId(null); setKitStep('ask'); }}
                                     onDone={() => { setCurrentKitId(null); setKitStep('ask'); }}
@@ -2474,7 +2439,6 @@ const AppFormModal = ({ initial, prefill, initialHours = '', opts, existing, rem
                                 onAddParts={(uids) => addLooseToKit(k.__id, uids)}
                                 onSet={(key, v) => setKit(k.__id, key, v)}
                                 onSetPart={(uid, key, v) => setKitPart(k.__id, uid, key, v)}
-                                onAddPart={() => addKitPart(k.__id)}
                                 onDeletePart={(uid) => deleteKitPart(k.__id, uid)}
                                 onRemove={() => removeKit(k.__id)}
                             />

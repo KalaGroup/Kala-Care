@@ -13,7 +13,7 @@ import io
 import json
 import math
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 from sqlalchemy.orm import Session
@@ -58,15 +58,16 @@ def _tight(name) -> str:
 # canonical field -> accepted header skeletons (first match wins)
 CANON_HEADERS = {
     "zone_name": ["ZONENAME", "ZONE"],
-    "soid": ["SOID"],
-    "sd_name": ["SDNAME"],
+    "soid": ["SOID", "SDID", "SONO", "SONUMBER", "SOI"],
+    "sd_name": ["SDNAME", "SD", "DEALERNAME"],
     "branch_id": ["BRANCHID", "BRANCHCODE", "BRANCH"],
     "branch_name": ["BRANCHNAME"],
     "claim_invoice_no": ["CLAIMINVOICENO", "CLAIMINVOICENUMBER", "INVOICENO", "INVOICENUMBER"],
     "claim_invoice_date": ["CLAIMINVOICEDATE", "INVOICEDATE"],
-    "product_segment": ["PRODUCTSEGMENT"],
-    "segment": ["SEGMENT"],
-    "sr_type": ["SERVICEREPORTTYPE", "SRTYPE", "SERVICETYPE", "REPORTTYPE"],
+    "product_segment": ["PRODUCTSEGMENT", "PRODSEGMENT", "PRODUCTSEG"],
+    "segment": ["SEGMENT", "SEGMENTNAME", "CUSTOMERSEGMENT"],
+    "sr_type": ["SERVICEREPORTTYPE", "CLAIMINVOICESRTYPE", "SRTYPE", "SERVICETYPE",
+                "REPORTTYPE", "SERVICEREPORT", "TYPEOFSERVICE", "CLAIMTYPE", "SRREPORTTYPE"],
     "net_taxable_amount": ["NETTAXABLEAMOUNT", "NETTAXABLEAMT", "NETTAXABLEVALUE",
                            "NETAMOUNT", "TAXABLEAMOUNT", "TAXABLEVALUE"],
 }
@@ -177,12 +178,32 @@ def validate_file(contents: bytes, filename: str):
     }
 
 
-def import_file(db: Session, contents: bytes, filename: str, record_type: str, user_id: str):
-    """Parse the file and insert only never-seen-before rows.
+# Fields compared to decide whether a re-uploaded invoice actually changed.
+_UPSERT_FIELDS = [
+    "zone_name", "soid", "sd_name", "branch_id", "branch_name",
+    "claim_invoice_date", "product_segment", "segment", "sr_type",
+    "net_taxable_amount", "extra_data",
+]
 
-    Dedupe key = hash of (record_type + identifying fields). Rows already in
-    the DB — or repeated inside the same file — are counted as duplicates and
-    skipped, so re-uploading an overlapping extract is always safe.
+
+# Line-level discriminator inside one invoice, per file type. The Part Sale
+# file has one row PER PART LINE of an invoice (CLAIM INVOICE NUMBER repeats;
+# invoice+PART NUMBER is unique). The Labour file is one row per invoice
+# (SR NUMBER as a safety discriminator).
+_LINE_KEY_HEADERS = {
+    "part": ["PARTNUMBER", "PARTNO"],
+    "labour": ["SRNUMBER", "SRNO"],
+}
+
+
+def import_file(db: Session, contents: bytes, filename: str, record_type: str, user_id: str):
+    """Parse the file and upsert rows keyed on CLAIM INVOICE NO + line key.
+
+    Identity = invoice number + the line discriminator (PART NUMBER for the
+    Part Sale file, SR NUMBER for Labour). A new line is inserted, a
+    re-uploaded line with changed values UPDATES the stored row (latest
+    upload wins), and an identical re-upload counts as a duplicate and is
+    skipped. Rows without an invoice number fall back to a full-content hash.
     """
     if record_type not in ("part", "labour"):
         return {"success": False, "message": "record_type must be 'part' or 'labour'"}
@@ -205,9 +226,14 @@ def import_file(db: Session, contents: bytes, filename: str, record_type: str, u
     db.add(batch)
     db.flush()
 
-    inserted = duplicates = skipped = 0
-    seen_keys = set()
-    pending = []
+    # Resolve the line-key column (PART NUMBER / SR NUMBER) if the file has one.
+    tight_cols = {_tight(c): c for c in df.columns if pd.notna(c)}
+    line_col = next((tight_cols[k] for k in _LINE_KEY_HEADERS.get(record_type, [])
+                     if k in tight_cols), None)
+
+    inserted = updated = duplicates = skipped = 0
+    by_line = {}        # (inv_no, line_key) -> parsed field dict (last in file wins)
+    no_invoice = []     # rows without an invoice number -> content-hash dedupe
 
     for _, row in df.iterrows():
         get = lambda f: row[mapping[f]] if f in mapping else None
@@ -219,72 +245,110 @@ def import_file(db: Session, contents: bytes, filename: str, record_type: str, u
             skipped += 1
             continue
 
-        inv_no = _clean_str(get("claim_invoice_no"), 100) or ""
-        sr_type = _clean_str(get("sr_type"), 120) or ""
-        segment = _clean_str(get("segment"), 100) or ""
-
-        raw = "|".join([record_type, branch_id, inv_no, inv_date.isoformat(),
-                        f"{amount:.2f}", sr_type, segment])
-        key = hashlib.sha256(raw.encode("utf-8")).hexdigest()
-        if key in seen_keys:
-            duplicates += 1
-            continue
-        seen_keys.add(key)
-
         extra = {}
         for c in unmapped:
             v = row[c]
             if pd.notna(v) and str(v).strip() != "":
                 extra[str(c)] = str(v)
 
-        pending.append(PmsSalesRecord(
-            record_type=record_type,
-            zone_name=_clean_str(get("zone_name"), 80),
-            soid=_clean_str(get("soid"), 80),
-            sd_name=_clean_str(get("sd_name"), 150),
-            branch_id=branch_id,
-            branch_name=_clean_str(get("branch_name"), 150),
-            claim_invoice_no=inv_no or None,
-            claim_invoice_date=inv_date,
-            product_segment=_clean_str(get("product_segment"), 100),
-            segment=segment or None,
-            sr_type=sr_type or None,
-            net_taxable_amount=amount,
-            extra_data=json.dumps(extra, ensure_ascii=False) if extra else None,
-            dedupe_key=key,
-            batch_id=batch.id,
-        ))
+        inv_no = _clean_str(get("claim_invoice_no"), 100)
+        fields = {
+            "zone_name": _clean_str(get("zone_name"), 80),
+            "soid": _clean_str(get("soid"), 80),
+            "sd_name": _clean_str(get("sd_name"), 150),
+            "branch_id": branch_id,
+            "branch_name": _clean_str(get("branch_name"), 150),
+            "claim_invoice_date": inv_date,
+            "product_segment": _clean_str(get("product_segment"), 100),
+            "segment": _clean_str(get("segment"), 100),
+            "sr_type": _clean_str(get("sr_type"), 120),
+            "net_taxable_amount": amount,
+            "extra_data": json.dumps(extra, ensure_ascii=False) if extra else None,
+        }
 
-    # One IN-query per chunk finds which keys already exist in the DB.
-    existing = set()
-    keys = [r.dedupe_key for r in pending]
+        if inv_no:
+            line_key = (_clean_str(row[line_col], 120) or "") if line_col is not None else ""
+            if (inv_no, line_key) in by_line:
+                duplicates += 1        # repeated inside the same file — last wins
+            by_line[(inv_no, line_key)] = fields
+        else:
+            raw = "|".join([record_type, branch_id, "", inv_date.isoformat(),
+                            f"{amount:.2f}", fields["sr_type"] or "", fields["segment"] or ""])
+            key = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+            no_invoice.append((key, fields))
+
+    # ---- line-keyed upsert: the identity hash is deterministic, so existing
+    # rows are found by dedupe_key in chunks ----
+    id_of = {k: hashlib.sha256(f"{record_type}|inv|{k[0]}|{k[1]}".encode("utf-8")).hexdigest()
+             for k in by_line}
+    existing = {}
+    id_list = list(id_of.values())
+    for i in range(0, len(id_list), 800):
+        chunk = id_list[i:i + 800]
+        for rec in db.query(PmsSalesRecord).filter(
+                PmsSalesRecord.dedupe_key.in_(chunk)).all():
+            existing[rec.dedupe_key] = rec
+
+    for key_pair, fields in by_line.items():
+        identity = id_of[key_pair]
+        rec = existing.get(identity)
+        if rec is not None:
+            if all(getattr(rec, f) == fields[f] for f in _UPSERT_FIELDS):
+                duplicates += 1        # identical re-upload
+            else:
+                for f in _UPSERT_FIELDS:
+                    setattr(rec, f, fields[f])
+                rec.batch_id = batch.id
+                updated += 1           # same invoice line, newer values — latest wins
+        else:
+            db.add(PmsSalesRecord(record_type=record_type, claim_invoice_no=key_pair[0],
+                                  dedupe_key=identity, batch_id=batch.id, **fields))
+            inserted += 1
+
+    # ---- rows without an invoice number: content-hash dedupe (as before) ----
+    seen_keys = set()
+    keys = [k for k, _ in no_invoice]
+    existing_keys = set()
     for i in range(0, len(keys), 800):
         chunk = keys[i:i + 800]
         rows = db.query(PmsSalesRecord.dedupe_key).filter(
             PmsSalesRecord.dedupe_key.in_(chunk)).all()
-        existing.update(k for (k,) in rows)
+        existing_keys.update(k for (k,) in rows)
 
-    for rec in pending:
-        if rec.dedupe_key in existing:
+    for key, fields in no_invoice:
+        if key in existing_keys or key in seen_keys:
             duplicates += 1
-        else:
-            db.add(rec)
-            inserted += 1
+            continue
+        seen_keys.add(key)
+        db.add(PmsSalesRecord(record_type=record_type, claim_invoice_no=None,
+                              dedupe_key=key, batch_id=batch.id, **fields))
+        inserted += 1
 
     batch.inserted_rows = inserted
+    batch.updated_rows = updated
     batch.duplicate_rows = duplicates
     batch.skipped_rows = skipped
     db.commit()
 
     return {
         "success": True,
-        "message": f"{inserted} new rows stored, {duplicates} duplicates skipped",
+        "message": f"{inserted} new, {updated} updated, {duplicates} duplicates skipped",
         "batch_id": batch.id,
         "total_rows": batch.total_rows,
         "inserted": inserted,
+        "updated": updated,
         "duplicates": duplicates,
         "skipped": skipped,
     }
+
+
+def clear_all_data(db: Session):
+    """Wipe every uploaded sales row + upload batch (targets, SR map and
+    saved reports are kept). Used to re-import everything from scratch."""
+    rows = db.query(PmsSalesRecord).delete(synchronize_session=False)
+    batches = db.query(PmsUploadBatch).delete(synchronize_session=False)
+    db.commit()
+    return {"success": True, "deleted_rows": rows, "deleted_batches": batches}
 
 
 def list_batches(db: Session, limit: int = 50):
@@ -293,6 +357,7 @@ def list_batches(db: Session, limit: int = 50):
     return [{
         "id": b.id, "record_type": b.record_type, "file_name": b.file_name,
         "total_rows": b.total_rows, "inserted_rows": b.inserted_rows,
+        "updated_rows": b.updated_rows or 0,
         "duplicate_rows": b.duplicate_rows, "skipped_rows": b.skipped_rows,
         "uploaded_by": b.uploaded_by,
         "uploaded_at": b.uploaded_at.isoformat() if b.uploaded_at else None,
@@ -481,30 +546,60 @@ def _region_of(zone_name):
     return z or "Other"
 
 
-def generate_report(db: Session, as_on: date):
-    """The full report payload for the month of `as_on`, computed like the
-    customer's Excel pivot:
+def generate_report(db: Session, as_on: date, from_date: date = None):
+    """The full report payload for the period [from_date .. as_on].
 
-      Monthly Target      -> AOP Master (pms_branch_targets) for the month
-      Daily Target        -> Monthly Target / days in month
-      Achi. on <date>     -> Σ NET TAXABLE AMOUNT where invoice date == as_on
-      Target till <date>  -> Daily Target × day number
-      Achi. till <date>   -> Σ amount, month start .. as_on
-      Invoice Count till  -> distinct CLAIM INVOICE NO in that window
-      % Achieved till dt  -> Achi. till / Monthly Target × 100
+    Without from_date the period is month-to-date (classic view). Weekly /
+    quarterly / yearly periods just pass a wider window. Targets come from
+    the AOP Master rows of every month the period touches:
+
+      Target (period)     -> Σ full monthly targets of the touched months
+      Daily Target        -> Target / total days of those months
+      Target till <to>    -> Σ monthly target × (days of month inside period / days in month)
+      Achi. on <to>       -> Σ NET TAXABLE AMOUNT on the period's last day
+      Achi. till <to>     -> Σ amount inside the period
+      Invoice Count till  -> distinct CLAIM INVOICE NO in the period
+      % Achieved          -> Achi. till / Target × 100
     """
-    month_key = as_on.strftime("%Y-%m")
-    month_start = as_on.replace(day=1)
-    days_in_month = calendar.monthrange(as_on.year, as_on.month)[1]
-    day_n = as_on.day
+    to_date = as_on
+    if from_date is None:
+        from_date = to_date.replace(day=1)
+    if from_date > to_date:
+        from_date, to_date = to_date, from_date
 
-    targets = db.query(PmsBranchTarget).filter(
-        PmsBranchTarget.target_month == month_key).all()
-    target_by_branch = {t.branch_id: t for t in targets}
+    # Months the period overlaps: (month_key, days inside period, days in month)
+    months = []
+    cur = from_date.replace(day=1)
+    while cur <= to_date:
+        dim = calendar.monthrange(cur.year, cur.month)[1]
+        m_end = cur.replace(day=dim)
+        ov = (min(m_end, to_date) - max(cur, from_date)).days + 1
+        months.append((cur.strftime("%Y-%m"), ov, dim))
+        cur = m_end + timedelta(days=1)
+    ov_by_month = {k: (ov, dim) for k, ov, dim in months}
+    total_month_days = sum(dim for _, _, dim in months)
+
+    target_rows = db.query(PmsBranchTarget).filter(
+        PmsBranchTarget.target_month.in_(list(ov_by_month))).all()
+
+    # Per-branch target sums (full + prorated-till) and display info from the
+    # latest touched month's target row.
+    full_target, till_target, info_by_branch = {}, {}, {}
+    for t in target_rows:
+        ov, dim = ov_by_month[t.target_month]
+        f = full_target.setdefault(t.branch_id, {"part": 0.0, "labour": 0.0})
+        p = till_target.setdefault(t.branch_id, {"part": 0.0, "labour": 0.0})
+        f["part"] += t.spare_target or 0
+        f["labour"] += t.labour_target or 0
+        p["part"] += (t.spare_target or 0) * ov / dim
+        p["labour"] += (t.labour_target or 0) * ov / dim
+        prev = info_by_branch.get(t.branch_id)
+        if prev is None or t.target_month > prev.target_month:
+            info_by_branch[t.branch_id] = t
 
     records = (db.query(PmsSalesRecord)
-               .filter(PmsSalesRecord.claim_invoice_date >= month_start,
-                       PmsSalesRecord.claim_invoice_date <= as_on)
+               .filter(PmsSalesRecord.claim_invoice_date >= from_date,
+                       PmsSalesRecord.claim_invoice_date <= to_date)
                .all())
 
     # Built-in defaults first, then DB rows on top — so the report groups
@@ -527,7 +622,7 @@ def generate_report(db: Session, as_on: date):
     for r in records:
         rt = r.record_type
         b = r.branch_id or "UNKNOWN"
-        t = target_by_branch.get(b)
+        t = info_by_branch.get(b)
         region = (t.region if t and t.region else _region_of(r.zone_name))
 
         info = branch_info.setdefault(b, {"branch_name": None, "region": region})
@@ -539,7 +634,7 @@ def generate_report(db: Session, as_on: date):
         inv = (rt, r.claim_invoice_no or f"row-{r.id}")
         agg["achieved_till"] += amt
         agg["invoices"].add(inv)
-        if r.claim_invoice_date == as_on:
+        if r.claim_invoice_date == to_date:
             agg["achieved_on"] += amt
             agg["invoices_on"].add(inv)
 
@@ -561,13 +656,13 @@ def generate_report(db: Session, as_on: date):
     # ---- branch tables (one per record type, same shape as the mockup) ----
     def _branch_rows(rt):
         rows = []
-        branch_ids = set(target_by_branch) | set(branch_agg[rt])
+        branch_ids = set(full_target) | set(branch_agg[rt])
         for b in sorted(branch_ids):
-            t = target_by_branch.get(b)
+            t = info_by_branch.get(b)
             agg = branch_agg[rt].get(b) or _blank()
-            monthly = (t.spare_target if rt == "part" else t.labour_target) if t else 0.0
-            daily = monthly / days_in_month if monthly else 0.0
-            target_till = daily * day_n
+            period_target = (full_target.get(b) or {}).get(rt, 0.0)
+            daily = period_target / total_month_days if period_target else 0.0
+            target_till = (till_target.get(b) or {}).get(rt, 0.0)
             achieved_till = round(agg["achieved_till"], 2)
             info = branch_info.get(b, {})
             rows.append({
@@ -575,13 +670,13 @@ def generate_report(db: Session, as_on: date):
                 "branch_id": b,
                 "branch_name": (t.branch_name if t and t.branch_name else info.get("branch_name")) or b,
                 "region": (t.region if t and t.region else info.get("region")) or "Other",
-                "monthly_target": round(monthly, 2),
+                "monthly_target": round(period_target, 2),   # period target (key kept for compat)
                 "daily_target": round(daily, 2),
                 "achieved_on": round(agg["achieved_on"], 2),
                 "target_till": round(target_till, 2),
                 "achieved_till": achieved_till,
                 "invoice_count_till": len(agg["invoices"]),
-                "pct_achieved": round(achieved_till / monthly * 100, 1) if monthly else None,
+                "pct_achieved": round(achieved_till / period_target * 100, 1) if period_target else None,
             })
         return rows
 
@@ -590,8 +685,8 @@ def generate_report(db: Session, as_on: date):
 
     total_spare = round(sum(r["achieved_till"] for r in part_rows), 2)
     total_labour = round(sum(r["achieved_till"] for r in labour_rows), 2)
-    total_spare_target = round(sum(t.spare_target or 0 for t in targets), 2)
-    total_labour_target = round(sum(t.labour_target or 0 for t in targets), 2)
+    total_spare_target = round(sum(f["part"] for f in full_target.values()), 2)
+    total_labour_target = round(sum(f["labour"] for f in full_target.values()), 2)
     total_target = total_spare_target + total_labour_target
     total_invoices = len(set().union(*[a["invoices"] for a in branch_agg["part"].values()],
                                      *[a["invoices"] for a in branch_agg["labour"].values()])
@@ -605,10 +700,11 @@ def generate_report(db: Session, as_on: date):
 
     return {
         "success": True,
-        "as_on": as_on.isoformat(),
-        "month": month_key,
-        "days_in_month": days_in_month,
-        "day_number": day_n,
+        "as_on": to_date.isoformat(),
+        "from_date": from_date.isoformat(),
+        "month": to_date.strftime("%Y-%m"),
+        "days_in_month": total_month_days,
+        "day_number": (to_date - from_date).days + 1,
         "generated_at": datetime.now().isoformat(),
         "summary": {
             "total_spare_sale": total_spare,

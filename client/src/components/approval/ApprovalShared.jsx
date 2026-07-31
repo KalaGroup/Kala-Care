@@ -181,6 +181,14 @@ export function ApplicationsTable({ apps, type = 'discounting', onOpen, emptyTex
     // Drive-style data table: light grey header, subtle grid borders
     const th = 'px-3 py-2 border border-gray-200 bg-gray-50 text-gray-600 font-semibold text-center align-middle whitespace-nowrap';
     const td = 'px-3 py-2 border border-gray-200 text-center align-middle';
+    // Status column stays PINNED on the right while the table scrolls.
+    // Collapsed borders don't stick with the cell in Chrome, so the LEFT
+    // border line is drawn as an inset shadow (sticks with the cell),
+    // layered with the soft separator shadow; opaque bg hides the rows
+    // sliding underneath.
+    const stickyShadow = 'shadow-[inset_1px_0_0_#e5e7eb,-4px_0_6px_-4px_rgba(0,0,0,0.15)]';
+    const thSticky = `${th} sticky right-0 z-20 ${stickyShadow}`;
+    const tdSticky = `${td} sticky right-0 z-10 bg-white group-hover:bg-indigo-50 ${stickyShadow}`;
 
     const isExpense = type === 'expense';
 
@@ -204,7 +212,7 @@ export function ApplicationsTable({ apps, type = 'discounting', onOpen, emptyTex
                     ? <span className="inline-flex items-center gap-1 text-indigo-700"><Paperclip size={12} />{app.attachments.length}</span>
                     : '—'}
             </td>
-            <td className={td}><StatusBadge status={app.status} /></td>
+            <td className={tdSticky}><StatusBadge status={app.status} /></td>
         </>
     );
 
@@ -238,7 +246,7 @@ export function ApplicationsTable({ apps, type = 'discounting', onOpen, emptyTex
                                 <th className={th}>Purpose</th>
                                 <th className={th}>Created By</th>
                                 <th className={th}>Files</th>
-                                <th className={th}>Status</th>
+                                <th className={thSticky}>Status</th>
                             </tr>
                         </thead>
                     ) : (
@@ -261,7 +269,7 @@ export function ApplicationsTable({ apps, type = 'discounting', onOpen, emptyTex
                                 <th rowSpan={2} className={th}>Purpose</th>
                                 <th rowSpan={2} className={th}>Created By</th>
                                 <th rowSpan={2} className={th}>Files</th>
-                                <th rowSpan={2} className={th}>Status</th>
+                                <th rowSpan={2} className={thSticky}>Status</th>
                             </tr>
                             <tr className="text-[11px] uppercase tracking-wide">
                                 <th className={th}>Name</th>
@@ -276,7 +284,7 @@ export function ApplicationsTable({ apps, type = 'discounting', onOpen, emptyTex
                     )}
                     <tbody className="bg-white">
                         {visibleApps.map((app, index) => (
-                            <tr key={app.id} className="hover:bg-indigo-50/40 cursor-pointer" onClick={() => onOpen(app)}>
+                            <tr key={app.id} className="group hover:bg-indigo-50/40 cursor-pointer" onClick={() => onOpen(app)}>
                                 {commonLeft(app, index)}
                                 {isExpense ? (
                                     <>
