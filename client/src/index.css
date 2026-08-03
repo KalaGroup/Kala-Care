@@ -995,6 +995,24 @@ html.dark [style*="background-color: rgb(255, 251, 235)"] { background-color: rg
 /* Disabled "Save All Limits" style button (#aaa) — washed out on dark */
 html.dark [style*="background: rgb(170, 170, 170)"] { background: #39404e !important; }
 
+/* ============================================================
+   DARK THEME — pass 4: CSP Status / Open CSP Status modals
+   (MyPerformance) + overdue row highlights on CustomerEng pages.
+   ============================================================ */
+
+/* Overdue rows keep their bright orange-300/400 in dark mode, which
+   clashes with the light body text — swap for a dark orange tint that
+   still clearly flags "overdue" but keeps text readable. */
+html.dark .bg-orange-300 { background-color: rgba(249, 115, 22, 0.24) !important; }
+html.dark .hover\:bg-orange-300:hover { background-color: rgba(249, 115, 22, 0.32) !important; }
+html.dark .bg-orange-400 { background-color: rgba(249, 115, 22, 0.34) !important; }
+html.dark .hover\:bg-orange-400:hover { background-color: rgba(249, 115, 22, 0.34) !important; }
+
+/* Inline "N overdue" / "N left" day counters — brighten the raw
+   red/green so they read on dark rows. */
+html.dark [style*="color: rgb(220, 38, 38)"] { color: #f87171 !important; }
+html.dark [style*="color: rgb(22, 163, 74)"] { color: #4ade80 !important; }
+
 /* Correction — elements with a brand-blue inline BACKGROUND also match the
    inline text-color rule above (the attribute string contains "color:").
    Re-assert white text on them; this rule is last so it wins. */

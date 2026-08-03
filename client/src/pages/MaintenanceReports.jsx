@@ -127,11 +127,13 @@ const MaintenanceReports = () => {
     useEffect(() => { load(); }, [load]);
 
     return (
-        <div className="min-h-screen">
+        <div className="mr-font min-h-screen">
             <style>{`
                 .r-scroll { scrollbar-width: thin; scrollbar-color: #c7c9e0 transparent; }
                 .r-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
                 .r-scroll::-webkit-scrollbar-thumb { background: #c7c9e0; border-radius: 9999px; }
+                /* One font for the whole page — font-mono falls back to different fonts per machine, making these tables look unlike the rest of the app */
+                .mr-font, .mr-font * { font-family: 'Inter', 'Segoe UI', Arial, sans-serif !important; }
             `}</style>
 
             <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10 max-md:px-2">

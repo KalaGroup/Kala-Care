@@ -20,8 +20,27 @@ from sqlalchemy.orm import Session
 
 from app.models.pms_model import (
     PmsBranchTarget, PmsSrTypeMapping, PmsUploadBatch,
-    PmsSalesRecord, PmsReportHistory,
+    PmsSalesRecord, PmsReportHistory, PmsMonthSettings, PmsHead,
 )
+from app.models.user_model import User, UserRole, UserBranchAccess
+
+# ERP branches (same codes as the rest of the ERP) used to auto-prefill a
+# month's Target Master; responsible person = the branch's Branch Admin.
+ERP_BRANCHES = [
+    ("MH", "420435_1", "Ch.Sambhaji Nagar"),
+    ("MH", "420435_2", "Ahilyanagar"),
+    ("MH", "420435_3", "Beed"),
+    ("MH", "420435_4", "Nanded"),
+    ("MH", "420435_5", "Babhaleshwar"),
+    ("MH", "420435_6", "Latur"),
+    ("KA", "420435_8", "Hubli"),
+    ("KA", "420435_9", "Belagavi"),
+    ("KA", "420435_10", "Hospet"),
+    ("KA", "420435_11", "Ballari"),
+    ("KA", "420435_12", "Bagalkot"),
+    ("KA", "420435_13", "Gulbarga"),
+    ("KA", "420435_14", "Bijapur"),
+]
 
 # ---------------- SR TYPE -> HEAD DEFAULTS (given by business) -------------- #
 
@@ -380,26 +399,148 @@ def data_summary(db: Session):
     return out
 
 
-def preview_rows(db: Session, record_type: str, limit: int = 50):
-    rows = (db.query(PmsSalesRecord)
-            .filter(PmsSalesRecord.record_type == record_type)
-            .order_by(PmsSalesRecord.id.desc()).limit(limit).all())
-    return [{
-        "zone_name": r.zone_name, "soid": r.soid, "sd_name": r.sd_name,
-        "branch_id": r.branch_id, "branch_name": r.branch_name,
-        "claim_invoice_no": r.claim_invoice_no,
-        "claim_invoice_date": r.claim_invoice_date.isoformat() if r.claim_invoice_date else None,
-        "product_segment": r.product_segment, "segment": r.segment,
-        "sr_type": r.sr_type, "net_taxable_amount": r.net_taxable_amount,
-    } for r in rows]
+def preview_rows(db: Session, record_type: str, limit: int = 200, offset: int = 0,
+                 search: str = None):
+    """One page of stored rows (newest first) + the total count, so the
+    frontend can lazy-load the full dataset with infinite scroll.
+    `search` filters on CLAIM INVOICE NO (contains, case-insensitive)."""
+    q = (db.query(PmsSalesRecord)
+         .filter(PmsSalesRecord.record_type == record_type))
+    if search:
+        # Escape LIKE wildcards (SQL Server also treats [ as one) so the user's
+        # text is matched literally anywhere inside the invoice no.
+        safe = (search.strip().replace("\\", "\\\\").replace("%", "\\%")
+                .replace("_", "\\_").replace("[", "\\["))
+        q = q.filter(PmsSalesRecord.claim_invoice_no.ilike(f"%{safe}%", escape="\\"))
+    total = q.count()
+    rows = (q.order_by(PmsSalesRecord.id.desc())
+            .offset(offset).limit(limit).all())
+    return {
+        "total": total,
+        "items": [{
+            "zone_name": r.zone_name, "soid": r.soid, "sd_name": r.sd_name,
+            "branch_id": r.branch_id, "branch_name": r.branch_name,
+            "claim_invoice_no": r.claim_invoice_no,
+            "claim_invoice_date": r.claim_invoice_date.isoformat() if r.claim_invoice_date else None,
+            "product_segment": r.product_segment, "segment": r.segment,
+            "sr_type": r.sr_type, "net_taxable_amount": r.net_taxable_amount,
+        } for r in rows],
+    }
 
 
 # ---------------- AOP MASTER: BRANCH TARGETS -------------------------------- #
 
+def _count_workdays(start: date, end: date) -> int:
+    """Days in [start..end] excluding Sundays."""
+    n, cur = 0, start
+    while cur <= end:
+        if cur.weekday() != 6:
+            n += 1
+        cur += timedelta(days=1)
+    return n
+
+
+def _month_bounds(month: str):
+    y, m = map(int, month.split("-"))
+    return date(y, m, 1), date(y, m, calendar.monthrange(y, m)[1])
+
+
+def _branch_admins(db: Session):
+    """branch -> Branch Admin name. A branch admin with multi-branch access
+    (UserBranchAccess, granted from Profile) is the responsible person for
+    EVERY branch they can access, not just their primary one."""
+    admins = {}
+    branch_admins = (db.query(User)
+                     .filter(User.role == UserRole.BRANCH_ADMIN,
+                             User.is_deleted == False)  # noqa: E712
+                     .all())
+    for u in branch_admins:
+        admins.setdefault(_norm_branch_id(u.branch), u.name)
+    by_uid = {u.user_id: u.name for u in branch_admins}
+    if by_uid:
+        for acc in (db.query(UserBranchAccess)
+                    .filter(UserBranchAccess.user_id.in_(list(by_uid))).all()):
+            admins.setdefault(_norm_branch_id(acc.branch), by_uid[acc.user_id])
+    return admins
+
+
+def _profile_branches(db: Session):
+    """Every branch the ERP knows: the static list plus any branch that
+    appears on a user account in the Profile page (new branches show up here
+    automatically). HO is not a sales branch."""
+    branches = {b: {"region": r, "name": n} for r, b, n in ERP_BRANCHES}
+    for u in db.query(User).filter(User.is_deleted == False).all():  # noqa: E712
+        b = _norm_branch_id(u.branch)
+        if b and b != "HO" and b not in branches:
+            branches[b] = {"region": None, "name": u.branch_name}
+    for acc in db.query(UserBranchAccess).all():
+        b = _norm_branch_id(acc.branch)
+        if b and b != "HO" and b not in branches:
+            branches[b] = {"region": None, "name": acc.branch_name}
+    return branches
+
+
+def get_targets_payload(db: Session, month: str):
+    """The month's target rows + working-days setting, kept in sync with the
+    Profile page on EVERY load: branches added there appear as new rows, and
+    the responsible person always mirrors the current Branch Admin(s)."""
+    branches = _profile_branches(db)
+    admins = _branch_admins(db)
+    existing = {t.branch_id: t for t in
+                db.query(PmsBranchTarget).filter(PmsBranchTarget.target_month == month).all()}
+
+    changed = False
+    for b, info in branches.items():
+        t = existing.get(b)
+        admin = admins.get(b)
+        if t is None:
+            db.add(PmsBranchTarget(
+                target_month=month, branch_id=b, region=info["region"],
+                branch_name=info["name"], responsible_person=admin,
+                spare_target=0, labour_target=0, created_by="profile-sync",
+            ))
+            changed = True
+        else:
+            # Profile changes flow into the saved rows (targets untouched)
+            if admin and t.responsible_person != admin:
+                t.responsible_person = admin
+                changed = True
+            if info["name"] and t.branch_name != info["name"]:
+                t.branch_name = info["name"]
+                changed = True
+            # Region is user-editable — the sync only fills it when blank.
+            if info["region"] and not t.region:
+                t.region = info["region"]
+                changed = True
+    if changed:
+        db.commit()
+
+    items = list_targets(db, month)
+    prefill = False
+
+    m_start, m_end = _month_bounds(month)
+    default_wd = _count_workdays(m_start, m_end)
+    setting = (db.query(PmsMonthSettings)
+               .filter(PmsMonthSettings.target_month == month).first())
+    return {
+        "items": items,
+        "prefill": prefill,
+        "working_days": (setting.working_days if setting and setting.working_days else default_wd),
+        "default_working_days": default_wd,
+    }
+
+
+def _branch_sort_key(branch_id):
+    """Natural order — 420435_1, _2 … _10, _14 (string sort puts _10 before _8)."""
+    m = re.search(r"(\d+)$", branch_id or "")
+    return (int(m.group(1)) if m else 10 ** 9, branch_id or "")
+
+
 def list_targets(db: Session, month: str):
-    rows = (db.query(PmsBranchTarget)
-            .filter(PmsBranchTarget.target_month == month)
-            .order_by(PmsBranchTarget.region, PmsBranchTarget.branch_id).all())
+    rows = sorted(
+        db.query(PmsBranchTarget)
+        .filter(PmsBranchTarget.target_month == month).all(),
+        key=lambda t: _branch_sort_key(t.branch_id))
     return [{
         "id": t.id, "target_month": t.target_month, "region": t.region,
         "branch_id": t.branch_id, "branch_name": t.branch_name,
@@ -408,8 +549,21 @@ def list_targets(db: Session, month: str):
     } for t in rows]
 
 
-def save_targets(db: Session, month: str, rows: list, user_id: str):
-    """Upsert the month's target rows (matched on branch_id)."""
+def save_targets(db: Session, month: str, rows: list, user_id: str, working_days=None):
+    """Upsert the month's target rows (matched on branch_id) and, when given,
+    the month's working-days setting."""
+    if working_days is not None:
+        try:
+            wd = max(1, min(31, int(working_days)))
+            setting = (db.query(PmsMonthSettings)
+                       .filter(PmsMonthSettings.target_month == month).first())
+            if not setting:
+                setting = PmsMonthSettings(target_month=month)
+                db.add(setting)
+            setting.working_days = wd
+            setting.updated_by = user_id
+        except (ValueError, TypeError):
+            pass
     saved = 0
     for r in rows:
         branch_id = _norm_branch_id(r.get("branch_id"))
@@ -464,6 +618,42 @@ def copy_targets(db: Session, from_month: str, to_month: str, user_id: str):
 
 
 # ---------------- SR TYPE MASTER ------------------------------------------- #
+
+def list_heads(db: Session):
+    """Head master rows (seeded with the five default heads on first use)."""
+    if db.query(PmsHead).count() == 0:
+        for h in HEAD_CHOICES:
+            db.add(PmsHead(name=h, created_by="system"))
+        db.commit()
+    rows = db.query(PmsHead).order_by(PmsHead.id).all()
+    return [{"id": h.id, "name": h.name} for h in rows]
+
+
+def add_head(db: Session, name: str, user_id: str):
+    name = (_clean_str(name, 60) or "").strip()
+    if not name:
+        return {"success": False, "message": "Head name is required"}
+    exists = db.query(PmsHead).filter(PmsHead.name.ilike(name)).first()
+    if exists:
+        return {"success": False, "message": f"Head “{exists.name}” already exists"}
+    db.add(PmsHead(name=name, created_by=user_id))
+    db.commit()
+    return {"success": True, "items": list_heads(db)}
+
+
+def delete_head(db: Session, head_id: int):
+    row = db.query(PmsHead).filter(PmsHead.id == head_id).first()
+    if not row:
+        return {"success": False, "message": "Head not found"}
+    used = (db.query(PmsSrTypeMapping)
+            .filter(PmsSrTypeMapping.head == row.name).count())
+    if used:
+        return {"success": False,
+                "message": f"“{row.name}” is used by {used} SR type(s) — remap them first"}
+    db.delete(row)
+    db.commit()
+    return {"success": True, "items": list_heads(db)}
+
 
 def _seed_sr_defaults(db: Session):
     existing = {m.sr_type.lower() for m in db.query(PmsSrTypeMapping).all()}
@@ -567,17 +757,27 @@ def generate_report(db: Session, as_on: date, from_date: date = None):
     if from_date > to_date:
         from_date, to_date = to_date, from_date
 
-    # Months the period overlaps: (month_key, days inside period, days in month)
-    months = []
+    # Months the period overlaps. Targets spread over WORKING days (Sundays
+    # excluded; per-month count editable in the AOP Master).
+    month_info = {}
     cur = from_date.replace(day=1)
     while cur <= to_date:
         dim = calendar.monthrange(cur.year, cur.month)[1]
         m_end = cur.replace(day=dim)
-        ov = (min(m_end, to_date) - max(cur, from_date)).days + 1
-        months.append((cur.strftime("%Y-%m"), ov, dim))
+        ov_start, ov_end = max(cur, from_date), min(m_end, to_date)
+        month_info[cur.strftime("%Y-%m")] = {
+            "ov_work": _count_workdays(ov_start, ov_end),
+            "wd": _count_workdays(cur, m_end),   # default; overridden below
+        }
         cur = m_end + timedelta(days=1)
-    ov_by_month = {k: (ov, dim) for k, ov, dim in months}
-    total_month_days = sum(dim for _, _, dim in months)
+
+    for s in (db.query(PmsMonthSettings)
+              .filter(PmsMonthSettings.target_month.in_(list(month_info))).all()):
+        if s.working_days:
+            month_info[s.target_month]["wd"] = max(1, s.working_days)
+
+    ov_by_month = month_info
+    total_month_days = sum(info["wd"] for info in month_info.values())
 
     target_rows = db.query(PmsBranchTarget).filter(
         PmsBranchTarget.target_month.in_(list(ov_by_month))).all()
@@ -586,13 +786,14 @@ def generate_report(db: Session, as_on: date, from_date: date = None):
     # latest touched month's target row.
     full_target, till_target, info_by_branch = {}, {}, {}
     for t in target_rows:
-        ov, dim = ov_by_month[t.target_month]
+        info = ov_by_month[t.target_month]
+        ratio = min(info["ov_work"], info["wd"]) / info["wd"]
         f = full_target.setdefault(t.branch_id, {"part": 0.0, "labour": 0.0})
         p = till_target.setdefault(t.branch_id, {"part": 0.0, "labour": 0.0})
         f["part"] += t.spare_target or 0
         f["labour"] += t.labour_target or 0
-        p["part"] += (t.spare_target or 0) * ov / dim
-        p["labour"] += (t.labour_target or 0) * ov / dim
+        p["part"] += (t.spare_target or 0) * ratio
+        p["labour"] += (t.labour_target or 0) * ratio
         prev = info_by_branch.get(t.branch_id)
         if prev is None or t.target_month > prev.target_month:
             info_by_branch[t.branch_id] = t
@@ -657,7 +858,7 @@ def generate_report(db: Session, as_on: date, from_date: date = None):
     def _branch_rows(rt):
         rows = []
         branch_ids = set(full_target) | set(branch_agg[rt])
-        for b in sorted(branch_ids):
+        for b in sorted(branch_ids, key=_branch_sort_key):
             t = info_by_branch.get(b)
             agg = branch_agg[rt].get(b) or _blank()
             period_target = (full_target.get(b) or {}).get(rt, 0.0)
@@ -676,7 +877,13 @@ def generate_report(db: Session, as_on: date, from_date: date = None):
                 "target_till": round(target_till, 2),
                 "achieved_till": achieved_till,
                 "invoice_count_till": len(agg["invoices"]),
-                "pct_achieved": round(achieved_till / period_target * 100, 1) if period_target else None,
+                # Same formulas as the business's Result report:
+                #   % Achieved     = Achi. Till / Target Till
+                #   Short-Fall     = Target Till - Achi. Till   (negative = ahead)
+                #   Balance/Month  = Monthly Target - Achi. Till
+                "pct_achieved": round(achieved_till / target_till * 100, 1) if target_till else None,
+                "short_fall_till": round(target_till - achieved_till, 2),
+                "balance_month": round(period_target - achieved_till, 2),
             })
         return rows
 
@@ -735,14 +942,24 @@ def save_report(db: Session, as_on: date, title: str, payload: dict, user_id: st
     return {"success": True, "id": row.id}
 
 
+def _user_names(db: Session, user_ids):
+    ids = [u for u in set(user_ids) if u]
+    if not ids:
+        return {}
+    return {u.user_id: u.name for u in
+            db.query(User).filter(User.user_id.in_(ids)).all()}
+
+
 def list_reports(db: Session, limit: int = 100):
     rows = (db.query(PmsReportHistory.id, PmsReportHistory.as_on_date,
                      PmsReportHistory.title, PmsReportHistory.created_by,
                      PmsReportHistory.created_at)
             .order_by(PmsReportHistory.id.desc()).limit(limit).all())
+    names = _user_names(db, [r.created_by for r in rows])
     return [{
         "id": r.id, "as_on_date": r.as_on_date.isoformat(),
         "title": r.title, "created_by": r.created_by,
+        "created_by_name": names.get(r.created_by, r.created_by or "—"),
         "created_at": r.created_at.isoformat() if r.created_at else None,
     } for r in rows]
 
@@ -751,8 +968,11 @@ def get_report(db: Session, report_id: int):
     row = db.query(PmsReportHistory).filter(PmsReportHistory.id == report_id).first()
     if not row:
         return {"success": False, "message": "Report not found"}
+    names = _user_names(db, [row.created_by])
     return {"success": True, "id": row.id, "title": row.title,
             "as_on_date": row.as_on_date.isoformat(),
+            "created_by_name": names.get(row.created_by, row.created_by or "—"),
+            "created_at": row.created_at.isoformat() if row.created_at else None,
             "payload": json.loads(row.payload)}
 
 

@@ -37,6 +37,7 @@ def _require_master_admin(db: Session, user_id: Optional[str], user_role: Option
 class TargetsSaveIn(BaseModel):
     month: str                      # 'YYYY-MM'
     rows: list
+    working_days: Optional[int] = None
 
 
 class TargetsCopyIn(BaseModel):
@@ -46,6 +47,10 @@ class TargetsCopyIn(BaseModel):
 
 class SrTypesSaveIn(BaseModel):
     items: list                     # [{sr_type, head}]
+
+
+class HeadIn(BaseModel):
+    name: str
 
 
 class ReportSaveIn(BaseModel):
@@ -64,7 +69,7 @@ async def get_targets(
     db: Session = Depends(get_db),
 ):
     _require_master_admin(db, user_id, user_role)
-    return {"success": True, "items": pc.list_targets(db, month)}
+    return {"success": True, **pc.get_targets_payload(db, month)}
 
 
 @router.post("/targets/bulk")
@@ -75,7 +80,7 @@ async def save_targets(
     db: Session = Depends(get_db),
 ):
     _require_master_admin(db, user_id, user_role)
-    return pc.save_targets(db, payload.month, payload.rows, user_id)
+    return pc.save_targets(db, payload.month, payload.rows, user_id, payload.working_days)
 
 
 @router.post("/targets/copy")
@@ -109,8 +114,10 @@ async def get_sr_types(
     db: Session = Depends(get_db),
 ):
     _require_master_admin(db, user_id, user_role)
+    heads = pc.list_heads(db)
     return {"success": True, "items": pc.list_sr_types(db),
-            "head_choices": pc.HEAD_CHOICES}
+            "heads": heads,
+            "head_choices": [h["name"] for h in heads]}
 
 
 @router.post("/sr-types")
@@ -122,6 +129,28 @@ async def save_sr_types(
 ):
     _require_master_admin(db, user_id, user_role)
     return pc.save_sr_types(db, payload.items, user_id)
+
+
+@router.post("/heads")
+async def add_head(
+    payload: HeadIn,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_master_admin(db, user_id, user_role)
+    return pc.add_head(db, payload.name, user_id)
+
+
+@router.delete("/heads/{head_id}")
+async def delete_head(
+    head_id: int,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_master_admin(db, user_id, user_role)
+    return pc.delete_head(db, head_id)
 
 
 @router.post("/sr-types/sync")
@@ -195,13 +224,16 @@ async def get_data_summary(
 @router.get("/data/preview")
 async def get_data_preview(
     record_type: str,
-    limit: int = 50,
+    limit: int = 200,
+    offset: int = 0,
+    search: Optional[str] = None,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
     _require_master_admin(db, user_id, user_role)
-    return {"success": True, "items": pc.preview_rows(db, record_type, min(limit, 200))}
+    page = pc.preview_rows(db, record_type, min(limit, 500), max(offset, 0), search)
+    return {"success": True, "items": page["items"], "total": page["total"]}
 
 
 # ---------------- REPORT ---------------- #

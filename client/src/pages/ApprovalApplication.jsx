@@ -175,7 +175,7 @@ export default function ApprovalApplication() {
                             <FileCheck2 size={18} />
                         </div>
                         <div>
-                            <h1 className="text-lg sm:text-xl font-bold leading-tight">Approval Application</h1>
+                            <h1 className="text-lg sm:text-xl font-bold leading-tight">Note For Approval</h1>
                             <p className="text-[11px] text-white/70 leading-tight">
                                 Discounting, Credit &amp; Expense approvals — L2 → L3 → L4 (HOD) → L5 (COO)
                             </p>

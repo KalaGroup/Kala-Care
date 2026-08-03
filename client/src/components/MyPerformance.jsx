@@ -1501,13 +1501,13 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     // Sorted CSP rows for Open CSP modal
     const sortedOpenCspRows = useMemo(() => {
         return [...filteredOpenCspRows].sort((a, b) => {
-            const da = getCspDaysPass(a.due_date);
-            const db = getCspDaysPass(b.due_date);
+            const da = getCspDaysPass(a);
+            const db = getCspDaysPass(b);
             const valA = da === null ? -Infinity : da;
             const valB = db === null ? -Infinity : db;
             return openCspDaysSort === 'desc' ? valB - valA : valA - valB;
         });
-    }, [filteredOpenCspRows, openCspDaysSort]);
+    }, [filteredOpenCspRows, openCspDaysSort, getCspDaysPass]);
 
     // Latest unique followups (one per instance_id + campaign_name)
     const latestUniqueFollowups = useMemo(
@@ -2544,7 +2544,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                             </span>
                         )}
                     </h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1">
+                    <p className="text-base sm:text-lg font-semibold text-black mt-1">
                         <TimeValue>{(performance.total_followups || 0) + otherCompletedFollowups.length}</TimeValue>
                     </p>
 
@@ -2562,7 +2562,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     className="group relative bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all text-center cursor-pointer flex flex-col justify-between min-h-[90px]"
                 >
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Work In Progress</h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1"><TimeValue>{performance.wip_count || 0}</TimeValue></p>
+                    <p className="text-base sm:text-lg font-semibold text-black mt-1"><TimeValue>{performance.wip_count || 0}</TimeValue></p>
                     <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
                         <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
                             Click to view WIP follow-ups
@@ -2576,7 +2576,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     className="group relative bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all text-center cursor-pointer flex flex-col justify-between min-h-[90px]"
                 >
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Followups</h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1"><TimeValue>{performance.rescheduled_count || 0}</TimeValue></p>
+                    <p className="text-base sm:text-lg font-semibold text-black mt-1"><TimeValue>{performance.rescheduled_count || 0}</TimeValue></p>
                     <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
                         <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
                             Click to view Followups
@@ -2590,7 +2590,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     className="group relative bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all text-center cursor-pointer flex flex-col justify-between min-h-[90px]"
                 >
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Rejected</h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1"><TimeValue>{performance.rejected_count || 0}</TimeValue></p>
+                    <p className="text-base sm:text-lg font-semibold text-black mt-1"><TimeValue>{performance.rejected_count || 0}</TimeValue></p>
                     <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
                         <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
                             Click to view rejected follow-ups
@@ -2604,7 +2604,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     className="group relative bg-white rounded-lg shadow-sm p-3 border border-gray-200 hover:shadow-md hover:border-[#2f3192] transition-all text-center cursor-pointer flex flex-col justify-between min-h-[90px]"
                 >
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Not Connected</h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1"><TimeValue>{notConnectedCount}</TimeValue></p>
+                    <p className="text-base sm:text-lg font-semibold text-black mt-1"><TimeValue>{notConnectedCount}</TimeValue></p>
                     <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
                         <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
                             Click to view not connected (NC) follow-ups
@@ -2625,7 +2625,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                             </span>
                         )}
                     </h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1">
+                    <p className="text-base sm:text-lg font-semibold text-black mt-1">
                         <TimeValue>{(performance.completed_count || 0) + (nonFollowupCustomerStats?.completed || 0)}</TimeValue>
                     </p>
                     <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
@@ -2643,7 +2643,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>
                         Quotation Required
                     </h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1">
+                    <p className="text-base sm:text-lg font-semibold text-black mt-1">
                         <TimeValue>{quotationCount}</TimeValue>
                     </p>
 
@@ -2662,7 +2662,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>
                         Quotation Sent
                     </h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1">
+                    <p className="text-base sm:text-lg font-semibold text-black mt-1">
                         <TimeValue>{quotationSentCount}</TimeValue>
                     </p>
 
@@ -2681,7 +2681,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>
                         Add New CSP SR
                     </h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1">
+                    <p className="text-base sm:text-lg font-semibold text-black mt-1">
                         {userCspSrCount}
                     </p>
 
@@ -2699,7 +2699,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>
                         Total CSP
                     </h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1">
+                    <p className="text-base sm:text-lg font-semibold text-black mt-1">
                         {cspData.total_instances}
                     </p>
 
@@ -2717,7 +2717,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>
                         Open CSP
                     </h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1">
+                    <p className="text-base sm:text-lg font-semibold text-black mt-1">
                         {openCspInstanceCount}
                     </p>
 
@@ -2735,7 +2735,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>
                         CSP Quotation Required
                     </h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1">
+                    <p className="text-base sm:text-lg font-semibold text-black mt-1">
                         {cspQuotationCount}
                     </p>
 
@@ -2753,7 +2753,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>
                         CSP Quotation Sent
                     </h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1">
+                    <p className="text-base sm:text-lg font-semibold text-black mt-1">
                         {cspQuotationSentCount}
                     </p>
 
@@ -2771,7 +2771,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>
                         Letter For Warranty Lapse
                     </h3>
-                    <p className="text-lg sm:text-xl font-bold text-black mt-1">
+                    <p className="text-base sm:text-lg font-semibold text-black mt-1">
                         {cspLetterCount}
                     </p>
 

@@ -93,6 +93,97 @@ const getBranchDisplayName = (branchCode) => {
     return branchCode;
 };
 
+// Always-visible top scrollbar for wide tables. A native scrollbar inside a
+// short strip auto-hides or ignores styling depending on browser/OS settings,
+// so this draws its own draggable thumb and drives the table's scrollLeft.
+const TopScrollbar = ({ scrollRef, watch }) => {
+    const trackRef = useRef(null);
+    const [bar, setBar] = useState({ show: false, w: 0, x: 0 });
+
+    useEffect(() => {
+        const el = scrollRef.current;
+        const track = trackRef.current;
+        if (!el || !track) return;
+
+        const update = () => {
+            const { scrollWidth, clientWidth, scrollLeft } = el;
+            if (scrollWidth <= clientWidth + 1) {
+                setBar((b) => (b.show ? { ...b, show: false } : b));
+                return;
+            }
+            const tw = track.clientWidth;
+            const w = Math.max(40, (clientWidth / scrollWidth) * tw);
+            const maxX = Math.max(0, tw - w);
+            const maxScroll = scrollWidth - clientWidth;
+            const x = maxScroll > 0 ? (scrollLeft / maxScroll) * maxX : 0;
+            setBar({ show: true, w, x });
+        };
+
+        update();
+        el.addEventListener('scroll', update);
+        const ro = new ResizeObserver(update);
+        ro.observe(el);
+        ro.observe(track);
+        const tableEl = el.querySelector('table');
+        if (tableEl) ro.observe(tableEl);
+        return () => {
+            el.removeEventListener('scroll', update);
+            ro.disconnect();
+        };
+    }, [scrollRef, watch]);
+
+    // Move the table so the thumb's left edge lands at clientX minus grabOffset
+    const dragTo = (clientX, grabOffset) => {
+        const el = scrollRef.current;
+        const track = trackRef.current;
+        if (!el || !track) return;
+        const rect = track.getBoundingClientRect();
+        const w = Math.max(40, (el.clientWidth / el.scrollWidth) * rect.width);
+        const maxX = Math.max(0, rect.width - w);
+        const maxScroll = el.scrollWidth - el.clientWidth;
+        const x = Math.min(Math.max(clientX - rect.left - grabOffset, 0), maxX);
+        el.scrollLeft = maxX > 0 ? (x / maxX) * maxScroll : 0;
+    };
+
+    const onThumbPointerDown = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const grabOffset = e.clientX - e.currentTarget.getBoundingClientRect().left;
+        const move = (ev) => dragTo(ev.clientX, grabOffset);
+        const stop = () => {
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', stop);
+            window.removeEventListener('pointercancel', stop);
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', stop);
+        window.addEventListener('pointercancel', stop);
+    };
+
+    const onTrackPointerDown = (e) => {
+        dragTo(e.clientX, bar.w / 2); // jump so the thumb centers on the click
+    };
+
+    return (
+        <div
+            className="hidden sm:block sticky top-0 z-10 bg-gray-50 border-b border-gray-200 px-2 py-[2px]"
+            style={{ visibility: bar.show ? 'visible' : 'hidden' }}
+        >
+            <div
+                ref={trackRef}
+                onPointerDown={onTrackPointerDown}
+                className="relative h-1.5 rounded-full bg-gray-200 cursor-pointer"
+            >
+                <div
+                    onPointerDown={onThumbPointerDown}
+                    className="absolute top-0 h-full rounded-full bg-[#b3b6d9] hover:bg-[#8d91c4] cursor-grab active:cursor-grabbing"
+                    style={{ width: `${bar.w}px`, transform: `translateX(${bar.x}px)` }}
+                />
+            </div>
+        </div>
+    );
+};
+
 const Dashboard = () => {
     const [userData, setUserData] = useState(null);
     const [allEmployeesPerformance, setAllEmployeesPerformance] = useState([]);
@@ -155,7 +246,6 @@ const Dashboard = () => {
         );
 
     const tableContainerRef = useRef(null);
-    const topScrollBarRef = useRef(null);
     const [customStartDate, setCustomStartDate] = useState(null);
     const [customEndDate, setCustomEndDate] = useState(null);
     const [isFilterLoading, setIsFilterLoading] = useState(false);
@@ -213,7 +303,6 @@ const Dashboard = () => {
     const [rrStats, setRrStats] = useState([]);
     const activityTableContainerRef = useRef(null);
     const campaignTableContainerRef = useRef(null);
-    const campaignTopScrollBarRef = useRef(null);
     const activityTopScrollBarRef = useRef(null);
     const [activityLoading, setActivityLoading] = useState(false);
     const [rrLoading, setRrLoading] = useState(false);
@@ -914,120 +1003,6 @@ const Dashboard = () => {
 
     // flagOrder moved to FLAG_ORDER constant outside component (use FLAG_ORDER below)
     const flagOrder = FLAG_ORDER;
-
-    // Set up scroll synchronization for Campaign Success tab
-    useEffect(() => {
-        if (activeTab !== 'campaign-success') return;
-
-        const tableContainer = campaignTableContainerRef.current;
-        const topScrollBar = campaignTopScrollBarRef.current;
-
-        if (!tableContainer || !topScrollBar) return;
-
-        const updateTopScrollWidth = () => {
-            if (tableContainer && topScrollBar) {
-                // Always mirror the table's scroll width — when the table fits,
-                // the spacer equals the visible width and no bar shows.
-                const spacer = topScrollBar.querySelector('div');
-                if (spacer) {
-                    spacer.style.width = `${tableContainer.scrollWidth}px`;
-                    spacer.style.height = '1px';
-                }
-            }
-        };
-
-        updateTopScrollWidth();
-
-        const resizeObserver = new ResizeObserver(() => {
-            updateTopScrollWidth();
-        });
-
-        if (tableContainer) {
-            resizeObserver.observe(tableContainer);
-            const tableEl = tableContainer.querySelector('table');
-            if (tableEl) resizeObserver.observe(tableEl); // re-size when columns change width
-        }
-
-        const handleTableScroll = () => {
-            if (topScrollBar) {
-                topScrollBar.scrollLeft = tableContainer.scrollLeft;
-            }
-        };
-
-        const handleTopScroll = () => {
-            if (tableContainer) {
-                tableContainer.scrollLeft = topScrollBar.scrollLeft;
-            }
-        };
-
-        tableContainer.addEventListener('scroll', handleTableScroll);
-        topScrollBar.addEventListener('scroll', handleTopScroll);
-
-        return () => {
-            tableContainer.removeEventListener('scroll', handleTableScroll);
-            topScrollBar.removeEventListener('scroll', handleTopScroll);
-            resizeObserver.disconnect();
-        };
-        // campaignLoading in deps: the refs only mount AFTER the loading
-        // spinner goes away — without it, the first open of the tab attaches
-        // nothing and the top scrollbar never appears.
-    }, [activeTab, campaignPerformance, campaignLoading]);
-
-    // Set up scroll synchronization for Rejected Reasons tab
-    useEffect(() => {
-        if (activeTab !== 'rejected-reason') return;
-
-        const tableContainer = tableContainerRef.current;
-        const topScrollBar = topScrollBarRef.current;
-
-        if (!tableContainer || !topScrollBar) return;
-
-        const updateTopScrollWidth = () => {
-            if (tableContainer && topScrollBar) {
-                const scrollWidth = tableContainer.scrollWidth;
-                const clientWidth = tableContainer.clientWidth;
-
-                if (scrollWidth > clientWidth) {
-                    const spacer = topScrollBar.querySelector('div');
-                    if (spacer) {
-                        spacer.style.width = `${scrollWidth}px`;
-                        spacer.style.height = '1px';
-                    }
-                }
-            }
-        };
-
-        updateTopScrollWidth();
-
-        const resizeObserver = new ResizeObserver(() => {
-            updateTopScrollWidth();
-        });
-
-        if (tableContainer) {
-            resizeObserver.observe(tableContainer);
-        }
-
-        const handleTableScroll = () => {
-            if (topScrollBar) {
-                topScrollBar.scrollLeft = tableContainer.scrollLeft;
-            }
-        };
-
-        const handleTopScroll = () => {
-            if (tableContainer) {
-                tableContainer.scrollLeft = topScrollBar.scrollLeft;
-            }
-        };
-
-        tableContainer.addEventListener('scroll', handleTableScroll);
-        topScrollBar.addEventListener('scroll', handleTopScroll);
-
-        return () => {
-            tableContainer.removeEventListener('scroll', handleTableScroll);
-            topScrollBar.removeEventListener('scroll', handleTopScroll);
-            resizeObserver.disconnect();
-        };
-    }, [activeTab, rrDetailedView, rrStats]);
 
     const handleCampaignNameClick = (campaign) => {
         setSelectedCampaign(campaign);
@@ -3695,9 +3670,9 @@ const getPerformanceTitle = () => {
                                         setActiveTab('overall');
                                         setIsMobileMenuOpen(false);
                                     }}
-                                    className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
+                                    className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-[13px] leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
                         ${activeTab === 'overall'
-                                            ? 'text-white font-bold shadow-md'
+                                            ? 'text-white font-semibold shadow-md'
                                             : 'text-black bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300'
                                         }`}
                                     style={activeTab === 'overall' ? { backgroundColor: "#2f3192" } : {}}
@@ -3712,7 +3687,7 @@ const getPerformanceTitle = () => {
                                             setActiveTab('branches');
                                             setIsMobileMenuOpen(false);
                                         }}
-                                        className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
+                                        className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-[13px] leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
                             ${activeTab === 'branches'
                                                 ? 'text-white shadow-md'
                                                 : 'text-black bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300'
@@ -3730,7 +3705,7 @@ const getPerformanceTitle = () => {
                                             setActiveTab('branch-report');
                                             setIsMobileMenuOpen(false);
                                         }}
-                                        className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
+                                        className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-[13px] leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
                             ${activeTab === 'branch-report'
                                                 ? 'text-white shadow-md'
                                                 : 'text-black bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300'
@@ -3749,7 +3724,7 @@ const getPerformanceTitle = () => {
                                                 setActiveTab('campaign-success');
                                                 setIsMobileMenuOpen(false);
                                             }}
-                                            className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
+                                            className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-[13px] leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
                                 ${activeTab === 'campaign-success'
                                                     ? 'text-white shadow-md'
                                                     : 'text-black bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300'
@@ -3767,10 +3742,10 @@ const getPerformanceTitle = () => {
                                             setActiveTab('activity');
                                             setIsMobileMenuOpen(false);
                                         }}
-                                        className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
+                                        className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-[13px] leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
             ${activeTab === 'activity'
                                                 ? 'text-white shadow-md'
-                                                : 'text-black font-bold bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300'
+                                                : 'text-black bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300'
                                             }`}
                                         style={activeTab === 'activity' ? { backgroundColor: "#2f3192" } : {}}
                                     >
@@ -3785,7 +3760,7 @@ const getPerformanceTitle = () => {
                                             setActiveTab('rejected-reason');
                                             setIsMobileMenuOpen(false);
                                         }}
-                                        className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-sm leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
+                                        className={`px-3 py-2 rounded-[24px] font-medium transition-all duration-200 text-[13px] leading-tight text-center lg:flex-1 lg:min-w-0 lg:flex lg:items-center lg:justify-center
             ${activeTab === 'rejected-reason'
                                                 ? 'text-white shadow-md'
                                                 : 'text-black bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300'
@@ -3817,7 +3792,7 @@ const getPerformanceTitle = () => {
                                             </h3>
                                             <div className="flex items-center justify-between">
                                                 <div className="w-[30%] flex justify-center">
-                                                    <p className="text-lg font-bold text-gray-900">
+                                                    <p className="text-lg font-semibold text-gray-900">
                                                         {summaryStats?.total_customers || 0}
                                                     </p>
                                                 </div>
@@ -3825,11 +3800,11 @@ const getPerformanceTitle = () => {
                                                 <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>Attended:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.attended_customers || 0}</TimeValue></span>
+                                                        <span className="font-semibold text-base whitespace-nowrap"><TimeValue>{summaryStats?.attended_customers || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>Remaining:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.remaining_customers || 0}</TimeValue></span>
+                                                        <span className="font-semibold text-base whitespace-nowrap"><TimeValue>{summaryStats?.remaining_customers || 0}</TimeValue></span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -3842,7 +3817,7 @@ const getPerformanceTitle = () => {
                                             </h3>
                                             <div className="flex items-center justify-between">
                                                 <div className="w-[30%] flex justify-center">
-                                                    <p className="text-lg font-bold text-gray-900">
+                                                    <p className="text-lg font-semibold text-gray-900">
                                                         {summaryStats?.total_assets || 0}
                                                     </p>
                                                 </div>
@@ -3850,11 +3825,11 @@ const getPerformanceTitle = () => {
                                                 <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>Attended:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.attended_assets || 0}</TimeValue></span>
+                                                        <span className="font-semibold text-base whitespace-nowrap"><TimeValue>{summaryStats?.attended_assets || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>Remaining:</span>
-                                                        <span className="font-bold text-lg whitespace-nowrap"><TimeValue>{summaryStats?.remaining_assets || 0}</TimeValue></span>
+                                                        <span className="font-semibold text-base whitespace-nowrap"><TimeValue>{summaryStats?.remaining_assets || 0}</TimeValue></span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -3867,7 +3842,7 @@ const getPerformanceTitle = () => {
                                             </h3>
                                             <div className="flex items-center justify-between">
                                                 <div className="w-[30%] flex justify-center">
-                                                    <p className="text-lg font-bold text-gray-900">
+                                                    <p className="text-lg font-semibold text-gray-900">
                                                         {summaryStats?.attended_assets || 0}
                                                     </p>
                                                 </div>
@@ -3875,23 +3850,23 @@ const getPerformanceTitle = () => {
                                                 <div className="w-[60%] grid grid-cols-3 gap-x-2 gap-y-1 text-xs font-semibold max-sm:grid-cols-2">
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>WIP:</span>
-                                                        <span className="font-bold text-base whitespace-nowrap"><TimeValue>{summaryStats?.wip_assets || 0}</TimeValue></span>
+                                                        <span className="font-semibold text-sm whitespace-nowrap"><TimeValue>{summaryStats?.wip_assets || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>F:</span>
-                                                        <span className="font-bold text-base whitespace-nowrap"><TimeValue>{summaryStats?.rescheduled_assets || 0}</TimeValue></span>
+                                                        <span className="font-semibold text-sm whitespace-nowrap"><TimeValue>{summaryStats?.rescheduled_assets || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>R:</span>
-                                                        <span className="font-bold text-base whitespace-nowrap"><TimeValue>{summaryStats?.rejected_assets || 0}</TimeValue></span>
+                                                        <span className="font-semibold text-sm whitespace-nowrap"><TimeValue>{summaryStats?.rejected_assets || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>NC:</span>
-                                                        <span className="font-bold text-base whitespace-nowrap"><TimeValue>{summaryStats?.not_connected_assets || 0}</TimeValue></span>
+                                                        <span className="font-semibold text-sm whitespace-nowrap"><TimeValue>{summaryStats?.not_connected_assets || 0}</TimeValue></span>
                                                     </div>
                                                     <div className="flex flex-row justify-between items-baseline">
                                                         <span>C:</span>
-                                                        <span className="font-bold text-base whitespace-nowrap"><TimeValue>{summaryStats?.completed_assets || 0}</TimeValue></span>
+                                                        <span className="font-semibold text-sm whitespace-nowrap"><TimeValue>{summaryStats?.completed_assets || 0}</TimeValue></span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -4279,7 +4254,7 @@ const getPerformanceTitle = () => {
                                                         </div>
                                                         <div className="text-center">
                                                             <p className="text-xs text-gray-500">Employees</p>
-                                                            <p className="text-xl font-bold text-gray-900">{branch.total_employees}</p>
+                                                            <p className="text-lg font-semibold text-gray-900">{branch.total_employees}</p>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -4297,7 +4272,7 @@ const getPerformanceTitle = () => {
                                             >
                                                 <div className="flex items-center justify-between gap-3 max-md:flex-wrap">
                                                     <div>
-                                                        <h3 className="text-base font-semibold text-[#2f3192] underline hover:font-bold transition-colors">
+                                                        <h3 className="text-sm font-semibold text-[#2f3192] underline hover:font-bold transition-colors">
                                                             {getBranchDisplayName(branch.branch)}
                                                         </h3>
                                                         <p className="text-xs text-blackgray-500 mt-1">
@@ -4323,7 +4298,7 @@ const getPerformanceTitle = () => {
                                                         </button>
                                                         <div className="text-center">
                                                             <p className="text-xs text-blackgray-500">Employees</p>
-                                                            <p className="text-xl font-bold text-gray-900">{branch.total_employees}</p>
+                                                            <p className="text-lg font-semibold text-gray-900">{branch.total_employees}</p>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -4359,7 +4334,7 @@ const getPerformanceTitle = () => {
                                                         ) : (
                                                             <div className="flex items-center justify-between">
                                                                 <div className="w-[30%] flex justify-center">
-                                                                    <p className="text-2xl font-bold text-black">
+                                                                    <p className="text-xl font-semibold text-black">
                                                                         {allocationData?.total_allocated_customers?.toLocaleString() || 0}
                                                                     </p>
                                                                 </div>
@@ -4367,13 +4342,13 @@ const getPerformanceTitle = () => {
                                                                 <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
                                                                     <div className="flex flex-row justify-between items-baseline">
                                                                         <span>Attended:</span>
-                                                                        <span className="font-bold text-lg whitespace-nowrap">
+                                                                        <span className="font-semibold text-base whitespace-nowrap">
                                                                             {allocationData?.attended_customers?.toLocaleString() || 0}
                                                                         </span>
                                                                     </div>
                                                                     <div className="flex flex-row justify-between items-baseline">
                                                                         <span>Remaining:</span>
-                                                                        <span className="font-bold text-lg whitespace-nowrap">
+                                                                        <span className="font-semibold text-base whitespace-nowrap">
                                                                             {allocationData?.total_allocated_customers && allocationData?.attended_customers
                                                                                 ? (allocationData.total_allocated_customers - allocationData.attended_customers).toLocaleString()
                                                                                 : 0}
@@ -4391,7 +4366,7 @@ const getPerformanceTitle = () => {
                                                         </h3>
                                                         <div className="flex items-center justify-between">
                                                             <div className="w-[35%] flex justify-center">
-                                                                <p className="text-2xl font-bold text-black">
+                                                                <p className="text-xl font-semibold text-black">
                                                                     {totalBranchAssets.toLocaleString()}
                                                                 </p>
                                                             </div>
@@ -4399,13 +4374,13 @@ const getPerformanceTitle = () => {
                                                             <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
                                                                 <div className="flex flex-row justify-between items-baseline">
                                                                     <span>Attended:</span>
-                                                                    <span className="font-bold text-lg whitespace-nowrap">
+                                                                    <span className="font-semibold text-base whitespace-nowrap">
                                                                         {totalEngagedCustomers.toLocaleString()}
                                                                     </span>
                                                                 </div>
                                                                 <div className="flex flex-row justify-between items-baseline">
                                                                     <span>Remaining:</span>
-                                                                    <span className="font-bold text-lg whitespace-nowrap">
+                                                                    <span className="font-semibold text-base whitespace-nowrap">
                                                                         {(totalBranchAssets - totalEngagedCustomers).toLocaleString()}
                                                                     </span>
                                                                 </div>
@@ -4420,31 +4395,31 @@ const getPerformanceTitle = () => {
                                                         </h3>
                                                         <div className="flex items-center justify-between">
                                                             <div className="w-[25%] flex justify-center">
-                                                                <p className="text-2xl font-bold text-black">
+                                                                <p className="text-xl font-semibold text-black">
                                                                     {totalEngagedCustomers.toLocaleString()}
                                                                 </p>
                                                             </div>
                                                             <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
                                                             <div className="w-[65%] min-w-0 grid grid-cols-3 gap-x-2 gap-y-1 pl-2 pr-3 text-xs font-semibold justify-items-start max-sm:grid-cols-2">
                                                                 <div className="flex items-baseline gap-1 min-w-0">
-                                                                    <span className="w-8 shrink-0">WIP:</span>
-                                                                    <span className="font-bold text-base text-black whitespace-nowrap">{totalWip.toLocaleString()}</span>
+                                                                    <span className="shrink-0">WIP:</span>
+                                                                    <span className="font-semibold text-sm text-black whitespace-nowrap">{totalWip.toLocaleString()}</span>
                                                                 </div>
                                                                 <div className="flex items-baseline gap-1 min-w-0">
-                                                                    <span className="w-8 shrink-0">F:</span>
-                                                                    <span className="font-bold text-base text-black whitespace-nowrap">{totalFR.toLocaleString()}</span>
+                                                                    <span className="shrink-0">F:</span>
+                                                                    <span className="font-semibold text-sm text-black whitespace-nowrap">{totalFR.toLocaleString()}</span>
                                                                 </div>
                                                                 <div className="flex items-baseline gap-1 min-w-0">
-                                                                    <span className="w-8 shrink-0">R:</span>
-                                                                    <span className="font-bold text-base text-black whitespace-nowrap">{totalRejected.toLocaleString()}</span>
+                                                                    <span className="shrink-0">R:</span>
+                                                                    <span className="font-semibold text-sm text-black whitespace-nowrap">{totalRejected.toLocaleString()}</span>
                                                                 </div>
                                                                 <div className="flex items-baseline gap-1 min-w-0">
-                                                                    <span className="w-8 shrink-0">NC:</span>
-                                                                    <span className="font-bold text-base text-black whitespace-nowrap">{totalNotConnected.toLocaleString()}</span>
+                                                                    <span className="shrink-0">NC:</span>
+                                                                    <span className="font-semibold text-sm text-black whitespace-nowrap">{totalNotConnected.toLocaleString()}</span>
                                                                 </div>
                                                                 <div className="flex items-baseline gap-1 min-w-0">
-                                                                    <span className="w-8 shrink-0">C:</span>
-                                                                    <span className="font-bold text-base text-black whitespace-nowrap">{totalCompleted.toLocaleString()}</span>
+                                                                    <span className="shrink-0">C:</span>
+                                                                    <span className="font-semibold text-sm text-black whitespace-nowrap">{totalCompleted.toLocaleString()}</span>
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -4458,7 +4433,7 @@ const getPerformanceTitle = () => {
                                                         <div className="flex items-center justify-between">
                                                             <div className="w-[35%] flex flex-col items-center justify-center">
                                                                 <span className="text-[10px] text-black">Completion Rate</span>
-                                                                <p className="text-2xl font-bold text-black">
+                                                                <p className="text-xl font-semibold text-black">
                                                                     {completionRate}%
                                                                 </p>
                                                             </div>
@@ -4803,7 +4778,7 @@ const getPerformanceTitle = () => {
 
                                     {/* LEFT */}
                                     <div className="w-[30%] flex justify-center">
-                                        <p className="text-lg font-bold text-gray-900">
+                                        <p className="text-lg font-semibold text-gray-900">
                                             {campaignPerformance.length}
                                         </p>
                                     </div>
@@ -4814,13 +4789,13 @@ const getPerformanceTitle = () => {
                                     <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Active:</span>
-                                            <span className="font-bold text-lg whitespace-nowrap">
+                                            <span className="font-semibold text-base whitespace-nowrap">
                                                 {campaignSuccessTotals.activeCount}
                                             </span>
                                         </div>
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Inactive:</span>
-                                            <span className="font-bold text-lg whitespace-nowrap">
+                                            <span className="font-semibold text-base whitespace-nowrap">
                                                 {campaignPerformance.length - campaignSuccessTotals.activeCount}
                                             </span>
                                         </div>
@@ -4839,7 +4814,7 @@ const getPerformanceTitle = () => {
 
                                     {/* LEFT */}
                                     <div className="w-[30%] flex justify-center">
-                                        <p className="text-lg font-bold text-gray-900">
+                                        <p className="text-lg font-semibold text-gray-900">
                                             <TimeValue>{campaignSuccessTotals.attendedTotal}</TimeValue>
                                         </p>
                                     </div>
@@ -4850,13 +4825,13 @@ const getPerformanceTitle = () => {
                                     <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Active Drive:</span>
-                                            <span className="font-bold text-lg whitespace-nowrap">
+                                            <span className="font-semibold text-base whitespace-nowrap">
                                                 <TimeValue>{campaignSuccessTotals.attendedActive}</TimeValue>
                                             </span>
                                         </div>
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Inactive Drive:</span>
-                                            <span className="font-bold text-lg whitespace-nowrap">
+                                            <span className="font-semibold text-base whitespace-nowrap">
                                                 <TimeValue>{campaignSuccessTotals.attendedInactive}</TimeValue>
                                             </span>
                                         </div>
@@ -4874,7 +4849,7 @@ const getPerformanceTitle = () => {
 
                                     {/* LEFT */}
                                     <div className="w-[30%] flex justify-center">
-                                        <p className="text-lg font-bold text-gray-900">
+                                        <p className="text-lg font-semibold text-gray-900">
                                             <TimeValue>{campaignSuccessTotals.completedTotal}</TimeValue>
                                         </p>
                                     </div>
@@ -4885,13 +4860,13 @@ const getPerformanceTitle = () => {
                                     <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Active Drive:</span>
-                                            <span className="font-bold text-lg whitespace-nowrap">
+                                            <span className="font-semibold text-base whitespace-nowrap">
                                                 <TimeValue>{campaignSuccessTotals.completedActive}</TimeValue>
                                             </span>
                                         </div>
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Inactive Drive:</span>
-                                            <span className="font-bold text-lg whitespace-nowrap">
+                                            <span className="font-semibold text-base whitespace-nowrap">
                                                 <TimeValue>{campaignSuccessTotals.completedInactive}</TimeValue>
                                             </span>
                                         </div>
@@ -4910,7 +4885,7 @@ const getPerformanceTitle = () => {
 
                                     {/* LEFT */}
                                     <div className="w-[30%] flex justify-center">
-                                        <p className="text-lg font-bold text-gray-900">
+                                        <p className="text-lg font-semibold text-gray-900">
                                             <TimeValue>{campaignSuccessTotals.avgSuccessRateDisplay}%</TimeValue>
                                         </p>
                                     </div>
@@ -4940,8 +4915,8 @@ const getPerformanceTitle = () => {
                             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                                 <div className="p-2 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                                     <div>
-                                        <h3 className="text-base font-semibold text-black">Drive Performance</h3>
-                                        <p className="text-sm text-black mt-1">Drive-wise success metrics and flag breakdown</p>
+                                        <h3 className="text-sm font-semibold text-black">Drive Performance</h3>
+                                        <p className="text-xs text-black mt-1">Drive-wise success metrics and flag breakdown</p>
                                     </div>
                                     <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
                                         <button
@@ -4988,17 +4963,7 @@ const getPerformanceTitle = () => {
                                 </div>
 
                                 <div className="relative">
-                                    <div
-                                        ref={campaignTopScrollBarRef}
-                                        className="hidden sm:block sticky top-0 z-10 bg-gray-50 border-b border-gray-200 overflow-x-auto"
-                                        style={{
-                                            scrollbarWidth: 'thin',
-                                            overflowY: 'hidden',
-                                            height: '12px'
-                                        }}
-                                    >
-                                        <div style={{ height: '1px' }}></div>
-                                    </div>
+                                    <TopScrollbar scrollRef={campaignTableContainerRef} watch={campaignPerformance} />
 
                                     <div
                                         ref={campaignTableContainerRef}
@@ -5011,10 +4976,10 @@ const getPerformanceTitle = () => {
                                         <table className="min-w-full divide-y divide-gray-200 border border-gray-200 whitespace-nowrap" style={{ width: 'max-content', minWidth: '100%' }}>
                                             <thead className="bg-gray-50">
                                                 <tr>
-                                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider w-12 border-r border-gray-200">
+                                                    <th className="px-2 py-1 text-center text-[11px] font-medium text-black uppercase tracking-wider w-12 border-r border-gray-200">
                                                         <div className="font-bold">Sr. No.</div>
                                                     </th>
-                                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
+                                                    <th className="px-2 py-1 text-center text-[11px] font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('campaign_name')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
                                                             Drive
@@ -5023,7 +4988,7 @@ const getPerformanceTitle = () => {
                                                             </span>
                                                         </div>
                                                     </th>
-                                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
+                                                    <th className="px-2 py-1 text-center text-[11px] font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('created_by_name')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
                                                             Created By
@@ -5032,7 +4997,7 @@ const getPerformanceTitle = () => {
                                                             </span>
                                                         </div>
                                                     </th>
-                                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
+                                                    <th className="px-2 py-1 text-center text-[11px] font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('service')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
                                                             Service/Product
@@ -5041,7 +5006,7 @@ const getPerformanceTitle = () => {
                                                             </span>
                                                         </div>
                                                     </th>
-                                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
+                                                    <th className="px-2 py-1 text-center text-[11px] font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('status')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
                                                             Status
@@ -5050,7 +5015,7 @@ const getPerformanceTitle = () => {
                                                             </span>
                                                         </div>
                                                     </th>
-                                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
+                                                    <th className="px-2 py-1 text-center text-[11px] font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('total_customers')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
                                                             Total Assets
@@ -5059,7 +5024,7 @@ const getPerformanceTitle = () => {
                                                             </span>
                                                         </div>
                                                     </th>
-                                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
+                                                    <th className="px-2 py-1 text-center text-[11px] font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('asset_numbers_count')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
                                                             Remaining
@@ -5068,7 +5033,7 @@ const getPerformanceTitle = () => {
                                                             </span>
                                                         </div>
                                                     </th>
-                                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
+                                                    <th className="px-2 py-1 text-center text-[11px] font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('attended_customers')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
                                                             Attended
@@ -5077,7 +5042,7 @@ const getPerformanceTitle = () => {
                                                             </span>
                                                         </div>
                                                     </th>
-                                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
+                                                    <th className="px-2 py-1 text-center text-[11px] font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('wip_count')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
                                                             WIP
@@ -5086,7 +5051,7 @@ const getPerformanceTitle = () => {
                                                             </span>
                                                         </div>
                                                     </th>
-                                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
+                                                    <th className="px-2 py-1 text-center text-[11px] font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('rescheduled_count')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
                                                             Followups
@@ -5095,7 +5060,7 @@ const getPerformanceTitle = () => {
                                                             </span>
                                                         </div>
                                                     </th>
-                                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
+                                                    <th className="px-2 py-1 text-center text-[11px] font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('rejected_count')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
                                                             Rejected
@@ -5104,7 +5069,7 @@ const getPerformanceTitle = () => {
                                                             </span>
                                                         </div>
                                                     </th>
-                                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
+                                                    <th className="px-2 py-1 text-center text-[11px] font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('not_connected_count')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
                                                             NC
@@ -5113,7 +5078,7 @@ const getPerformanceTitle = () => {
                                                             </span>
                                                         </div>
                                                     </th>
-                                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
+                                                    <th className="px-2 py-1 text-center text-[11px] font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('completed_count')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
                                                             Completed
@@ -5122,7 +5087,7 @@ const getPerformanceTitle = () => {
                                                             </span>
                                                         </div>
                                                     </th>
-                                                    <th className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
+                                                    <th className="px-2 py-1 text-center text-[11px] font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                         onClick={() => handleCampaignSort('success_percentage')}>
                                                         <div className="flex items-center justify-center gap-2 font-bold">
                                                             Success %
@@ -5132,7 +5097,7 @@ const getPerformanceTitle = () => {
                                                         </div>
                                                     </th>
                                                     {flagOrder.map(flag => (
-                                                        <th key={flag} className="px-2 py-1 text-center text-xs font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
+                                                        <th key={flag} className="px-2 py-1 text-center text-[11px] font-medium text-black uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors duration-200 border-r border-gray-200"
                                                             onClick={() => handleCampaignSort(flag)}>
                                                             <div className="flex items-center justify-center gap-2 font-bold">
                                                                 {flag}
@@ -5161,33 +5126,33 @@ const getPerformanceTitle = () => {
 
                                                     return (
                                                         <tr key={campaign.campaign_id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                                            <td className="px-2 py-1 text-sm text-black text-center border-r border-gray-200">{index + 1}</td>
+                                                            <td className="px-2 py-1 text-xs text-black text-center border-r border-gray-200">{index + 1}</td>
                                                             <td className="px-2 py-1 text-center border-r border-gray-200">
                                                                 <button onClick={() => handleCampaignNameClick(campaign)} className="text-center hover:underline focus:outline-none">
                                                                     <div>
-                                                                        <p className="text-sm font-medium text-[#2f3192] underline hover:font-bold transition-colors">
+                                                                        <p className="text-xs font-medium text-[#2f3192] underline hover:font-bold transition-colors">
                                                                             {campaign.campaign_name}
                                                                         </p>
                                                                         <p className="text-xs text-black truncate max-w-[200px]">{campaign.description || 'No description'}</p>
                                                                     </div>
                                                                 </button>
                                                             </td>
-                                                            <td className="px-2 py-1 text-sm text-black text-center border-r border-gray-200">{createdByName}</td>
-                                                            <td className="px-2 py-1 text-sm text-black text-center border-r border-gray-200">{campaign.service}</td>
+                                                            <td className="px-2 py-1 text-xs text-black text-center border-r border-gray-200">{createdByName}</td>
+                                                            <td className="px-2 py-1 text-xs text-black text-center border-r border-gray-200">{campaign.service}</td>
                                                             <td className="px-2 py-1 text-center border-r border-gray-200">
                                                                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${campaign.status === 'active' ? 'text-black' : 'text-black'}`}>
                                                                     {campaign.status === 'active' ? 'Active' : 'Inactive'}
                                                                 </span>
                                                             </td>
-                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200">{totalCustomers}</td>
+                                                            <td className="px-2 py-1 text-xs font-medium text-black text-center border-r border-gray-200">{totalCustomers}</td>
                                                             {/* Remaining = totalCustomers − attended; attended is time-filtered, so this is too */}
-                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{remaining2}</TimeValue></td>
-                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{attended}</TimeValue></td>
-                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{wip}</TimeValue></td>
-                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{rescheduled}</TimeValue></td>
-                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{rejected}</TimeValue></td>
-                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{notConnected}</TimeValue></td>
-                                                            <td className="px-2 py-1 text-sm font-medium text-black text-center border-r border-gray-200"><TimeValue>{completed}</TimeValue></td>
+                                                            <td className="px-2 py-1 text-xs font-medium text-black text-center border-r border-gray-200"><TimeValue>{remaining2}</TimeValue></td>
+                                                            <td className="px-2 py-1 text-xs font-medium text-black text-center border-r border-gray-200"><TimeValue>{attended}</TimeValue></td>
+                                                            <td className="px-2 py-1 text-xs font-medium text-black text-center border-r border-gray-200"><TimeValue>{wip}</TimeValue></td>
+                                                            <td className="px-2 py-1 text-xs font-medium text-black text-center border-r border-gray-200"><TimeValue>{rescheduled}</TimeValue></td>
+                                                            <td className="px-2 py-1 text-xs font-medium text-black text-center border-r border-gray-200"><TimeValue>{rejected}</TimeValue></td>
+                                                            <td className="px-2 py-1 text-xs font-medium text-black text-center border-r border-gray-200"><TimeValue>{notConnected}</TimeValue></td>
+                                                            <td className="px-2 py-1 text-xs font-medium text-black text-center border-r border-gray-200"><TimeValue>{completed}</TimeValue></td>
                                                             <td className="px-2 py-1 text-center border-r border-gray-200">
                                                                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium inline-block ${successPercentage >= 70 ? 'bg-green-100 text-black' :
                                                                     successPercentage >= 40 ? 'text-black' : 'text-black'}`}>
@@ -5195,7 +5160,7 @@ const getPerformanceTitle = () => {
                                                                 </span>
                                                             </td>
                                                             {flagOrder.map(flag => (
-                                                                <td key={flag} className="px-2 py-1 text-center text-sm text-black border-r border-gray-200">
+                                                                <td key={flag} className="px-2 py-1 text-center text-xs text-black border-r border-gray-200">
                                                                     <TimeValue>{flagBreakdown[flag] || 0}</TimeValue>
                                                                 </td>
                                                             ))}
@@ -5928,17 +5893,7 @@ const getPerformanceTitle = () => {
                             </div>
 
                             <div className="relative">
-                                <div
-                                    ref={topScrollBarRef}
-                                    className="hidden sm:block sticky top-0 z-10 bg-gray-50 border-b border-gray-200 overflow-x-auto"
-                                    style={{
-                                        scrollbarWidth: 'thin',
-                                        overflowY: 'hidden',
-                                        height: '8px'
-                                    }}
-                                >
-                                    <div style={{ height: '1px' }}></div>
-                                </div>
+                                <TopScrollbar scrollRef={tableContainerRef} watch={`${rrDetailedView}-${rrStats?.length || 0}`} />
 
                                 <div
                                     ref={tableContainerRef}

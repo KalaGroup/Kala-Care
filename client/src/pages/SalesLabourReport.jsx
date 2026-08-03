@@ -2,11 +2,12 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
+import { canExportExcel } from '../utils/exportPermission';
 import {
   ChartBarSquareIcon, ArrowUpTrayIcon, DocumentMagnifyingGlassIcon,
-  ClockIcon, PrinterIcon, BookmarkSquareIcon, XMarkIcon, TrashIcon,
+  ClockIcon, BookmarkSquareIcon, XMarkIcon, TrashIcon, ArrowDownTrayIcon,
   DocumentCheckIcon, TableCellsIcon, ArrowPathIcon, CalendarDaysIcon,
-  ChevronDownIcon,
+  ChevronDownIcon, MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
@@ -50,6 +51,22 @@ const fmtFull = (iso) => {
   const d = new Date(iso + 'T00:00:00');
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
 };
+// Wrap every case-insensitive occurrence of `query` inside `text` in a yellow
+// <mark> — used by the preview's Claim Invoice No search.
+const highlightMatch = (text, query) => {
+  if (text == null) return '—';
+  const s = String(text);
+  const q = (query || '').trim();
+  if (!q) return s;
+  const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = s.split(new RegExp(`(${esc})`, 'ig'));
+  return parts.map((p, i) =>
+    p.toLowerCase() === q.toLowerCase()
+      ? <mark key={i} className="bg-yellow-300 rounded-[2px] px-0">{p}</mark>
+      : p
+  );
+};
+
 // Grid-style tables — every cell bordered.
 const thCls =
   'px-2 py-1.5 text-center text-[11px] font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap bg-gray-50 border border-gray-200';
@@ -196,13 +213,22 @@ const SalesLabourReport = () => {
   const [summary, setSummary] = useState(null);
   const [previewType, setPreviewType] = useState('part');
   const [previewRows, setPreviewRows] = useState([]);
+  const [previewTotal, setPreviewTotal] = useState(0);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const previewBusyRef = useRef(false);   // guards concurrent lazy-load pages
+  // Claim Invoice No search — `previewSearch` follows the input, `previewQuery`
+  // is the debounced value actually sent to the server (search runs over the
+  // WHOLE stored dataset, not just loaded rows).
+  const [previewSearch, setPreviewSearch] = useState('');
+  const [previewQuery, setPreviewQuery] = useState('');
+  const previewReqRef = useRef(0);        // drops stale out-of-order responses
   const [batches, setBatches] = useState([]);
   const [showBatches, setShowBatches] = useState(false);
 
   // report
   const [report, setReport] = useState(null);
   const [generating, setGenerating] = useState(false);
+  const [branchFilter, setBranchFilter] = useState('All');   // branch_id | 'All'
   // 'data' shows the Uploaded File Preview box; 'report' replaces it with the
   // generated report (Back to Data returns).
   const [view, setView] = useState('data');
@@ -213,19 +239,22 @@ const SalesLabourReport = () => {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [showRangePicker, setShowRangePicker] = useState(false);
-  const [activePeriod, setActivePeriod] = useState('current_month');
+  // Default = As On Date (month-to-date ending at the latest data date)
+  const [activePeriod, setActivePeriod] = useState('as_on');
   const [pickStart, setPickStart] = useState(null);   // calendar Date objects
   const [pickEnd, setPickEnd] = useState(null);
   // Whether the CURRENT report has been saved to history (drives step ④)
   const [savedHist, setSavedHist] = useState(false);
   const [reportType, setReportType] = useState('spare');
-  const [regionFilter, setRegionFilter] = useState('All');
+  
   const [savingReport, setSavingReport] = useState(false);
 
   // history
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // Saved report opened INSIDE the modal: {id, title, as_on_date, payload}
+  const [historyDetail, setHistoryDetail] = useState(null);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -235,15 +264,58 @@ const SalesLabourReport = () => {
     } catch { /* non-fatal */ }
   }, []);
 
+  // Debounce the search box (350 ms) so we hit the server once per pause,
+  // not on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setPreviewQuery(previewSearch.trim()), 350);
+    return () => clearTimeout(t);
+  }, [previewSearch]);
+
+  const previewUrl = useCallback((rt, offset) =>
+    `${API}/pms/data/preview?record_type=${rt}&limit=200&offset=${offset}` +
+    (previewQuery ? `&search=${encodeURIComponent(previewQuery)}` : ''),
+  [previewQuery]);
+
+  // First page (reset) — 200 rows; further pages appended by onPreviewScroll.
   const loadPreview = useCallback(async (rt) => {
+    const reqId = ++previewReqRef.current;
+    previewBusyRef.current = true;
     setPreviewLoading(true);
     try {
-      const res = await fetch(`${API}/pms/data/preview?record_type=${rt}&limit=50`, { headers: authHeaders() });
+      const res = await fetch(previewUrl(rt, 0), { headers: authHeaders() });
       const data = await res.json();
-      if (res.ok && data.success) setPreviewRows(data.items || []);
-    } catch { setPreviewRows([]); }
-    finally { setPreviewLoading(false); }
-  }, []);
+      if (reqId !== previewReqRef.current) return;   // a newer request superseded this one
+      if (res.ok && data.success) {
+        setPreviewRows(data.items || []);
+        setPreviewTotal(data.total || 0);
+      }
+    } catch {
+      if (reqId === previewReqRef.current) { setPreviewRows([]); setPreviewTotal(0); }
+    }
+    finally {
+      if (reqId === previewReqRef.current) { setPreviewLoading(false); previewBusyRef.current = false; }
+    }
+  }, [previewUrl]);
+
+  // Lazy-load the next page when the preview table is scrolled near its end.
+  const onPreviewScroll = useCallback(async (e) => {
+    const el = e.currentTarget;
+    if (el.scrollTop + el.clientHeight < el.scrollHeight - 300) return;
+    if (previewBusyRef.current) return;
+    if (previewRows.length >= previewTotal) return;   // everything loaded
+    previewBusyRef.current = true;
+    const reqId = previewReqRef.current;
+    try {
+      const res = await fetch(previewUrl(previewType, previewRows.length), { headers: authHeaders() });
+      const data = await res.json();
+      if (reqId !== previewReqRef.current) return;   // search/type changed mid-flight
+      if (res.ok && data.success) {
+        setPreviewRows((prev) => [...prev, ...(data.items || [])]);
+        setPreviewTotal(data.total || 0);
+      }
+    } catch { /* next scroll retries */ }
+    finally { if (reqId === previewReqRef.current) previewBusyRef.current = false; }
+  }, [previewRows.length, previewTotal, previewType, previewUrl]);
 
   const loadBatches = useCallback(async () => {
     try {
@@ -274,19 +346,22 @@ const SalesLabourReport = () => {
     return [f, t];
   };
 
-  // Default period once data arrives: current month of the latest data date.
+  // Default period once data arrives: As On the latest data date (month-to-date).
   useEffect(() => {
     if (!dataRange.max) return;
     let f = dataRange.max.slice(0, 8) + '01';
     if (dataRange.min && f < dataRange.min) f = dataRange.min;
     setFromDate((cur) => cur || f);
     setToDate((cur) => cur || dataRange.max);
+    // pre-select the as-on date in the calendar so Apply works immediately
+    setPickStart((cur) => cur || new Date(dataRange.max + 'T00:00:00'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataRange.min, dataRange.max]);
 
   // Quick Select presets — computed from the latest uploaded data date and
   // clamped inside the uploaded range.
   const QUICK_OPTIONS = [
+    { key: 'as_on', label: 'As On Date' },
     { key: 'current_month', label: 'Current Month' },
     { key: 'last_month', label: 'Last Month' },
     { key: 'last_quarter', label: 'Last Quarter' },
@@ -296,6 +371,14 @@ const SalesLabourReport = () => {
   ];
   const applyQuick = (key) => {
     if (!dataRange.max) return;
+    if (key === 'as_on') {
+      // Switch the calendar to single-date "As On" mode — the user picks the
+      // as-on date and Apply runs month-start → that date.
+      setActivePeriod('as_on');
+      setPickStart(null);
+      setPickEnd(null);
+      return;
+    }
     const max = dataRange.max;
     const d = new Date(max + 'T00:00:00');
     let from = max.slice(0, 8) + '01', to = max;
@@ -314,7 +397,19 @@ const SalesLabourReport = () => {
     setShowRangePicker(false);
   };
 
+  const asOnMode = activePeriod === 'as_on';
+
   const applyCustomRange = () => {
+    if (asOnMode) {
+      // As On: month-to-date ending on the picked day
+      if (!pickStart) return;
+      const asOnIso = isoOf(pickStart);
+      const [f, t] = clampToData(asOnIso.slice(0, 8) + '01', asOnIso);
+      setFromDate(f);
+      setToDate(t);
+      setShowRangePicker(false);
+      return;
+    }
     if (!pickStart || !pickEnd) return;
     const [f, t] = clampToData(isoOf(pickStart), isoOf(pickEnd));
     setFromDate(f);
@@ -337,6 +432,7 @@ const SalesLabourReport = () => {
       setReport(data);
       setView('report');
       setSavedHist(false);
+      setBranchFilter('All');
       if (!data.spare_rows.length && !data.labour_rows.length) {
         toast('No data / targets found for ' + data.month, { icon: 'ℹ️' });
       } else {
@@ -374,6 +470,7 @@ const SalesLabourReport = () => {
 
   const openHistory = async () => {
     setShowHistory(true);
+    setHistoryDetail(null);
     setHistoryLoading(true);
     try {
       const res = await fetch(`${API}/pms/report/history`, { headers: authHeaders() });
@@ -383,19 +480,26 @@ const SalesLabourReport = () => {
     finally { setHistoryLoading(false); }
   };
 
+  // Open a saved report INSIDE the history modal (detail view).
   const openHistoryItem = async (id) => {
     try {
       const res = await fetch(`${API}/pms/report/history/${id}`, { headers: authHeaders() });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.message || 'Could not open report');
-      setReport(data.payload);
-      setView('report');
-      setSavedHist(true);   // it came from history, so it is already saved
-      setShowHistory(false);
-      toast.success(`Opened: ${data.title}`);
+      setHistoryDetail(data);
     } catch (e) {
       toast.error(e.message);
     }
+  };
+
+  // Push the saved report into the main report view (for filters/export).
+  const loadHistoryToPage = () => {
+    if (!historyDetail) return;
+    setReport(historyDetail.payload);
+    setView('report');
+    setSavedHist(true);   // it came from history, so it is already saved
+    setShowHistory(false);
+    setHistoryDetail(null);
   };
 
   const deleteHistoryItem = async (id) => {
@@ -410,11 +514,18 @@ const SalesLabourReport = () => {
     }
   };
 
-  // ---- report table data with region filter ----
-  const branchRows = report
+  // ---- report table data with region + branch filters ----
+  const typeRows = report
     ? (reportType === 'labour' ? report.labour_rows : report.spare_rows)
-        .filter((r) => regionFilter === 'All' || r.region === regionFilter)
     : [];
+  const regionRows = typeRows;
+  const branchOptions = regionRows.map((r) => ({ id: r.branch_id, name: r.branch_name }));
+  // Guard: a branch hidden by the region filter falls back to All
+  const activeBranch = branchFilter !== 'All' && regionRows.some((r) => r.branch_id === branchFilter)
+    ? branchFilter : 'All';
+  const branchRows = activeBranch === 'All'
+    ? regionRows
+    : regionRows.filter((r) => r.branch_id === activeBranch);
   const totals = branchRows.reduce((a, r) => ({
     monthly_target: a.monthly_target + (r.monthly_target || 0),
     daily_target: a.daily_target + (r.daily_target || 0),
@@ -422,12 +533,90 @@ const SalesLabourReport = () => {
     target_till: a.target_till + (r.target_till || 0),
     achieved_till: a.achieved_till + (r.achieved_till || 0),
     invoice_count_till: a.invoice_count_till + (r.invoice_count_till || 0),
-  }), { monthly_target: 0, daily_target: 0, achieved_on: 0, target_till: 0, achieved_till: 0, invoice_count_till: 0 });
+    short_fall_till: a.short_fall_till + (r.short_fall_till || 0),
+    balance_month: a.balance_month + (r.balance_month || 0),
+  }), { monthly_target: 0, daily_target: 0, achieved_on: 0, target_till: 0, achieved_till: 0, invoice_count_till: 0, short_fall_till: 0, balance_month: 0 });
 
   const breakdownRows = report && ['regional', 'segment', 'service_head'].includes(reportType)
     ? report[reportType] : null;
 
   const dayLabel = report ? fmtDay(report.as_on) : '';
+  const canExport = canExportExcel();
+
+  // Export ONLY the table currently on screen, with the report info stacked
+  // in the top rows. Permission-gated (master admin / can_export flag).
+  const exportReport = async () => {
+    if (!report) return;
+    try {
+      const XLSX = await import('xlsx');
+      const typeName = REPORT_TYPES.find((t) => t.key === reportType)?.name || 'Report';
+      const s = report.summary;
+      const info = [
+        ['Performance Management System — Spare & Labour Sale'],
+        [`Generated Report : As on ${fmtFull(report.as_on)}`],
+        ['Period', `${fmtFull(report.from_date)} → ${fmtFull(report.as_on)}`],
+        ['Report Type', typeName],
+        ['Total Spare Sale (₹)', s.total_spare_sale],
+        ['Total Labour Sale (₹)', s.total_labour_sale],
+        ['Overall % Achieved', s.overall_pct_achieved != null ? s.overall_pct_achieved + ' %' : '—'],
+        ['Total Invoices', s.total_invoices],
+        [],
+      ];
+
+      let header, rows;
+      if (breakdownRows) {
+        const label = reportType === 'regional' ? 'Region'
+          : reportType === 'segment' ? 'Segment' : 'Service Head';
+        header = [label, 'Spare Sale', 'Labour Sale', 'Total', 'Invoices'];
+        rows = breakdownRows.map((r) => [r.name, r.part, r.labour, r.total, r.invoices]);
+        rows.push(['Total',
+          breakdownRows.reduce((x, r) => x + r.part, 0),
+          breakdownRows.reduce((x, r) => x + r.labour, 0),
+          breakdownRows.reduce((x, r) => x + r.total, 0),
+          breakdownRows.reduce((x, r) => x + r.invoices, 0)]);
+      } else {
+        header = ['Region', 'Branch', 'Responsible Person', 'Monthly Target', 'Daily Target',
+          `Achi. On ${dayLabel}`, `Target Till ${dayLabel}`, `Achi. Till ${dayLabel}`,
+          `Invoice Count Till ${dayLabel}`, '% Achieved Till Date',
+          'Short-Fall Till Date', 'Balance For Month'];
+        // pivot layout: MH block, MH Total, KA block, KA Total, grand total
+        const byRegion = {};
+        branchRows.forEach((r) => { (byRegion[r.region] = byRegion[r.region] || []).push(r); });
+        const regionKeys = ['MH', 'KA'].filter((k) => byRegion[k])
+          .concat(Object.keys(byRegion).filter((k) => k !== 'MH' && k !== 'KA'));
+        rows = [];
+        regionKeys.forEach((reg) => {
+          byRegion[reg].forEach((r, i) => rows.push([
+            i === 0 ? reg : '', r.branch_name, r.responsible_person,
+            r.monthly_target, r.daily_target, r.achieved_on, r.target_till,
+            r.achieved_till, r.invoice_count_till, r.pct_achieved,
+            r.short_fall_till, r.balance_month,
+          ]));
+          const s = byRegion[reg].reduce((a, r) => ({
+            mt: a.mt + (r.monthly_target || 0), dt: a.dt + (r.daily_target || 0),
+            ao: a.ao + (r.achieved_on || 0), tt: a.tt + (r.target_till || 0),
+            at: a.at + (r.achieved_till || 0), ic: a.ic + (r.invoice_count_till || 0),
+            sf: a.sf + (r.short_fall_till || 0), bm: a.bm + (r.balance_month || 0),
+          }), { mt: 0, dt: 0, ao: 0, tt: 0, at: 0, ic: 0, sf: 0, bm: 0 });
+          rows.push([`${reg} Total`, '', '', s.mt, s.dt, s.ao, s.tt, s.at, s.ic,
+            s.tt ? +(s.at / s.tt * 100).toFixed(1) : '—', s.sf, s.bm]);
+        });
+        rows.push([`Total (All)`, '', '', totals.monthly_target, totals.daily_target,
+          totals.achieved_on, totals.target_till, totals.achieved_till, totals.invoice_count_till,
+          totals.target_till ? +(totals.achieved_till / totals.target_till * 100).toFixed(1) : '—',
+          totals.short_fall_till, totals.balance_month]);
+      }
+
+      const ws = XLSX.utils.aoa_to_sheet([...info, header, ...rows]);
+      ws['!cols'] = header.map((h) => ({ wch: Math.max(14, String(h).length + 2) }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'PMS Report');
+      XLSX.writeFile(wb, `PMS_${typeName.replace(/[^\w]+/g, '_')}_${report.as_on}.xlsx`);
+      toast.success('Report exported');
+    } catch (e) {
+      toast.error('Export failed: ' + e.message);
+    }
+  };
 
   return (
     <div className="min-h-screen font-sans">
@@ -482,41 +671,10 @@ const SalesLabourReport = () => {
         <div className="px-4 py-2.5 border-b border-gray-100 flex flex-wrap items-center gap-2">
           <ArrowUpTrayIcon className="h-4 w-4" style={{ color: themeColor }} />
           <h2 className="text-sm font-semibold text-gray-900">Report Setup</h2>
-          {/* Progress stepper — completed steps turn green */}
-          {(() => {
-            const hasData = !!dataRange.max;
-            const steps = [
-              { label: 'Upload files', done: hasData },
-              { label: 'Preview data', done: hasData },
-              { label: 'Generate report', done: !!report },
-              { label: 'Save', done: savedHist },
-            ];
-            const current = steps.findIndex((s) => !s.done);
-            return (
-              <div className="ml-auto flex items-center flex-wrap gap-0.5">
-                {steps.map((s, i) => (
-                  <React.Fragment key={s.label}>
-                    {i > 0 && (
-                      <div className={`h-0.5 w-4 sm:w-6 rounded transition-colors ${steps[i - 1].done ? 'bg-emerald-500' : 'bg-gray-200'}`} />
-                    )}
-                    <div className="flex items-center gap-1 px-0.5" title={`Step ${i + 1}: ${s.label}`}>
-                      <span
-                        className={`h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold border transition-colors ${
-                          s.done ? 'bg-emerald-500 border-emerald-500 text-white'
-                            : current === i ? 'bg-white border-2' : 'bg-gray-100 border-gray-200 text-gray-400'}`}
-                        style={!s.done && current === i ? { borderColor: themeColor, color: themeColor } : {}}>
-                        {s.done ? '✓' : i + 1}
-                      </span>
-                      <span className={`text-[10px] font-bold whitespace-nowrap max-sm:hidden ${
-                        s.done ? 'text-emerald-600' : current === i ? 'text-gray-800' : 'text-gray-400'}`}>
-                        {s.label}
-                      </span>
-                    </div>
-                  </React.Fragment>
-                ))}
-              </div>
-            );
-          })()}
+          {/* Steps — plain text only */}
+          <span className="ml-auto text-right text-[11px] font-bold text-gray-700">
+            ① Upload files → ② Preview data → ③ Generate report → ④ Save
+          </span>
         </div>
         <div className="p-3 flex flex-wrap gap-3">
           <UploadBox label="Part Sale file" recordType="part" onUploaded={onUploaded}
@@ -580,43 +738,71 @@ const SalesLabourReport = () => {
                           </div>
                         </div>
 
-                        {/* Custom Range calendar */}
+                        {/* Custom Range / As On calendar */}
                         <div className="sm:w-[66%]">
-                          <h3 className="text-xs font-semibold text-gray-800 mb-2 text-center">Custom Range</h3>
-                          <div className="flex gap-2 mb-2">
-                            <div className="flex-1">
-                              <label className="block text-[11px] text-gray-500 mb-0.5 text-center">Start Date</label>
+                          <h3 className="text-xs font-semibold text-gray-800 mb-2 text-center">
+                            {asOnMode ? 'As On Date' : 'Custom Range'}
+                          </h3>
+                          {asOnMode ? (
+                            <div className="mb-2">
+                              <label className="block text-[11px] text-gray-500 mb-0.5 text-center">
+                                Report runs from month start to the picked date
+                              </label>
                               <div className="px-1.5 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-center truncate">
-                                {pickStart ? pickStart.toLocaleDateString('en-GB') : 'Not selected'}
+                                {pickStart
+                                  ? `${pickStart.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).replace(' ', ' ')} — as on ${pickStart.toLocaleDateString('en-GB')}`
+                                  : 'Not selected'}
                               </div>
                             </div>
-                            <div className="flex-1">
-                              <label className="block text-[11px] text-gray-500 mb-0.5 text-center">End Date</label>
-                              <div className="px-1.5 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-center truncate">
-                                {pickEnd ? pickEnd.toLocaleDateString('en-GB') : 'Not selected'}
+                          ) : (
+                            <div className="flex gap-2 mb-2">
+                              <div className="flex-1">
+                                <label className="block text-[11px] text-gray-500 mb-0.5 text-center">Start Date</label>
+                                <div className="px-1.5 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-center truncate">
+                                  {pickStart ? pickStart.toLocaleDateString('en-GB') : 'Not selected'}
+                                </div>
+                              </div>
+                              <div className="flex-1">
+                                <label className="block text-[11px] text-gray-500 mb-0.5 text-center">End Date</label>
+                                <div className="px-1.5 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-center truncate">
+                                  {pickEnd ? pickEnd.toLocaleDateString('en-GB') : 'Not selected'}
+                                </div>
                               </div>
                             </div>
-                          </div>
+                          )}
                           <div className="border border-gray-200 rounded-lg p-1 bg-gray-50/50 flex justify-center">
-                            <DatePicker
-                              selected={pickStart}
-                              onChange={(dates) => { const [s, e] = dates; setPickStart(s); setPickEnd(e); }}
-                              startDate={pickStart}
-                              endDate={pickEnd}
-                              selectsRange
-                              inline
-                              minDate={dataRange.min ? new Date(dataRange.min + 'T00:00:00') : undefined}
-                              maxDate={dataRange.max ? new Date(dataRange.max + 'T00:00:00') : undefined}
-                              calendarClassName="custom-calendar"
-                              dateFormat="dd/MM/yyyy"
-                            />
+                            {asOnMode ? (
+                              <DatePicker
+                                selected={pickStart}
+                                onChange={(d) => { setPickStart(d); setPickEnd(null); }}
+                                inline
+                                minDate={dataRange.min ? new Date(dataRange.min + 'T00:00:00') : undefined}
+                                maxDate={dataRange.max ? new Date(dataRange.max + 'T00:00:00') : undefined}
+                                calendarClassName="custom-calendar"
+                                dateFormat="dd/MM/yyyy"
+                              />
+                            ) : (
+                              <DatePicker
+                                selected={pickStart}
+                                onChange={(dates) => { const [s, e] = dates; setPickStart(s); setPickEnd(e); }}
+                                startDate={pickStart}
+                                endDate={pickEnd}
+                                selectsRange
+                                inline
+                                minDate={dataRange.min ? new Date(dataRange.min + 'T00:00:00') : undefined}
+                                maxDate={dataRange.max ? new Date(dataRange.max + 'T00:00:00') : undefined}
+                                calendarClassName="custom-calendar"
+                                dateFormat="dd/MM/yyyy"
+                              />
+                            )}
                           </div>
                           <div className="flex gap-2 mt-2.5">
                             <button onClick={() => setShowRangePicker(false)}
                               className="flex-1 px-2 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-xs font-medium">
                               Cancel
                             </button>
-                            <button onClick={applyCustomRange} disabled={!pickStart || !pickEnd}
+                            <button onClick={applyCustomRange}
+                              disabled={asOnMode ? !pickStart : (!pickStart || !pickEnd)}
                               className="flex-1 px-2 py-1.5 text-white rounded-lg hover:opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium"
                               style={{ backgroundColor: themeColor }}>
                               Apply
@@ -737,8 +923,26 @@ const SalesLabourReport = () => {
         <div className="px-4 py-2.5 border-b border-gray-100 flex flex-wrap items-center gap-2">
           <TableCellsIcon className="h-4 w-4" style={{ color: themeColor }} />
           <h2 className="text-sm font-semibold text-gray-900">Uploaded File Preview</h2>
-          <span className="text-[11px] text-gray-400">latest 50 stored rows</span>
+          <span className="text-[11px] text-gray-400">
+            {previewTotal > 0 ? `${inr(previewRows.length)} of ${inr(previewTotal)} rows` : 'newest first'}
+          </span>
           <div className="flex-1" />
+          <div className="relative">
+            <MagnifyingGlassIcon className="h-3.5 w-3.5 text-gray-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text" value={previewSearch}
+              onChange={(e) => setPreviewSearch(e.target.value)}
+              placeholder="Search Claim Invoice No…"
+              className="pl-7 pr-6 py-1 w-52 text-[11px] border border-gray-300 rounded-md outline-none focus:ring-1"
+              style={{ '--tw-ring-color': themeColor }}
+            />
+            {previewSearch && (
+              <button onClick={() => setPreviewSearch('')} title="Clear search"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <XMarkIcon className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
           {[['part', 'Part Sale'], ['labour', 'Labour']].map(([k, n]) => (
             <button key={k} onClick={() => setPreviewType(k)}
               className={`px-2.5 py-1 rounded-md text-[11px] font-medium border ${previewType === k
@@ -758,10 +962,14 @@ const SalesLabourReport = () => {
           /* Empty state — tall box with the message centered */
           <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
             <TableCellsIcon className="h-8 w-8" />
-            <p className="text-sm">No {previewType === 'part' ? 'Part Sale' : 'Labour'} data added yet</p>
+            <p className="text-sm">
+              {previewQuery
+                ? <>No invoice matching “{previewQuery}” in {previewType === 'part' ? 'Part Sale' : 'Labour'} data</>
+                : <>No {previewType === 'part' ? 'Part Sale' : 'Labour'} data added yet</>}
+            </p>
           </div>
         ) : (
-          <div className="overflow-x-auto max-h-[320px] overflow-y-auto">
+          <div className="overflow-x-auto max-h-[420px] overflow-y-auto" onScroll={onPreviewScroll}>
             <table className="w-full text-[11px] border-collapse min-w-[1050px]">
               <thead className="sticky top-0"><tr>
                 {PREVIEW_COLS.map(([k, label]) => <th key={k} className={thCls}>{label}</th>)}
@@ -771,11 +979,18 @@ const SalesLabourReport = () => {
                   <tr key={i} className="hover:bg-gray-50/60">
                     {PREVIEW_COLS.map(([k]) => (
                       <td key={k} className={`${tdCls} ${k === 'net_taxable_amount' ? 'text-right font-medium' : ''}`}>
-                        {k === 'net_taxable_amount' ? inr(r[k]) : (r[k] ?? '—')}
+                        {k === 'net_taxable_amount' ? inr(r[k])
+                          : k === 'claim_invoice_no' ? highlightMatch(r[k], previewQuery)
+                          : (r[k] ?? '—')}
                       </td>
                     ))}
                   </tr>
                 ))}
+                {previewRows.length < previewTotal && (
+                  <tr><td colSpan={PREVIEW_COLS.length} className="text-center py-2 text-[11px] text-gray-400 border border-gray-200">
+                    Scroll for more… ({inr(previewTotal - previewRows.length)} remaining)
+                  </td></tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -805,10 +1020,12 @@ const SalesLabourReport = () => {
               className="pms-no-print flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50">
               <BookmarkSquareIcon className="h-3.5 w-3.5" /> {savingReport ? 'Saving…' : 'Save to History'}
             </button>
-            <button onClick={() => window.print()}
-              className="pms-no-print flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
-              <PrinterIcon className="h-3.5 w-3.5" /> Print / PDF
-            </button>
+            {canExport && (
+              <button onClick={exportReport}
+                className="pms-no-print flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
+                <ArrowDownTrayIcon className="h-3.5 w-3.5" /> Export
+              </button>
+            )}
           </div>
 
           {/* Summary tiles */}
@@ -838,71 +1055,203 @@ const SalesLabourReport = () => {
               </select>
             </div>
             {!breakdownRows && (
-              <div className="flex gap-1">
-                {['All', 'MH', 'KA'].map((r) => (
-                  <button key={r} onClick={() => setRegionFilter(r)}
-                    className={`px-3 py-1 rounded-md text-[11px] font-medium border ${regionFilter === r
-                      ? 'text-white border-transparent' : 'text-gray-700 border-gray-300 hover:bg-gray-50'}`}
-                    style={regionFilter === r ? { backgroundColor: themeColor } : {}}>
-                    {r}
-                  </button>
-                ))}
+              <div className="flex flex-col ml-auto">
+                <label className="text-[10px] font-medium text-gray-500 mb-0.5">Branch</label>
+                <select value={activeBranch} onChange={(e) => setBranchFilter(e.target.value)}
+                  className="border border-gray-300 rounded px-2 py-1 text-xs text-black bg-white focus:outline-none focus:ring-1 min-w-[160px]"
+                  style={{ '--tw-ring-color': themeColor }}>
+                  <option value="All">All Branches</option>
+                  {branchOptions.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
               </div>
             )}
           </div>
 
-          {/* Branch table (Spare / Labour) */}
+          {/* ===== Branch Analysis (one branch selected) ===== */}
+          {!breakdownRows && activeBranch !== 'All' && branchRows.length === 1 && (() => {
+            const b = branchRows[0];
+            const totalWd = report.days_in_month || 0;
+            const elapsedWd = b.daily_target > 0 ? Math.round(b.target_till / b.daily_target) : null;
+            const remainingWd = elapsedWd != null ? Math.max(0, totalWd - elapsedWd) : null;
+            const avgPerDay = elapsedWd ? b.achieved_till / elapsedWd : null;
+            const requiredPerDay = (b.balance_month > 0 && remainingWd > 0) ? b.balance_month / remainingWd : 0;
+            const totalAchieved = typeRows.reduce((s, r) => s + (r.achieved_till || 0), 0);
+            const contribution = totalAchieved ? (b.achieved_till / totalAchieved * 100) : null;
+            const rank = 1 + typeRows.filter((r) => (r.achieved_till || 0) > (b.achieved_till || 0)).length;
+            const otherRows = reportType === 'labour' ? report.spare_rows : report.labour_rows;
+            const o = (otherRows || []).find((r) => r.branch_id === b.branch_id);
+            const otherName = reportType === 'labour' ? 'Spare' : 'Labour';
+            const progress = b.monthly_target ? Math.min(100, b.achieved_till / b.monthly_target * 100) : null;
+            const tile = (label, value, color) => (
+              <div key={label} className="border border-gray-200 rounded-lg px-3 py-2 bg-white">
+                <p className="text-[10px] text-gray-500">{label}</p>
+                <p className="text-sm font-bold" style={{ color: color || themeColor }}>{value}</p>
+              </div>
+            );
+            return (
+              <div className="mx-3 mb-2 rounded-xl border p-3"
+                style={{ borderColor: 'rgba(47,49,146,0.25)', backgroundColor: 'rgba(47,49,146,0.04)' }}>
+                <div className="flex flex-wrap items-start gap-2 mb-2">
+                  <div>
+                    <h3 className="text-xs font-bold text-gray-900">
+                      Branch Analysis — {b.branch_name} ({b.region})
+                      <span className="ml-2 text-[11px] font-normal text-gray-500">· {b.responsible_person}</span>
+                    </h3>
+                    <p className="text-[11px] font-semibold mt-0.5" style={{ color: themeColor }}>
+                      Rank #{rank} of {typeRows.length} (by Achi. Till)
+                    </p>
+                  </div>
+                  {/* compact month-progress bar — top-right corner */}
+                  {progress != null && (
+                    <div className="ml-auto w-44 max-sm:w-full">
+                      <div className="flex justify-between text-[10px] text-gray-500 mb-0.5">
+                        <span>Month progress</span>
+                        <span className="font-semibold">{progress.toFixed(1)} %</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-gray-200 overflow-hidden"
+                        title={`₹${inr(b.achieved_till)} of ₹${inr(b.monthly_target)}`}>
+                        <div className="h-full rounded-full transition-all"
+                          style={{ width: `${progress}%`, backgroundColor: progress >= 100 ? '#15803d' : progress >= 70 ? '#ca8a04' : themeColor }} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="grid grid-cols-5 max-lg:grid-cols-3 max-sm:grid-cols-2 gap-2">
+                  {tile('% Achieved Till Date', b.pct_achieved != null ? b.pct_achieved + ' %' : '—',
+                    b.pct_achieved == null ? undefined : b.pct_achieved >= 100 ? '#15803d' : b.pct_achieved >= 70 ? '#ca8a04' : '#92400e')}
+                  {tile('Short-Fall Till Date', '₹ ' + inr(b.short_fall_till),
+                    b.short_fall_till > 0 ? '#92400e' : '#15803d')}
+                  {tile('Balance For Month', '₹ ' + inr(b.balance_month),
+                    b.balance_month <= 0 ? '#15803d' : undefined)}
+                  {tile('Avg / Working Day', avgPerDay != null ? '₹ ' + inr(avgPerDay) : '—')}
+                  {tile(`Required / Day (${remainingWd ?? '—'} days left)`,
+                    b.balance_month <= 0 ? 'Target met ✓' : '₹ ' + inr(requiredPerDay),
+                    b.balance_month <= 0 ? '#15803d' : requiredPerDay > (b.daily_target || 0) ? '#92400e' : undefined)}
+                  {tile('Invoices Till Date', inr(b.invoice_count_till))}
+                  {tile('Avg Value / Invoice', b.invoice_count_till ? '₹ ' + inr(b.achieved_till / b.invoice_count_till) : '—')}
+                  {tile(`Contribution (of all ${reportType === 'labour' ? 'Labour' : 'Spare'})`,
+                    contribution != null ? contribution.toFixed(1) + ' %' : '—')}
+                  {tile(`${otherName} — Achi. Till`, o ? '₹ ' + inr(o.achieved_till) : '—')}
+                  {tile(`${otherName} — % Achieved`, o && o.pct_achieved != null ? o.pct_achieved + ' %' : '—',
+                    !o || o.pct_achieved == null ? undefined : o.pct_achieved >= 100 ? '#15803d' : o.pct_achieved >= 70 ? '#ca8a04' : '#92400e')}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Branch table (Spare / Labour) — pivot layout: Region first with a
+              merged cell per region (MH then KA), each region followed by its
+              own subtotal row, then the grand total. */}
           {!breakdownRows && (
             <div className="px-3 pb-3 overflow-x-auto">
               <table className="w-full text-[11px] border-collapse min-w-[980px]">
                 <thead><tr>
-                  <th className={thCls}>Responsible Person</th>
-                  <th className={thCls}>Branch</th>
                   <th className={thCls}>Region</th>
-                  <th className={thCls}>Target</th>
+                  <th className={thCls}>Branch</th>
+                  <th className={thCls}>Responsible Person</th>
+                  <th className={thCls}>Monthly Target</th>
                   <th className={thCls}>Daily Target</th>
                   <th className={thCls}>Achi. on {dayLabel}</th>
                   <th className={thCls}>Target Till {dayLabel}</th>
                   <th className={thCls}>Achi. Till {dayLabel}</th>
                   <th className={thCls}>Invoice Count Till {dayLabel}</th>
                   <th className={thCls}>% Achieved Till Date</th>
+                  <th className={thCls}>Short-Fall Till Date</th>
+                  <th className={thCls}>Balance For Month</th>
                 </tr></thead>
                 <tbody>
                   {branchRows.length === 0 ? (
-                    <tr><td colSpan={10} className="text-center py-6 text-gray-500">
+                    <tr><td colSpan={12} className="text-center py-6 text-gray-500">
                       No rows — upload data and set AOP targets for {report.month}.
                     </td></tr>
-                  ) : branchRows.map((r, i) => (
-                    <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60">
-                      <td className={tdCls}>{r.responsible_person}</td>
-                      <td className={tdCls}>{r.branch_name}</td>
-                      <td className={tdCls}>{r.region}</td>
-                      <td className={`${tdCls} text-right`}>{inr(r.monthly_target)}</td>
-                      <td className={`${tdCls} text-right`}>{inr(r.daily_target)}</td>
-                      <td className={`${tdCls} text-right`}>{inr(r.achieved_on)}</td>
-                      <td className={`${tdCls} text-right`}>{inr(r.target_till)}</td>
-                      <td className={`${tdCls} text-right font-medium`}>{inr(r.achieved_till)}</td>
-                      <td className={`${tdCls} text-right`}>{inr(r.invoice_count_till)}</td>
-                      <td className={`${tdCls} text-right font-semibold`}
-                        style={{ color: r.pct_achieved == null ? undefined : r.pct_achieved >= 100 ? '#15803d' : r.pct_achieved >= 70 ? '#a16207' : '#b91c1c' }}>
-                        {r.pct_achieved == null ? '—' : r.pct_achieved + ' %'}
-                      </td>
-                    </tr>
-                  ))}
-                  {branchRows.length > 0 && (
-                    <tr className="bg-gray-50 font-semibold">
-                      <td className={tdCls} colSpan={3}>Total ({regionFilter})</td>
-                      <td className={`${tdCls} text-right`}>{inr(totals.monthly_target)}</td>
-                      <td className={`${tdCls} text-right`}>{inr(totals.daily_target)}</td>
-                      <td className={`${tdCls} text-right`}>{inr(totals.achieved_on)}</td>
-                      <td className={`${tdCls} text-right`}>{inr(totals.target_till)}</td>
-                      <td className={`${tdCls} text-right`}>{inr(totals.achieved_till)}</td>
-                      <td className={`${tdCls} text-right`}>{inr(totals.invoice_count_till)}</td>
-                      <td className={`${tdCls} text-right`}>
-                        {totals.monthly_target ? (totals.achieved_till / totals.monthly_target * 100).toFixed(1) + ' %' : '—'}
-                      </td>
-                    </tr>
-                  )}
+                  ) : (() => {
+                    // group by region, MH first then KA then anything else
+                    const byRegion = {};
+                    branchRows.forEach((r) => { (byRegion[r.region] = byRegion[r.region] || []).push(r); });
+                    const regionKeys = ['MH', 'KA'].filter((k) => byRegion[k])
+                      .concat(Object.keys(byRegion).filter((k) => k !== 'MH' && k !== 'KA'));
+                    const sumRows = (rows) => rows.reduce((a, r) => ({
+                      monthly_target: a.monthly_target + (r.monthly_target || 0),
+                      daily_target: a.daily_target + (r.daily_target || 0),
+                      achieved_on: a.achieved_on + (r.achieved_on || 0),
+                      target_till: a.target_till + (r.target_till || 0),
+                      achieved_till: a.achieved_till + (r.achieved_till || 0),
+                      invoice_count_till: a.invoice_count_till + (r.invoice_count_till || 0),
+                      short_fall_till: a.short_fall_till + (r.short_fall_till || 0),
+                      balance_month: a.balance_month + (r.balance_month || 0),
+                    }), { monthly_target: 0, daily_target: 0, achieved_on: 0, target_till: 0, achieved_till: 0, invoice_count_till: 0, short_fall_till: 0, balance_month: 0 });
+                    const metricCells = (s) => (
+                      <>
+                        <td className={`${tdCls} text-right`}>{inr(s.monthly_target)}</td>
+                        <td className={`${tdCls} text-right`}>{inr(s.daily_target)}</td>
+                        <td className={`${tdCls} text-right`}>{inr(s.achieved_on)}</td>
+                        <td className={`${tdCls} text-right`}>{inr(s.target_till)}</td>
+                        <td className={`${tdCls} text-right`}>{inr(s.achieved_till)}</td>
+                        <td className={`${tdCls} text-right`}>{inr(s.invoice_count_till)}</td>
+                        <td className={`${tdCls} text-right`}>
+                          {s.target_till ? (s.achieved_till / s.target_till * 100).toFixed(1) + ' %' : '—'}
+                        </td>
+                        <td className={`${tdCls} text-right`}
+                          style={{ color: s.short_fall_till > 0 ? '#92400e' : '#15803d' }}>
+                          {inr(s.short_fall_till)}
+                        </td>
+                        <td className={`${tdCls} text-right`}>{inr(s.balance_month)}</td>
+                      </>
+                    );
+                    return (
+                      <>
+                        {regionKeys.map((reg) => {
+                          const rows = byRegion[reg];
+                          const sub = sumRows(rows);
+                          return (
+                            <React.Fragment key={reg}>
+                              {rows.map((r, i) => (
+                                <tr key={r.branch_id} className="hover:bg-gray-50/60">
+                                  {i === 0 && (
+                                    <td rowSpan={rows.length}
+                                      className={`${tdCls} text-center font-bold align-middle`}
+                                      style={{ color: themeColor, backgroundColor: 'rgba(47,49,146,0.04)' }}>
+                                      {reg}
+                                    </td>
+                                  )}
+                                  <td className={tdCls}>{r.branch_name}</td>
+                                  <td className={tdCls}>{r.responsible_person}</td>
+                                  <td className={`${tdCls} text-right`}>{inr(r.monthly_target)}</td>
+                                  <td className={`${tdCls} text-right`}>{inr(r.daily_target)}</td>
+                                  <td className={`${tdCls} text-right`}>{inr(r.achieved_on)}</td>
+                                  <td className={`${tdCls} text-right`}>{inr(r.target_till)}</td>
+                                  <td className={`${tdCls} text-right font-medium`}>{inr(r.achieved_till)}</td>
+                                  <td className={`${tdCls} text-right`}>{inr(r.invoice_count_till)}</td>
+                                  <td className={`${tdCls} text-right font-semibold`}
+                                    style={{ color: r.pct_achieved == null ? undefined : r.pct_achieved >= 100 ? '#15803d' : r.pct_achieved >= 70 ? '#a16207' : '#92400e' }}>
+                                    {r.pct_achieved == null ? '—' : r.pct_achieved + ' %'}
+                                  </td>
+                                  <td className={`${tdCls} text-right`}
+                                    style={{ color: r.short_fall_till == null ? undefined : r.short_fall_till > 0 ? '#92400e' : '#15803d' }}>
+                                    {inr(r.short_fall_till)}
+                                  </td>
+                                  <td className={`${tdCls} text-right`}
+                                    style={{ color: r.balance_month == null ? undefined : r.balance_month > 0 ? undefined : '#15803d' }}>
+                                    {inr(r.balance_month)}
+                                  </td>
+                                </tr>
+                              ))}
+                              {/* region subtotal (like the pivot's "MH Total") */}
+                              <tr className="font-semibold" style={{ backgroundColor: 'rgba(47,49,146,0.08)' }}>
+                                <td className={tdCls} colSpan={3}>{reg} Total</td>
+                                {metricCells(sub)}
+                              </tr>
+                            </React.Fragment>
+                          );
+                        })}
+                        {/* grand total */}
+                        <tr className="bg-gray-50 font-bold">
+                          <td className={tdCls} colSpan={3}>Total (All)</td>
+                          {metricCells(totals)}
+                        </tr>
+                      </>
+                    );
+                  })()}
                 </tbody>
               </table>
             </div>
@@ -949,50 +1298,184 @@ const SalesLabourReport = () => {
         </div>
       )}
 
-      {/* ============ History modal ============ */}
+      {/* ============ History modal (list → in-modal report viewer) ============ */}
       {showHistory && (
         <div className="pms-no-print fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-lg shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
-            <div className="px-4 py-2.5 border-b border-gray-200 flex justify-between items-center">
-              <h2 className="text-sm font-semibold text-gray-900">Report History</h2>
+          <div className="bg-white rounded-lg shadow-2xl max-w-6xl w-full max-h-[92vh] overflow-hidden flex flex-col">
+            <div className="px-4 py-2.5 border-b border-gray-200 flex items-center gap-2">
+              {historyDetail && (
+                <button onClick={() => setHistoryDetail(null)}
+                  className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-gray-700 border border-gray-300 rounded hover:bg-gray-50">
+                  ← Back to list
+                </button>
+              )}
+              <h2 className="text-sm font-semibold text-gray-900 flex-1 truncate">
+                {historyDetail ? historyDetail.title : 'Report History'}
+              </h2>
+              {historyDetail && (
+                <button onClick={loadHistoryToPage}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white rounded-md hover:opacity-90"
+                  style={{ backgroundColor: themeColor }}>
+                  Open in Report View
+                </button>
+              )}
               <button onClick={() => setShowHistory(false)} className="p-1 rounded hover:bg-gray-100">
                 <XMarkIcon className="h-4 w-4 text-gray-500" />
               </button>
             </div>
+
             <div className="flex-1 overflow-y-auto p-3">
-              {historyLoading ? (
-                <p className="text-center py-6 text-xs text-gray-500">Loading…</p>
-              ) : history.length === 0 ? (
-                <p className="text-center py-6 text-xs text-gray-500">No saved reports yet.</p>
+              {!historyDetail ? (
+                /* ---------- LIST ---------- */
+                historyLoading ? (
+                  <p className="text-center py-6 text-xs text-gray-500">Loading…</p>
+                ) : history.length === 0 ? (
+                  <div className="h-64 flex flex-col items-center justify-center gap-2 text-gray-400">
+                    <ClockIcon className="h-8 w-8" />
+                    <p className="text-sm">No saved reports yet.</p>
+                  </div>
+                ) : (
+                  <table className="w-full text-xs border-collapse">
+                    <thead><tr>
+                      <th className={thCls}>Title</th>
+                      <th className={thCls}>As on</th>
+                      <th className={thCls}>Generated By</th>
+                      <th className={thCls}>Saved</th>
+                      <th className={thCls} style={{ width: 90 }}>Action</th>
+                    </tr></thead>
+                    <tbody>
+                      {history.map((h) => (
+                        <tr key={h.id} className="border-b border-gray-100 hover:bg-gray-50/60">
+                          <td className={tdCls}>
+                            <button onClick={() => openHistoryItem(h.id)}
+                              className="font-medium hover:underline" style={{ color: themeColor }}>
+                              {h.title}
+                            </button>
+                          </td>
+                          <td className={tdCls}>{fmtFull(h.as_on_date)}</td>
+                          <td className={tdCls}>{h.created_by_name || h.created_by || '—'}</td>
+                          <td className={tdCls}>{h.created_at ? new Date(h.created_at).toLocaleString('en-GB') : '—'}</td>
+                          <td className={`${tdCls} text-center`}>
+                            <button onClick={() => deleteHistoryItem(h.id)} title="Delete"
+                              className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-600">
+                              <TrashIcon className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )
               ) : (
-                <table className="w-full text-xs border-collapse">
-                  <thead><tr>
-                    <th className={thCls}>Title</th>
-                    <th className={thCls}>As on</th>
-                    <th className={thCls}>Saved</th>
-                    <th className={thCls} style={{ width: 90 }}>Action</th>
-                  </tr></thead>
-                  <tbody>
-                    {history.map((h) => (
-                      <tr key={h.id} className="border-b border-gray-100 hover:bg-gray-50/60">
-                        <td className={tdCls}>
-                          <button onClick={() => openHistoryItem(h.id)}
-                            className="font-medium hover:underline" style={{ color: themeColor }}>
-                            {h.title}
-                          </button>
-                        </td>
-                        <td className={tdCls}>{fmtFull(h.as_on_date)}</td>
-                        <td className={tdCls}>{h.created_at ? new Date(h.created_at).toLocaleString('en-GB') : '—'}</td>
-                        <td className={`${tdCls} text-center`}>
-                          <button onClick={() => deleteHistoryItem(h.id)} title="Delete"
-                            className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-600">
-                            <TrashIcon className="h-3.5 w-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                /* ---------- IN-MODAL REPORT VIEWER ---------- */
+                (() => {
+                  const p = historyDetail.payload;
+                  const d = fmtDay(p.as_on);
+                  const branchTable = (rows, title) => (
+                    <div className="mt-3">
+                      <h3 className="text-xs font-bold text-gray-800 mb-1.5">{title}</h3>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-[11px] border-collapse min-w-[1000px]">
+                          <thead><tr>
+                            <th className={thCls}>Responsible Person</th>
+                            <th className={thCls}>Branch</th>
+                            <th className={thCls}>Region</th>
+                            <th className={thCls}>Monthly Target</th>
+                            <th className={thCls}>Daily Target</th>
+                            <th className={thCls}>Achi. on {d}</th>
+                            <th className={thCls}>Target Till {d}</th>
+                            <th className={thCls}>Achi. Till {d}</th>
+                            <th className={thCls}>Invoices</th>
+                            <th className={thCls}>% Achieved</th>
+                            <th className={thCls}>Short-Fall</th>
+                            <th className={thCls}>Balance</th>
+                          </tr></thead>
+                          <tbody>
+                            {(rows || []).map((r, i) => (
+                              <tr key={i} className="hover:bg-gray-50/60">
+                                <td className={tdCls}>{r.responsible_person}</td>
+                                <td className={tdCls}>{r.branch_name}</td>
+                                <td className={`${tdCls} text-center`}>{r.region}</td>
+                                <td className={`${tdCls} text-right`}>{inr(r.monthly_target)}</td>
+                                <td className={`${tdCls} text-right`}>{inr(r.daily_target)}</td>
+                                <td className={`${tdCls} text-right`}>{inr(r.achieved_on)}</td>
+                                <td className={`${tdCls} text-right`}>{inr(r.target_till)}</td>
+                                <td className={`${tdCls} text-right font-medium`}>{inr(r.achieved_till)}</td>
+                                <td className={`${tdCls} text-right`}>{inr(r.invoice_count_till)}</td>
+                                <td className={`${tdCls} text-right font-semibold`}
+                                  style={{ color: r.pct_achieved == null ? undefined : r.pct_achieved >= 100 ? '#15803d' : r.pct_achieved >= 70 ? '#a16207' : '#92400e' }}>
+                                  {r.pct_achieved == null ? '—' : r.pct_achieved + ' %'}
+                                </td>
+                                <td className={`${tdCls} text-right`}
+                                  style={{ color: r.short_fall_till == null ? undefined : r.short_fall_till > 0 ? '#92400e' : '#15803d' }}>
+                                  {inr(r.short_fall_till)}
+                                </td>
+                                <td className={`${tdCls} text-right`}>{inr(r.balance_month)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                  const breakdownTable = (rows, title, label) => (
+                    <div className="mt-3">
+                      <h3 className="text-xs font-bold text-gray-800 mb-1.5">{title}</h3>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-[11px] border-collapse min-w-[480px]">
+                          <thead><tr>
+                            <th className={thCls}>{label}</th>
+                            <th className={thCls}>Spare Sale</th>
+                            <th className={thCls}>Labour Sale</th>
+                            <th className={thCls}>Total</th>
+                            <th className={thCls}>Invoices</th>
+                          </tr></thead>
+                          <tbody>
+                            {(rows || []).map((r, i) => (
+                              <tr key={i} className="hover:bg-gray-50/60">
+                                <td className={`${tdCls} font-medium`}>{r.name}</td>
+                                <td className={`${tdCls} text-right`}>{inr(r.part)}</td>
+                                <td className={`${tdCls} text-right`}>{inr(r.labour)}</td>
+                                <td className={`${tdCls} text-right font-semibold`}>{inr(r.total)}</td>
+                                <td className={`${tdCls} text-right`}>{inr(r.invoices)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                  return (
+                    <div>
+                      <p className="text-[11px] text-gray-500">
+                        As on <b>{fmtFull(p.as_on)}</b>
+                        {p.from_date && <> · Period: {fmtDay(p.from_date)} → {fmtDay(p.as_on)}</>}
+                        {historyDetail.created_by_name && <> · Generated by <b>{historyDetail.created_by_name}</b></>}
+                        {historyDetail.created_at && <> on {new Date(historyDetail.created_at).toLocaleString('en-GB')}</>}
+                      </p>
+                      {/* Summary tiles */}
+                      <div className="mt-2 grid grid-cols-4 max-md:grid-cols-2 gap-2">
+                        {[
+                          ['Total Spare Sale', '₹ ' + lakh(p.summary?.total_spare_sale)],
+                          ['Total Labour Sale', '₹ ' + lakh(p.summary?.total_labour_sale)],
+                          ['Overall % Achieved', p.summary?.overall_pct_achieved != null
+                            ? p.summary.overall_pct_achieved + ' %' : '—'],
+                          ['Total Invoices', inr(p.summary?.total_invoices)],
+                        ].map(([label, value]) => (
+                          <div key={label} className="border border-gray-200 rounded-lg px-3 py-2">
+                            <p className="text-[11px] text-gray-500">{label}</p>
+                            <p className="text-base font-bold" style={{ color: themeColor }}>{value}</p>
+                          </div>
+                        ))}
+                      </div>
+                      {branchTable(p.spare_rows, 'Spare Part Sales')}
+                      {branchTable(p.labour_rows, 'Labour Sales')}
+                      {breakdownTable(p.regional, 'Regional-wise Sales', 'Region')}
+                      {breakdownTable(p.segment, 'Segment-wise Sales', 'Segment')}
+                      {breakdownTable(p.service_head, 'Service Report Type-wise Sales', 'Service Head')}
+                    </div>
+                  );
+                })()
               )}
             </div>
           </div>

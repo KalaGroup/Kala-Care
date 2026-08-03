@@ -33,6 +33,31 @@ class PmsBranchTarget(Base):
     )
 
 
+class PmsMonthSettings(Base):
+    """Per-month settings for the AOP Master — currently the number of
+    working days (defaults to all days except Sundays; editable)."""
+    __tablename__ = "pms_month_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    target_month = Column(String(7), nullable=False, unique=True, index=True)  # 'YYYY-MM'
+    working_days = Column(Integer, nullable=True)
+    updated_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
+
+
+class PmsHead(Base):
+    """Head master — the reporting buckets SR Types map to (Warranty,
+    Post Warranty, AMC, KOEL AMC, OTC Order + any added later). Managed from
+    the SR Type Master tab; feeds its Head dropdown."""
+    __tablename__ = "pms_heads"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(60), nullable=False, unique=True)
+    created_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+
+
 class PmsSrTypeMapping(Base):
     """SR Type → Head mapping (e.g. 'Bandhan Premium' → 'AMC').
 
@@ -97,6 +122,8 @@ class PmsSalesRecord(Base):
 
     __table_args__ = (
         Index("ix_pms_records_type_date", "record_type", "claim_invoice_date"),
+        # Preview pagination: filter by record_type, newest-first by id.
+        Index("ix_pms_records_type_id", "record_type", "id"),
     )
 
 

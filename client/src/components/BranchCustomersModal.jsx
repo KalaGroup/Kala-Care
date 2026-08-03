@@ -719,7 +719,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                 ) : (
                                     <div className="flex items-center justify-between">
                                         <div className="w-[30%] flex justify-center">
-                                            <p className="text-lg font-bold text-gray-900">
+                                            <p className="text-lg font-semibold text-gray-900">
                                                 {allocationSummary?.total_allocated_customers?.toLocaleString() || 0}
                                             </p>
                                         </div>
@@ -727,13 +727,13 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                         <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
                                             <div className="flex flex-row justify-between items-baseline">
                                                 <span>Attended:</span>
-                                                <span className="font-bold text-lg whitespace-nowrap">
+                                                <span className="font-semibold text-base whitespace-nowrap">
                                                     {allocationSummary?.attended_customers?.toLocaleString() || 0}
                                                 </span>
                                             </div>
                                             <div className="flex flex-row justify-between items-baseline">
                                                 <span>Remaining:</span>
-                                                <span className="font-bold text-lg whitespace-nowrap">
+                                                <span className="font-semibold text-base whitespace-nowrap">
                                                     {allocationSummary?.total_allocated_customers && allocationSummary?.attended_customers
                                                         ? (allocationSummary.total_allocated_customers - allocationSummary.attended_customers).toLocaleString()
                                                         : 0}
@@ -751,7 +751,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                 </h3>
                                 <div className="flex items-center justify-between">
                                     <div className="w-[35%] flex justify-center">
-                                        <p className="text-2xl font-bold text-gray-900">
+                                        <p className="text-xl font-semibold text-gray-900">
                                             {totalBranchAssets.toLocaleString()}
                                         </p>
                                     </div>
@@ -760,13 +760,13 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                     <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Attended:</span>
-                                            <span className="font-bold text-lg whitespace-nowrap">
+                                            <span className="font-semibold text-base whitespace-nowrap">
                                                 {totalEngagedCustomers.toLocaleString()}
                                             </span>
                                         </div>
                                         <div className="flex flex-row justify-between items-baseline">
                                             <span>Remaining:</span>
-                                            <span className="font-bold text-lg whitespace-nowrap">
+                                            <span className="font-semibold text-base whitespace-nowrap">
                                                 {(totalBranchAssets - totalEngagedCustomers).toLocaleString()}  {/* ← Fix */}
                                             </span>
                                         </div>
@@ -781,31 +781,31 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                 </h3>
                                 <div className="flex items-center justify-between">
                                     <div className="w-[30%] flex justify-center">
-                                        <p className="text-2xl font-bold text-black">
+                                        <p className="text-xl font-semibold text-black">
                                             {totalEngagedCustomers.toLocaleString()}
                                         </p>
                                     </div>
                                     <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
                                     <div className="w-[60%] min-w-0 grid grid-cols-3 gap-x-2 gap-y-1 pl-2 pr-3 text-xs font-semibold justify-items-start">
                                         <div className="flex items-baseline gap-1 min-w-0">
-                                            <span className="w-8 shrink-0">WIP:</span>
-                                            <span className="font-bold text-base text-black whitespace-nowrap">{totalWip.toLocaleString()}</span>
+                                            <span className="shrink-0">WIP:</span>
+                                            <span className="font-semibold text-sm text-black whitespace-nowrap">{totalWip.toLocaleString()}</span>
                                         </div>
                                         <div className="flex items-baseline gap-1 min-w-0">
-                                            <span className="w-8 shrink-0">F:</span>
-                                            <span className="font-bold text-base text-black whitespace-nowrap">{totalFR.toLocaleString()}</span>
+                                            <span className="shrink-0">F:</span>
+                                            <span className="font-semibold text-sm text-black whitespace-nowrap">{totalFR.toLocaleString()}</span>
                                         </div>
                                         <div className="flex items-baseline gap-1 min-w-0">
-                                            <span className="w-8 shrink-0">R:</span>
-                                            <span className="font-bold text-base text-black whitespace-nowrap">{totalRejected.toLocaleString()}</span>
+                                            <span className="shrink-0">R:</span>
+                                            <span className="font-semibold text-sm text-black whitespace-nowrap">{totalRejected.toLocaleString()}</span>
                                         </div>
                                         <div className="flex items-baseline gap-1 min-w-0">
-                                            <span className="w-8 shrink-0">NC:</span>
-                                            <span className="font-bold text-base text-black whitespace-nowrap">{totalNotConnected.toLocaleString()}</span>
+                                            <span className="shrink-0">NC:</span>
+                                            <span className="font-semibold text-sm text-black whitespace-nowrap">{totalNotConnected.toLocaleString()}</span>
                                         </div>
                                         <div className="flex items-baseline gap-1 min-w-0">
-                                            <span className="w-8 shrink-0">C:</span>
-                                            <span className="font-bold text-base text-black whitespace-nowrap">{totalCompleted.toLocaleString()}</span>
+                                            <span className="shrink-0">C:</span>
+                                            <span className="font-semibold text-sm text-black whitespace-nowrap">{totalCompleted.toLocaleString()}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -819,7 +819,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                 <div className="flex items-center justify-between">
                                     <div className="w-[35%] flex flex-col items-center justify-center">
                                         <span className="text-[10px] text-black">Completion Rate</span>
-                                        <p className="text-2xl font-bold text-black">
+                                        <p className="text-xl font-semibold text-black">
                                             {completionRate}%
                                         </p>
                                     </div>

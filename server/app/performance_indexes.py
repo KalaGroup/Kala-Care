@@ -13,6 +13,8 @@ blocks on this.
 from sqlalchemy import text
 
 INDEX_STATEMENTS = [
+    # PMS preview pagination — filter record_type, newest-first pages by id
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_pms_records_type_id' AND object_id = OBJECT_ID('dbo.pms_sales_records')) CREATE NONCLUSTERED INDEX ix_pms_records_type_id ON dbo.pms_sales_records (record_type, id DESC);",
     # IX_followups_customer_id_followup_date
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_followups_customer_id_followup_date' AND object_id = OBJECT_ID('dbo.followups')) CREATE NONCLUSTERED INDEX IX_followups_customer_id_followup_date ON dbo.followups (customer_id, followup_date DESC) INCLUDE (status);",
     # IX_non_followups_customer_id_followup_date_id
