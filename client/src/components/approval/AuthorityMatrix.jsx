@@ -1,6 +1,7 @@
-/* Authority Matrix — TWO tabs (UI combined; underlying logic unchanged):
+/* Authority Matrix — the tab bar is gone; the SAME component serves two
+   header buttons (underlying logic unchanged):
 
-   1. Employee Hierarchy & Limits — one table:
+   1. Default (Authority Matrix button) — Employee Hierarchy & Limits table:
       Branch | Employee | Level | Max Discounting % | Max Credit Days |
       Max Expense Amount | Action.
       Each branch row lists its taken-in employees as bullets; a LEVEL
@@ -11,7 +12,8 @@
       the expense amount is ONE number applied to ALL expense types. Newly
       created profile employees are DETECTED and offered through the row's
       "Add employee" option.
-   2. Expense Type Master — the expense-type dropdown master.              */
+   2. expenseOnly prop (Expense Master button, replaces My Approval Limits
+      for the COO) — the expense-type dropdown master in a small box.      */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import Swal from 'sweetalert2';
@@ -43,14 +45,16 @@ const LIMIT_KEYS = ['max_discount_percent', 'max_credit_days', 'max_expense_amou
 // browser so the builder view survives refreshes.
 const LS_KEY = 'apvHierarchyBranchesL5';
 
-export default function AuthorityMatrix({ onClose }) {
+/* expenseOnly=true renders ONLY the Expense Type Master in a small box
+   (opened from the header's "Expense Master" button — COO only). */
+export default function AuthorityMatrix({ onClose, expenseOnly = false }) {
     const [data, setData] = useState({
         users: [], branches: [], hod_categories: {}, expense_types: [],
         level_configs: [], chain_data: null, exclusions: {}, branch_members: {},
         branch_groups: {}, ho_branch: 'HO',
     });
     const [loading, setLoading] = useState(true);
-    const [tab, setTab] = useState('hierarchy');   // hierarchy | expense
+    const tab = expenseOnly ? 'expense' : 'hierarchy';   // tabs removed — one view per box
     const [savingId, setSavingId] = useState(null);
     const [newTypeName, setNewTypeName] = useState('');
     const [treeFor, setTreeFor] = useState(null);         // hierarchy tree popup (name click)
@@ -553,16 +557,6 @@ export default function AuthorityMatrix({ onClose }) {
 
     /* ------- small UI pieces ------- */
 
-    const tabBtn = (key, label, Icon) => (
-        <button onClick={() => setTab(key)}
-            className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap flex-shrink-0 ${tab === key
-                ? 'bg-white shadow-sm'
-                : 'bg-white/15 text-white hover:bg-white/25'}`}
-            style={tab === key ? { color: BRAND } : undefined}>
-            <Icon size={14} /> {label}
-        </button>
-    );
-
     const Toggle = ({ on, onChange }) => (
         <button type="button" onClick={() => onChange(!on)}
             className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold border transition-colors ${on
@@ -578,18 +572,17 @@ export default function AuthorityMatrix({ onClose }) {
     /* ================= RENDER ================= */
     return (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3 max-md:p-2" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[96vw] h-[94vh] flex flex-col overflow-hidden"
+            <div className={`bg-white rounded-2xl shadow-2xl w-full flex flex-col overflow-hidden ${expenseOnly
+                ? 'max-w-xl max-h-[88vh]'
+                : 'max-w-[96vw] h-[94vh]'}`}
                 onClick={e => e.stopPropagation()}>
-                {/* Blue bar: title + tabs + close, in ONE row */}
-                <div className="sticky top-0 z-30 flex flex-wrap md:flex-nowrap items-center gap-3 max-md:gap-2 px-3 sm:px-5 py-2.5 rounded-t-2xl text-white md:overflow-x-auto" style={{ background: BRAND, scrollbarWidth: 'thin' }}>
+                {/* Blue bar: title + close (tabs removed — each box shows one view) */}
+                <div className="sticky top-0 z-30 flex items-center gap-3 max-md:gap-2 px-3 sm:px-5 py-2.5 rounded-t-2xl text-white" style={{ background: BRAND }}>
                     <span className="font-semibold text-sm flex items-center gap-2 whitespace-nowrap flex-shrink-0">
-                        <Network size={16} /> Authority Matrix
+                        {expenseOnly ? <Wallet size={16} /> : <Network size={16} />}
+                        {expenseOnly ? 'Expense Master' : 'Authority Matrix'}
                     </span>
-                    <div className="ml-auto flex flex-wrap md:flex-nowrap items-center gap-2 max-md:order-last max-md:w-full max-md:ml-0">
-                        {tabBtn('hierarchy', 'Employee Hierarchy & Limits', GitBranch)}
-                        {tabBtn('expense', 'Expense Type Master', Wallet)}
-                    </div>
-                    <button onClick={onClose} className="p-1.5 rounded-lg bg-white hover:bg-white/90 transition flex-shrink-0 max-md:ml-auto" style={{ color: '#2f3192' }}><X size={15} /></button>
+                    <button onClick={onClose} className="ml-auto p-1.5 rounded-lg bg-white hover:bg-white/90 transition flex-shrink-0" style={{ color: '#2f3192' }}><X size={15} /></button>
                 </div>
 
                 {/* content fills the rest of the box */}

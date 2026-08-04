@@ -418,7 +418,7 @@ const generateBandedLetterPdf = async (bodyHtml) => {
     }
 };
 
-const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, isBranchAdmin, isMasterAdmin, isITAdmin }) => {
+const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, isBranchAdmin, isMasterAdmin, isITAdmin, autoOpenBox, onAutoOpenBoxClose }) => {
     const navigate = useNavigate();
 
     // Yellow highlight for time-dependent counts. 'all' (Calendar) = no highlight.
@@ -1332,6 +1332,45 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             fetchCspStatus();
         }
     };
+
+    // Auto-open one of the CSP boxes when embedded from the Dashboard Employee
+    // Progress table (clicked count cell). Only flips the visibility flags —
+    // every filter is still at its initial value on mount and the mount effects
+    // below already fetch the data, so no duplicate requests are fired.
+    const autoOpenDone = useRef(false);
+    useEffect(() => {
+        if (!autoOpenBox || autoOpenDone.current || !userData?.user_id) return;
+        autoOpenDone.current = true;
+        if (autoOpenBox === 'csp') {
+            setShowCspModal(true);
+        } else if (autoOpenBox === 'openCsp') {
+            setShowOpenCspModal(true);
+        } else if (autoOpenBox === 'cspQuotationRequired') {
+            setCspQuotationFilterActive(true);
+            setShowAllFollowupsModal(true);
+        } else if (autoOpenBox === 'cspQuotationSent') {
+            setCspQuotationSentFilterActive(true);
+            setShowAllFollowupsModal(true);
+        }
+    }, [autoOpenBox, userData?.user_id]);
+
+    // Box-only mode (opened from a Dashboard count cell): the surrounding
+    // Employee Performance modal is hidden, so when the auto-opened box is
+    // closed, close the whole thing with it — otherwise the user would be
+    // left staring at the dashboard with an invisible modal on top.
+    const autoBoxWasOpen = useRef(false);
+    useEffect(() => {
+        if (!autoOpenBox || !onAutoOpenBoxClose) return;
+        const open = autoOpenBox === 'csp' ? showCspModal
+            : autoOpenBox === 'openCsp' ? showOpenCspModal
+            : showAllFollowupsModal;
+        if (open) {
+            autoBoxWasOpen.current = true;
+        } else if (autoBoxWasOpen.current) {
+            autoBoxWasOpen.current = false;
+            onAutoOpenBoxClose();
+        }
+    }, [autoOpenBox, onAutoOpenBoxClose, showCspModal, showOpenCspModal, showAllFollowupsModal]);
 
     // Parse a "DD-MM-YYYY" due-date string (the backend's output format) into a Date
     const parseCspDueDate = (str) => {

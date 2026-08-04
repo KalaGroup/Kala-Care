@@ -23,6 +23,7 @@ from app.models.pms_model import (
     PmsSalesRecord, PmsReportHistory, PmsMonthSettings, PmsHead,
 )
 from app.models.user_model import User, UserRole, UserBranchAccess
+from app.time_utils import now_ist
 
 # ERP branches (same codes as the rest of the ERP) used to auto-prefill a
 # month's Target Master; responsible person = the branch's Branch Admin.
@@ -91,6 +92,14 @@ CANON_HEADERS = {
                            "NETAMOUNT", "TAXABLEAMOUNT", "TAXABLEVALUE"],
 }
 
+# The SR Type column differs per file and feeds the SR Type Master:
+# Part Sale (spares) file -> 'CLAIM INVOICE SR TYPE', Labour file -> 'SR TYPE'.
+# These take priority over the generic sr_type header fallbacks above.
+_SR_TYPE_PRIORITY = {
+    "part": ["CLAIMINVOICESRTYPE"],
+    "labour": ["SRTYPE"],
+}
+
 # The report cannot be built without these three.
 CRITICAL_FIELDS = ["branch_id", "claim_invoice_date", "net_taxable_amount"]
 
@@ -101,8 +110,12 @@ FIELD_LABELS = {
 }
 
 
-def _map_headers(df: pd.DataFrame):
-    """Return ({canonical_field: actual column}, [unmapped columns])."""
+def _map_headers(df: pd.DataFrame, record_type: str = None):
+    """Return ({canonical_field: actual column}, [unmapped columns]).
+
+    record_type ('part' | 'labour') puts that file's known SR Type header
+    first — CLAIM INVOICE SR TYPE for spares, SR TYPE for labour — so it
+    always wins over the generic fallbacks."""
     cols = [c for c in df.columns if pd.notna(c)]
     by_tight = {}
     for c in cols:
@@ -110,6 +123,9 @@ def _map_headers(df: pd.DataFrame):
 
     mapping, used = {}, set()
     for field, keys in CANON_HEADERS.items():
+        if field == "sr_type" and record_type in _SR_TYPE_PRIORITY:
+            pref = _SR_TYPE_PRIORITY[record_type]
+            keys = pref + [k for k in keys if k not in pref]
         for k in keys:
             col = by_tight.get(k)
             if col is not None and col not in used:
@@ -133,13 +149,20 @@ def _norm_branch_id(value) -> str:
 
 
 def _parse_date(value):
+    """DATE ONLY — any time part ('2026-07-01 11:16:21') is dropped.
+
+    Year-first values (yyyy-mm-dd...) must NOT be parsed day-first: with
+    dayfirst=True pandas can flip '2026-07-01' into 7 Jan. dayfirst stays on
+    only for day-first Indian formats like '01-07-2026'."""
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return None
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
         return value
-    ts = pd.to_datetime(str(value).strip(), dayfirst=True, errors="coerce")
+    s = str(value).strip()
+    year_first = bool(re.match(r"^\d{4}[-/.]", s))
+    ts = pd.to_datetime(s, dayfirst=not year_first, errors="coerce")
     return None if pd.isna(ts) else ts.date()
 
 
@@ -172,15 +195,17 @@ def _read_excel(contents: bytes) -> pd.DataFrame:
 
 # ---------------- UPLOAD / VALIDATE ---------------------------------------- #
 
-def validate_file(contents: bytes, filename: str):
+def validate_file(contents: bytes, filename: str, record_type: str = None):
     """Dry-run: report which canonical columns were found / are missing and a
-    small sample, without writing anything."""
+    small sample, without writing anything. record_type ('part' | 'labour')
+    is accepted for parity with import_file; header matching is the same for
+    both files."""
     try:
         df = _read_excel(contents)
     except Exception as e:
         return {"success": False, "message": f"Could not read Excel file: {e}"}
 
-    mapping, unmapped = _map_headers(df)
+    mapping, unmapped = _map_headers(df, record_type)
     missing = [FIELD_LABELS[f] for f in CRITICAL_FIELDS if f not in mapping]
     sample = df.head(5).fillna("").astype(str).to_dict(orient="records")
     return {
@@ -215,7 +240,26 @@ _LINE_KEY_HEADERS = {
 }
 
 
-def import_file(db: Session, contents: bytes, filename: str, record_type: str, user_id: str):
+# ---- Upload progress (polled by the frontend while an import runs) -------- #
+# The import runs in a worker thread (run_in_threadpool in the route), so the
+# progress GET endpoint stays responsive and can read this dict live.
+UPLOAD_PROGRESS = {}
+
+
+def set_upload_progress(token, pct, stage=""):
+    if token:
+        UPLOAD_PROGRESS[token] = {"pct": int(min(100, max(0, pct))), "stage": stage}
+
+
+def get_upload_progress(token):
+    info = UPLOAD_PROGRESS.get(token)
+    if info and info["pct"] >= 100:
+        UPLOAD_PROGRESS.pop(token, None)     # done — free the slot
+    return info or {"pct": 0, "stage": "Starting…"}
+
+
+def import_file(db: Session, contents: bytes, filename: str, record_type: str,
+                user_id: str, progress_token: str = None):
     """Parse the file and upsert rows keyed on CLAIM INVOICE NO + line key.
 
     Identity = invoice number + the line discriminator (PART NUMBER for the
@@ -227,17 +271,21 @@ def import_file(db: Session, contents: bytes, filename: str, record_type: str, u
     if record_type not in ("part", "labour"):
         return {"success": False, "message": "record_type must be 'part' or 'labour'"}
 
+    set_upload_progress(progress_token, 3, "Reading Excel file…")
     try:
         df = _read_excel(contents)
     except Exception as e:
+        set_upload_progress(progress_token, 100, "Failed")
         return {"success": False, "message": f"Could not read Excel file: {e}"}
 
-    mapping, unmapped = _map_headers(df)
+    mapping, unmapped = _map_headers(df, record_type)
     missing = [FIELD_LABELS[f] for f in CRITICAL_FIELDS if f not in mapping]
     if missing:
+        set_upload_progress(progress_token, 100, "Failed")
         return {"success": False,
                 "message": "Missing critical columns: " + ", ".join(missing)}
 
+    set_upload_progress(progress_token, 8, "Parsing rows…")
     batch = PmsUploadBatch(
         record_type=record_type, file_name=filename[:255], total_rows=int(len(df)),
         uploaded_by=user_id,
@@ -254,7 +302,11 @@ def import_file(db: Session, contents: bytes, filename: str, record_type: str, u
     by_line = {}        # (inv_no, line_key) -> parsed field dict (last in file wins)
     no_invoice = []     # rows without an invoice number -> content-hash dedupe
 
-    for _, row in df.iterrows():
+    total_rows = max(1, len(df))
+    for row_i, (_, row) in enumerate(df.iterrows()):
+        if progress_token and row_i % 200 == 0:
+            set_upload_progress(progress_token, 8 + 42 * row_i / total_rows,
+                                f"Parsing rows… {row_i:,} / {total_rows:,}")
         get = lambda f: row[mapping[f]] if f in mapping else None
 
         inv_date = _parse_date(get("claim_invoice_date"))
@@ -300,6 +352,7 @@ def import_file(db: Session, contents: bytes, filename: str, record_type: str, u
     # rows are found by dedupe_key in chunks ----
     id_of = {k: hashlib.sha256(f"{record_type}|inv|{k[0]}|{k[1]}".encode("utf-8")).hexdigest()
              for k in by_line}
+    set_upload_progress(progress_token, 52, "Matching existing records…")
     existing = {}
     id_list = list(id_of.values())
     for i in range(0, len(id_list), 800):
@@ -308,7 +361,10 @@ def import_file(db: Session, contents: bytes, filename: str, record_type: str, u
                 PmsSalesRecord.dedupe_key.in_(chunk)).all():
             existing[rec.dedupe_key] = rec
 
-    for key_pair, fields in by_line.items():
+    for up_i, (key_pair, fields) in enumerate(by_line.items()):
+        if progress_token and up_i % 200 == 0:
+            set_upload_progress(progress_token, 58 + 32 * up_i / max(1, len(by_line)),
+                                f"Importing rows… {up_i:,} / {len(by_line):,}")
         identity = id_of[key_pair]
         rec = existing.get(identity)
         if rec is not None:
@@ -324,6 +380,7 @@ def import_file(db: Session, contents: bytes, filename: str, record_type: str, u
                                   dedupe_key=identity, batch_id=batch.id, **fields))
             inserted += 1
 
+    set_upload_progress(progress_token, 90, "Importing remaining rows…")
     # ---- rows without an invoice number: content-hash dedupe (as before) ----
     seen_keys = set()
     keys = [k for k, _ in no_invoice]
@@ -343,15 +400,36 @@ def import_file(db: Session, contents: bytes, filename: str, record_type: str, u
                               dedupe_key=key, batch_id=batch.id, **fields))
         inserted += 1
 
+    # ---- SR Type Master auto-sync: every SR type seen in an upload is added
+    # to the mapping permanently (head defaulted when known). Rows are only
+    # ever added here — deleting the uploaded data later never removes them.
+    set_upload_progress(progress_token, 93, "Updating SR Type Master…")
+    seen_types = {f["sr_type"] for f in by_line.values() if f.get("sr_type")}
+    seen_types.update(f["sr_type"] for _, f in no_invoice if f.get("sr_type"))
+    new_sr_types = 0
+    if seen_types:
+        known = {m.sr_type.lower() for m in db.query(PmsSrTypeMapping).all()}
+        for sr in sorted(seen_types):
+            if sr.lower() not in known:
+                db.add(PmsSrTypeMapping(sr_type=sr,
+                                        head=DEFAULT_SR_HEADS.get(sr),
+                                        created_by=user_id))
+                known.add(sr.lower())
+                new_sr_types += 1
+
     batch.inserted_rows = inserted
     batch.updated_rows = updated
     batch.duplicate_rows = duplicates
     batch.skipped_rows = skipped
+    set_upload_progress(progress_token, 96, "Saving to database…")
     db.commit()
+    set_upload_progress(progress_token, 100, "Done")
 
     return {
         "success": True,
-        "message": f"{inserted} new, {updated} updated, {duplicates} duplicates skipped",
+        "message": (f"{inserted} new, {updated} updated, {duplicates} duplicates skipped"
+                    + (f" — {new_sr_types} new SR type(s) added to master" if new_sr_types else "")),
+        "sr_types_added": new_sr_types,
         "batch_id": batch.id,
         "total_rows": batch.total_rows,
         "inserted": inserted,
@@ -400,10 +478,12 @@ def data_summary(db: Session):
 
 
 def preview_rows(db: Session, record_type: str, limit: int = 200, offset: int = 0,
-                 search: str = None):
+                 search: str = None, cancelled: str = None):
     """One page of stored rows (newest first) + the total count, so the
     frontend can lazy-load the full dataset with infinite scroll.
-    `search` filters on CLAIM INVOICE NO (contains, case-insensitive)."""
+    `search` filters on CLAIM INVOICE NO (contains, case-insensitive).
+    `cancelled`: None/'all' = every row, 'cancelled' = only cancelled
+    invoices, 'active' = only non-cancelled."""
     q = (db.query(PmsSalesRecord)
          .filter(PmsSalesRecord.record_type == record_type))
     if search:
@@ -412,23 +492,72 @@ def preview_rows(db: Session, record_type: str, limit: int = 200, offset: int = 
         safe = (search.strip().replace("\\", "\\\\").replace("%", "\\%")
                 .replace("_", "\\_").replace("[", "\\["))
         q = q.filter(PmsSalesRecord.claim_invoice_no.ilike(f"%{safe}%", escape="\\"))
+    if cancelled == "cancelled":
+        q = q.filter(PmsSalesRecord.is_cancelled == True)   # noqa: E712
+    elif cancelled == "active":
+        q = q.filter(PmsSalesRecord.is_cancelled == False)  # noqa: E712
     total = q.count()
     rows = (q.order_by(PmsSalesRecord.id.desc())
             .offset(offset).limit(limit).all())
+    # Cancelled-row count for this type (whole dataset, so the filter chip can
+    # show it regardless of the current search/page).
+    cancelled_total = (db.query(PmsSalesRecord)
+                       .filter(PmsSalesRecord.record_type == record_type,
+                               PmsSalesRecord.is_cancelled == True)  # noqa: E712
+                       .count())
     return {
         "total": total,
+        "cancelled_total": cancelled_total,
         "items": [{
+            "id": r.id,
             "zone_name": r.zone_name, "soid": r.soid, "sd_name": r.sd_name,
             "branch_id": r.branch_id, "branch_name": r.branch_name,
             "claim_invoice_no": r.claim_invoice_no,
             "claim_invoice_date": r.claim_invoice_date.isoformat() if r.claim_invoice_date else None,
             "product_segment": r.product_segment, "segment": r.segment,
             "sr_type": r.sr_type, "net_taxable_amount": r.net_taxable_amount,
+            "is_cancelled": bool(r.is_cancelled),
+            "cancelled_by": r.cancelled_by,
+            "cancelled_at": r.cancelled_at.isoformat() if r.cancelled_at else None,
+            # every unmapped file column (original header -> value)
+            "extra": json.loads(r.extra_data) if r.extra_data else {},
         } for r in rows],
     }
 
 
+def set_row_cancelled(db: Session, record_type: str, row_id: int,
+                      cancelled: bool, user_id: str = None):
+    """Cancel / restore ONE stored row (not the whole invoice). The filter is
+    scoped to the record type, so a Part Sale cancel can never touch Labour
+    data and vice versa. The row stays in the database, just flagged — and
+    every generated report skips flagged rows."""
+    rows = (db.query(PmsSalesRecord)
+            .filter(PmsSalesRecord.id == int(row_id),
+                    PmsSalesRecord.record_type == record_type)
+            .update({PmsSalesRecord.is_cancelled: bool(cancelled),
+                     PmsSalesRecord.cancelled_by: (user_id if cancelled else None),
+                     PmsSalesRecord.cancelled_at: (now_ist() if cancelled else None)},
+                    synchronize_session=False))
+    db.commit()
+    if not rows:
+        return {"success": False, "message": "Row not found"}
+    return {"success": True, "rows": rows, "cancelled": bool(cancelled)}
+
+
 # ---------------- AOP MASTER: BRANCH TARGETS -------------------------------- #
+
+# Working-days master is YEAR-INDEPENDENT: one row per calendar month
+# ('ALL-04' = April) applies to EVERY financial year. Year-specific rows
+# ('2026-04', from before this change) remain as a fallback.
+_ALL_WD_PREFIX = "ALL-"
+
+
+def _all_wd_map(db: Session):
+    """{month number '04'..'12': PmsMonthSettings} of the universal rows."""
+    rows = (db.query(PmsMonthSettings)
+            .filter(PmsMonthSettings.target_month.like(f"{_ALL_WD_PREFIX}%")).all())
+    return {r.target_month[len(_ALL_WD_PREFIX):]: r for r in rows}
+
 
 def _count_workdays(start: date, end: date) -> int:
     """Days in [start..end] excluding Sundays."""
@@ -587,6 +716,155 @@ def save_targets(db: Session, month: str, rows: list, user_id: str, working_days
     return {"success": True, "saved": saved, "items": list_targets(db, month)}
 
 
+# ---- Financial-year view (Apr..Mar) ---------------------------------------
+# The Target Master UI edits a whole FY at once: one grid per metric with 12
+# month columns + a monthly working-days master. Storage is unchanged — the
+# same per-(month, branch) rows in pms_branch_targets / pms_month_settings the
+# report already reads.
+
+def _fy_months(fy_start: int):
+    """['2025-04' .. '2025-12', '2026-01' .. '2026-03'] for fy_start=2025."""
+    return ([f"{fy_start}-{m:02d}" for m in range(4, 13)] +
+            [f"{fy_start + 1}-{m:02d}" for m in range(1, 4)])
+
+
+def get_targets_year_payload(db: Session, fy_start: int):
+    """Branch rows for the whole FY (spare/labour per month, in rupees) plus
+    the monthly working-days settings. Branch list + responsible person are
+    synced from the Profile page on every load, same as the month view; rows
+    are materialised in the DB only on save."""
+    months = _fy_months(fy_start)
+    branches = _profile_branches(db)
+    admins = _branch_admins(db)
+
+    def _blank_row(branch_id, region=None, name=None, person=None):
+        return {
+            "branch_id": branch_id, "region": region, "branch_name": name,
+            "responsible_person": person,
+            "spare": {m: 0 for m in months},
+            "labour": {m: 0 for m in months},
+        }
+
+    by_branch = {b: _blank_row(b, info["region"], info["name"], admins.get(b))
+                 for b, info in branches.items()}
+
+    targets = (db.query(PmsBranchTarget)
+               .filter(PmsBranchTarget.target_month.in_(months))
+               .order_by(PmsBranchTarget.target_month).all())
+    for t in targets:
+        row = by_branch.setdefault(
+            t.branch_id,
+            _blank_row(t.branch_id, t.region, t.branch_name, t.responsible_person))
+        row["spare"][t.target_month] = t.spare_target or 0
+        row["labour"][t.target_month] = t.labour_target or 0
+        # Region is user-editable — a saved row's region wins over the
+        # profile default (latest month wins via the order_by above).
+        if t.region:
+            row["region"] = t.region
+        if t.branch_name and not row["branch_name"]:
+            row["branch_name"] = t.branch_name
+        if t.responsible_person and not row["responsible_person"]:
+            row["responsible_person"] = t.responsible_person
+
+    default_wd = {}
+    for m in months:
+        m_start, m_end = _month_bounds(m)
+        default_wd[m] = _count_workdays(m_start, m_end)
+    saved = {s.target_month: s for s in
+             db.query(PmsMonthSettings)
+             .filter(PmsMonthSettings.target_month.in_(months)).all()}
+    all_wd = _all_wd_map(db)
+
+    # Region-wise working days (MH / KA). The universal ('ALL-MM', every FY)
+    # row wins; old year-specific rows and the legacy single value fall back.
+    def _wd_pair(m):
+        s = all_wd.get(m[5:7]) or saved.get(m)
+        base = (s.working_days if s and s.working_days else default_wd[m])
+        return {
+            "mh": (s.working_days_mh if s and s.working_days_mh else base),
+            "ka": (s.working_days_ka if s and s.working_days_ka else base),
+        }
+
+    return {
+        "months": months,
+        "items": sorted(by_branch.values(),
+                        key=lambda r: _branch_sort_key(r["branch_id"])),
+        "working_days": {m: _wd_pair(m) for m in months},
+        "default_working_days": default_wd,
+    }
+
+
+def save_targets_year(db: Session, fy_start: int, rows: list, user_id: str,
+                      working_days: dict = None):
+    """Upsert the FY's target rows (12 months per branch) and the monthly
+    working-days settings. Values arrive in rupees."""
+    months = _fy_months(fy_start)
+    month_set = set(months)
+
+    def _iv(v):
+        try:
+            return max(1, min(31, int(v)))
+        except (ValueError, TypeError):
+            return None
+
+    for m, wd in (working_days or {}).items():
+        if m not in month_set:
+            continue
+        # New style: {'mh': n, 'ka': n}. Legacy: a single int for both.
+        if isinstance(wd, dict):
+            mh, ka = _iv(wd.get("mh")), _iv(wd.get("ka"))
+        else:
+            mh = ka = _iv(wd)
+        if mh is None and ka is None:
+            continue
+        # Saved under the UNIVERSAL month key ('ALL-04') — one master for
+        # every financial year, not per-FY.
+        key = _ALL_WD_PREFIX + m[5:7]
+        setting = (db.query(PmsMonthSettings)
+                   .filter(PmsMonthSettings.target_month == key).first())
+        if not setting:
+            setting = PmsMonthSettings(target_month=key)
+            db.add(setting)
+        if mh is not None:
+            setting.working_days_mh = mh
+        if ka is not None:
+            setting.working_days_ka = ka
+        # legacy mirror (pre-split readers)
+        setting.working_days = mh or ka
+        setting.updated_by = user_id
+
+    existing = {(t.target_month, t.branch_id): t for t in
+                db.query(PmsBranchTarget)
+                .filter(PmsBranchTarget.target_month.in_(months)).all()}
+    saved = 0
+    for r in rows:
+        branch_id = _norm_branch_id(r.get("branch_id"))
+        if not branch_id:
+            continue
+        region = (r.get("region") or "").strip().upper()[:10] or None
+        branch_name = _clean_str(r.get("branch_name"), 120)
+        person = _clean_str(r.get("responsible_person"), 120)
+        spare = r.get("spare") or {}
+        labour = r.get("labour") or {}
+        for m in months:
+            row = existing.get((m, branch_id))
+            if not row:
+                row = PmsBranchTarget(target_month=m, branch_id=branch_id,
+                                      created_by=user_id)
+                db.add(row)
+                existing[(m, branch_id)] = row
+            row.region = region
+            row.branch_name = branch_name
+            row.responsible_person = person
+            row.spare_target = _parse_amount(spare.get(m))
+            row.labour_target = _parse_amount(labour.get(m))
+            row.updated_by = user_id
+        saved += 1
+    db.commit()
+    return {"success": True, "saved": saved,
+            **get_targets_year_payload(db, fy_start)}
+
+
 def delete_target(db: Session, target_id: int):
     row = db.query(PmsBranchTarget).filter(PmsBranchTarget.id == target_id).first()
     if not row:
@@ -736,7 +1014,8 @@ def _region_of(zone_name):
     return z or "Other"
 
 
-def generate_report(db: Session, as_on: date, from_date: date = None):
+def generate_report(db: Session, as_on: date, from_date: date = None,
+                    part_as_on: date = None, labour_as_on: date = None):
     """The full report payload for the period [from_date .. as_on].
 
     Without from_date the period is month-to-date (classic view). Weekly /
@@ -750,57 +1029,101 @@ def generate_report(db: Session, as_on: date, from_date: date = None):
       Achi. till <to>     -> Σ amount inside the period
       Invoice Count till  -> distinct CLAIM INVOICE NO in the period
       % Achieved          -> Achi. till / Target × 100
+
+    part_as_on / labour_as_on optionally give EACH record type its own
+    period end (used by the default all-data report, where the Part Sale and
+    Labour files end on different dates — each side is then measured against
+    targets only up to its own last data date). Omitted -> both use as_on.
     """
-    to_date = as_on
+    to_by = {"part": part_as_on or as_on, "labour": labour_as_on or as_on}
+    to_date = max(to_by.values())
     if from_date is None:
         from_date = to_date.replace(day=1)
     if from_date > to_date:
         from_date, to_date = to_date, from_date
+    for rt in to_by:                       # keep each end inside the period
+        to_by[rt] = min(max(to_by[rt], from_date), to_date)
 
-    # Months the period overlaps. Targets spread over WORKING days (Sundays
-    # excluded; per-month count editable in the AOP Master).
-    month_info = {}
-    cur = from_date.replace(day=1)
-    while cur <= to_date:
-        dim = calendar.monthrange(cur.year, cur.month)[1]
-        m_end = cur.replace(day=dim)
-        ov_start, ov_end = max(cur, from_date), min(m_end, to_date)
-        month_info[cur.strftime("%Y-%m")] = {
-            "ov_work": _count_workdays(ov_start, ov_end),
-            "wd": _count_workdays(cur, m_end),   # default; overridden below
-        }
-        cur = m_end + timedelta(days=1)
+    # Months each type's window overlaps. Targets spread over WORKING days
+    # (Sundays excluded); the per-month count is editable in the AOP Master
+    # PER REGION — MH and KA have different holidays, so each region's
+    # branches use their own working-days count.
+    def _months_till(to_d):
+        info = {}
+        cur = from_date.replace(day=1)
+        while cur <= to_d:
+            dim = calendar.monthrange(cur.year, cur.month)[1]
+            m_end = cur.replace(day=dim)
+            ov_start, ov_end = max(cur, from_date), min(m_end, to_d)
+            wd_default = _count_workdays(cur, m_end)
+            info[cur.strftime("%Y-%m")] = {
+                "ov_work": _count_workdays(ov_start, ov_end),
+                "wd_mh": wd_default,      # defaults; overridden below
+                "wd_ka": wd_default,
+            }
+            cur = m_end + timedelta(days=1)
+        return info
 
-    for s in (db.query(PmsMonthSettings)
-              .filter(PmsMonthSettings.target_month.in_(list(month_info))).all()):
-        if s.working_days:
-            month_info[s.target_month]["wd"] = max(1, s.working_days)
+    month_by_rt = {rt: _months_till(d) for rt, d in to_by.items()}
+    all_months = sorted(set(month_by_rt["part"]) | set(month_by_rt["labour"]))
 
-    ov_by_month = month_info
-    total_month_days = sum(info["wd"] for info in month_info.values())
+    # Universal per-month rows ('ALL-MM', apply to EVERY year) win; old
+    # year-specific rows are the fallback for months saved before the change.
+    year_rows = {s.target_month: s for s in
+                 db.query(PmsMonthSettings)
+                 .filter(PmsMonthSettings.target_month.in_(all_months)).all()}
+    all_wd = _all_wd_map(db)
+    for month in all_months:
+        s = all_wd.get(month[5:7]) or year_rows.get(month)
+        if s is None:
+            continue
+        mh = s.working_days_mh or s.working_days
+        ka = s.working_days_ka or s.working_days
+        for m in month_by_rt.values():
+            if month in m:
+                if mh:
+                    m[month]["wd_mh"] = max(1, mh)
+                if ka:
+                    m[month]["wd_ka"] = max(1, ka)
+
+    def _wd_of(info, region):
+        return info["wd_ka"] if (region or "").upper() == "KA" else info["wd_mh"]
+
+    # Period working days per record type AND region (drives Daily Target)
+    total_days_reg = {rt: {
+        "MH": max(1, sum(i["wd_mh"] for i in m.values())),
+        "KA": max(1, sum(i["wd_ka"] for i in m.values())),
+    } for rt, m in month_by_rt.items()}
+    total_days_rt = {rt: max(v.values()) for rt, v in total_days_reg.items()}
 
     target_rows = db.query(PmsBranchTarget).filter(
-        PmsBranchTarget.target_month.in_(list(ov_by_month))).all()
+        PmsBranchTarget.target_month.in_(all_months)).all()
 
     # Per-branch target sums (full + prorated-till) and display info from the
-    # latest touched month's target row.
+    # latest touched month's target row. Each record type only counts the
+    # months inside ITS window.
     full_target, till_target, info_by_branch = {}, {}, {}
     for t in target_rows:
-        info = ov_by_month[t.target_month]
-        ratio = min(info["ov_work"], info["wd"]) / info["wd"]
         f = full_target.setdefault(t.branch_id, {"part": 0.0, "labour": 0.0})
         p = till_target.setdefault(t.branch_id, {"part": 0.0, "labour": 0.0})
-        f["part"] += t.spare_target or 0
-        f["labour"] += t.labour_target or 0
-        p["part"] += (t.spare_target or 0) * ratio
-        p["labour"] += (t.labour_target or 0) * ratio
+        for rt in ("part", "labour"):
+            info = month_by_rt[rt].get(t.target_month)
+            if info is None:
+                continue                   # month beyond this type's as-on
+            wd = _wd_of(info, t.region)    # region-wise working days
+            ratio = min(info["ov_work"], wd) / wd
+            val = (t.spare_target if rt == "part" else t.labour_target) or 0
+            f[rt] += val
+            p[rt] += val * ratio
         prev = info_by_branch.get(t.branch_id)
         if prev is None or t.target_month > prev.target_month:
             info_by_branch[t.branch_id] = t
 
     records = (db.query(PmsSalesRecord)
                .filter(PmsSalesRecord.claim_invoice_date >= from_date,
-                       PmsSalesRecord.claim_invoice_date <= to_date)
+                       PmsSalesRecord.claim_invoice_date <= to_date,
+                       # cancelled invoices stay stored but never count
+                       PmsSalesRecord.is_cancelled == False)  # noqa: E712
                .all())
 
     # Built-in defaults first, then DB rows on top — so the report groups
@@ -818,10 +1141,13 @@ def generate_report(db: Session, as_on: date, from_date: date = None):
     region_agg = {}          # region -> {part, labour, invoices:set}
     segment_agg = {}         # segment -> {part, labour, invoices:set}
     head_agg = {}            # head -> {part, labour, invoices:set}
+    category_agg = {}        # CATEGORY (Part Sale file only) -> {part, invoices:set}
     branch_info = {}         # branch_id -> {branch_name, region} discovered from data
 
     for r in records:
         rt = r.record_type
+        if r.claim_invoice_date > to_by.get(rt, to_date):
+            continue                       # beyond this type's own as-on date
         b = r.branch_id or "UNKNOWN"
         t = info_by_branch.get(b)
         region = (t.region if t and t.region else _region_of(r.zone_name))
@@ -835,7 +1161,7 @@ def generate_report(db: Session, as_on: date, from_date: date = None):
         inv = (rt, r.claim_invoice_no or f"row-{r.id}")
         agg["achieved_till"] += amt
         agg["invoices"].add(inv)
-        if r.claim_invoice_date == to_date:
+        if r.claim_invoice_date == to_by.get(rt, to_date):
             agg["achieved_on"] += amt
             agg["invoices_on"].add(inv)
 
@@ -854,6 +1180,28 @@ def generate_report(db: Session, as_on: date, from_date: date = None):
         hd[rt] += amt
         hd["invoices"].add(inv)
 
+        # CATEGORY comes only in the Part Sale file — it's an unmapped column,
+        # so it lives in extra_data (QUANTITY too). Spare-only breakdown;
+        # blanks grouped like Excel's "(Blanks)".
+        if rt == "part":
+            cat, qty = None, 0.0
+            if r.extra_data:
+                try:
+                    for k, v in json.loads(r.extra_data).items():
+                        tk = _tight(k)
+                        if tk == "CATEGORY":
+                            cat = str(v).strip()
+                        elif tk in ("QUANTITY", "QTY"):
+                            qty = _parse_amount(v)
+                except (ValueError, TypeError):
+                    pass
+            c = category_agg.setdefault(cat or "(Blanks)",
+                                        {"part": 0.0, "invoices": set(), "qty": 0.0, "lines": 0})
+            c["part"] += amt
+            c["qty"] += qty
+            c["lines"] += 1        # one stored row = one part line of an invoice
+            c["invoices"].add(inv)
+
     # ---- branch tables (one per record type, same shape as the mockup) ----
     def _branch_rows(rt):
         rows = []
@@ -861,16 +1209,20 @@ def generate_report(db: Session, as_on: date, from_date: date = None):
         for b in sorted(branch_ids, key=_branch_sort_key):
             t = info_by_branch.get(b)
             agg = branch_agg[rt].get(b) or _blank()
+            info = branch_info.get(b, {})
+            region = (t.region if t and t.region else info.get("region")) or "Other"
             period_target = (full_target.get(b) or {}).get(rt, 0.0)
-            daily = period_target / total_month_days if period_target else 0.0
+            # Daily Target spreads the target over the branch's OWN region's
+            # working days (MH and KA can differ)
+            reg_days = total_days_reg[rt]["KA" if region.upper() == "KA" else "MH"]
+            daily = period_target / reg_days if period_target else 0.0
             target_till = (till_target.get(b) or {}).get(rt, 0.0)
             achieved_till = round(agg["achieved_till"], 2)
-            info = branch_info.get(b, {})
             rows.append({
                 "responsible_person": (t.responsible_person if t else None) or "—",
                 "branch_id": b,
                 "branch_name": (t.branch_name if t and t.branch_name else info.get("branch_name")) or b,
-                "region": (t.region if t and t.region else info.get("region")) or "Other",
+                "region": region,
                 "monthly_target": round(period_target, 2),   # period target (key kept for compat)
                 "daily_target": round(daily, 2),
                 "achieved_on": round(agg["achieved_on"], 2),
@@ -908,9 +1260,11 @@ def generate_report(db: Session, as_on: date, from_date: date = None):
     return {
         "success": True,
         "as_on": to_date.isoformat(),
+        "as_on_part": to_by["part"].isoformat(),
+        "as_on_labour": to_by["labour"].isoformat(),
         "from_date": from_date.isoformat(),
         "month": to_date.strftime("%Y-%m"),
-        "days_in_month": total_month_days,
+        "days_in_month": max(total_days_rt.values()),
         "day_number": (to_date - from_date).days + 1,
         "generated_at": datetime.now().isoformat(),
         "summary": {
@@ -927,6 +1281,13 @@ def generate_report(db: Session, as_on: date, from_date: date = None):
         "regional": _dictrows(region_agg),
         "segment": _dictrows(segment_agg),
         "service_head": _dictrows(head_agg),
+        # Spare-only (the Labour file has no CATEGORY column)
+        "category": [{
+            "name": k, "part": round(v["part"], 2),
+            "invoices": len(v["invoices"]),
+            "qty": round(v["qty"], 2),
+            "lines": v["lines"],
+        } for k, v in sorted(category_agg.items(), key=lambda kv: -kv[1]["part"])],
     }
 
 

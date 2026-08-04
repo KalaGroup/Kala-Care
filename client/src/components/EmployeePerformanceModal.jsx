@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import MyPerformance from './MyPerformance';
 
-const EmployeePerformanceModal = ({ isOpen, onClose, employee, userData, timePeriod, customStartDate, customEndDate }) => {
+const EmployeePerformanceModal = ({ isOpen, onClose, employee, userData, timePeriod, customStartDate, customEndDate, autoOpenBox }) => {
     const modalRef = useRef(null);
     const touchStartY = useRef(0);
     
@@ -59,6 +59,12 @@ const EmployeePerformanceModal = ({ isOpen, onClose, employee, userData, timePer
 
     if (!isOpen) return null;
 
+    // Opened from a Dashboard CSP count cell: show ONLY the auto-opened CSP
+    // box (it portals to document.body), keeping the full Employee
+    // Performance page hidden underneath. MyPerformance stays mounted so its
+    // data fetches run; closing the box closes this modal too.
+    const boxOnly = Boolean(autoOpenBox);
+
     // Create employee user data object
     const employeeUserData = {
         user_id: employee.user_id,
@@ -69,7 +75,7 @@ const EmployeePerformanceModal = ({ isOpen, onClose, employee, userData, timePer
     };
 
     return (
-        <div className="fixed inset-0 z-[9999] overflow-y-auto overscroll-contain">
+        <div className={`fixed inset-0 z-[9999] overflow-y-auto overscroll-contain ${boxOnly ? 'hidden' : ''}`}>
             <div className="flex items-start sm:items-center justify-center min-h-screen p-1 sm:p-3 md:p-6">
                 {/* Backdrop with blur */}
                 <div 
@@ -124,6 +130,8 @@ const EmployeePerformanceModal = ({ isOpen, onClose, employee, userData, timePer
                             isBranchAdmin={false}
                             isMasterAdmin={false}
                             isITAdmin={false}
+                            autoOpenBox={autoOpenBox}
+                            onAutoOpenBoxClose={boxOnly ? onClose : undefined}
                         />
                     </div>
                 </div>

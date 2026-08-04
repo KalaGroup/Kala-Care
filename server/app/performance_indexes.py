@@ -246,6 +246,36 @@ COLUMN_STATEMENTS = [
         "add": "ALTER TABLE dbo.pms_upload_batches ADD updated_rows INT NOT NULL CONSTRAINT DF_pms_batches_updated_rows DEFAULT 0",
     },
     {
+        # PMS sales rows — cancelled-invoice flag: the row stays stored but is
+        # excluded from every generated report (set per invoice from the
+        # Uploaded File Preview).
+        "name": "pms_sales_records.is_cancelled",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_sales_records') AND name = 'is_cancelled'",
+        "add": "ALTER TABLE dbo.pms_sales_records ADD is_cancelled BIT NOT NULL CONSTRAINT DF_pms_records_is_cancelled DEFAULT 0",
+    },
+    {
+        "name": "pms_sales_records.cancelled_by",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_sales_records') AND name = 'cancelled_by'",
+        "add": "ALTER TABLE dbo.pms_sales_records ADD cancelled_by NVARCHAR(50) NULL",
+    },
+    {
+        "name": "pms_sales_records.cancelled_at",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_sales_records') AND name = 'cancelled_at'",
+        "add": "ALTER TABLE dbo.pms_sales_records ADD cancelled_at DATETIME NULL",
+    },
+    {
+        # Region-wise working days (MH / KA differ) — legacy working_days
+        # stays as the fallback for months saved before the split.
+        "name": "pms_month_settings.working_days_mh",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_month_settings') AND name = 'working_days_mh'",
+        "add": "ALTER TABLE dbo.pms_month_settings ADD working_days_mh INT NULL",
+    },
+    {
+        "name": "pms_month_settings.working_days_ka",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_month_settings') AND name = 'working_days_ka'",
+        "add": "ALTER TABLE dbo.pms_month_settings ADD working_days_ka INT NULL",
+    },
+    {
         # Kit-level Service Hours — the master file now carries a second
         # "Service Hours" column after the kit's Action; the part's own
         # service_hours keeps driving service mapping / coverage.

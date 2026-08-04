@@ -2762,6 +2762,115 @@ class EngagementController:
             "rows": result_rows,
         }
 
+    def get_csp_counts_for_branches(self, branch_ids: List[str]) -> Dict[str, Dict[str, int]]:
+        """
+        Batched Total CSP / Open CSP counts for MANY branches in one pass —
+        used by the Dashboard Employee Progress table columns.
+
+        Mirrors get_csp_status_for_branch + the MyPerformance front-end math:
+          total_csp = unique enrolled instances (campaign_csp_info rows whose
+                      instance_id is in that CSP campaign's asset_numbers)
+          open_csp  = unique instances having an SR with status 'open' whose
+                      LATEST CSP-drive follow-up is not Completed/Rejected
+        """
+        from app.models.campaign_model import CampaignCSPInfo
+
+        wanted = {str(b) for b in (branch_ids or []) if b}
+        counts = {b: {"total_csp": 0, "open_csp": 0} for b in wanted}
+        if not wanted:
+            return counts
+
+        # Active CSP campaigns + their enrolled asset sets — parsed ONCE for all branches
+        csp_campaigns = self.db.query(Campaign).filter(
+            Campaign.status == 'active',
+            func.upper(Campaign.service) == 'CSP'
+        ).all()
+        if not csp_campaigns:
+            return counts
+
+        assets_in_campaign: Dict[int, set] = {}
+        for c in csp_campaigns:
+            asset_set = set()
+            for asset in self._parse_asset_numbers(c.asset_numbers):
+                norm = self._normalize_id(asset)
+                if norm:
+                    asset_set.add(norm)
+            assets_in_campaign[c.id] = asset_set
+
+        sp_rows = self.db.query(
+            CampaignCSPInfo.campaign_id,
+            CampaignCSPInfo.branch_id,
+            CampaignCSPInfo.instance_id,
+            CampaignCSPInfo.sr_status,
+        ).filter(
+            CampaignCSPInfo.campaign_id.in_(list(assets_in_campaign.keys())),
+            CampaignCSPInfo.branch_id.in_(list(wanted)),
+        ).all()
+
+        total_by_branch: Dict[str, set] = {b: set() for b in wanted}
+        open_by_branch: Dict[str, set] = {b: set() for b in wanted}
+        # raw + normalized instance forms for the Customer lookup below
+        open_candidates: set = set()
+        for camp_id, branch, inst, sr_status in sp_rows:
+            norm = self._normalize_id(inst) if inst else None
+            if not norm or norm not in assets_in_campaign.get(camp_id, set()):
+                continue
+            b = str(branch)
+            if b not in total_by_branch:
+                continue
+            total_by_branch[b].add(norm)
+            if (sr_status or '').strip().lower() == 'open':
+                open_by_branch[b].add(norm)
+                open_candidates.add(str(inst).strip())
+                open_candidates.add(norm)
+
+        # Latest CSP-drive follow-up STATUS per open instance (batched, windowed —
+        # same query shape as get_csp_status_for_branch, status column only)
+        fu_status_by_norm: Dict[str, tuple] = {}
+        if open_candidates:
+            csp_like_ids = [cid for (cid,) in self.db.query(Campaign.id).filter(
+                Campaign.service.ilike('%csp%')
+            ).all()]
+            if csp_like_ids:
+                cand_list = [c for c in open_candidates if c]
+                norm_by_cust: Dict[int, str] = {}
+                for i in range(0, len(cand_list), 1000):
+                    for cid, inst in self.db.query(Customer.id, Customer.instance_id).filter(
+                            Customer.instance_id.in_(cand_list[i:i + 1000])).all():
+                        norm_by_cust[cid] = self._normalize_id(inst)
+
+                cust_ids = list(norm_by_cust.keys())
+                for i in range(0, len(cust_ids), 1000):
+                    chunk = cust_ids[i:i + 1000]
+                    sub = self.db.query(
+                        FollowUp.customer_id.label('cid'),
+                        FollowUp.followup_date.label('fd'),
+                        FollowUp.status.label('status'),
+                        func.row_number().over(
+                            partition_by=FollowUp.customer_id,
+                            order_by=[desc(FollowUp.followup_date), desc(FollowUp.id)],
+                        ).label('rn'),
+                    ).filter(
+                        FollowUp.customer_id.in_(chunk),
+                        FollowUp.campaign_id.in_(csp_like_ids),
+                    ).subquery()
+                    for r in self.db.query(sub).filter(sub.c.rn == 1).all():
+                        norm = norm_by_cust.get(r.cid)
+                        if not norm:
+                            continue
+                        prev = fu_status_by_norm.get(norm)
+                        # duplicate customer rows for one instance → keep the newest
+                        if prev is None or (r.fd is not None and (prev[0] is None or r.fd > prev[0])):
+                            fu_status_by_norm[norm] = (r.fd, (r.status or '').strip().lower())
+
+        for b in wanted:
+            counts[b]["total_csp"] = len(total_by_branch.get(b, set()))
+            counts[b]["open_csp"] = sum(
+                1 for norm in open_by_branch.get(b, set())
+                if fu_status_by_norm.get(norm, (None, ''))[1] not in ('completed', 'rejected')
+            )
+        return counts
+
 # ==================== Warranty Expiry Map (for CSP due-date cap) ====================
 
     def get_warranty_expiry_map(self, instance_ids: List[str]) -> Dict[str, Optional[str]]:

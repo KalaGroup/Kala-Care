@@ -995,6 +995,14 @@ html.dark [style*="background-color: rgb(255, 251, 235)"] { background-color: rg
 /* Disabled "Save All Limits" style button (#aaa) — washed out on dark */
 html.dark [style*="background: rgb(170, 170, 170)"] { background: #39404e !important; }
 
+/* Employee Progress table: the Employee column is position:sticky, but with
+   border-collapse the cell borders stay in the table grid and scroll away
+   under it. Draw the left/right lines as an inset shadow that moves WITH the
+   sticky cell, so the column separator stays visible while scrolling. */
+.emp-sticky-col {
+  box-shadow: inset 1px 0 0 #d1d5db, inset -1px 0 0 #d1d5db;
+}
+
 /* ============================================================
    DARK THEME — pass 4: CSP Status / Open CSP Status modals
    (MyPerformance) + overdue row highlights on CustomerEng pages.
@@ -1013,6 +1021,10 @@ html.dark .hover\:bg-orange-400:hover { background-color: rgba(249, 115, 22, 0.3
 html.dark [style*="color: rgb(220, 38, 38)"] { color: #f87171 !important; }
 html.dark [style*="color: rgb(22, 163, 74)"] { color: #4ade80 !important; }
 
+/* Sticky Employee column separator lines (see .emp-sticky-col above) */
+html.dark .emp-sticky-col {
+  box-shadow: inset 1px 0 0 #3a4150, inset -1px 0 0 #3a4150 !important;
+}
 /* Correction — elements with a brand-blue inline BACKGROUND also match the
    inline text-color rule above (the attribute string contains "color:").
    Re-assert white text on them; this rule is last so it wins. */
@@ -1634,3 +1646,25 @@ html.dark .bg-amber-50\/60 { background-color: rgba(234, 179, 8, 0.1) !important
 html.dark .apv-scroll { scrollbar-color: #6b7280 transparent; }
 html.dark .apv-scroll::-webkit-scrollbar-thumb { background: #6b7280; }
 html.dark .apv-scroll::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+/* ============================================================
+   PMS — Sales & Labour Report: Report Setup dark-mode top-ups
+   ============================================================ */
+/* Native file pickers: Tailwind's file: variant styles the
+   ::file-selector-button pseudo-element, which the .bg-gray-100
+   override above can't reach — the "Choose File" button stays a
+   glaring light block on the dark card. */
+html.dark input[type="file"] { background-color: transparent; }
+html.dark input[type="file"]::file-selector-button {
+  background-color: #232936 !important;
+  color: #c3c9d4 !important;
+}
+html.dark input[type="file"]:hover::file-selector-button { background-color: #2e3542 !important; }
+/* Expected File Format panel — sky header/borders + rose column chips
+   (text-sky-700 / bg-sky-50 / amber chips are already themed above) */
+html.dark .border-sky-200 { border-color: rgba(56, 189, 248, 0.35) !important; }
+html.dark .text-sky-800 { color: #7dd3fc !important; }
+html.dark .text-sky-900 { color: #bae6fd !important; }
+html.dark .hover\:bg-sky-100:hover { background-color: rgba(56, 189, 248, 0.16) !important; }
+html.dark .bg-rose-50\/60 { background-color: rgba(244, 63, 94, 0.08) !important; }
+html.dark .border-rose-200 { border-color: rgba(244, 63, 94, 0.3) !important; }

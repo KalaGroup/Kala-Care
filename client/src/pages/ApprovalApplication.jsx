@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Network, FileCheck2, Gauge, X, BarChart3, RotateCcw } from 'lucide-react';
+import { Network, FileCheck2, Gauge, X, BarChart3, RotateCcw, Wallet } from 'lucide-react';
 import { getAccess, prefetchApplications, errText } from '../components/approval/approvalApi';
 import { setLevelNames, levelLabel, levelName } from '../components/approval/ApprovalShared';
 
@@ -56,6 +56,25 @@ function MyLimitsModal({ access, onClose }) {
             <span className="text-[11px] text-gray-800">{text}</span>
         </div>
     );
+    // L2/L3/L4 approvers see ONLY their own stage + the stage right after it
+    // (their record's approver) — not the whole chain up to L5.
+    const isMid = ['l2', 'l3', 'l4'].includes(access.level);
+    const live = (s) => !!s && !s.skipped &&
+        (Array.isArray(s) ? s.length > 0 : (s.names || []).length > 0);
+    const nextStage = () => {
+        if (chain.is_ho) {
+            return access.level === 'l4'
+                ? <ChainStep tag={`L5 ${levelName('l5')}`} text={stepNames(chain.l5)} />
+                : <ChainStep tag={`L4 ${levelName('l4')}`} text="You choose your approver at submit" />;
+        }
+        if (access.level === 'l2' && live(chain.l3))
+            return <ChainStep tag="L3" text={stepNames(chain.l3)} />;
+        if (access.level !== 'l4' && CATS.some(([k]) => live(chain.l4?.[k])))
+            return CATS.map(([k, label]) => (
+                <ChainStep key={k} tag={`L4 ${levelName('l4')}`} text={`${label}: ${stepNames(chain.l4?.[k])}`} />
+            ));
+        return <ChainStep tag={`L5 ${levelName('l5')}`} text={stepNames(chain.l5)} />;
+    };
     return (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3 max-md:p-2" onClick={onClose}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
@@ -80,6 +99,13 @@ function MyLimitsModal({ access, onClose }) {
                         <p className="px-3 py-2 bg-gray-50 text-[10px] uppercase tracking-wide font-bold text-gray-800 border-b border-gray-200">
                             My Approval Hierarchy {chain.branch ? `(${chain.branch})` : ''}
                         </p>
+                        {isMid ? (
+                            <>
+                                <ChainStep tag={access.level.toUpperCase()}
+                                    text={`${access.name} (You) — creates the record`} />
+                                {nextStage()}
+                            </>
+                        ) : (<>
                         <ChainStep tag="L1" text={`${access.name} — creates the record (approved by the next level)`} />
                         {chain.is_ho ? (
                             <>
@@ -97,6 +123,7 @@ function MyLimitsModal({ access, onClose }) {
                                 <ChainStep tag={`L5 ${levelName('l5')}`} text={stepNames(chain.l5)} />
                             </>
                         )}
+                        </>)}
                     </div>
                     )}
                 </div>
@@ -110,6 +137,7 @@ export default function ApprovalApplication() {
     const [loading, setLoading] = useState(true);
     const [showMatrix, setShowMatrix] = useState(false);
     const [showLimits, setShowLimits] = useState(false);
+    const [showExpense, setShowExpense] = useState(false);
     const [showReports, setShowReports] = useState(false);
     // Bump to remount the active view when the Authority Matrix changes rules
     const [viewKey, setViewKey] = useState(0);
@@ -185,10 +213,18 @@ export default function ApprovalApplication() {
                         <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium bg-white/15 text-white">
                             Your view: <b className="font-bold">{badge.label}</b>
                         </span>
-                        <button onClick={() => setShowLimits(true)}
-                            className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1.5 text-[12px] font-semibold text-white transition">
-                            <Gauge size={14} /> My Approval Limits
-                        </button>
+                        {/* COO has no limits of their own — their slot shows the Expense Master instead */}
+                        {access.level === 'l5' ? (
+                            <button onClick={() => setShowExpense(true)}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1.5 text-[12px] font-semibold text-white transition">
+                                <Wallet size={14} /> Expense Master
+                            </button>
+                        ) : (
+                            <button onClick={() => setShowLimits(true)}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1.5 text-[12px] font-semibold text-white transition">
+                                <Gauge size={14} /> My Approval Limits
+                            </button>
+                        )}
                         {(access.level === 'l4' || access.level === 'l5') && (
                             <button onClick={() => setShowReports(true)}
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1.5 text-[12px] font-semibold text-white transition">
@@ -222,6 +258,13 @@ export default function ApprovalApplication() {
             )}
             {showLimits && (
                 <MyLimitsModal access={access} onClose={() => setShowLimits(false)} />
+            )}
+            {showExpense && (
+                <Suspense fallback={viewLoader}>
+                    <AuthorityMatrix expenseOnly
+                        onClose={() => { setShowExpense(false); setViewKey(k => k + 1); }}
+                    />
+                </Suspense>
             )}
             {showReports && (
                 <Suspense fallback={viewLoader}>

@@ -1,14 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import {
   PresentationChartLineIcon, PlusIcon, ArrowPathIcon,
   ArrowDownTrayIcon, BuildingOffice2Icon, XMarkIcon,
-  TagIcon, CheckIcon,
+  TagIcon, CheckIcon, CalendarDaysIcon, WrenchScrewdriverIcon,
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
 // PMS → AOP Master
-//   Tab 1: Target Master   — branch-wise monthly Spare / Labour targets
+//   Tab 1: Target Master   — financial-year grid (Apr..Mar) of branch-wise
+//                            Spare / Labour targets + monthly working days
 //   Tab 2: SR Type Master  — Service Report Type → Head mapping
 // Backend: server/app/routes/pms_routes.py (master admin only)
 // ============================================================================
@@ -18,7 +19,6 @@ const API = import.meta.env.VITE_BACKEND_URL;
 // -- Theme (same as Knowledge Bank) --------------------------------
 const themeColor = '#2f3192';
 const themeDark = '#23255f';
-const themeSoft = 'rgba(47, 49, 146, 0.10)';
 
 // Headers every PMS call sends — backend enforces master admin.
 const authHeaders = () => {
@@ -28,7 +28,23 @@ const authHeaders = () => {
 
 const jsonHeaders = () => ({ ...authHeaders(), 'Content-Type': 'application/json' });
 
-const currentMonth = () => new Date().toISOString().slice(0, 7);
+// ---- Financial year helpers (Apr..Mar) ----
+const currentFy = () => {
+  const d = new Date();
+  return d.getMonth() + 1 >= 4 ? d.getFullYear() : d.getFullYear() - 1;
+};
+const fyMonths = (fy) => {
+  const out = [];
+  for (let m = 4; m <= 12; m++) out.push(`${fy}-${String(m).padStart(2, '0')}`);
+  for (let m = 1; m <= 3; m++) out.push(`${fy + 1}-${String(m).padStart(2, '0')}`);
+  return out;
+};
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const monthLabel = (key) => {
+  const [y, m] = key.split('-');
+  return `${MONTH_SHORT[parseInt(m, 10) - 1]}-${y.slice(2)}`;
+};
+const fyLabel = (fy) => `${fy}–${String(fy + 1).slice(2)}`;
 
 // Targets are ENTERED and DISPLAYED in Lakh (23 = ₹23,00,000) but stored in
 // rupees in the DB, which is what the report math uses.
@@ -39,11 +55,16 @@ const rupeesToLakh = (v) => {
   return n === 0 ? 0 : parseFloat((n / LAKH).toFixed(4));
 };
 const lakhToRupees = (v) => (parseFloat(v) || 0) * LAKH;
-const lakhRow = (r) => ({
-  ...r,
-  spare_target: rupeesToLakh(r.spare_target),
-  labour_target: rupeesToLakh(r.labour_target),
-});
+const mapVals = (obj, fn) =>
+  Object.fromEntries(Object.entries(obj || {}).map(([k, v]) => [k, fn(v)]));
+
+// Server working_days → state: {'YYYY-MM': {mh: 'str', ka: 'str'}}.
+// Accepts the new {mh, ka} shape and the legacy single number.
+const wdToState = (wd) => mapVals(wd, (v) => (
+  v !== null && typeof v === 'object'
+    ? { mh: String(v.mh ?? ''), ka: String(v.ka ?? '') }
+    : { mh: String(v ?? ''), ka: String(v ?? '') }
+));
 
 const inputCls =
   'w-full border border-gray-300 rounded px-2 py-1 text-xs text-black bg-white focus:outline-none focus:ring-1';
@@ -52,19 +73,73 @@ const thCls =
   'px-2 py-1.5 text-center text-[11px] font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap bg-gray-50 border border-gray-200';
 const tdCls = 'px-2 py-1 border border-gray-200';
 
+// Compact variants for the 15-column FY target grid.
+const thC =
+  'px-1 py-1.5 text-center text-[10px] font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap bg-gray-50 border border-gray-200';
+const tdC = 'px-1 py-0.5 border border-gray-200';
+const cellInput =
+  'w-full border border-gray-300 rounded px-1 py-0.5 text-xs text-black bg-white focus:outline-none focus:ring-1';
+
+// Always-visible top scrollbar for the wide FY table — a REAL native
+// horizontal scrollbar (empty scroll area whose spacer matches the table's
+// scrollWidth, kept in sync both ways). Same pattern as Dashboard.jsx.
+const TopScrollbar = ({ scrollRef, watch }) => {
+  const topRef = useRef(null);
+  const [spacerWidth, setSpacerWidth] = useState(0); // 0 = table fits, bar hidden
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    const top = topRef.current;
+    if (!el || !top) return;
+
+    const update = () => {
+      const { scrollWidth, clientWidth } = el;
+      setSpacerWidth(scrollWidth > clientWidth + 1 ? scrollWidth : 0);
+    };
+    // Assigning an identical scrollLeft doesn't refire 'scroll',
+    // so the two listeners can't ping-pong.
+    const fromTable = () => { top.scrollLeft = el.scrollLeft; };
+    const fromTop = () => { el.scrollLeft = top.scrollLeft; };
+
+    update();
+    el.addEventListener('scroll', fromTable);
+    top.addEventListener('scroll', fromTop);
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    const tableEl = el.querySelector('table');
+    if (tableEl) ro.observe(tableEl);
+    return () => {
+      el.removeEventListener('scroll', fromTable);
+      top.removeEventListener('scroll', fromTop);
+      ro.disconnect();
+    };
+  }, [scrollRef, watch]);
+
+  return (
+    <div ref={topRef}
+      className={`overflow-x-auto overflow-y-hidden ${spacerWidth ? 'hidden sm:block' : 'hidden'}`}>
+      <div style={{ width: spacerWidth ? `${spacerWidth}px` : '100%', height: '1px' }} />
+    </div>
+  );
+};
+
 // ---------------------------------------------------------------------------
 
 const AOPMaster = () => {
   const [tab, setTab] = useState('targets'); // 'targets' | 'srtypes'
 
-  // ---- Target Master state ----
-  const [month, setMonth] = useState(currentMonth());
-  const [rows, setRows] = useState([]);
+  // ---- Target Master state (whole financial year) ----
+  const [fy, setFy] = useState(currentFy());
+  const [subTab, setSubTab] = useState('spare'); // 'spare' | 'labour'
+  const [rows, setRows] = useState([]);          // [{branch_id, region, ..., spare:{m:lakh}, labour:{m:lakh}}]
+  const [workingDays, setWorkingDays] = useState({});   // {'YYYY-MM': {mh: 'v', ka: 'v'}}
+  const [defaultWd, setDefaultWd] = useState({});       // {'YYYY-MM': int}
   const [loadingTargets, setLoadingTargets] = useState(false);
   const [savingTargets, setSavingTargets] = useState(false);
-  // Working days of the month (default = all days except Sundays; editable)
-  const [workingDays, setWorkingDays] = useState('');
-  const [defaultWd, setDefaultWd] = useState(null);
+  const [showWdModal, setShowWdModal] = useState(false);
+  const targetTableRef = useRef(null);
+
+  const months = fyMonths(fy);
 
   // ---- SR Type Master state ----
   const [srItems, setSrItems] = useState([]);
@@ -77,17 +152,22 @@ const AOPMaster = () => {
 
   // ---------------- Target Master ----------------
 
-  const loadTargets = useCallback(async (m) => {
+  const loadTargets = useCallback(async (year) => {
     setLoadingTargets(true);
     try {
-      const res = await fetch(`${API}/pms/targets?month=${m}`, { headers: authHeaders() });
+      const res = await fetch(`${API}/pms/targets/year?fy=${year}`, { headers: authHeaders() });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Failed to load targets');
-      // Prefilled rows (all ERP branches + their Branch Admin) arrive unsaved —
-      // marked dirty so “Save All” stores them. Rupees → Lakh for display.
-      setRows((data.items || []).map((r) => ({ ...lakhRow(r), _dirty: !!data.prefill })));
-      setWorkingDays(String(data.working_days ?? ''));
-      setDefaultWd(data.default_working_days ?? null);
+      // Rupees → Lakh for display, per month cell.
+      setRows((data.items || []).map((r) => ({
+        ...r,
+        region: r.region || 'MH',   // default region — never blank
+        spare: mapVals(r.spare, rupeesToLakh),
+        labour: mapVals(r.labour, rupeesToLakh),
+        _dirty: false,
+      })));
+      setWorkingDays(wdToState(data.working_days));
+      setDefaultWd(data.default_working_days || {});
     } catch (e) {
       toast.error(e.message);
       setRows([]);
@@ -96,34 +176,58 @@ const AOPMaster = () => {
     }
   }, []);
 
-  useEffect(() => { loadTargets(month); }, [month, loadTargets]);
+  useEffect(() => { loadTargets(fy); }, [fy, loadTargets]);
 
-  const setRow = (idx, field, value) => {
+  const setCell = (idx, metric, month, value) => {
+    setRows((prev) => prev.map((r, i) => (i === idx
+      ? { ...r, [metric]: { ...r[metric], [month]: value }, _dirty: true } : r)));
+  };
+
+  const setRowField = (idx, field, value) => {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: value, _dirty: true } : r)));
   };
 
   const saveTargets = async () => {
     const valid = rows.filter((r) => String(r.branch_id || '').trim());
-    if (!valid.length) { toast.error('Nothing to save — add at least one branch row'); return; }
+    if (!valid.length) { toast.error('Nothing to save — no branch rows'); return; }
     setSavingTargets(true);
     try {
-      const res = await fetch(`${API}/pms/targets/bulk`, {
+      // Region-wise working days: {'YYYY-MM': {mh: n, ka: n}}
+      const wd = {};
+      months.forEach((m) => {
+        const entry = {};
+        const mh = parseInt(workingDays[m]?.mh, 10);
+        const ka = parseInt(workingDays[m]?.ka, 10);
+        if (Number.isFinite(mh)) entry.mh = mh;
+        if (Number.isFinite(ka)) entry.ka = ka;
+        if (Object.keys(entry).length) wd[m] = entry;
+      });
+      const res = await fetch(`${API}/pms/targets/year/bulk`, {
         method: 'POST', headers: jsonHeaders(),
         body: JSON.stringify({
-          month,
+          fy,
           // Entered in Lakh → stored in rupees
           rows: valid.map((r) => ({
-            ...r,
-            spare_target: lakhToRupees(r.spare_target),
-            labour_target: lakhToRupees(r.labour_target),
+            branch_id: r.branch_id, region: r.region,
+            branch_name: r.branch_name, responsible_person: r.responsible_person,
+            spare: mapVals(r.spare, lakhToRupees),
+            labour: mapVals(r.labour, lakhToRupees),
           })),
-          working_days: parseInt(workingDays, 10) || null,
+          working_days: wd,
         }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Save failed');
-      toast.success(`Saved ${data.saved} target row(s)`);
-      setRows((data.items || []).map((r) => ({ ...lakhRow(r), _dirty: false })));
+      toast.success(`Saved ${data.saved} branch row(s) for FY ${fyLabel(fy)}`);
+      setRows((data.items || []).map((r) => ({
+        ...r,
+        region: r.region || 'MH',
+        spare: mapVals(r.spare, rupeesToLakh),
+        labour: mapVals(r.labour, rupeesToLakh),
+        _dirty: false,
+      })));
+      setWorkingDays(wdToState(data.working_days));
+      setDefaultWd(data.default_working_days || {});
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -133,15 +237,19 @@ const AOPMaster = () => {
 
   const exportTargets = () => {
     if (!rows.length) { toast.error('Nothing to export'); return; }
-    const head = ['Region', 'Branch ID', 'Branch Name', 'Responsible Person', 'Spare Target (Lakh)', 'Labour Target (Lakh)'];
-    const lines = [head.join(',')].concat(rows.map((r) =>
-      [r.region, r.branch_id, r.branch_name, r.responsible_person, r.spare_target, r.labour_target]
-        .map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')
-    ));
+    const metric = subTab;
+    const head = ['Region', 'Branch ID', 'Branch Name', 'Responsible Person',
+      ...months.map(monthLabel), 'Total (Lakh)'];
+    const lines = [head.join(',')].concat(rows.map((r) => {
+      const vals = months.map((m) => r[metric]?.[m] ?? '');
+      const total = parseFloat(vals.reduce((s, v) => s + (parseFloat(v) || 0), 0).toFixed(2));
+      return [r.region, r.branch_id, r.branch_name, r.responsible_person, ...vals, total]
+        .map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
+    }));
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `AOP_Targets_${month}.csv`;
+    a.download = `AOP_${metric === 'spare' ? 'Spare' : 'Labour'}_Targets_FY${fy}-${String(fy + 1).slice(2)}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -234,11 +342,27 @@ const AOPMaster = () => {
 
   const dirtyCount = rows.filter((r) => r._dirty).length;
 
+  // Column totals of the active metric (Lakh) + grand totals of both.
+  const colTotal = (m) =>
+    parseFloat(rows.reduce((s, r) => s + (parseFloat(r[subTab]?.[m]) || 0), 0).toFixed(2));
+  const rowTotal = (r, metric = subTab) =>
+    parseFloat(months.reduce((s, m) => s + (parseFloat(r[metric]?.[m]) || 0), 0).toFixed(2));
+  const grandTotal = (metric) =>
+    parseFloat(rows.reduce((s, r) => s + rowTotal(r, metric), 0).toFixed(2));
+
+  // FY choices: last 5 and next 10 financial years.
+  const fyChoices = [];
+  for (let y = currentFy() - 5; y <= currentFy() + 10; y++) fyChoices.push(y);
+  if (!fyChoices.includes(fy)) fyChoices.push(fy);
+
+  const stickyTh = `${thC} sticky left-0 z-10`;
+  const stickyTd = `${tdC} sticky left-0 z-10 bg-white`;
+
   // ---------------- render ----------------
 
   return (
     <div className="min-h-screen font-sans">
-      <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10 max-md:px-2">
+      <div className="max-w-[1500px] mx-auto px-3 sm:px-5 pb-10 max-md:px-2">
 
         {/* ===== Hero header (same style as Knowledge Bank) ===== */}
         <div className="rounded-2xl px-3 sm:px-5 py-3 mb-3 text-white relative overflow-hidden"
@@ -253,13 +377,14 @@ const AOPMaster = () => {
               <div>
                 <h1 className="text-lg sm:text-xl font-bold leading-tight">AOP Master</h1>
                 <p className="text-[11px] text-white/70 leading-tight">
-                  Branch-wise monthly targets &amp; SR Type mapping for the PMS report
+                  Branch-wise yearly targets, working days &amp; SR Type mapping for the PMS report
                 </p>
               </div>
             </div>
             <div className="flex items-center flex-wrap gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium bg-white/15 text-white">
-                Month: <b className="font-bold">{month}</b>
+                <CalendarDaysIcon className="h-4 w-4" />
+                Financial Year: <b className="font-bold">{fyLabel(fy)}</b> (Apr {fy} – Mar {fy + 1})
               </span>
             </div>
           </div>
@@ -284,27 +409,37 @@ const AOPMaster = () => {
       {/* ================= TARGET MASTER ================= */}
       {tab === 'targets' && (
         <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-gray-100 flex flex-wrap items-end gap-2">
-            <div className="flex flex-col">
-              <label className="text-[10px] font-medium text-gray-500 mb-0.5">Target Month</label>
-              <input type="month" value={month} onChange={(e) => setMonth(e.target.value)}
-                className={inputCls} style={{ '--tw-ring-color': themeColor, width: 150 }} />
-            </div>
-            <div className="flex flex-col">
-              <label className="text-[10px] font-medium text-gray-500 mb-0.5">
-                Working Days{defaultWd != null ? ` (default ${defaultWd} — Sundays excluded)` : ''}
-              </label>
-              <input type="number" min="1" max="31" value={workingDays}
-                onChange={(e) => setWorkingDays(e.target.value)}
-                onFocus={(e) => e.target.select()}
-                className={inputCls} style={{ '--tw-ring-color': themeColor, width: 90 }} />
-            </div>
+          {/* -- One header row: FY + sub-tabs + actions -- */}
+          <div className="px-3 py-2 border-b border-gray-100 flex flex-wrap items-center gap-1.5">
+            <select value={fy} onChange={(e) => setFy(parseInt(e.target.value, 10))}
+              title="Financial Year (Apr–Mar)"
+              className={inputCls} style={{ '--tw-ring-color': themeColor, width: 170 }}>
+              {fyChoices.sort((a, b) => a - b).map((y) => (
+                <option key={y} value={y}>FY {fyLabel(y)} (Apr–Mar)</option>
+              ))}
+            </select>
+            {[
+              { key: 'spare', name: 'Spare Target (Lakh ₹)', icon: TagIcon },
+              { key: 'labour', name: 'Labour Target (Lakh ₹)', icon: WrenchScrewdriverIcon },
+            ].map((t) => (
+              <button key={t.key} onClick={() => setSubTab(t.key)}
+                className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold transition ${
+                  subTab === t.key ? 'text-white' : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'}`}
+                style={subTab === t.key ? { backgroundColor: themeColor } : {}}>
+                <t.icon className="h-3.5 w-3.5" />
+                {t.name}
+              </button>
+            ))}
             <div className="flex-1" />
+            <button onClick={() => setShowWdModal(true)} disabled={loadingTargets}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50">
+              <CalendarDaysIcon className="h-3.5 w-3.5" /> Working Days
+            </button>
             <button onClick={exportTargets}
               className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
               <ArrowDownTrayIcon className="h-3.5 w-3.5" /> Export
             </button>
-            <button onClick={saveTargets} disabled={savingTargets}
+            <button onClick={saveTargets} disabled={savingTargets || loadingTargets}
               className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white rounded-md hover:opacity-90 disabled:opacity-50"
               style={{ backgroundColor: themeColor }}>
               <CheckIcon className="h-3.5 w-3.5" />
@@ -312,72 +447,92 @@ const AOPMaster = () => {
             </button>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs border-collapse min-w-[820px]">
+          <TopScrollbar scrollRef={targetTableRef} watch={`${subTab}-${fy}-${rows.length}`} />
+          <div className="overflow-x-auto" ref={targetTableRef}>
+            <table className="w-full text-xs border-collapse min-w-[1080px]">
               <thead>
                 <tr>
-                  <th className={thCls} style={{ width: 90 }}>Region</th>
-                  <th className={thCls} style={{ width: 130 }}>Branch ID</th>
-                  <th className={thCls}>Branch Name</th>
-                  <th className={thCls}>Responsible Person</th>
-                  <th className={thCls} style={{ width: 130 }}>Spare Target (Lakh ₹)</th>
-                  <th className={thCls} style={{ width: 130 }}>Labour Target (Lakh ₹)</th>
+                  <th className={stickyTh} style={{ minWidth: 92, maxWidth: 110 }}>Branch</th>
+                  <th className={thC} style={{ width: 78 }}>Region</th>
+                  <th className={thC} style={{ minWidth: 105 }}>Responsible Person</th>
+                  {months.map((m) => (
+                    <th key={m} className={thC} style={{ minWidth: 58 }}>{monthLabel(m)}</th>
+                  ))}
+                  <th className={thC} style={{ minWidth: 62 }}>Total</th>
                 </tr>
               </thead>
               <tbody>
                 {loadingTargets ? (
-                  <tr><td colSpan={6} className="border border-gray-200">
+                  <tr><td colSpan={16} className="border border-gray-200">
                     <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
                       <ArrowPathIcon className="h-7 w-7 animate-spin" />
-                      <p className="text-sm">Loading targets…</p>
+                      <p className="text-sm">Loading FY {fyLabel(fy)} targets…</p>
                     </div>
                   </td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={6} className="border border-gray-200">
+                  <tr><td colSpan={16} className="border border-gray-200">
                     <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
                       <BuildingOffice2Icon className="h-8 w-8" />
                       <p className="text-sm text-center px-4">
-                        No branches found for {month}.
+                        No branches found for FY {fyLabel(fy)}.
                       </p>
                     </div>
                   </td></tr>
                 ) : rows.map((r, idx) => (
-                  <tr key={r.id ?? `new-${idx}`} className="border-b border-gray-100 hover:bg-gray-50/60">
-                    <td className={tdCls}>
-                      <select value={r.region || ''} onChange={(e) => setRow(idx, 'region', e.target.value)}
-                        className={inputCls} style={{ '--tw-ring-color': themeColor }}>
-                        <option value="">—</option>
+                  <tr key={r.branch_id ?? `new-${idx}`} className="border-b border-gray-100 hover:bg-gray-50/60">
+                    {/* Fixed branch cell — stays visible while scrolling months;
+                        name wraps to two lines, code only on hover */}
+                    <td className={stickyTd} style={{ maxWidth: 110 }} title={r.branch_id}>
+                      <div className="font-semibold text-gray-800 leading-tight break-words">{r.branch_name || '—'}</div>
+                    </td>
+                    <td className={tdC}>
+                      <select value={r.region || 'MH'} onChange={(e) => setRowField(idx, 'region', e.target.value)}
+                        className={cellInput} style={{ '--tw-ring-color': themeColor }}>
                         <option value="MH">MH</option>
                         <option value="KA">KA</option>
                       </select>
                     </td>
-                    {/* Fixed columns — plain text, not editable */}
-                    <td className={`${tdCls} text-gray-700`}>{r.branch_id || '—'}</td>
-                    <td className={`${tdCls} text-gray-700`}>{r.branch_name || '—'}</td>
-                    <td className={`${tdCls} text-gray-700`}>{r.responsible_person || '—'}</td>
-                    <td className={tdCls}>
-                      <input type="number" min="0" step="0.01" value={r.spare_target ?? ''} onChange={(e) => setRow(idx, 'spare_target', e.target.value)}
-                        onFocus={(e) => e.target.select()}
-                        placeholder="e.g. 23 = ₹23 Lakh" title="Enter in Lakh — 23 means ₹23,00,000"
-                        className={`${inputCls} text-right`} style={{ '--tw-ring-color': themeColor }} />
-                    </td>
-                    <td className={tdCls}>
-                      <input type="number" min="0" step="0.01" value={r.labour_target ?? ''} onChange={(e) => setRow(idx, 'labour_target', e.target.value)}
-                        onFocus={(e) => e.target.select()}
-                        placeholder="e.g. 23 = ₹23 Lakh" title="Enter in Lakh — 23 means ₹23,00,000"
-                        className={`${inputCls} text-right`} style={{ '--tw-ring-color': themeColor }} />
+                    <td className={`${tdC} text-gray-700`}>{r.responsible_person || '—'}</td>
+                    {months.map((m) => (
+                      <td key={m} className={tdC}>
+                        <input type="number" min="0" step="0.01" value={r[subTab]?.[m] ?? ''}
+                          onChange={(e) => setCell(idx, subTab, m, e.target.value)}
+                          onFocus={(e) => e.target.select()}
+                          title={`${monthLabel(m)} — enter in Lakh`}
+                          className={`${cellInput} text-right`} style={{ '--tw-ring-color': themeColor }} />
+                      </td>
+                    ))}
+                    <td className={`${tdC} text-center font-semibold text-gray-800 bg-gray-50/60`}>
+                      {rowTotal(r)}
                     </td>
                   </tr>
                 ))}
               </tbody>
+              {rows.length > 0 && !loadingTargets && (
+                <tfoot>
+                  <tr>
+                    <td className={`${stickyTd} font-semibold text-gray-700 bg-gray-50`} colSpan={1}>Total (Lakh)</td>
+                    <td className={`${tdC} bg-gray-50`} colSpan={2} />
+                    {months.map((m) => (
+                      <td key={m} className={`${tdC} text-center font-semibold text-gray-800 bg-gray-50`}>
+                        {colTotal(m)}
+                      </td>
+                    ))}
+                    <td className={`${tdC} text-center font-bold bg-gray-100 text-[#2f3192]`}>
+                      {grandTotal(subTab)}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
 
           {rows.length > 0 && (
             <div className="px-4 py-2 border-t border-gray-100 flex flex-wrap gap-4 text-[11px] text-gray-600">
               <span>Branches: <b>{rows.length}</b></span>
-              <span>Total Spare Target: <b>{parseFloat(rows.reduce((s, r) => s + (parseFloat(r.spare_target) || 0), 0).toFixed(2))} Lakh</b> (₹ {(rows.reduce((s, r) => s + (parseFloat(r.spare_target) || 0), 0) * 100000).toLocaleString('en-IN')})</span>
-              <span>Total Labour Target: <b>{parseFloat(rows.reduce((s, r) => s + (parseFloat(r.labour_target) || 0), 0).toFixed(2))} Lakh</b> (₹ {(rows.reduce((s, r) => s + (parseFloat(r.labour_target) || 0), 0) * 100000).toLocaleString('en-IN')})</span>
+              <span>FY Spare Target: <b>{grandTotal('spare')} Lakh</b> (₹ {(grandTotal('spare') * LAKH).toLocaleString('en-IN')})</span>
+              <span>FY Labour Target: <b>{grandTotal('labour')} Lakh</b> (₹ {(grandTotal('labour') * LAKH).toLocaleString('en-IN')})</span>
+              <span className="ml-auto text-gray-400">Enter in Lakh — 23 means ₹23,00,000</span>
             </div>
           )}
         </div>
@@ -388,8 +543,7 @@ const AOPMaster = () => {
         <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
           <div className="px-4 py-2.5 border-b border-gray-100 flex flex-wrap items-center gap-2">
             <p className="text-xs text-gray-500 flex-1 min-w-[220px]">
-              Map each Service Report Type (from the Excel files) to a reporting Head —
-              Warranty, Post Warranty, AMC, KOEL AMC or OTC Order.
+              SR Types are added <b>automatically on file upload</b> — map each one to a Head.
             </p>
             <button onClick={() => srAction('sync', (d) => `Synced — ${d.added} new SR type(s) from data`)}
               className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
@@ -410,46 +564,114 @@ const AOPMaster = () => {
             </button>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs border-collapse min-w-[520px]">
-              <thead>
-                <tr>
-                  <th className={thCls} style={{ width: 60 }}>Sr. No.</th>
-                  <th className={thCls}>SR Type (from Excel)</th>
-                  <th className={thCls} style={{ width: 180 }}>Head</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loadingSr ? (
-                  <tr><td colSpan={3} className="border border-gray-200">
-                    <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
-                      <ArrowPathIcon className="h-7 w-7 animate-spin" />
-                      <p className="text-sm">Loading SR types…</p>
-                    </div>
-                  </td></tr>
-                ) : srItems.length === 0 ? (
-                  <tr><td colSpan={3} className="border border-gray-200">
-                    <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
-                      <TagIcon className="h-8 w-8" />
-                      <p className="text-sm">No SR types yet.</p>
-                    </div>
-                  </td></tr>
-                ) : srItems.map((it, idx) => (
-                  <tr key={it.id ?? `new-${idx}`} className="border-b border-gray-100 hover:bg-gray-50/60">
-                    <td className={`${tdCls} text-center text-gray-500`}>{idx + 1}</td>
-                    {/* SR Type comes from the Excel data — plain text, not editable */}
-                    <td className={`${tdCls} text-gray-700`}>{it.sr_type || '—'}</td>
-                    <td className={tdCls}>
-                      <select value={it.head || ''} onChange={(e) => setSrItem(idx, 'head', e.target.value)}
-                        className={inputCls} style={{ '--tw-ring-color': themeColor }}>
-                        <option value="">— select head —</option>
-                        {headChoices.map((h) => <option key={h} value={h}>{h}</option>)}
-                      </select>
-                    </td>
-                  </tr>
+          {loadingSr ? (
+            <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
+              <ArrowPathIcon className="h-7 w-7 animate-spin" />
+              <p className="text-sm">Loading SR types…</p>
+            </div>
+          ) : srItems.length === 0 ? (
+            <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
+              <TagIcon className="h-8 w-8" />
+              <p className="text-sm">No SR types yet.</p>
+            </div>
+          ) : (
+            /* Two half-tables side by side — rows split left/right */
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-3 p-3">
+              {[srItems.slice(0, Math.ceil(srItems.length / 2)),
+                srItems.slice(Math.ceil(srItems.length / 2))].map((half, hIdx) => {
+                const offset = hIdx === 0 ? 0 : Math.ceil(srItems.length / 2);
+                return (
+                  <div key={hIdx} className="overflow-x-auto self-start">
+                    <table className="w-full text-xs border-collapse min-w-[380px]">
+                      <thead>
+                        <tr>
+                          <th className={thCls} style={{ width: 55 }}>Sr. No.</th>
+                          <th className={thCls}>SR Type (from Excel)</th>
+                          <th className={thCls} style={{ width: 160 }}>Head</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {half.map((it, i) => {
+                          const idx = offset + i;
+                          return (
+                            <tr key={it.id ?? `new-${idx}`} className="border-b border-gray-100 hover:bg-gray-50/60">
+                              <td className={`${tdCls} text-center text-gray-500`}>{idx + 1}</td>
+                              {/* SR Type comes from the Excel data — plain text, not editable */}
+                              <td className={`${tdCls} text-gray-700`}>{it.sr_type || '—'}</td>
+                              <td className={tdCls}>
+                                <select value={it.head || ''} onChange={(e) => setSrItem(idx, 'head', e.target.value)}
+                                  className={inputCls} style={{ '--tw-ring-color': themeColor }}>
+                                  <option value="">— select head —</option>
+                                  {headChoices.map((h) => <option key={h} value={h}>{h}</option>)}
+                                </select>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ================= WORKING DAYS MODAL ================= */}
+      {showWdModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-lg shadow-2xl max-w-md w-full max-h-[85vh] overflow-hidden flex flex-col">
+            <div className="px-4 py-2.5 border-b border-gray-200 flex justify-between items-center">
+              <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+                <CalendarDaysIcon className="h-4 w-4 text-[#2f3192]" />
+                Monthly Working Days — all financial years
+              </h2>
+              <button onClick={() => setShowWdModal(false)} className="p-1 rounded hover:bg-gray-100">
+                <XMarkIcon className="h-4 w-4 text-gray-500" />
+              </button>
+            </div>
+            <div className="p-4 flex-1 overflow-y-auto">
+              <p className="text-[11px] text-gray-500 mb-3">
+                One master for <b>every financial year</b> — no year attached; set each
+                month once and it applies to all FYs. Set <b>per region</b> — MH and KA
+                have different holidays; the report spreads each region's targets
+                over its own working days. Default = all days except Sundays.
+                Saved with <b>Save All</b>.
+              </p>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {months.map((m) => (
+                  <div key={m} className="flex flex-col items-center rounded-lg border border-gray-200 bg-gray-50/60 px-1.5 py-1.5">
+                    <span className="text-[10px] font-semibold text-black mb-0.5">{monthLabel(m).replace(/[-\s]?\d+$/, '')}</span>
+                    {['mh', 'ka'].map((reg) => (
+                      <div key={reg} className="flex items-center gap-1 mt-0.5">
+                        <span className="text-[9px] font-bold text-black w-5 text-right">{reg.toUpperCase()}</span>
+                        <input type="number" min="1" max="31" value={workingDays[m]?.[reg] ?? ''}
+                          onChange={(e) => setWorkingDays((prev) => ({
+                            ...prev, [m]: { ...(prev[m] || {}), [reg]: e.target.value },
+                          }))}
+                          onFocus={(e) => e.target.select()}
+                          title={`${reg.toUpperCase()} working days — default ${defaultWd[m] ?? '—'} (Sundays excluded)`}
+                          className="w-14 border border-gray-300 rounded px-1 py-0.5 text-xs text-black bg-white text-center focus:outline-none focus:ring-1"
+                          style={{ '--tw-ring-color': themeColor }} />
+                      </div>
+                    ))}
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            </div>
+            <div className="px-4 py-3 border-t border-gray-200 flex items-center gap-2">
+              <button onClick={() => setWorkingDays(mapVals(defaultWd, (v) => ({ mh: String(v ?? ''), ka: String(v ?? '') })))}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
+                <ArrowPathIcon className="h-3.5 w-3.5" /> Reset defaults
+              </button>
+              <div className="flex-1" />
+              <button onClick={() => setShowWdModal(false)}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white rounded-md hover:opacity-90"
+                style={{ backgroundColor: themeColor }}>
+                <CheckIcon className="h-3.5 w-3.5" /> Done
+              </button>
+            </div>
           </div>
         </div>
       )}

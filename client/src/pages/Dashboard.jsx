@@ -93,93 +93,48 @@ const getBranchDisplayName = (branchCode) => {
     return branchCode;
 };
 
-// Always-visible top scrollbar for wide tables. A native scrollbar inside a
-// short strip auto-hides or ignores styling depending on browser/OS settings,
-// so this draws its own draggable thumb and drives the table's scrollLeft.
+// Always-visible top scrollbar for wide tables — a REAL native horizontal
+// scrollbar (an empty scroll area whose inner spacer matches the table's
+// scrollWidth, kept in sync both ways), so it looks exactly like the
+// browser's own bottom scrollbar in both light and dark themes.
 const TopScrollbar = ({ scrollRef, watch }) => {
-    const trackRef = useRef(null);
-    const [bar, setBar] = useState({ show: false, w: 0, x: 0 });
+    const topRef = useRef(null);
+    const [spacerWidth, setSpacerWidth] = useState(0); // 0 = table fits, bar hidden
 
     useEffect(() => {
         const el = scrollRef.current;
-        const track = trackRef.current;
-        if (!el || !track) return;
+        const top = topRef.current;
+        if (!el || !top) return;
 
         const update = () => {
-            const { scrollWidth, clientWidth, scrollLeft } = el;
-            if (scrollWidth <= clientWidth + 1) {
-                setBar((b) => (b.show ? { ...b, show: false } : b));
-                return;
-            }
-            const tw = track.clientWidth;
-            const w = Math.max(40, (clientWidth / scrollWidth) * tw);
-            const maxX = Math.max(0, tw - w);
-            const maxScroll = scrollWidth - clientWidth;
-            const x = maxScroll > 0 ? (scrollLeft / maxScroll) * maxX : 0;
-            setBar({ show: true, w, x });
+            const { scrollWidth, clientWidth } = el;
+            setSpacerWidth(scrollWidth > clientWidth + 1 ? scrollWidth : 0);
         };
+        // Assigning an identical scrollLeft doesn't refire 'scroll',
+        // so the two listeners can't ping-pong.
+        const fromTable = () => { top.scrollLeft = el.scrollLeft; };
+        const fromTop = () => { el.scrollLeft = top.scrollLeft; };
 
         update();
-        el.addEventListener('scroll', update);
+        el.addEventListener('scroll', fromTable);
+        top.addEventListener('scroll', fromTop);
         const ro = new ResizeObserver(update);
         ro.observe(el);
-        ro.observe(track);
         const tableEl = el.querySelector('table');
         if (tableEl) ro.observe(tableEl);
         return () => {
-            el.removeEventListener('scroll', update);
+            el.removeEventListener('scroll', fromTable);
+            top.removeEventListener('scroll', fromTop);
             ro.disconnect();
         };
     }, [scrollRef, watch]);
 
-    // Move the table so the thumb's left edge lands at clientX minus grabOffset
-    const dragTo = (clientX, grabOffset) => {
-        const el = scrollRef.current;
-        const track = trackRef.current;
-        if (!el || !track) return;
-        const rect = track.getBoundingClientRect();
-        const w = Math.max(40, (el.clientWidth / el.scrollWidth) * rect.width);
-        const maxX = Math.max(0, rect.width - w);
-        const maxScroll = el.scrollWidth - el.clientWidth;
-        const x = Math.min(Math.max(clientX - rect.left - grabOffset, 0), maxX);
-        el.scrollLeft = maxX > 0 ? (x / maxX) * maxScroll : 0;
-    };
-
-    const onThumbPointerDown = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const grabOffset = e.clientX - e.currentTarget.getBoundingClientRect().left;
-        const move = (ev) => dragTo(ev.clientX, grabOffset);
-        const stop = () => {
-            window.removeEventListener('pointermove', move);
-            window.removeEventListener('pointerup', stop);
-            window.removeEventListener('pointercancel', stop);
-        };
-        window.addEventListener('pointermove', move);
-        window.addEventListener('pointerup', stop);
-        window.addEventListener('pointercancel', stop);
-    };
-
-    const onTrackPointerDown = (e) => {
-        dragTo(e.clientX, bar.w / 2); // jump so the thumb centers on the click
-    };
-
     return (
         <div
-            className="hidden sm:block sticky top-0 z-10 bg-gray-50 border-b border-gray-200 px-2 py-[2px]"
-            style={{ visibility: bar.show ? 'visible' : 'hidden' }}
+            ref={topRef}
+            className={`overflow-x-auto overflow-y-hidden ${spacerWidth ? 'hidden sm:block' : 'hidden'}`}
         >
-            <div
-                ref={trackRef}
-                onPointerDown={onTrackPointerDown}
-                className="relative h-1.5 rounded-full bg-gray-200 cursor-pointer"
-            >
-                <div
-                    onPointerDown={onThumbPointerDown}
-                    className="absolute top-0 h-full rounded-full bg-[#b3b6d9] hover:bg-[#8d91c4] cursor-grab active:cursor-grabbing"
-                    style={{ width: `${bar.w}px`, transform: `translateX(${bar.x}px)` }}
-                />
-            </div>
+            <div style={{ width: spacerWidth ? `${spacerWidth}px` : '100%', height: '1px' }} />
         </div>
     );
 };
@@ -253,6 +208,14 @@ const Dashboard = () => {
     const [detailedView, setDetailedView] = useState(false);
     const [selectedEmployee, setSelectedEmployee] = useState(null);
     const [showEmployeeModal, setShowEmployeeModal] = useState(false);
+    // Which CSP box the Employee Performance modal should auto-open ('csp' |
+    // 'openCsp' | 'cspQuotationRequired' | 'cspQuotationSent' | null)
+    const [employeeAutoOpenBox, setEmployeeAutoOpenBox] = useState(null);
+    // Employee Progress CSP columns — fetched in ONE batched call, in parallel
+    // with the table data so the table load itself is untouched.
+    const [branchCspCounts, setBranchCspCounts] = useState({});   // { branch: { total_csp, open_csp } }
+    const [userCspCounts, setUserCspCounts] = useState({});       // { user_id: { csp_quotation_required, csp_quotation_sent } }
+    const [cspCountsLoading, setCspCountsLoading] = useState(false);
     const [showEmployeeActivityModal, setShowEmployeeActivityModal] = useState(false);
     const [selectedActivityUser, setSelectedActivityUser] = useState(null);
     const [selectedActivityName, setSelectedActivityName] = useState('');
@@ -303,6 +266,7 @@ const Dashboard = () => {
     const [rrStats, setRrStats] = useState([]);
     const activityTableContainerRef = useRef(null);
     const campaignTableContainerRef = useRef(null);
+    const branchEmployeesTableRef = useRef(null);
     const activityTopScrollBarRef = useRef(null);
     const [activityLoading, setActivityLoading] = useState(false);
     const [rrLoading, setRrLoading] = useState(false);
@@ -1143,6 +1107,22 @@ const Dashboard = () => {
                     valueA = employeeA.total_quotation_value || 0;
                     valueB = employeeB.total_quotation_value || 0;
                     break;
+                case 'totalCsp':
+                    valueA = branchCspCounts[employeeA.branch]?.total_csp || 0;
+                    valueB = branchCspCounts[employeeB.branch]?.total_csp || 0;
+                    break;
+                case 'openCsp':
+                    valueA = branchCspCounts[employeeA.branch]?.open_csp || 0;
+                    valueB = branchCspCounts[employeeB.branch]?.open_csp || 0;
+                    break;
+                case 'cspQuotationRequired':
+                    valueA = userCspCounts[employeeA.user_id]?.csp_quotation_required || 0;
+                    valueB = userCspCounts[employeeB.user_id]?.csp_quotation_required || 0;
+                    break;
+                case 'cspQuotationSent':
+                    valueA = userCspCounts[employeeA.user_id]?.csp_quotation_sent || 0;
+                    valueB = userCspCounts[employeeB.user_id]?.csp_quotation_sent || 0;
+                    break;
                 default:
                     return 0;
             }
@@ -1151,7 +1131,7 @@ const Dashboard = () => {
             if (valueA > valueB) return branchEmployeeSortState.sortDirection === 'asc' ? 1 : -1;
             return 0;
         });
-    }, [branchEmployees, branchEmployeeSortState, selectedBranch]);
+    }, [branchEmployees, branchEmployeeSortState, selectedBranch, branchCspCounts, userCspCounts]);
 
     // Backwards compat shim — JSX using getSortedBranchEmployeesList() still works
     const getSortedBranchEmployeesList = useCallback(() => sortedBranchEmployees, [sortedBranchEmployees]);
@@ -1600,6 +1580,15 @@ const Dashboard = () => {
 
     const handleEmployeeNameClick = (employee) => {
         setSelectedEmployee(employee);
+        setEmployeeAutoOpenBox(null);
+        setShowEmployeeModal(true);
+    };
+
+    // A CSP count cell was clicked — open the employee's performance modal with
+    // the matching CSP box already open (same data the employee sees).
+    const handleEmployeeCspCellClick = (employee, box) => {
+        setSelectedEmployee(employee);
+        setEmployeeAutoOpenBox(box);
         setShowEmployeeModal(true);
     };
 
@@ -2420,10 +2409,46 @@ const Dashboard = () => {
         }
     }, [isMasterAdmin, isITAdmin, isBranchAdmin, fetchAllBranches]);
 
+    // CSP columns for the Employee Progress table — ONE batched request for all
+    // selected branches, fired in PARALLEL with the employees fetch (never
+    // awaited by it), so the table renders exactly as fast as before and the
+    // CSP cells fill in when this resolves.
+    const fetchEmployeeCspCounts = useCallback(async (branchCodes) => {
+        if (!branchCodes || branchCodes.length === 0) {
+            if (isMounted.current) { setBranchCspCounts({}); setUserCspCounts({}); }
+            return;
+        }
+        const signal = abortControllerRef.current?.signal;
+        try {
+            if (isMounted.current) setCspCountsLoading(true);
+            let url = `${API_BASE_URL}/performance/branch-employees-csp-counts?time_period=${timePeriod}`;
+            if (timePeriod === 'custom' && customStartDate && customEndDate) {
+                url += `&start_date=${formatDateForAPI(customStartDate)}&end_date=${formatDateForAPI(customEndDate)}`;
+            }
+            const payload = {
+                branch_codes: branchCodes,
+                user_info: { user_id: userData.user_id || userData.id, name: userData.name, role: userData.role, branch: userData.branch }
+            };
+            const response = await axios.post(url, payload, { signal });
+            if (isMounted.current) {
+                setBranchCspCounts(response.data?.branch_counts || {});
+                setUserCspCounts(response.data?.user_counts || {});
+            }
+        } catch (error) {
+            if (axios.isCancel(error) || error.name === 'CanceledError') return;
+            console.error('Error fetching employee CSP counts:', error);
+            if (isMounted.current) { setBranchCspCounts({}); setUserCspCounts({}); }
+        } finally {
+            if (isMounted.current && !signal?.aborted) setCspCountsLoading(false);
+        }
+    }, [userData, timePeriod, customStartDate, customEndDate]);
+
     const fetchBranchEmployeesForBranchAdmin = useCallback(async () => {
         const signal = abortControllerRef.current?.signal;
         try {
             if (isMounted.current) setLoading(true);
+            // CSP columns load in parallel — intentionally NOT awaited here
+            fetchEmployeeCspCounts([userData.branch]);
             const payload = {
                 branch_code: userData.branch,
                 user_info: { user_id: userData.user_id || userData.id, name: userData.name, role: userData.role, branch: userData.branch }
@@ -2449,7 +2474,7 @@ const Dashboard = () => {
         } finally {
             if (isMounted.current) setLoading(false);
         }
-    }, [userData, timePeriod, customStartDate, customEndDate]);
+    }, [userData, timePeriod, customStartDate, customEndDate, fetchEmployeeCspCounts]);
 
     const fetchCampaignPerformance = useCallback(async () => {
 
@@ -2502,6 +2527,8 @@ const Dashboard = () => {
 
             try {
                 if (isMounted.current) { setBranchEmployeesLoading(true); setError(null); setBranchEmployees([]); }
+                // CSP columns load in parallel — intentionally NOT awaited here
+                fetchEmployeeCspCounts(branchCodes);
                 const fetchPromises = branchCodes.map(async (branchCode) => {
                     const payload = {
                         branch_code: branchCode,
@@ -2559,7 +2586,7 @@ const Dashboard = () => {
 
         // Debounce only rapid clicks; execute immediately when no pending fetch
         debounceTimeoutRef.current = setTimeout(execute, 50);
-    }, [userData, timePeriod, customStartDate, customEndDate]);
+    }, [userData, timePeriod, customStartDate, customEndDate, fetchEmployeeCspCounts]);
 
     const loadBranchOverviewTabData = useCallback(async () => {
         if (isLoadingData.current) return;
@@ -2851,11 +2878,25 @@ const Dashboard = () => {
                 'Rejected': emp.rejected_count || 0,
                 'Not Connected': emp.not_connected_count || 0,
                 'Completed': completed,
+                'Total CSP': branchCspCounts[emp.branch]?.total_csp || 0,
+                'Open CSP': branchCspCounts[emp.branch]?.open_csp || 0,
+                'CSP Quotation Required': userCspCounts[emp.user_id]?.csp_quotation_required || 0,
+                'CSP Quotation Sent': userCspCounts[emp.user_id]?.csp_quotation_sent || 0,
             };
         });
 
-        // Add total row
+        // Add total row (branch-level CSP counts summed ONCE per branch)
         const totals = calculateSelectedEmployeesTotals();
+        let totalCsp = 0, totalOpenCsp = 0;
+        for (const b of new Set(employees.map(e => e.branch))) {
+            totalCsp += branchCspCounts[b]?.total_csp || 0;
+            totalOpenCsp += branchCspCounts[b]?.open_csp || 0;
+        }
+        let totalQuotReq = 0, totalQuotSent = 0;
+        for (const e of employees) {
+            totalQuotReq += userCspCounts[e.user_id]?.csp_quotation_required || 0;
+            totalQuotSent += userCspCounts[e.user_id]?.csp_quotation_sent || 0;
+        }
         exportData.push({
             'Sr. No.': 'TOTAL',
             'Employee Name': `${totals.totalEmployees} Employees`,
@@ -2866,6 +2907,10 @@ const Dashboard = () => {
             'Rejected': totals.totalRejected,
             'Not Connected': totals.totalNotConnected,
             'Completed': totals.totalCompleted,
+            'Total CSP': totalCsp,
+            'Open CSP': totalOpenCsp,
+            'CSP Quotation Required': totalQuotReq,
+            'CSP Quotation Sent': totalQuotSent,
         });
 
         const ws = XLSX.utils.json_to_sheet(exportData);
@@ -2877,7 +2922,7 @@ const Dashboard = () => {
         for (let row = range.s.r; row <= range.e.r; row++) {
             const cellAddress = XLSX.utils.encode_cell({ r: row, c: 0 });
             if (ws[cellAddress] && ws[cellAddress].v === 'TOTAL') {
-                for (let col = 0; col <= 8; col++) {
+                for (let col = 0; col <= 12; col++) {
                     const totalCellAddress = XLSX.utils.encode_cell({ r: row, c: col });
                     if (ws[totalCellAddress]) {
                         ws[totalCellAddress].s = {
@@ -2891,7 +2936,8 @@ const Dashboard = () => {
 
         ws['!cols'] = [
             { wch: 8 }, { wch: 25 }, { wch: 25 }, { wch: 22 },
-            { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 14 }
+            { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 14 },
+            { wch: 12 }, { wch: 12 }, { wch: 22 }, { wch: 18 }
         ];
 
         const periodText = {
@@ -2905,7 +2951,7 @@ const Dashboard = () => {
 
         const filename = `branch_employees_${periodText}_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
         XLSX.writeFile(wb, filename);
-    }, [branchEmployees, branchEmployeeSortState, timePeriod]);
+    }, [branchEmployees, branchEmployeeSortState, timePeriod, branchCspCounts, userCspCounts]);
 
     const handleTimePeriodChange = (period) => {
         if (period === 'custom') {
@@ -4619,19 +4665,21 @@ const getPerformanceTitle = () => {
                                         )}
                                     </div>
                                 </div>
-                                <div className="overflow-x-auto border border-gray-300 rounded">
+                                <div className="relative">
+                                <TopScrollbar scrollRef={branchEmployeesTableRef} watch={branchEmployees} />
+                                <div ref={branchEmployeesTableRef} className="overflow-x-auto border border-gray-300 rounded">
                                     <table className="min-w-full border-collapse">
                                         <thead className="bg-gray-50">
                                             <tr>
-                                                <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 w-10">Sr. No.</th>
-                                                <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 sticky left-0 bg-gray-50 z-10">Employee</th>
-                                                <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300">Branch</th>
+                                                <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 w-10 whitespace-nowrap">Sr. No.</th>
+                                                <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 sticky left-0 bg-gray-50 z-10 emp-sticky-col min-w-[140px] max-w-[140px]">Employee</th>
+                                                <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 sticky left-[140px] bg-gray-50 z-10 emp-sticky-col min-w-[130px] max-w-[130px]">Branch</th>
                                                 <th
                                                     onClick={() => handleBranchEmployeeTableSort('totalFollowups')}
                                                     className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
                                                 >
-                                                    <div className="flex items-center justify-center gap-1">
-                                                        Total all Calls and follow-ups
+                                                    <div className="flex items-center justify-center gap-1 whitespace-nowrap">
+                                                        <span className="leading-tight">Total all Calls &<br />follow-ups</span>
                                                         {renderBranchEmployeeSortIcon('totalFollowups')}
                                                     </div>
                                                 </th>
@@ -4680,8 +4728,48 @@ const getPerformanceTitle = () => {
                                                         {renderBranchEmployeeSortIcon('completedCount')}
                                                     </div>
                                                 </th>
-                                                <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300">
-                                                    Drive Progress
+                                                <th
+                                                    onClick={() => handleBranchEmployeeTableSort('totalCsp')}
+                                                    title="Branch-wide CSP instances (same as the employee's Total CSP box)"
+                                                    className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                                >
+                                                    <div className="flex items-center justify-center gap-1 whitespace-nowrap">
+                                                        <span className="leading-tight">Total<br />CSP</span>
+                                                        {renderBranchEmployeeSortIcon('totalCsp')}
+                                                    </div>
+                                                </th>
+                                                <th
+                                                    onClick={() => handleBranchEmployeeTableSort('openCsp')}
+                                                    title="Branch-wide open SR CSP instances (same as the employee's Open CSP box)"
+                                                    className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                                >
+                                                    <div className="flex items-center justify-center gap-1 whitespace-nowrap">
+                                                        <span className="leading-tight">Open<br />CSP</span>
+                                                        {renderBranchEmployeeSortIcon('openCsp')}
+                                                    </div>
+                                                </th>
+                                                <th
+                                                    onClick={() => handleBranchEmployeeTableSort('cspQuotationRequired')}
+                                                    title="This employee's CSP follow-ups where a quotation is still required"
+                                                    className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                                >
+                                                    <div className="flex items-center justify-center gap-1 whitespace-nowrap">
+                                                        <span className="leading-tight">CSP Quot.<br />Required</span>
+                                                        {renderBranchEmployeeSortIcon('cspQuotationRequired')}
+                                                    </div>
+                                                </th>
+                                                <th
+                                                    onClick={() => handleBranchEmployeeTableSort('cspQuotationSent')}
+                                                    title="This employee's CSP follow-ups with a quotation sent (not yet completed/rejected)"
+                                                    className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                                >
+                                                    <div className="flex items-center justify-center gap-1 whitespace-nowrap">
+                                                        <span className="leading-tight">CSP Quot.<br />Sent</span>
+                                                        {renderBranchEmployeeSortIcon('cspQuotationSent')}
+                                                    </div>
+                                                </th>
+                                                <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 whitespace-nowrap">
+                                                    <span className="leading-tight">Drive<br />Progress</span>
                                                 </th>
                                             </tr>
                                         </thead>
@@ -4689,11 +4777,15 @@ const getPerformanceTitle = () => {
                                             {getSortedBranchEmployeesList().map((employeeRecord, recordIndex) => {
                                                 const totalFollowups = employeeRecord.total_followups || 0;
                                                 const completedFollowups = employeeRecord.completed_count || 0;
+                                                const empBranchCsp = branchCspCounts[employeeRecord.branch] || {};
+                                                const empUserCsp = userCspCounts[employeeRecord.user_id] || {};
+                                                // '…' only while the batch is still loading; 0 afterwards
+                                                const cspCell = (val) => (cspCountsLoading && val === undefined) ? '…' : (val || 0);
 
                                                 return (
                                                     <tr key={`${employeeRecord.user_id}_${recordIndex}`} className={recordIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300">{recordIndex + 1}</td>
-                                                        <td className="px-3 py-2 text-center border border-gray-300 sticky left-0 bg-inherit z-10">
+                                                        <td className="px-3 py-2 text-center border border-gray-300 sticky left-0 bg-inherit z-10 emp-sticky-col min-w-[140px] max-w-[140px]">
                                                             <button
                                                                 onClick={() => handleEmployeeNameClick(employeeRecord)}
                                                                 className="text-xs font-medium text-[#2f3192] underline hover:font-bold focus:outline-none transition-colors"
@@ -4701,13 +4793,49 @@ const getPerformanceTitle = () => {
                                                                 {employeeRecord.user_name}
                                                             </button>
                                                         </td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300">{getBranchDisplayName(employeeRecord.branch)}</td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 sticky left-[140px] bg-inherit z-10 emp-sticky-col min-w-[130px] max-w-[130px]">{getBranchDisplayName(employeeRecord.branch)}</td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{totalFollowups}</TimeValue></td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.wip_count || 0}</TimeValue></td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.rescheduled_count || 0}</TimeValue></td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.rejected_count || 0}</TimeValue></td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.not_connected_count || 0}</TimeValue></td>
                                                         <td className="px-3 py-2 text-xs font-medium text-center border border-gray-300 text-black"><TimeValue>{completedFollowups}</TimeValue></td>
+                                                        <td className="px-3 py-2 text-center border border-gray-300">
+                                                            <button
+                                                                onClick={() => handleEmployeeCspCellClick(employeeRecord, 'csp')}
+                                                                className="text-xs font-medium text-[#2f3192] underline hover:font-bold focus:outline-none transition-colors"
+                                                                title="Click to view CSP customers & due dates"
+                                                            >
+                                                                {cspCell(empBranchCsp.total_csp)}
+                                                            </button>
+                                                        </td>
+                                                        <td className="px-3 py-2 text-center border border-gray-300">
+                                                            <button
+                                                                onClick={() => handleEmployeeCspCellClick(employeeRecord, 'openCsp')}
+                                                                className="text-xs font-medium text-[#2f3192] underline hover:font-bold focus:outline-none transition-colors"
+                                                                title="Click to view open SR CSP records"
+                                                            >
+                                                                {cspCell(empBranchCsp.open_csp)}
+                                                            </button>
+                                                        </td>
+                                                        <td className="px-3 py-2 text-center border border-gray-300">
+                                                            <button
+                                                                onClick={() => handleEmployeeCspCellClick(employeeRecord, 'cspQuotationRequired')}
+                                                                className="text-xs font-medium text-[#2f3192] underline hover:font-bold focus:outline-none transition-colors"
+                                                                title="Click to view CSP quotation follow-ups"
+                                                            >
+                                                                {cspCell(empUserCsp.csp_quotation_required)}
+                                                            </button>
+                                                        </td>
+                                                        <td className="px-3 py-2 text-center border border-gray-300">
+                                                            <button
+                                                                onClick={() => handleEmployeeCspCellClick(employeeRecord, 'cspQuotationSent')}
+                                                                className="text-xs font-medium text-[#2f3192] underline hover:font-bold focus:outline-none transition-colors"
+                                                                title="Click to view CSP quotation sent customers"
+                                                            >
+                                                                {cspCell(empUserCsp.csp_quotation_sent)}
+                                                            </button>
+                                                        </td>
                                                         <td className="px-3 py-2 text-center border border-gray-300">
                                                             <button
                                                                 onClick={() => handleCampaignProgressClick(employeeRecord)}
@@ -4724,25 +4852,43 @@ const getPerformanceTitle = () => {
                                             {/* TOTAL ROW */}
                                             {getSortedBranchEmployeesList().length > 0 && (() => {
                                                 const totals = calculateSelectedEmployeesTotals();
+                                                const employeesShown = getSortedBranchEmployeesList();
+                                                // Branch-level counts are the same for every employee of a
+                                                // branch — sum each branch ONCE, not once per employee row.
+                                                let totalCsp = 0, totalOpenCsp = 0;
+                                                for (const b of new Set(employeesShown.map(e => e.branch))) {
+                                                    totalCsp += branchCspCounts[b]?.total_csp || 0;
+                                                    totalOpenCsp += branchCspCounts[b]?.open_csp || 0;
+                                                }
+                                                let totalQuotReq = 0, totalQuotSent = 0;
+                                                for (const e of employeesShown) {
+                                                    totalQuotReq += userCspCounts[e.user_id]?.csp_quotation_required || 0;
+                                                    totalQuotSent += userCspCounts[e.user_id]?.csp_quotation_sent || 0;
+                                                }
                                                 return (
                                                     <tr className="bg-gray-100 font-bold border-t-2 border-gray-400">
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">TOTAL</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold sticky left-0 bg-inherit z-10 emp-sticky-col min-w-[140px] max-w-[140px]">
                                                             {totals.totalEmployees} Employees
                                                         </td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">-</td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold sticky left-[140px] bg-inherit z-10 emp-sticky-col min-w-[130px] max-w-[130px]">-</td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalFollowups.toLocaleString()}</TimeValue></td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalWip.toLocaleString()}</TimeValue></td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalRescheduled.toLocaleString()}</TimeValue></td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalRejected.toLocaleString()}</TimeValue></td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalNotConnected.toLocaleString()}</TimeValue></td>
                                                         <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalCompleted.toLocaleString()}</TimeValue></td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{cspCountsLoading ? '…' : totalCsp.toLocaleString()}</td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{cspCountsLoading ? '…' : totalOpenCsp.toLocaleString()}</td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{cspCountsLoading ? '…' : totalQuotReq.toLocaleString()}</td>
+                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{cspCountsLoading ? '…' : totalQuotSent.toLocaleString()}</td>
                                                         <td className="px-3 py-2 text-center border border-gray-300">—</td>
                                                     </tr>
                                                 );
                                             })()}
                                         </tbody>
                                     </table>
+                                </div>
                                 </div>
                             </div>
                         ) : !branchEmployeesLoading && selectedBranch && branchEmployees.length === 0 ? (
@@ -6356,12 +6502,14 @@ const getPerformanceTitle = () => {
                 onClose={() => {
                     setShowEmployeeModal(false);
                     setSelectedEmployee(null);
+                    setEmployeeAutoOpenBox(null);
                 }}
                 employee={selectedEmployee}
                 userData={userData}
                 timePeriod={timePeriod}
                 customStartDate={customStartDate}
                 customEndDate={customEndDate}
+                autoOpenBox={employeeAutoOpenBox}
             />
 
             <BranchCustomersModal

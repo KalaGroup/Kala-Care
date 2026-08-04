@@ -607,6 +607,83 @@ class EmployeePerformanceController:
             return []
 
     @staticmethod
+    async def get_branch_employees_csp_quotation_counts(db: Session, branch_codes: List[str],
+                                                        time_period: str = 'all', start_date=None, end_date=None):
+        """
+        Per-employee 'CSP Quotation Required' / 'CSP Quotation Sent' counts for every
+        non-blocked user of the given branches — ONE windowed query for all of them.
+
+        Mirrors the MyPerformance.jsx front-end math exactly: keep the LATEST
+        follow-up per (user, instance, drive), then
+          required: activity contains 'quotation', quotation NOT sent,
+                    status 'rescheduled', CSP drive
+          sent:     quotation sent, CSP drive, status not Completed/Rejected
+        """
+        try:
+            user_rows = db.query(User.user_id).filter(
+                User.branch.in_(branch_codes),
+                User.is_blocked == False
+            ).all()
+            user_ids = [u.user_id for u in user_rows]
+            if not user_ids:
+                return {}
+
+            base_query = db.query(FollowUp).filter(FollowUp.user_id.in_(user_ids))
+            filtered_query = EmployeePerformanceController.apply_time_filter(
+                base_query, FollowUp, time_period, start_date, end_date
+            )
+            sub = filtered_query.with_entities(
+                FollowUp.user_id.label('uid'),
+                FollowUp.campaign_id.label('camp'),
+                FollowUp.activity_id.label('act'),
+                FollowUp.status.label('status'),
+                FollowUp.quotation_sent.label('qs'),
+                func.row_number().over(
+                    partition_by=[FollowUp.user_id, FollowUp.customer_instance_id, FollowUp.campaign_id],
+                    order_by=[desc(func.coalesce(FollowUp.created_at, FollowUp.followup_date)), desc(FollowUp.id)],
+                ).label('rn'),
+            ).subquery()
+            latest = db.query(sub).filter(sub.c.rn == 1).all()
+            if not latest:
+                return {}
+
+            # CSP-ness of a drive: service OR name contains 'csp' (same as the front end)
+            camp_ids = list({r.camp for r in latest if r.camp})
+            csp_camp_ids = set()
+            for i in range(0, len(camp_ids), 1000):
+                for cid, name, service in db.query(Campaign.id, Campaign.name, Campaign.service).filter(
+                        Campaign.id.in_(camp_ids[i:i + 1000])).all():
+                    if 'csp' in (service or '').lower() or 'csp' in (name or '').lower():
+                        csp_camp_ids.add(cid)
+
+            act_ids = list({r.act for r in latest if r.act})
+            quotation_act_ids = set()
+            for i in range(0, len(act_ids), 1000):
+                for aid, content in db.query(Activity.id, Activity.content).filter(
+                        Activity.id.in_(act_ids[i:i + 1000])).all():
+                    if 'quotation' in (content or '').lower():
+                        quotation_act_ids.add(aid)
+
+            counts = {}
+            for r in latest:
+                if r.camp not in csp_camp_ids:
+                    continue
+                entry = counts.setdefault(r.uid, {"csp_quotation_required": 0, "csp_quotation_sent": 0})
+                status_lc = (r.status or '').strip().lower()
+                if r.qs:
+                    if status_lc not in ('completed', 'rejected'):
+                        entry["csp_quotation_sent"] += 1
+                elif status_lc == 'rescheduled' and r.act in quotation_act_ids:
+                    entry["csp_quotation_required"] += 1
+            return counts
+
+        except Exception as e:
+            print(f"Error in get_branch_employees_csp_quotation_counts: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {}
+
+    @staticmethod
     async def get_all_branches(db: Session):
         """
         Get all unique branch codes from users table

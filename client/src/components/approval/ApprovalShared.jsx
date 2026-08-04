@@ -1007,7 +1007,14 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
         } catch { /* submit still works without the flow panel */ }
 
         const pickerLevels = [];
-        const flowRows = (chainLevels || []).map(l => {
+        // An L2/L3/L4 creator's record only travels UPWARD — levels at or
+        // below their own stage never act on it, so hide those rows (same
+        // trim as the My Approval Limits popup).
+        const LVL_ORDER = { l2: 2, l3: 3, l4: 4, l5: 5 };
+        const myOrder = { l2: 2, l3: 3, l4: 4 }[access?.level] || 0;
+        const flowRows = (chainLevels || [])
+            .filter(l => (LVL_ORDER[l.level] || 0) > myOrder)
+            .map(l => {
             const tag = `${l.level.toUpperCase()} – ${esc(levelName(l.level))}`;
             const row = (body) => `<div style="margin:6px 0"><b style="font-size:11px">${tag}</b>${body}</div>`;
             if (l.skipped)

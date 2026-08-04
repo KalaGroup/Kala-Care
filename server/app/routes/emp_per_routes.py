@@ -29,6 +29,10 @@ class BranchReportRequest(BaseModel):
     branch_code: str
     user_info: UserInfo
 
+class BranchCspCountsRequest(BaseModel):
+    branch_codes: List[str]
+    user_info: UserInfo
+
 class CampaignPerformanceRequest(BaseModel):
     user_info: UserInfo
     campaign_id: Optional[int] = None
@@ -365,6 +369,65 @@ async def get_branch_employees(
         
         return employees
         
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.post("/branch-employees-csp-counts")
+async def get_branch_employees_csp_counts(
+    request: BranchCspCountsRequest,
+    time_period: str = Query('all', description="Time period: all, month, 3months, 6months, year"),
+    start_date: Optional[str] = Query(None, description="Start date for custom range (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date for custom range (YYYY-MM-DD)"),
+    db: Session = Depends(get_db)
+):
+    """
+    Batched CSP columns for the Dashboard Employee Progress table — ONE call
+    for ALL selected branches so the table load itself stays untouched.
+      branch_counts: { branch: { total_csp, open_csp } }   (branch-wide, same
+                     numbers as the employee's Total CSP / Open CSP boxes)
+      user_counts:   { user_id: { csp_quotation_required, csp_quotation_sent } }
+    """
+    try:
+        role = request.user_info.role or ''
+        if not is_admin(role):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only admins can view branch employees"
+            )
+
+        branch_codes = [str(b) for b in (request.branch_codes or []) if b]
+        # Branch admins can only see their own branch
+        if role.lower() == 'branch_admin':
+            branch_codes = [b for b in branch_codes if b == request.user_info.branch]
+        if not branch_codes:
+            return {"branch_counts": {}, "user_counts": {}}
+
+        start_datetime = None
+        end_datetime = None
+        if start_date and end_date:
+            try:
+                datetime.strptime(start_date, '%Y-%m-%d')
+                datetime.strptime(end_date, '%Y-%m-%d')
+                start_datetime = convert_ist_to_utc_datetime(start_date, is_end_date=False)
+                end_datetime = convert_ist_to_utc_datetime(end_date, is_end_date=True)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid date format. Use YYYY-MM-DD"
+                )
+
+        from app.controllers.engagement_controller import EngagementController
+        branch_counts = EngagementController(db).get_csp_counts_for_branches(branch_codes)
+        user_counts = await emp_per_controller.EmployeePerformanceController.get_branch_employees_csp_quotation_counts(
+            db, branch_codes, time_period, start_datetime, end_datetime
+        )
+        return {"branch_counts": branch_counts, "user_counts": user_counts}
+
     except HTTPException:
         raise
     except Exception as e:

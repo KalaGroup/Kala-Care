@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, Float, Date, DateTime, Text, ForeignKey,
+    Boolean, Column, Integer, String, Float, Date, DateTime, Text, ForeignKey,
     UniqueConstraint, Index,
 )
 from app.database import Base
@@ -34,13 +34,17 @@ class PmsBranchTarget(Base):
 
 
 class PmsMonthSettings(Base):
-    """Per-month settings for the AOP Master — currently the number of
-    working days (defaults to all days except Sundays; editable)."""
+    """Per-month settings for the AOP Master — the number of working days
+    (defaults to all days except Sundays; editable). Working days are set
+    PER REGION (MH / KA have different holidays); the legacy single
+    `working_days` stays as a fallback for months saved before the split."""
     __tablename__ = "pms_month_settings"
 
     id = Column(Integer, primary_key=True, index=True)
     target_month = Column(String(7), nullable=False, unique=True, index=True)  # 'YYYY-MM'
-    working_days = Column(Integer, nullable=True)
+    working_days = Column(Integer, nullable=True)         # legacy single value (fallback)
+    working_days_mh = Column(Integer, nullable=True)
+    working_days_ka = Column(Integer, nullable=True)
     updated_by = Column(String(50), nullable=True)
     created_at = Column(DateTime(timezone=True), default=now_ist)
     updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
@@ -116,6 +120,11 @@ class PmsSalesRecord(Base):
     sr_type = Column(String(120), nullable=True)
     net_taxable_amount = Column(Float, nullable=False, default=0)
     extra_data = Column(Text, nullable=True)              # JSON of unmapped columns
+    # Cancelled invoice: the row STAYS stored (audit trail) but is excluded
+    # from every generated report. Set/cleared per invoice from the preview.
+    is_cancelled = Column(Boolean, nullable=False, default=False, index=True)
+    cancelled_by = Column(String(50), nullable=True)
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
     dedupe_key = Column(String(64), nullable=False, unique=True, index=True)
     batch_id = Column(Integer, ForeignKey("pms_upload_batches.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=now_ist)

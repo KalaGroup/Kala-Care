@@ -2,6 +2,7 @@ from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -45,6 +46,12 @@ class TargetsCopyIn(BaseModel):
     to_month: str
 
 
+class TargetsYearSaveIn(BaseModel):
+    fy: int                         # FY start year (2025 = Apr 2025 .. Mar 2026)
+    rows: list                      # [{branch_id, region, ..., spare:{m:v}, labour:{m:v}}]
+    working_days: Optional[dict] = None   # {'YYYY-MM': int}
+
+
 class SrTypesSaveIn(BaseModel):
     items: list                     # [{sr_type, head}]
 
@@ -59,6 +66,12 @@ class ReportSaveIn(BaseModel):
     payload: dict
 
 
+class CancelRowIn(BaseModel):
+    record_type: str                # 'part' | 'labour' — scopes the row lookup
+    row_id: int                     # pms_sales_records.id of the ONE row
+    cancelled: bool = True          # False = restore
+
+
 # ---------------- AOP MASTER: TARGETS ---------------- #
 
 @router.get("/targets")
@@ -70,6 +83,29 @@ async def get_targets(
 ):
     _require_master_admin(db, user_id, user_role)
     return {"success": True, **pc.get_targets_payload(db, month)}
+
+
+@router.get("/targets/year")
+async def get_targets_year(
+    fy: int,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_master_admin(db, user_id, user_role)
+    return {"success": True, **pc.get_targets_year_payload(db, fy)}
+
+
+@router.post("/targets/year/bulk")
+async def save_targets_year(
+    payload: TargetsYearSaveIn,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_master_admin(db, user_id, user_role)
+    return pc.save_targets_year(db, payload.fy, payload.rows, user_id,
+                                payload.working_days)
 
 
 @router.post("/targets/bulk")
@@ -180,6 +216,7 @@ async def upload_file(
     file: UploadFile = File(...),
     record_type: str = Form(...),               # 'part' | 'labour'
     validate_only: bool = Form(False),
+    progress_token: Optional[str] = Form(None),  # frontend polls /upload/progress
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -187,8 +224,18 @@ async def upload_file(
     _require_master_admin(db, user_id, user_role)
     contents = await file.read()
     if validate_only:
-        return pc.validate_file(contents, file.filename)
-    return pc.import_file(db, contents, file.filename, record_type, user_id)
+        return pc.validate_file(contents, file.filename, record_type)
+    # Worker thread keeps the event loop free so progress polls answer live.
+    return await run_in_threadpool(
+        pc.import_file, db, contents, file.filename, record_type, user_id,
+        progress_token)
+
+
+@router.get("/upload/progress")
+async def upload_progress(token: str):
+    """Live progress of a running import (no auth — token is an opaque,
+    client-generated random id and the payload is just {pct, stage})."""
+    return {"success": True, **pc.get_upload_progress(token)}
 
 
 @router.get("/uploads")
@@ -227,13 +274,30 @@ async def get_data_preview(
     limit: int = 200,
     offset: int = 0,
     search: Optional[str] = None,
+    cancelled: Optional[str] = None,     # 'all' | 'active' | 'cancelled'
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
     _require_master_admin(db, user_id, user_role)
-    page = pc.preview_rows(db, record_type, min(limit, 500), max(offset, 0), search)
-    return {"success": True, "items": page["items"], "total": page["total"]}
+    page = pc.preview_rows(db, record_type, min(limit, 500), max(offset, 0),
+                           search, cancelled)
+    return {"success": True, "items": page["items"], "total": page["total"],
+            "cancelled_total": page["cancelled_total"]}
+
+
+@router.post("/data/cancel-row")
+async def cancel_row(
+    payload: CancelRowIn,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_master_admin(db, user_id, user_role)
+    if payload.record_type not in ("part", "labour"):
+        raise HTTPException(status_code=400, detail="record_type must be 'part' or 'labour'")
+    return pc.set_row_cancelled(db, payload.record_type, payload.row_id,
+                                payload.cancelled, user_id)
 
 
 # ---------------- REPORT ---------------- #
@@ -242,12 +306,14 @@ async def get_data_preview(
 async def get_report(
     as_on: date,
     from_date: Optional[date] = None,
+    part_as_on: Optional[date] = None,     # per-type period ends — used by the
+    labour_as_on: Optional[date] = None,   # default all-data report
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
     _require_master_admin(db, user_id, user_role)
-    return pc.generate_report(db, as_on, from_date)
+    return pc.generate_report(db, as_on, from_date, part_as_on, labour_as_on)
 
 
 @router.post("/report/save")
