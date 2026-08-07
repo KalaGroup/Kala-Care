@@ -16,6 +16,7 @@ import re
 from datetime import date, datetime, timedelta
 
 import pandas as pd
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.pms_model import (
@@ -90,6 +91,18 @@ CANON_HEADERS = {
                 "REPORTTYPE", "SERVICEREPORT", "TYPEOFSERVICE", "CLAIMTYPE", "SRREPORTTYPE"],
     "net_taxable_amount": ["NETTAXABLEAMOUNT", "NETTAXABLEAMT", "NETTAXABLEVALUE",
                            "NETAMOUNT", "TAXABLEAMOUNT", "TAXABLEVALUE"],
+    # ---- remaining standard file columns — REAL columns, no extra_data ----
+    "instance_id": ["INSTANCEID"],                                     # part
+    "application_code": ["APPLICATIONCODE", "APPCODE"],                # part
+    "engine_serial_no": ["ENGINESERIALNO", "ENGINESERIALNUMBER", "ENGINESRNO"],  # part
+    "sr_sub_type": ["CLAIMINVOICESRSUBTYPE", "SRSUBTYPE"],             # both files
+    "category": ["CATEGORY"],                                          # part
+    "part_category": ["PARTCATEGORY"],                                 # part
+    "part_number": ["PARTNUMBER", "PARTNO"],                           # part
+    "part_description": ["PARTDESCRIPTION", "PARTDESCTRIPTION"],       # part (file typo)
+    "quantity": ["QUANTITY", "QTY"],                                   # part
+    "series": ["SERIES"],                                              # labour
+    "sr_number": ["SRNUMBER", "SRNO"],                                 # labour
 }
 
 # The SR Type column differs per file and feeds the SR Type Master:
@@ -226,7 +239,11 @@ def validate_file(contents: bytes, filename: str, record_type: str = None):
 _UPSERT_FIELDS = [
     "zone_name", "soid", "sd_name", "branch_id", "branch_name",
     "claim_invoice_date", "product_segment", "segment", "sr_type",
-    "net_taxable_amount", "extra_data",
+    "net_taxable_amount",
+    "instance_id", "application_code", "engine_serial_no", "sr_sub_type",
+    "category", "part_category", "part_number", "part_description",
+    "quantity", "series", "sr_number",
+    "extra_data",
 ]
 
 
@@ -334,6 +351,19 @@ def import_file(db: Session, contents: bytes, filename: str, record_type: str,
             "segment": _clean_str(get("segment"), 100),
             "sr_type": _clean_str(get("sr_type"), 120),
             "net_taxable_amount": amount,
+            # every remaining standard column stored as a REAL column
+            "instance_id": _clean_str(get("instance_id"), 100),
+            "application_code": _clean_str(get("application_code"), 100),
+            "engine_serial_no": _clean_str(get("engine_serial_no"), 100),
+            "sr_sub_type": _clean_str(get("sr_sub_type"), 120),
+            "category": _clean_str(get("category"), 100),
+            "part_category": _clean_str(get("part_category"), 100),
+            "part_number": _clean_str(get("part_number"), 120),
+            "part_description": _clean_str(get("part_description"), 255),
+            "quantity": _parse_amount(get("quantity")) if "quantity" in mapping else None,
+            "series": _clean_str(get("series"), 100),
+            "sr_number": _clean_str(get("sr_number"), 100),
+            # only truly UNKNOWN extra columns (none in the standard files)
             "extra_data": json.dumps(extra, ensure_ascii=False) if extra else None,
         }
 
@@ -462,17 +492,21 @@ def list_batches(db: Session, limit: int = 50):
 
 
 def data_summary(db: Session):
-    """Row counts + invoice-date range per record type (shown on the page)."""
+    """Row counts + invoice-date range per record type (shown on the page).
+    One grouped aggregate instead of six queries — same output, index-only."""
+    by_rt = {r[0]: r for r in
+             db.query(PmsSalesRecord.record_type,
+                      func.count(PmsSalesRecord.id),
+                      func.min(PmsSalesRecord.claim_invoice_date),
+                      func.max(PmsSalesRecord.claim_invoice_date))
+             .group_by(PmsSalesRecord.record_type).all()}
     out = {}
     for rt in ("part", "labour"):
-        q = db.query(PmsSalesRecord).filter(PmsSalesRecord.record_type == rt)
-        count = q.count()
-        first = q.order_by(PmsSalesRecord.claim_invoice_date.asc()).first()
-        last = q.order_by(PmsSalesRecord.claim_invoice_date.desc()).first()
+        row = by_rt.get(rt)
         out[rt] = {
-            "rows": count,
-            "from_date": first.claim_invoice_date.isoformat() if first and first.claim_invoice_date else None,
-            "to_date": last.claim_invoice_date.isoformat() if last and last.claim_invoice_date else None,
+            "rows": int(row[1]) if row else 0,
+            "from_date": row[2].isoformat() if row and row[2] else None,
+            "to_date": row[3].isoformat() if row and row[3] else None,
         }
     return out
 
@@ -516,10 +550,15 @@ def preview_rows(db: Session, record_type: str, limit: int = 200, offset: int = 
             "claim_invoice_date": r.claim_invoice_date.isoformat() if r.claim_invoice_date else None,
             "product_segment": r.product_segment, "segment": r.segment,
             "sr_type": r.sr_type, "net_taxable_amount": r.net_taxable_amount,
+            "instance_id": r.instance_id, "application_code": r.application_code,
+            "engine_serial_no": r.engine_serial_no, "sr_sub_type": r.sr_sub_type,
+            "category": r.category, "part_category": r.part_category,
+            "part_number": r.part_number, "part_description": r.part_description,
+            "quantity": r.quantity, "series": r.series, "sr_number": r.sr_number,
             "is_cancelled": bool(r.is_cancelled),
             "cancelled_by": r.cancelled_by,
             "cancelled_at": r.cancelled_at.isoformat() if r.cancelled_at else None,
-            # every unmapped file column (original header -> value)
+            # legacy rows only — unknown extra columns (original header -> value)
             "extra": json.loads(r.extra_data) if r.extra_data else {},
         } for r in rows],
     }
@@ -1119,7 +1158,16 @@ def generate_report(db: Session, as_on: date, from_date: date = None,
         if prev is None or t.target_month > prev.target_month:
             info_by_branch[t.branch_id] = t
 
-    records = (db.query(PmsSalesRecord)
+    # Only the columns the aggregation loop reads — the covering index
+    # IX_pms_records_date_cancel serves this without touching the base table.
+    records = (db.query(
+                   PmsSalesRecord.id, PmsSalesRecord.record_type,
+                   PmsSalesRecord.claim_invoice_date, PmsSalesRecord.branch_id,
+                   PmsSalesRecord.branch_name, PmsSalesRecord.zone_name,
+                   PmsSalesRecord.claim_invoice_no, PmsSalesRecord.net_taxable_amount,
+                   PmsSalesRecord.segment, PmsSalesRecord.product_segment,
+                   PmsSalesRecord.sr_type, PmsSalesRecord.category,
+                   PmsSalesRecord.quantity)
                .filter(PmsSalesRecord.claim_invoice_date >= from_date,
                        PmsSalesRecord.claim_invoice_date <= to_date,
                        # cancelled invoices stay stored but never count
@@ -1180,25 +1228,14 @@ def generate_report(db: Session, as_on: date, from_date: date = None,
         hd[rt] += amt
         hd["invoices"].add(inv)
 
-        # CATEGORY comes only in the Part Sale file — it's an unmapped column,
-        # so it lives in extra_data (QUANTITY too). Spare-only breakdown;
-        # blanks grouped like Excel's "(Blanks)".
+        # CATEGORY / QUANTITY come only in the Part Sale file — real columns.
+        # Spare-only breakdown; blanks grouped like Excel's "(Blanks)".
         if rt == "part":
-            cat, qty = None, 0.0
-            if r.extra_data:
-                try:
-                    for k, v in json.loads(r.extra_data).items():
-                        tk = _tight(k)
-                        if tk == "CATEGORY":
-                            cat = str(v).strip()
-                        elif tk in ("QUANTITY", "QTY"):
-                            qty = _parse_amount(v)
-                except (ValueError, TypeError):
-                    pass
+            cat = (r.category or "").strip()
             c = category_agg.setdefault(cat or "(Blanks)",
                                         {"part": 0.0, "invoices": set(), "qty": 0.0, "lines": 0})
             c["part"] += amt
-            c["qty"] += qty
+            c["qty"] += r.quantity or 0.0
             c["lines"] += 1        # one stored row = one part line of an invoice
             c["invoices"].add(inv)
 
@@ -1291,6 +1328,125 @@ def generate_report(db: Session, as_on: date, from_date: date = None,
     }
 
 
+def branch_detail_report(db: Session, as_on: date, from_date: date,
+                         branch_ids: list):
+    """Detail for the SELECTED branches of the branch-filter report:
+
+      weeks         -> the period split into 7-day chunks (Week 1..N), each
+                       with Spare + Labour sale and invoice count
+      segment /     -> the breakdown tables recomputed from ONLY the selected
+      service_head     branches' rows (both record types)
+      category      -> Spare-only (the Labour file has no CATEGORY column)
+
+    Cancelled rows are excluded, same as the main report."""
+    ids = sorted({_norm_branch_id(b) for b in (branch_ids or []) if str(b).strip()})
+    if not ids:
+        return {"success": False, "message": "No branches selected"}
+    if from_date is None:
+        from_date = as_on.replace(day=1)
+    if from_date > as_on:
+        from_date, as_on = as_on, from_date
+
+    # Only the columns the loop reads — served by IX_pms_records_branch_date
+    # (seek on the selected branches + date range, no base-table lookups).
+    records = (db.query(
+                   PmsSalesRecord.id, PmsSalesRecord.record_type,
+                   PmsSalesRecord.claim_invoice_date,
+                   PmsSalesRecord.claim_invoice_no, PmsSalesRecord.net_taxable_amount,
+                   PmsSalesRecord.segment, PmsSalesRecord.product_segment,
+                   PmsSalesRecord.sr_type, PmsSalesRecord.category,
+                   PmsSalesRecord.quantity)
+               .filter(PmsSalesRecord.claim_invoice_date >= from_date,
+                       PmsSalesRecord.claim_invoice_date <= as_on,
+                       PmsSalesRecord.is_cancelled == False,  # noqa: E712
+                       PmsSalesRecord.branch_id.in_(ids))
+               .all())
+
+    # Week buckets: 7-day chunks starting at from_date, last one clamped.
+    weeks = []
+    ws, idx = from_date, 1
+    while ws <= as_on:
+        we = min(ws + timedelta(days=6), as_on)
+        weeks.append({"idx": idx, "start": ws, "end": we, "part": 0.0,
+                      "labour": 0.0, "invoices": set()})
+        ws, idx = we + timedelta(days=1), idx + 1
+
+    sr_head = {k.lower(): v for k, v in DEFAULT_SR_HEADS.items()}
+    sr_head.update({m.sr_type.lower(): (m.head or "Unmapped")
+                    for m in db.query(PmsSrTypeMapping).all()})
+
+    segment_agg, head_agg, category_agg = {}, {}, {}
+    month_agg = {}          # 'YYYY-MM' -> {part, labour, invoices:set}
+    for r in records:
+        rt = r.record_type
+        amt = r.net_taxable_amount or 0.0
+        inv = (rt, r.claim_invoice_no or f"row-{r.id}")
+
+        wk = weeks[min((r.claim_invoice_date - from_date).days // 7, len(weeks) - 1)]
+        wk[rt] += amt
+        wk["invoices"].add(inv)
+
+        mo = month_agg.setdefault(r.claim_invoice_date.strftime("%Y-%m"),
+                                  {"part": 0.0, "labour": 0.0, "invoices": set()})
+        mo[rt] += amt
+        mo["invoices"].add(inv)
+
+        seg_key = (r.segment or r.product_segment or "Unspecified").strip() or "Unspecified"
+        seg = segment_agg.setdefault(seg_key, {"part": 0.0, "labour": 0.0, "invoices": set()})
+        seg[rt] += amt
+        seg["invoices"].add(inv)
+
+        head_key = sr_head.get((r.sr_type or "").strip().lower(),
+                               "Unmapped" if r.sr_type else "Unspecified")
+        hd = head_agg.setdefault(head_key, {"part": 0.0, "labour": 0.0, "invoices": set()})
+        hd[rt] += amt
+        hd["invoices"].add(inv)
+
+        if rt == "part":
+            cat = (r.category or "").strip()
+            c = category_agg.setdefault(cat or "(Blanks)",
+                                        {"part": 0.0, "invoices": set(), "qty": 0.0, "lines": 0})
+            c["part"] += amt
+            c["qty"] += r.quantity or 0.0
+            c["lines"] += 1
+            c["invoices"].add(inv)
+
+    def _dictrows(dct):
+        return [{
+            "name": k, "part": round(v["part"], 2), "labour": round(v["labour"], 2),
+            "total": round(v["part"] + v["labour"], 2), "invoices": len(v["invoices"]),
+        } for k, v in sorted(dct.items(), key=lambda kv: -(kv[1]["part"] + kv[1]["labour"]))]
+
+    return {
+        "success": True,
+        "from_date": from_date.isoformat(),
+        "as_on": as_on.isoformat(),
+        "branches": ids,
+        "weeks": [{
+            "week": w["idx"],
+            "start": w["start"].isoformat(),
+            "end": w["end"].isoformat(),
+            "part": round(w["part"], 2),
+            "labour": round(w["labour"], 2),
+            "total": round(w["part"] + w["labour"], 2),
+            "invoices": len(w["invoices"]),
+        } for w in weeks],
+        "months": [{
+            "month": m,
+            "part": round(v["part"], 2),
+            "labour": round(v["labour"], 2),
+            "total": round(v["part"] + v["labour"], 2),
+            "invoices": len(v["invoices"]),
+        } for m, v in sorted(month_agg.items())],
+        "segment": _dictrows(segment_agg),
+        "service_head": _dictrows(head_agg),
+        "category": [{
+            "name": k, "part": round(v["part"], 2), "invoices": len(v["invoices"]),
+            "qty": round(v["qty"], 2), "lines": v["lines"],
+        } for k, v in sorted(category_agg.items(), key=lambda kv: -kv[1]["part"])],
+    }
+
+
 # ---------------- REPORT HISTORY ------------------------------------------- #
 
 def save_report(db: Session, as_on: date, title: str, payload: dict, user_id: str):
@@ -1344,3 +1500,81 @@ def delete_report(db: Session, report_id: int):
     db.delete(row)
     db.commit()
     return {"success": True}
+
+
+# ---------------- EMPLOYEE PRODUCTIVITY (SE-wise) ---------------- #
+
+def employee_productivity_data(db: Session):
+    """'Employee Productivity' report source data.
+
+    Labour-file SR NUMBERs (pms_sales_records, cancelled rows excluded) are
+    matched against the 'Response Time & MaxTTR Details' import
+    (response_time_maxttr, where SR NUMBER is unique); each matched SR counts
+    once for its SE NAME on its SR CLOSE DATE, under the RTM row's branch.
+
+    Payload mirrors the Productivity_Report_Prototype_3 structure —
+    branches[] / employees[{n, b}] / records[[empIdx, isoDate, count]] —
+    so all the windowing (week/month columns, per-day rates, branch rollups)
+    stays client-side exactly like the prototype."""
+    from app.models.customer_model import ResponseTimeMaxTTR
+
+    labour_sr_filter = (
+        PmsSalesRecord.record_type == "labour",
+        PmsSalesRecord.is_cancelled == False,  # noqa: E712 — SQL Server needs = 0, not IS NOT 1
+        PmsSalesRecord.sr_number.isnot(None),
+        PmsSalesRecord.sr_number != "",
+    )
+    labour_srs = (db.query(PmsSalesRecord.sr_number)
+                  .filter(*labour_sr_filter).distinct().subquery())
+
+    rows = (db.query(ResponseTimeMaxTTR.se_name,
+                     ResponseTimeMaxTTR.branch_name,
+                     ResponseTimeMaxTTR.sr_close_date)
+            .join(labour_srs, labour_srs.c.sr_number == ResponseTimeMaxTTR.sr_number)
+            .filter(ResponseTimeMaxTTR.sr_close_date.isnot(None),
+                    ResponseTimeMaxTTR.se_name.isnot(None),
+                    ResponseTimeMaxTTR.se_name != "")
+            .all())
+
+    labour_sr_total = (db.query(func.count(func.distinct(PmsSalesRecord.sr_number)))
+                       .filter(*labour_sr_filter).scalar()) or 0
+    # Raw labour row count — rows minus distinct = duplicate SR numbers
+    # (same SR billed on more than one invoice), shown in the footer note.
+    labour_row_total = (db.query(func.count(PmsSalesRecord.id))
+                        .filter(*labour_sr_filter).scalar()) or 0
+
+    if not rows:
+        return {"success": True,
+                "meta": {"min_date": None, "max_date": None, "total_sr": 0,
+                         "labour_sr_total": labour_sr_total,
+                         "labour_row_total": labour_row_total},
+                "branches": [], "employees": [], "records": []}
+
+    branch_idx, branches = {}, []
+    emp_idx, employees = {}, []          # employee identity = (name, branch)
+    counts = {}                          # (emp index, iso close date) -> SR count
+    min_d = max_d = None
+    for se_name, branch_name, close_dt in rows:
+        b = (branch_name or "").strip() or "(No branch)"
+        if b not in branch_idx:
+            branch_idx[b] = len(branches)
+            branches.append(b)
+        name = se_name.strip()
+        key = (name, branch_idx[b])
+        if key not in emp_idx:
+            emp_idx[key] = len(employees)
+            employees.append({"n": name, "b": branch_idx[b]})
+        d = close_dt.date() if isinstance(close_dt, datetime) else close_dt
+        ck = (emp_idx[key], d.isoformat())
+        counts[ck] = counts.get(ck, 0) + 1
+        if min_d is None or d < min_d:
+            min_d = d
+        if max_d is None or d > max_d:
+            max_d = d
+
+    records = sorted([ei, ds, n] for (ei, ds), n in counts.items())
+    return {"success": True,
+            "meta": {"min_date": min_d.isoformat(), "max_date": max_d.isoformat(),
+                     "total_sr": len(rows), "labour_sr_total": labour_sr_total,
+                     "labour_row_total": labour_row_total},
+            "branches": branches, "employees": employees, "records": records}

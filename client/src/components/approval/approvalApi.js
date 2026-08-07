@@ -30,10 +30,11 @@ export const getAccess = () =>
     axios.get(`${BASE}/access`, { headers: authHeaders() }).then(r => r.data);
 
 // HO creators: L4 choices filtered for ONE record — only HO HODs whose limit
-// for the record's type is higher than the caller's own.
-export const getL4Choices = (branch, requestType) =>
+// for the record's type is higher than the caller's own and who cover the
+// record's category.
+export const getL4Choices = (branch, requestType, category) =>
     axios.get(`${BASE}/l4-choices`, {
-        headers: authHeaders(), params: { branch, request_type: requestType },
+        headers: authHeaders(), params: { branch, request_type: requestType, category },
     }).then(r => r.data);
 
 // The approval path a record of (branch, category) will follow for the
@@ -149,3 +150,4 @@ export const approvalPdfUrl = (id) => `${BASE}/applications/${id}/pdf`;
 
 export const attachmentViewUrl = (id) => `${BASE}/attachments/${id}/view`;
 export const attachmentDownloadUrl = (id) => `${BASE}/attachments/${id}/download`;
+export const attachmentsZipUrl = (id) => `${BASE}/applications/${id}/attachments/zip`;

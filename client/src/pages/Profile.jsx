@@ -2720,7 +2720,7 @@ const Profile = () => {
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">MOM Tracking</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Note For Approval</th>
                                                         {!isRestrictedUser && (
-                                                            <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap">Actions</th>
+                                                            <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap sticky right-0 z-20 bg-gray-50 shadow-[inset_1px_0_0_#e5e7eb]">Actions</th>
                                                         )}
                                                     </tr>
                                                 </thead>
@@ -2737,7 +2737,7 @@ const Profile = () => {
                                                     ) : filteredEmployees && filteredEmployees.length > 0 ? (
                                                         visibleSortedEmployees
                                                             .map((emp, index) => (
-                                                                <tr key={emp.id || emp.user_id} className="hover:bg-gray-50 transition-colors">
+                                                                <tr key={emp.id || emp.user_id} className="group hover:bg-gray-50 transition-colors">
                                                                     <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200">
                                                                         {index + 1}
                                                                     </td>
@@ -2818,7 +2818,7 @@ const Profile = () => {
                                                                         )}
                                                                     </td>
                                                                     {!isRestrictedUser && (
-                                                                        <td className="px-2 py-1 text-center">
+                                                                        <td className="px-2 py-1 text-center sticky right-0 z-10 bg-white group-hover:bg-gray-50 shadow-[inset_1px_0_0_#e5e7eb]">
                                                                             <div className="flex items-center justify-center gap-1">
                                                                                 <button
                                                                                     onClick={() => setEditingUser(emp)}

@@ -310,8 +310,8 @@ const Dashboard = () => {
                 const remaining = campaign.asset_numbers_count || 0;
                 const completed = campaign.completed_count || campaign.total_completed_followups || campaign.completed || 0;
                 const total = remaining + completed;
-                const campaignName = campaign.campaign_name.length > 15
-                    ? campaign.campaign_name.substring(0, 12) + '...'
+                const campaignName = campaign.campaign_name.length > 12
+                    ? campaign.campaign_name.substring(0, 10) + '...'
                     : campaign.campaign_name;
                 return `${campaignName} (${total})`;
             }),
@@ -379,16 +379,16 @@ const Dashboard = () => {
         }
         return {
             responsive: true, maintainAspectRatio: false,
-            layout: { padding: { top: 25, bottom: 10, left: 10, right: 10 } },
+            layout: { padding: { top: 18, bottom: 0, left: 10, right: 10 } },
             plugins: {
-                legend: { position: 'top', labels: { usePointStyle: true, boxWidth: 10, font: { size: 10 }, padding: 8 } },
+                legend: { display: false },
                 tooltip: {
                     callbacks: {
                         label: (ctx) => `${ctx.dataset.label || ''}: ${ctx.raw || 0}`
                     }
                 },
                 datalabels: {
-                    display: true, color: '#1f2937', anchor: 'end', align: 'top', offset: 8, clip: false,
+                    display: true, color: '#1f2937', anchor: 'end', align: 'top', offset: 2, clip: false,
                     font: { weight: 'bold', size: 10 },
                     formatter: (value) => value === 0 ? '' : value
                 }
@@ -3260,7 +3260,7 @@ const getPerformanceTitle = () => {
                         <div key={i} className="h-3 w-20 rounded-full dash-shimmer" style={{ '--shimmer-delay': `${i * 0.1}s` }}></div>
                     ))}
                 </div>
-                <div className="h-[370px] flex items-end justify-around gap-2 px-4 pb-1 border-b border-gray-200">
+                <div className="h-[290px] flex items-end justify-around gap-2 px-4 pb-1 border-b border-gray-200">
                     {[55, 82, 40, 95, 65, 30, 74, 50, 88, 45].map((h, i) => (
                         <div
                             key={i}
@@ -3927,12 +3927,29 @@ const getPerformanceTitle = () => {
                                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 mb-3 dash-fade-in">
                                     {/* Campaign-wise Customer Breakdown - 65% width */}
                                     <div className="lg:col-span-8 bg-white rounded-xl shadow-sm p-3 border border-gray-100 max-lg:w-full max-lg:min-w-0">
-                                        <h3 className="text-base font-semibold text-gray-800 mb-4">
+                                        <h3 className="text-base font-semibold text-gray-800 mb-2">
                                             Drive-wise Customer Breakdown
                                         </h3>
-                                        <div className="h-[420px] w-full overflow-x-auto">
+                                        <div className="flex flex-wrap justify-center items-center gap-x-4 gap-y-1 mb-1">
+                                            {[
+                                                ['Remaining', '#3b82f6'],
+                                                ['WIP', '#eab308'],
+                                                ['Followups', '#a855f7'],
+                                                ['Rejected', '#dc6428'],
+                                                ['NC', '#6b7280'],
+                                                ['Completed', '#22c55e']
+                                            ].map(([label, color]) => (
+                                                <span key={label} className="flex items-center gap-1.5 text-[11px] text-gray-600">
+                                                    <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }}></span>
+                                                    {label}
+                                                </span>
+                                            ))}
+                                        </div>
+                                        <div className="h-[320px] w-full overflow-x-auto overflow-y-hidden" style={{ scrollbarWidth: 'thin' }}>
                                             {campaignBreakdownChartData ? (
-                                                <Bar data={campaignBreakdownChartData} options={campaignBreakdownChartOptions} />
+                                                <div className="h-full relative" style={{ minWidth: '100%', width: `${(campaignPerformance?.length || 0) * 160}px` }}>
+                                                    <Bar data={campaignBreakdownChartData} options={campaignBreakdownChartOptions} />
+                                                </div>
                                             ) : (
                                                 <div className="h-64 flex items-center justify-center text-gray-500">
                                                     No drive data available

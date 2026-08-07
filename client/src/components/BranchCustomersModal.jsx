@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
+import ChartDataLabels from 'chartjs-plugin-datalabels';
 import {
     Chart as ChartJS,
     CategoryScale,
@@ -481,15 +482,7 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
             }
         },
         plugins: {
-            legend: {
-                position: 'top',
-                labels: {
-                    usePointStyle: true,
-                    boxWidth: 10,
-                    font: { size: 10 },
-                    padding: 8
-                }
-            },
+            legend: { display: false },
             tooltip: {
                 callbacks: {
                     label: function (context) {
@@ -498,6 +491,11 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                         return `${label}: ${value.toLocaleString()}`;
                     }
                 }
+            },
+            datalabels: {
+                display: true, color: '#1f2937', anchor: 'end', align: 'top', offset: 2, clip: false,
+                font: { weight: 'bold', size: 10 },
+                formatter: (value) => value === 0 ? '' : value
             }
         },
         scales: {
@@ -867,9 +865,26 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                 </div>
                             </div>
 
-                            <div className="h-[420px] w-full overflow-x-auto">
+                            <div className="flex flex-wrap justify-center items-center gap-x-4 gap-y-1 mb-1">
+                                {[
+                                    ['Remaining', '#3b82f6'],
+                                    ['WIP', '#eab308'],
+                                    ['Followups', '#a855f7'],
+                                    ['Rejected', '#dc6428'],
+                                    ['NC', '#6b7280'],
+                                    ['Completed', '#22c55e']
+                                ].map(([label, color]) => (
+                                    <span key={label} className="flex items-center gap-1.5 text-[11px] text-gray-600">
+                                        <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }}></span>
+                                        {label}
+                                    </span>
+                                ))}
+                            </div>
+                            <div className="h-[400px] w-full overflow-x-auto overflow-y-hidden" style={{ scrollbarWidth: 'thin' }}>
                                 {campaignBreakdownData ? (
-                                    <Bar data={campaignBreakdownData} options={breakdownChartOptions} />
+                                    <div className="h-full relative" style={{ minWidth: '100%', width: `${(campaignBreakdownData.labels?.length || 0) * 160}px` }}>
+                                        <Bar data={campaignBreakdownData} options={breakdownChartOptions} plugins={[ChartDataLabels]} />
+                                    </div>
                                 ) : (
                                     <div className="h-64 flex items-center justify-center text-gray-500">
                                         No Drive data available

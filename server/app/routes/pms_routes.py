@@ -316,6 +316,33 @@ async def get_report(
     return pc.generate_report(db, as_on, from_date, part_as_on, labour_as_on)
 
 
+@router.get("/report/branch-detail")
+async def report_branch_detail(
+    as_on: date,
+    from_date: Optional[date] = None,
+    branches: str = "",                    # comma-separated branch ids
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_master_admin(db, user_id, user_role)
+    ids = [b for b in branches.split(",") if b.strip()]
+    return pc.branch_detail_report(db, as_on, from_date, ids)
+
+
+@router.get("/report/employee-productivity")
+async def report_employee_productivity(
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Employee Productivity — labour SR numbers matched against the
+    'Response Time & MaxTTR Details' import; counted by SE NAME on SR
+    close date. Windowing/aggregation happens client-side."""
+    _require_master_admin(db, user_id, user_role)
+    return pc.employee_productivity_data(db)
+
+
 @router.post("/report/save")
 async def save_report(
     payload: ReportSaveIn,

@@ -58,6 +58,13 @@ async def list_app_codes(slim: bool = False, db: Session = Depends(get_db)):
     return {"success": True, "items": mc.list_apps(db, slim=slim)}
 
 
+@router.get("/app-codes/last-updated")
+async def app_codes_last_updated(db: Session = Depends(get_db)):
+    """Newest master change + total app codes — the Import Data tab's
+    "Last data update" banner (mirrors /import/last-updated)."""
+    return {"success": True, **mc.master_last_updated(db)}
+
+
 @router.post("/app-codes")
 async def create_app_code(
     payload: AppCodeIn,

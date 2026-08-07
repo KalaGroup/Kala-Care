@@ -15,6 +15,16 @@ from sqlalchemy import text
 INDEX_STATEMENTS = [
     # PMS preview pagination — filter record_type, newest-first pages by id
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_pms_records_type_id' AND object_id = OBJECT_ID('dbo.pms_sales_records')) CREATE NONCLUSTERED INDEX ix_pms_records_type_id ON dbo.pms_sales_records (record_type, id DESC);",
+    # IX_pms_records_date_cancel — report generation: one covering seek over the
+    # period's date range (cancelled filtered in the index); INCLUDE carries every
+    # column the aggregation loop reads, so the wide base table is never touched.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_pms_records_date_cancel' AND object_id = OBJECT_ID('dbo.pms_sales_records')) CREATE NONCLUSTERED INDEX IX_pms_records_date_cancel ON dbo.pms_sales_records (claim_invoice_date, is_cancelled) INCLUDE (record_type, branch_id, branch_name, zone_name, claim_invoice_no, net_taxable_amount, segment, product_segment, sr_type, category, quantity);",
+    # IX_pms_records_type_cancel_id — preview's Active/Cancelled filter pages and
+    # the cancelled_total count: seek on (type, flag), rows already newest-first.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_pms_records_type_cancel_id' AND object_id = OBJECT_ID('dbo.pms_sales_records')) CREATE NONCLUSTERED INDEX IX_pms_records_type_cancel_id ON dbo.pms_sales_records (record_type, is_cancelled, id DESC);",
+    # IX_pms_records_branch_date — selected-branch detail (week/month/breakdowns):
+    # seek on the chosen branches + date range instead of scanning all rows.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_pms_records_branch_date' AND object_id = OBJECT_ID('dbo.pms_sales_records')) CREATE NONCLUSTERED INDEX IX_pms_records_branch_date ON dbo.pms_sales_records (branch_id, claim_invoice_date, is_cancelled) INCLUDE (record_type, claim_invoice_no, net_taxable_amount, segment, product_segment, sr_type, category, quantity);",
     # IX_followups_customer_id_followup_date
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_followups_customer_id_followup_date' AND object_id = OBJECT_ID('dbo.followups')) CREATE NONCLUSTERED INDEX IX_followups_customer_id_followup_date ON dbo.followups (customer_id, followup_date DESC) INCLUDE (status);",
     # IX_non_followups_customer_id_followup_date_id
@@ -195,6 +205,13 @@ INDEX_STATEMENTS = [
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_l4_action_by' AND object_id = OBJECT_ID('dbo.approval_applications')) CREATE NONCLUSTERED INDEX IX_apv_apps_l4_action_by ON dbo.approval_applications (l4_action_by) WHERE l4_action_by IS NOT NULL;",
     # resolve_level / _level_user_ids run on EVERY approval request
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_rights_level' AND object_id = OBJECT_ID('dbo.approval_rights')) CREATE NONCLUSTERED INDEX IX_apv_rights_level ON dbo.approval_rights (level) INCLUDE (user_id);",
+    # IX_uba_branch — _is_ho_user / _ho_member_ids check HO membership through
+    # user_branch_access on nearly every approval request; branch had no index.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_uba_branch' AND object_id = OBJECT_ID('dbo.user_branch_access')) CREATE NONCLUSTERED INDEX IX_uba_branch ON dbo.user_branch_access (branch) INCLUDE (user_id, branch_name);",
+    # Chosen-approver columns used in list_applications' visibility OR —
+    # mirrors the existing filtered l4/l5 approver indexes.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_l2_approver' AND object_id = OBJECT_ID('dbo.approval_applications')) CREATE NONCLUSTERED INDEX IX_apv_apps_l2_approver ON dbo.approval_applications (l2_approver_id) WHERE l2_approver_id IS NOT NULL;",
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_apps_l3_approver' AND object_id = OBJECT_ID('dbo.approval_applications')) CREATE NONCLUSTERED INDEX IX_apv_apps_l3_approver ON dbo.approval_applications (l3_approver_id) WHERE l3_approver_id IS NOT NULL;",
     # viewer-side exclusion lookups (list visibility + can_act flags)
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_apv_excl_approver_cat' AND object_id = OBJECT_ID('dbo.approval_approver_exclusions')) CREATE NONCLUSTERED INDEX IX_apv_excl_approver_cat ON dbo.approval_approver_exclusions (approver_id) INCLUDE (employee_id, category);",
     # _is_ho_user / _ho_member_ids check branch access on EVERY request
@@ -212,6 +229,10 @@ INDEX_STATEMENTS = [
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_mom_meetings_date_id' AND object_id = OBJECT_ID('dbo.mom_meetings')) CREATE NONCLUSTERED INDEX IX_mom_meetings_date_id ON dbo.mom_meetings (date DESC, id DESC);",
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_mom_rows_meeting_pos' AND object_id = OBJECT_ID('dbo.mom_rows')) CREATE NONCLUSTERED INDEX IX_mom_rows_meeting_pos ON dbo.mom_rows (meeting_id, position);",
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_mom_attendees_meeting_id' AND object_id = OBJECT_ID('dbo.mom_attendees')) CREATE NONCLUSTERED INDEX IX_mom_attendees_meeting_id ON dbo.mom_attendees (meeting_id, id);",
+    # IX_pms_records_type_cancel_srnum — Employee Productivity report: the
+    # DISTINCT labour SR-number scan (record_type + is_cancelled filter)
+    # becomes an index-only seek instead of scanning the wide records table.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_pms_records_type_cancel_srnum' AND object_id = OBJECT_ID('dbo.pms_sales_records')) CREATE NONCLUSTERED INDEX IX_pms_records_type_cancel_srnum ON dbo.pms_sales_records (record_type, is_cancelled, sr_number);",
 ]
 
 
@@ -262,6 +283,77 @@ COLUMN_STATEMENTS = [
         "name": "pms_sales_records.cancelled_at",
         "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_sales_records') AND name = 'cancelled_at'",
         "add": "ALTER TABLE dbo.pms_sales_records ADD cancelled_at DATETIME NULL",
+    },
+    {
+        # PMS sales rows — every standard file column becomes a REAL column
+        # (no extra_data JSON). Each add backfills once from the legacy
+        # extra_data JSON so rows imported earlier keep their values.
+        "name": "pms_sales_records.instance_id",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_sales_records') AND name = 'instance_id'",
+        "add": "ALTER TABLE dbo.pms_sales_records ADD instance_id NVARCHAR(100) NULL",
+        "backfill": "UPDATE dbo.pms_sales_records SET instance_id = LEFT(JSON_VALUE(extra_data, '$.\"INSTANCE ID\"'), 100) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        "name": "pms_sales_records.application_code",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_sales_records') AND name = 'application_code'",
+        "add": "ALTER TABLE dbo.pms_sales_records ADD application_code NVARCHAR(100) NULL",
+        "backfill": "UPDATE dbo.pms_sales_records SET application_code = LEFT(JSON_VALUE(extra_data, '$.\"APPLICATION CODE\"'), 100) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        "name": "pms_sales_records.engine_serial_no",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_sales_records') AND name = 'engine_serial_no'",
+        "add": "ALTER TABLE dbo.pms_sales_records ADD engine_serial_no NVARCHAR(100) NULL",
+        "backfill": "UPDATE dbo.pms_sales_records SET engine_serial_no = LEFT(JSON_VALUE(extra_data, '$.\"ENGINE SERIAL NO\"'), 100) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        # part file: 'CLAIM INVOICE SR SUB TYPE' / labour file: 'SR SUBTYPE'
+        "name": "pms_sales_records.sr_sub_type",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_sales_records') AND name = 'sr_sub_type'",
+        "add": "ALTER TABLE dbo.pms_sales_records ADD sr_sub_type NVARCHAR(120) NULL",
+        "backfill": "UPDATE dbo.pms_sales_records SET sr_sub_type = LEFT(COALESCE(JSON_VALUE(extra_data, '$.\"CLAIM INVOICE SR SUB TYPE\"'), JSON_VALUE(extra_data, '$.\"SR SUBTYPE\"')), 120) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        "name": "pms_sales_records.category",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_sales_records') AND name = 'category'",
+        "add": "ALTER TABLE dbo.pms_sales_records ADD category NVARCHAR(100) NULL",
+        "backfill": "UPDATE dbo.pms_sales_records SET category = LEFT(JSON_VALUE(extra_data, '$.\"CATEGORY\"'), 100) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        "name": "pms_sales_records.part_category",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_sales_records') AND name = 'part_category'",
+        "add": "ALTER TABLE dbo.pms_sales_records ADD part_category NVARCHAR(100) NULL",
+        "backfill": "UPDATE dbo.pms_sales_records SET part_category = LEFT(JSON_VALUE(extra_data, '$.\"PART CATEGORY\"'), 100) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        "name": "pms_sales_records.part_number",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_sales_records') AND name = 'part_number'",
+        "add": "ALTER TABLE dbo.pms_sales_records ADD part_number NVARCHAR(120) NULL",
+        "backfill": "UPDATE dbo.pms_sales_records SET part_number = LEFT(JSON_VALUE(extra_data, '$.\"PART NUMBER\"'), 120) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        # the standard file itself carries the 'DESCTRIPTION' typo — try both
+        "name": "pms_sales_records.part_description",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_sales_records') AND name = 'part_description'",
+        "add": "ALTER TABLE dbo.pms_sales_records ADD part_description NVARCHAR(255) NULL",
+        "backfill": "UPDATE dbo.pms_sales_records SET part_description = LEFT(COALESCE(JSON_VALUE(extra_data, '$.\"PART DESCTRIPTION\"'), JSON_VALUE(extra_data, '$.\"PART DESCRIPTION\"')), 255) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        "name": "pms_sales_records.quantity",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_sales_records') AND name = 'quantity'",
+        "add": "ALTER TABLE dbo.pms_sales_records ADD quantity FLOAT NULL",
+        "backfill": "UPDATE dbo.pms_sales_records SET quantity = TRY_CONVERT(FLOAT, JSON_VALUE(extra_data, '$.\"QUANTITY\"')) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        "name": "pms_sales_records.series",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_sales_records') AND name = 'series'",
+        "add": "ALTER TABLE dbo.pms_sales_records ADD series NVARCHAR(100) NULL",
+        "backfill": "UPDATE dbo.pms_sales_records SET series = LEFT(JSON_VALUE(extra_data, '$.\"SERIES\"'), 100) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        "name": "pms_sales_records.sr_number",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_sales_records') AND name = 'sr_number'",
+        "add": "ALTER TABLE dbo.pms_sales_records ADD sr_number NVARCHAR(100) NULL",
+        "backfill": "UPDATE dbo.pms_sales_records SET sr_number = LEFT(JSON_VALUE(extra_data, '$.\"SR NUMBER\"'), 100) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
     },
     {
         # Region-wise working days (MH / KA differ) — legacy working_days

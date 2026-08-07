@@ -6798,7 +6798,7 @@ ${f.start_para}`;
 
                         {/* Close SR Report — every Close SR file record of this instance, latest first */}
                         <div className="border border-gray-300 rounded-md overflow-hidden">
-                            <p className="text-[11px] font-bold text-black uppercase tracking-wide text-center px-2 py-1">Close SR Report</p>
+                            <p className="text-[11px] font-bold text-black uppercase tracking-wide text-center px-2 py-1">MaxTTR - Oil Change SR Zero Labour Flag</p>
                             <div className="overflow-x-auto">
                                 <table className="w-full border-collapse min-w-[520px]">
                                     <thead>
@@ -9058,16 +9058,14 @@ ${f.start_para}`;
                             {editingFollowup ? 'Edit Follow-up' : 'Create New Follow-ups'}
                         </h3>
                         <div className="flex gap-1.5 max-md:flex-wrap">
-                            {isAdmin && (
-                                <button
-                                    onClick={openLetterWizard}
-                                    className="send-letter-btn px-2 py-1 sm:px-2 sm:py-1.5 text-[11px] sm:text-xs text-black font-semibold rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-1.5"
-                                    style={{ background: `linear-gradient(135deg, #f59e0b, #d97706)` }}
-                                >
-                                    <PaperAirplaneIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                                    Send Letter
-                                </button>
-                            )}
+                            <button
+                                onClick={openLetterWizard}
+                                className="send-letter-btn px-2 py-1 sm:px-2 sm:py-1.5 text-[11px] sm:text-xs text-black font-semibold rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-1.5"
+                                style={{ background: `linear-gradient(135deg, #f59e0b, #d97706)` }}
+                            >
+                                <PaperAirplaneIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                                Send Letter
+                            </button>
                             {isAdmin && (
                                 <>
                                     <button
@@ -10151,7 +10149,7 @@ ${f.start_para}`;
                                                 </td>
                                                 <td className="px-2 py-1.5 text-center whitespace-nowrap border-r border-gray-100">
                                                     <span className={`px-1.5 py-0.5 rounded-full text-[11px] capitalize ${getStatusBadgeClass(followup.status)}`}>
-                                                        {followup.status === 'not_connected' ? 'Not Connected' : followup.status}
+                                                        {followup.status === 'not_connected' ? 'Not Connected' : followup.status === 'rescheduled' ? 'Followups' : followup.status}
                                                     </span>
                                                 </td>
                                                 <td className="px-2 py-1.5 text-center text-[11px] whitespace-nowrap text-black border-r border-gray-100">{formatDate(followup.next_followup_date)}</td>

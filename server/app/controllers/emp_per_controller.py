@@ -169,7 +169,9 @@ class EmployeePerformanceController:
                     SUM(CASE WHEN cf.followup_by = 'call'     AND cf.status = 'not_connected' THEN 1 ELSE 0 END) as call_not_connected,
                     SUM(CASE WHEN cf.followup_by = 'whatsapp' AND cf.status = 'not_connected' THEN 1 ELSE 0 END) as whatsapp_not_connected,
                     SUM(CASE WHEN cf.followup_by = 'email'    AND cf.status = 'not_connected' THEN 1 ELSE 0 END) as email_not_connected,
-                    SUM(CASE WHEN cf.followup_by = 'visit'    AND cf.status = 'not_connected' THEN 1 ELSE 0 END) as visit_not_connected
+                    SUM(CASE WHEN cf.followup_by = 'visit'    AND cf.status = 'not_connected' THEN 1 ELSE 0 END) as visit_not_connected,
+                    -- Any record without a campaign that day = non-drive/PW work
+                    SUM(CASE WHEN cf.campaign_id IS NULL THEN 1 ELSE 0 END) as non_drive_count
                 FROM combined_followups cf
                 GROUP BY CONVERT(DATE, cf.created_at)
                 ORDER BY CONVERT(DATE, cf.created_at) DESC
@@ -185,7 +187,13 @@ class EmployeePerformanceController:
                 last_time = row[2]
                 total_followups = int(row[3]) if row[3] else 0
                 campaign_name = row[4] if row[4] else 'N/A'
-                
+
+                # Day has campaign-less (non-drive/PW) records → show that in the
+                # Drive Name column alongside any drive names
+                non_drive_count = int(row[29]) if row[29] else 0
+                if non_drive_count > 0:
+                    campaign_name = f"{campaign_name}, Non-Drive/PW" if campaign_name != 'N/A' else 'Non-Drive/PW'
+
                 # Calculate working hours
                 working_hours = None
                 if first_time and last_time:
@@ -3121,6 +3129,7 @@ class EmployeePerformanceController:
                     "campaign_id": fu.campaign_id,
                     "campaign_name": campaign.name if campaign else 'N/A',
                     "campaign_service": campaign.service if campaign else 'N/A',
+                    "campaign_status": campaign.status if campaign else None,
                     "user_id": fu.user_id,
                     "user_name": fu.user_name,
                     "followup_date": fu.followup_date.isoformat() if fu.followup_date else None,

@@ -7,10 +7,11 @@ import {
     PencilSquareIcon, TrashIcon, ChevronRightIcon, ChevronDownIcon, ArrowPathIcon,
     CircleStackIcon, WrenchScrewdriverIcon, ArrowUpTrayIcon, CheckIcon, XMarkIcon, DocumentTextIcon,
     ArrowsRightLeftIcon, Squares2X2Icon, CheckCircleIcon, ExclamationTriangleIcon,
-    CubeIcon, FunnelIcon,
+    CubeIcon, FunnelIcon, ClockIcon,
 } from '@heroicons/react/24/outline';
 import {
     getAppCodes, createAppCode, updateAppCode, deleteAppCode, importAppCodes,
+    getMasterLastUpdated,
     getServices, renameService, getAppMapping, partService, ACTION, ORIG_HEADERS,
     IMPORT_COLUMNS, IMPORT_REQUIRED_COLUMN, themeColor, themeDark, themeSoft,
 } from './maintenanceApi';
@@ -61,6 +62,14 @@ const fmtDMY = (iso) => {
     if (!iso) return '';
     const d = new Date(String(iso).length === 10 ? `${iso}T00:00:00` : iso);
     return isNaN(d.getTime()) ? String(iso) : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+// App-code last-update stamp for the App Mapping Action column — dd/mm/yy, with
+// a same-shape dash placeholder when the code has no master record (or no date).
+const fmtDMY2 = (iso) => {
+    if (!iso) return '--/--/--';
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? '--/--/--' : d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
 };
 
 // Asset KVA can arrive as "30", "30.0" or "30 KVA" — the master stores the bare
@@ -1227,6 +1236,7 @@ const AppMapping = ({ onMasterChanged }) => {
                                             );
                                         })}
                                         <td className="px-3 py-2 border border-gray-200 text-center">
+                                            <span className="inline-flex items-center gap-2 whitespace-nowrap">
                                             {rowInMaster(r) ? (
                                                 <button onClick={() => openEdit(r)}
                                                     className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-[11.5px] font-semibold text-gray-700 transition hover:bg-gray-50 hover:border-gray-400">
@@ -1239,6 +1249,12 @@ const AppMapping = ({ onMasterChanged }) => {
                                                     <PlusIcon className="h-3.5 w-3.5" /> Add
                                                 </button>
                                             )}
+                                            {/* When the code was last added/edited in the master; dashes when it isn't in the master yet */}
+                                            <span title="Last update of this app code in the master"
+                                                className="font-mono text-[10.5px] text-gray-500">
+                                                {fmtDMY2(masterByCode.get(String(r.appCode || '').trim().toLowerCase())?.updatedAt)}
+                                            </span>
+                                            </span>
                                         </td>
                                     </tr>
                                 ))}
@@ -2713,6 +2729,10 @@ const MasterOfService = ({ onMasterChanged }) => {
 
 /* ----------------------------- Import Data (replace + confirm) ----------------------------- */
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, '');
+// Naive-IST ISO → readable date/time, same rendering as the Data Upload page.
+const fmtUploadTime = (iso) => new Date(iso).toLocaleString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true,
+});
 const ImportData = ({ onMasterChanged }) => {
     const [preview, setPreview] = useState(null); // {items, news, reps, fname, sheet}
     const [openRows, setOpenRows] = useState({}); // which preview app-codes are expanded
@@ -2725,6 +2745,17 @@ const ImportData = ({ onMasterChanged }) => {
         catch { /* preview still works; everything will look "new" */ }
     }, []);
     useEffect(() => { loadExisting(); }, [loadExisting]);
+
+    // Last upload banner — same info the Data Upload page shows per file type
+    const [lastUpdated, setLastUpdated] = useState(null);
+    const [lastUpdatedLoading, setLastUpdatedLoading] = useState(true);
+    const loadLastUpdated = useCallback(async () => {
+        setLastUpdatedLoading(true);
+        try { setLastUpdated(await getMasterLastUpdated()); }
+        catch { setLastUpdated(null); }
+        finally { setLastUpdatedLoading(false); }
+    }, []);
+    useEffect(() => { loadLastUpdated(); }, [loadLastUpdated]);
 
     const onFile = (file) => {
         if (!file) return;
@@ -2864,6 +2895,7 @@ const ImportData = ({ onMasterChanged }) => {
             setOpenRows({});
             if (fileRef.current) fileRef.current.value = '';
             await loadExisting();
+            loadLastUpdated();
             onMasterChanged?.(); // host page badge (App codes count) stays live
         } catch (e) {
             toast.error(e.message || 'Upload failed', { id: t });
@@ -2872,8 +2904,35 @@ const ImportData = ({ onMasterChanged }) => {
 
     return (
         <div>
-            <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 mb-4 text-[12px] text-amber-900/80 leading-relaxed">
+            {/* Overwrite notice + last-upload info share one row (stacked on mobile) */}
+            <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4 mb-4">
+            <div className="flex-1 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-[12px] text-amber-900/80 leading-relaxed">
                 <b>Re-uploads overwrite by app code.</b> Any code already present is deleted and re-inserted from the new file. You'll see exactly which codes are added and which are replaced, with a final confirmation before anything changes.
+            </div>
+
+            {/* Last upload info — same banner as the Data Upload page */}
+            <div className="flex md:justify-end shrink-0">
+                {lastUpdatedLoading ? (
+                    <span className="text-xs text-black flex items-center gap-1.5">
+                        <ArrowPathIcon className="animate-spin h-3 w-3" style={{ color: themeColor }} />
+                        Checking last update...
+                    </span>
+                ) : lastUpdated && lastUpdated.last_updated ? (
+                    <div className="inline-flex items-center gap-3 whitespace-nowrap px-3 py-2 border border-gray-200 rounded-md bg-gray-50 max-md:flex-wrap max-md:whitespace-normal max-md:w-full">
+                        <ClockIcon className="h-4 w-4 flex-shrink-0" style={{ color: themeColor }} />
+                        <span className="text-xs text-black">
+                            <span className="font-semibold">Last data update:</span>{' '}
+                            {fmtUploadTime(lastUpdated.last_updated)}
+                        </span>
+                        <span className="text-xs text-black">
+                            <span className="font-semibold">Total records:</span>{' '}
+                            {(lastUpdated.total_records || 0).toLocaleString('en-IN')}
+                        </span>
+                    </div>
+                ) : (
+                    <span className="text-xs text-black">No master data has been uploaded yet.</span>
+                )}
+            </div>
             </div>
 
             {/* Expected file format — same shape as the Data Upload page's panel */}

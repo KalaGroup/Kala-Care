@@ -27,13 +27,13 @@ def get_access(user_id: str = Header(...), db: Session = Depends(get_db)):
 
 
 @router.get("/l4-choices")
-def get_l4_choices(branch: str = None, request_type: str = None,
+def get_l4_choices(branch: str = None, request_type: str = None, category: str = None,
                    user_id: str = Header(...), db: Session = Depends(get_db)):
     """HO creators only: the L4 approver choices for ONE record — HO members
     holding L4 whose limit for the record's type is HIGHER than the caller's
-    own. Empty = no useful HOD; the record may be submitted without an L4
-    pick and goes straight to L5."""
-    return {"success": True, **ac.get_ho_l4_choices(db, user_id, branch, request_type)}
+    own and who cover the record's category. Empty = no useful HOD; the
+    record may be submitted without an L4 pick and goes straight to L5."""
+    return {"success": True, **ac.get_ho_l4_choices(db, user_id, branch, request_type, category)}
 
 
 @router.get("/chain-preview")
@@ -375,6 +375,18 @@ def download_approval_pdf(app_id: int, db: Session = Depends(get_db)):
 
 
 # ---------------- ATTACHMENTS ---------------- #
+
+@router.get("/applications/{app_id}/attachments/zip")
+def download_all_attachments_zip(app_id: int, db: Session = Depends(get_db)):
+    """All attachments of one application bundled into a single ZIP."""
+    filename, zip_bytes = ac.build_attachments_zip(db, app_id)
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 
 @router.get("/attachments/{attachment_id}/view")
 def view_attachment(attachment_id: int, db: Session = Depends(get_db)):

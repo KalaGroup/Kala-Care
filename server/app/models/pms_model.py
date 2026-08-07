@@ -119,7 +119,21 @@ class PmsSalesRecord(Base):
     segment = Column(String(100), nullable=True)
     sr_type = Column(String(120), nullable=True)
     net_taxable_amount = Column(Float, nullable=False, default=0)
-    extra_data = Column(Text, nullable=True)              # JSON of unmapped columns
+    # ---- full standard file columns (one REAL column each — no JSON) ----
+    instance_id = Column(String(100), nullable=True)          # Part Sale file
+    application_code = Column(String(100), nullable=True)     # Part Sale file
+    engine_serial_no = Column(String(100), nullable=True)     # Part Sale file
+    sr_sub_type = Column(String(120), nullable=True)          # both files
+    category = Column(String(100), nullable=True)             # Part Sale file
+    part_category = Column(String(100), nullable=True)        # Part Sale file
+    part_number = Column(String(120), nullable=True)          # Part Sale file
+    part_description = Column(String(255), nullable=True)     # Part Sale file
+    quantity = Column(Float, nullable=True)                   # Part Sale file
+    series = Column(String(100), nullable=True)               # Labour file
+    sr_number = Column(String(100), nullable=True)            # Labour file
+    # legacy JSON of unmapped columns — kept only for rows imported before
+    # the real columns existed (migration backfills them from here)
+    extra_data = Column(Text, nullable=True)
     # Cancelled invoice: the row STAYS stored (audit trail) but is excluded
     # from every generated report. Set/cleared per invoice from the preview.
     is_cancelled = Column(Boolean, nullable=False, default=False, index=True)

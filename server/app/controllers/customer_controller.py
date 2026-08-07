@@ -7,7 +7,8 @@ from datetime import datetime
 from app.models.customer_model import (
     Customer, AMCAgreement, AssetDetailed, AssetService,
     AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
-    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, OpenSRData
+    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, OpenSRData,
+    ResponseTimeMaxTTR
 )
 from app.time_utils import now_ist
 from app.schemas.customer_schema import (
@@ -1121,6 +1122,97 @@ class CustomerController:
             "updated_at": rec.updated_at
         }
     
+    # ==================== RESPONSE TIME & MAXTTR ====================
+
+    def _response_time_maxttr_search_filter(self, query, search: Optional[str]):
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                or_(
+                    ResponseTimeMaxTTR.instance_id.ilike(search_term),
+                    ResponseTimeMaxTTR.branch_id.ilike(search_term),
+                    ResponseTimeMaxTTR.branch_name.ilike(search_term),
+                    ResponseTimeMaxTTR.account_name.ilike(search_term),
+                    ResponseTimeMaxTTR.sr_number.ilike(search_term),
+                    ResponseTimeMaxTTR.sr_type.ilike(search_term),
+                    ResponseTimeMaxTTR.engine_serial_no.ilike(search_term),
+                    ResponseTimeMaxTTR.se_name.ilike(search_term),
+                    ResponseTimeMaxTTR.se_ticket_num.ilike(search_term)
+                )
+            )
+        return query
+
+    def get_response_time_maxttr_count(self, search: Optional[str] = None):
+        """Get total count of Response Time & MaxTTR rows with optional search"""
+        query = self._response_time_maxttr_search_filter(self.db.query(ResponseTimeMaxTTR), search)
+        return query.count()
+
+    def get_response_time_maxttr(self, skip: int = 0, limit: Optional[int] = 100, search: Optional[str] = None):
+        """Get all Response Time & MaxTTR rows with optional search + pagination"""
+        query = self._response_time_maxttr_search_filter(self.db.query(ResponseTimeMaxTTR), search)
+        query = query.order_by(desc(ResponseTimeMaxTTR.updated_at)).offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return [self._response_time_maxttr_to_dict(r) for r in query.all()]
+
+    def get_response_time_maxttr_by_instance(self, instance_id: str):
+        """Get Response Time & MaxTTR rows by instance ID"""
+        return self.db.query(ResponseTimeMaxTTR).filter(
+            ResponseTimeMaxTTR.instance_id == instance_id
+        ).order_by(desc(ResponseTimeMaxTTR.sr_open_date)).all()
+
+    def delete_response_time_maxttr(self, record_id: int):
+        """Delete one Response Time & MaxTTR row"""
+        rec = self.db.query(ResponseTimeMaxTTR).filter(ResponseTimeMaxTTR.id == record_id).first()
+        if not rec:
+            raise HTTPException(status_code=404, detail="Response Time & MaxTTR record not found")
+        self.db.delete(rec)
+        self.db.commit()
+        return {"message": "Response Time & MaxTTR record deleted successfully"}
+
+    def bulk_delete_response_time_maxttr(self, record_ids: List[int]):
+        """Delete multiple Response Time & MaxTTR rows"""
+        self.db.query(ResponseTimeMaxTTR).filter(ResponseTimeMaxTTR.id.in_(record_ids)).delete(synchronize_session=False)
+        self.db.commit()
+        return {"message": f"{len(record_ids)} Response Time & MaxTTR records deleted successfully"}
+
+    def _response_time_maxttr_to_dict(self, rec):
+        if not rec:
+            return None
+        return {
+            "id": rec.id,
+            "instance_id": rec.instance_id,
+            "zone_name": rec.zone_name,
+            "asm_name": rec.asm_name,
+            "sd_id": rec.sd_id,
+            "sd_name": rec.sd_name,
+            "branch_id": rec.branch_id,
+            "branch_name": rec.branch_name,
+            "application_code": rec.application_code,
+            "engine_serial_no": rec.engine_serial_no,
+            "segment": rec.segment,
+            "product_segment": rec.product_segment,
+            "goem_oem": rec.goem_oem,
+            "account_name": rec.account_name,
+            "sr_number": rec.sr_number,
+            "sr_type": rec.sr_type,
+            "sr_subtype": rec.sr_subtype,
+            "sr_open_date": rec.sr_open_date,
+            "sr_task_start_date": rec.sr_task_start_date,
+            "sr_task_end_date": rec.sr_task_end_date,
+            "sr_close_date": rec.sr_close_date,
+            "engineer_remarks": rec.engineer_remarks,
+            "se_name": rec.se_name,
+            "se_ticket_num": rec.se_ticket_num,
+            "response_time_range_in_hrs": rec.response_time_range_in_hrs,
+            "response_time": rec.response_time,
+            "maxttr_on_task_closed_in_hrs": rec.maxttr_on_task_closed_in_hrs,
+            "maxttr_on_sr_closed_in_hrs": rec.maxttr_on_sr_closed_in_hrs,
+            "extra_data": rec.extra_data,
+            "created_at": rec.created_at,
+            "updated_at": rec.updated_at
+        }
+
     # ==================== COMPLETE CUSTOMER DATA ====================
     
     def get_customer_complete_data(self, instance_id: str):
@@ -1155,6 +1247,7 @@ class CustomerController:
             "lms_data": [self._lms_data_to_dict(a) for a in self.get_lms_data_by_instance(instance_id)],
             "open_sr_load_reports": [self._open_sr_load_report_to_dict(a) for a in self.get_open_sr_load_reports_by_instance(instance_id)],
             "open_sr_data": [self._open_sr_data_to_dict(a) for a in self.get_open_sr_data_by_instance(instance_id)],
+            "response_time_maxttr": [self._response_time_maxttr_to_dict(a) for a in self.get_response_time_maxttr_by_instance(instance_id)],
 
             "amc_agreements_count": amc_agreements_count,
             "asset_detailed_count": asset_detailed_count,
@@ -1756,7 +1849,8 @@ class CustomerController:
             'regular_bandhan': RegularBandhan,
             'lms_data': LMSData,
             'open_sr_load_reports': OpenSRLoadReport,
-            'open_sr_data': OpenSRData
+            'open_sr_data': OpenSRData,
+            'response_time_maxttr': ResponseTimeMaxTTR
         }
         
         if table_name not in model_map:

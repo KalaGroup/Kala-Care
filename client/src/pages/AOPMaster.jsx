@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import {
   PresentationChartLineIcon, PlusIcon, ArrowPathIcon,
-  ArrowDownTrayIcon, BuildingOffice2Icon, XMarkIcon,
-  TagIcon, CheckIcon, CalendarDaysIcon, WrenchScrewdriverIcon,
+  ArrowUpTrayIcon, BuildingOffice2Icon, XMarkIcon,
+  TagIcon, CheckIcon, CalendarDaysIcon, WrenchScrewdriverIcon, MapPinIcon,
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
@@ -80,6 +80,21 @@ const tdC = 'px-1 py-0.5 border border-gray-200';
 const cellInput =
   'w-full border border-gray-300 rounded px-1 py-0.5 text-xs text-black bg-white focus:outline-none focus:ring-1';
 
+// Quarter group header + active-month (current month) green tint variants.
+const thQ =
+  'px-1 py-1 text-center text-[10px] font-bold text-gray-700 uppercase tracking-wide whitespace-nowrap bg-gray-100 border border-gray-200';
+const thCAct =
+  'px-1 py-1.5 text-center text-[10px] font-semibold text-green-800 uppercase tracking-wide whitespace-nowrap bg-green-100 border border-green-200';
+const tdCAct = 'px-1 py-0.5 border border-green-200 bg-green-50';
+const cellInputAct =
+  'w-full border border-green-300 rounded px-1 py-0.5 text-xs text-black bg-green-50 focus:outline-none focus:ring-1';
+
+// Current month as 'YYYY-MM' — the active column gets the green tint.
+const nowMonthKey = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+
 // Always-visible top scrollbar for the wide FY table — a REAL native
 // horizontal scrollbar (empty scroll area whose spacer matches the table's
 // scrollWidth, kept in sync both ways). Same pattern as Dashboard.jsx.
@@ -137,6 +152,7 @@ const AOPMaster = () => {
   const [loadingTargets, setLoadingTargets] = useState(false);
   const [savingTargets, setSavingTargets] = useState(false);
   const [showWdModal, setShowWdModal] = useState(false);
+  const [showRegionModal, setShowRegionModal] = useState(false);
   const targetTableRef = useRef(null);
 
   const months = fyMonths(fy);
@@ -158,10 +174,13 @@ const AOPMaster = () => {
       const res = await fetch(`${API}/pms/targets/year?fy=${year}`, { headers: authHeaders() });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Failed to load targets');
-      // Rupees → Lakh for display, per month cell.
+      // Rupees → Lakh for display, per month cell. A region already saved in
+      // the DB is FIXED (label in the Region modal); only new branches
+      // without one get the MH/KA dropdown.
       setRows((data.items || []).map((r) => ({
         ...r,
         region: r.region || 'MH',   // default region — never blank
+        _regionFixed: !!r.region,
         spare: mapVals(r.spare, rupeesToLakh),
         labour: mapVals(r.labour, rupeesToLakh),
         _dirty: false,
@@ -222,6 +241,7 @@ const AOPMaster = () => {
       setRows((data.items || []).map((r) => ({
         ...r,
         region: r.region || 'MH',
+        _regionFixed: !!r.region,
         spare: mapVals(r.spare, rupeesToLakh),
         labour: mapVals(r.labour, rupeesToLakh),
         _dirty: false,
@@ -235,23 +255,49 @@ const AOPMaster = () => {
     }
   };
 
-  const exportTargets = () => {
+  // Excel export mirroring the on-screen grid: merged Q1..Q4 header row,
+  // month row below it, per-quarter Total columns and the footer totals row.
+  const exportTargets = async () => {
     if (!rows.length) { toast.error('Nothing to export'); return; }
-    const metric = subTab;
-    const head = ['Region', 'Branch ID', 'Branch Name', 'Responsible Person',
-      ...months.map(monthLabel), 'Total (Lakh)'];
-    const lines = [head.join(',')].concat(rows.map((r) => {
-      const vals = months.map((m) => r[metric]?.[m] ?? '');
-      const total = parseFloat(vals.reduce((s, v) => s + (parseFloat(v) || 0), 0).toFixed(2));
-      return [r.region, r.branch_id, r.branch_name, r.responsible_person, ...vals, total]
-        .map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
-    }));
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `AOP_${metric === 'spare' ? 'Spare' : 'Labour'}_Targets_FY${fy}-${String(fy + 1).slice(2)}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    try {
+      const XLSX = await import('xlsx');
+      const metric = subTab;
+      const qs = [0, 1, 2, 3].map((i) => ({ label: `Q${i + 1}`, keys: months.slice(i * 3, i * 3 + 3) }));
+      const val = (r, m) => parseFloat(r[metric]?.[m]) || 0;
+      const rTot = (r) => parseFloat(months.reduce((s, m) => s + val(r, m), 0).toFixed(2));
+      const qTot = (r, q) => parseFloat(q.keys.reduce((s, m) => s + val(r, m), 0).toFixed(2));
+      const cTot = (m) => parseFloat(rows.reduce((s, r) => s + val(r, m), 0).toFixed(2));
+
+      const head1 = ['Branch', 'Responsible Person',
+        ...qs.flatMap((q) => [q.label, '', '', '']),
+        `Total FY-${String(fy + 1).slice(2)}`];
+      const head2 = ['', '',
+        ...qs.flatMap((q) => [...q.keys.map(monthLabel), 'Total']), ''];
+      const data = rows.map((r) => [
+        r.branch_name || r.branch_id, r.responsible_person || '',
+        ...qs.flatMap((q) => [...q.keys.map((m) => val(r, m)), qTot(r, q)]),
+        rTot(r),
+      ]);
+      const foot = ['Total (Lakh)', '',
+        ...qs.flatMap((q) => [...q.keys.map(cTot),
+          parseFloat(q.keys.reduce((s, m) => s + cTot(m), 0).toFixed(2))]),
+        parseFloat(rows.reduce((s, r) => s + rTot(r), 0).toFixed(2))];
+
+      const ws = XLSX.utils.aoa_to_sheet([head1, head2, ...data, foot]);
+      ws['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } },     // Branch
+        { s: { r: 0, c: 1 }, e: { r: 1, c: 1 } },     // Responsible Person
+        ...qs.map((_, i) => ({ s: { r: 0, c: 2 + i * 4 }, e: { r: 0, c: 5 + i * 4 } })),
+        { s: { r: 0, c: 18 }, e: { r: 1, c: 18 } },   // Total FY
+      ];
+      ws['!cols'] = [{ wch: 20 }, { wch: 20 }, ...Array(16).fill({ wch: 8 }), { wch: 11 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, metric === 'spare' ? 'Spare Targets' : 'Labour Targets');
+      XLSX.writeFile(wb, `AOP_${metric === 'spare' ? 'Spare' : 'Labour'}_Targets_FY${fy}-${String(fy + 1).slice(2)}.xlsx`);
+      toast.success('Exported');
+    } catch (e) {
+      toast.error('Export failed: ' + e.message);
+    }
   };
 
   // ---------------- SR Type Master ----------------
@@ -350,6 +396,16 @@ const AOPMaster = () => {
   const grandTotal = (metric) =>
     parseFloat(rows.reduce((s, r) => s + rowTotal(r, metric), 0).toFixed(2));
 
+  // Quarters of the FY grid: Q1 = Apr-Jun … Q4 = Jan-Mar, each with its own Total column.
+  const quarters = [0, 1, 2, 3].map((i) => ({
+    label: `Q${i + 1}`, keys: months.slice(i * 3, i * 3 + 3),
+  }));
+  const activeMonth = nowMonthKey();  // highlighted only when the selected FY contains it
+  const qRowTotal = (r, q) =>
+    parseFloat(q.keys.reduce((s, m) => s + (parseFloat(r[subTab]?.[m]) || 0), 0).toFixed(2));
+  const qColTotal = (q) =>
+    parseFloat(q.keys.reduce((s, m) => s + colTotal(m), 0).toFixed(2));
+
   // FY choices: last 5 and next 10 financial years.
   const fyChoices = [];
   for (let y = currentFy() - 5; y <= currentFy() + 10; y++) fyChoices.push(y);
@@ -431,13 +487,17 @@ const AOPMaster = () => {
               </button>
             ))}
             <div className="flex-1" />
+            <button onClick={() => setShowRegionModal(true)} disabled={loadingTargets}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50">
+              <MapPinIcon className="h-3.5 w-3.5" /> Region
+            </button>
             <button onClick={() => setShowWdModal(true)} disabled={loadingTargets}
               className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50">
               <CalendarDaysIcon className="h-3.5 w-3.5" /> Working Days
             </button>
             <button onClick={exportTargets}
               className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
-              <ArrowDownTrayIcon className="h-3.5 w-3.5" /> Export
+              <ArrowUpTrayIcon className="h-3.5 w-3.5" /> Export
             </button>
             <button onClick={saveTargets} disabled={savingTargets || loadingTargets}
               className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white rounded-md hover:opacity-90 disabled:opacity-50"
@@ -449,28 +509,45 @@ const AOPMaster = () => {
 
           <TopScrollbar scrollRef={targetTableRef} watch={`${subTab}-${fy}-${rows.length}`} />
           <div className="overflow-x-auto" ref={targetTableRef}>
-            <table className="w-full text-xs border-collapse min-w-[1080px]">
+            <table className="w-full text-xs border-collapse min-w-[1020px]">
               <thead>
                 <tr>
-                  <th className={stickyTh} style={{ minWidth: 92, maxWidth: 110 }}>Branch</th>
-                  <th className={thC} style={{ width: 78 }}>Region</th>
-                  <th className={thC} style={{ minWidth: 105 }}>Responsible Person</th>
-                  {months.map((m) => (
-                    <th key={m} className={thC} style={{ minWidth: 58 }}>{monthLabel(m)}</th>
+                  <th className={stickyTh} style={{ width: 90, minWidth: 90, maxWidth: 90 }} rowSpan={2}>Branch</th>
+                  <th className={thC} rowSpan={2}
+                    style={{ width: 90, minWidth: 90, maxWidth: 90, whiteSpace: 'normal' }}>
+                    Responsible Person
+                  </th>
+                  {quarters.map((q) => (
+                    <th key={q.label} colSpan={4}
+                      className={q.keys.includes(activeMonth) ? thCAct : thQ}>
+                      {q.label}
+                    </th>
                   ))}
-                  <th className={thC} style={{ minWidth: 62 }}>Total</th>
+                  <th className={thC} style={{ minWidth: 62 }} rowSpan={2}>Total FY-{String(fy + 1).slice(2)}</th>
+                </tr>
+                <tr>
+                  {quarters.map((q) => (
+                    <React.Fragment key={q.label}>
+                      {q.keys.map((m) => (
+                        <th key={m} className={m === activeMonth ? thCAct : thC} style={{ minWidth: 46 }}>
+                          {monthLabel(m)}
+                        </th>
+                      ))}
+                      <th className={`${thQ} font-semibold`} style={{ minWidth: 46 }}>Total</th>
+                    </React.Fragment>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {loadingTargets ? (
-                  <tr><td colSpan={16} className="border border-gray-200">
+                  <tr><td colSpan={19} className="border border-gray-200">
                     <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
                       <ArrowPathIcon className="h-7 w-7 animate-spin" />
                       <p className="text-sm">Loading FY {fyLabel(fy)} targets…</p>
                     </div>
                   </td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={16} className="border border-gray-200">
+                  <tr><td colSpan={19} className="border border-gray-200">
                     <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
                       <BuildingOffice2Icon className="h-8 w-8" />
                       <p className="text-sm text-center px-4">
@@ -482,25 +559,30 @@ const AOPMaster = () => {
                   <tr key={r.branch_id ?? `new-${idx}`} className="border-b border-gray-100 hover:bg-gray-50/60">
                     {/* Fixed branch cell — stays visible while scrolling months;
                         name wraps to two lines, code only on hover */}
-                    <td className={stickyTd} style={{ maxWidth: 110 }} title={r.branch_id}>
-                      <div className="font-semibold text-gray-800 leading-tight break-words">{r.branch_name || '—'}</div>
+                    <td className={stickyTd} style={{ maxWidth: 90 }}
+                      title={`${r.branch_name || ''}${r.branch_id ? ` (${r.branch_id})` : ''}`}>
+                      <div className="font-semibold text-gray-800 truncate">{r.branch_name || '—'}</div>
                     </td>
-                    <td className={tdC}>
-                      <select value={r.region || 'MH'} onChange={(e) => setRowField(idx, 'region', e.target.value)}
-                        className={cellInput} style={{ '--tw-ring-color': themeColor }}>
-                        <option value="MH">MH</option>
-                        <option value="KA">KA</option>
-                      </select>
+                    <td className={`${tdC} text-gray-700`} style={{ maxWidth: 90 }}
+                      title={r.responsible_person || ''}>
+                      <div className="truncate">{r.responsible_person || '—'}</div>
                     </td>
-                    <td className={`${tdC} text-gray-700`}>{r.responsible_person || '—'}</td>
-                    {months.map((m) => (
-                      <td key={m} className={tdC}>
-                        <input type="number" min="0" step="0.01" value={r[subTab]?.[m] ?? ''}
-                          onChange={(e) => setCell(idx, subTab, m, e.target.value)}
-                          onFocus={(e) => e.target.select()}
-                          title={`${monthLabel(m)} — enter in Lakh`}
-                          className={`${cellInput} text-right`} style={{ '--tw-ring-color': themeColor }} />
-                      </td>
+                    {quarters.map((q) => (
+                      <React.Fragment key={q.label}>
+                        {q.keys.map((m) => (
+                          <td key={m} className={m === activeMonth ? tdCAct : tdC}>
+                            <input type="number" min="0" step="0.01" value={r[subTab]?.[m] ?? ''}
+                              onChange={(e) => setCell(idx, subTab, m, e.target.value)}
+                              onFocus={(e) => e.target.select()}
+                              title={`${monthLabel(m)} — enter in Lakh`}
+                              className={`${m === activeMonth ? cellInputAct : cellInput} text-right`}
+                              style={{ '--tw-ring-color': themeColor }} />
+                          </td>
+                        ))}
+                        <td className={`${tdC} text-center font-semibold text-gray-700 bg-gray-100/70`}>
+                          {qRowTotal(r, q)}
+                        </td>
+                      </React.Fragment>
                     ))}
                     <td className={`${tdC} text-center font-semibold text-gray-800 bg-gray-50/60`}>
                       {rowTotal(r)}
@@ -512,11 +594,19 @@ const AOPMaster = () => {
                 <tfoot>
                   <tr>
                     <td className={`${stickyTd} font-semibold text-gray-700 bg-gray-50`} colSpan={1}>Total (Lakh)</td>
-                    <td className={`${tdC} bg-gray-50`} colSpan={2} />
-                    {months.map((m) => (
-                      <td key={m} className={`${tdC} text-center font-semibold text-gray-800 bg-gray-50`}>
-                        {colTotal(m)}
-                      </td>
+                    <td className={`${tdC} bg-gray-50`} colSpan={1} />
+                    {quarters.map((q) => (
+                      <React.Fragment key={q.label}>
+                        {q.keys.map((m) => (
+                          <td key={m}
+                            className={`${m === activeMonth ? tdCAct : `${tdC} bg-gray-50`} text-center font-semibold text-gray-800`}>
+                            {colTotal(m)}
+                          </td>
+                        ))}
+                        <td className={`${tdC} text-center font-bold text-gray-800 bg-gray-100`}>
+                          {qColTotal(q)}
+                        </td>
+                      </React.Fragment>
                     ))}
                     <td className={`${tdC} text-center font-bold bg-gray-100 text-[#2f3192]`}>
                       {grandTotal(subTab)}
@@ -615,6 +705,63 @@ const AOPMaster = () => {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ================= REGION MODAL ================= */}
+      {showRegionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-lg shadow-2xl max-w-md w-full max-h-[85vh] overflow-hidden flex flex-col">
+            <div className="px-4 py-2.5 border-b border-gray-200 flex justify-between items-center">
+              <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+                <MapPinIcon className="h-4 w-4 text-[#2f3192]" />
+                Branch Region — MH / KA
+              </h2>
+              <button onClick={() => setShowRegionModal(false)} className="p-1 rounded hover:bg-gray-100">
+                <XMarkIcon className="h-4 w-4 text-gray-500" />
+              </button>
+            </div>
+            <div className="p-4 flex-1 overflow-y-auto">
+              <p className="text-[11px] text-gray-500 mb-3">
+                One region per branch — applies to <b>both Spare and Labour</b> targets.
+                The report spreads each branch's targets over its region's (MH/KA)
+                working days. A saved region is <b>fixed</b>; only new branches
+                without one get the dropdown. Saved with <b>Save All</b>.
+              </p>
+              <div className="space-y-1.5">
+                {rows.map((r, idx) => (
+                  <div key={r.branch_id ?? `new-${idx}`}
+                    className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50/60">
+                    <span className="text-xs font-medium text-gray-800 truncate" title={r.branch_id}>
+                      {r.branch_name || '—'}
+                    </span>
+                    {r._regionFixed ? (
+                      <span className="flex-shrink-0 text-center text-xs font-semibold text-gray-700 bg-gray-100 border border-gray-200 rounded px-2 py-1"
+                        style={{ width: 70 }} title="Region already saved — fixed">
+                        {r.region}
+                      </span>
+                    ) : (
+                      <select value={r.region || 'MH'} onChange={(e) => setRowField(idx, 'region', e.target.value)}
+                        className={`${inputCls} flex-shrink-0`} style={{ '--tw-ring-color': themeColor, width: 70 }}>
+                        <option value="MH">MH</option>
+                        <option value="KA">KA</option>
+                      </select>
+                    )}
+                  </div>
+                ))}
+                {rows.length === 0 && (
+                  <p className="text-xs text-gray-400 text-center py-4">No branches loaded.</p>
+                )}
+              </div>
+            </div>
+            <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-end">
+              <button onClick={() => setShowRegionModal(false)}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white rounded-md hover:opacity-90"
+                style={{ backgroundColor: themeColor }}>
+                <CheckIcon className="h-3.5 w-3.5" /> Done
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

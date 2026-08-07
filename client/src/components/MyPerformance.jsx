@@ -58,6 +58,15 @@ const statusLabel = (s) => {
     return map[(s || '').trim().toLowerCase()] || (s || '-');
 };
 
+// Options for the multi-select Status filter in the All-Follow-ups modal
+const FOLLOWUP_STATUS_OPTIONS = [
+    { value: 'completed', label: 'Completed' },
+    { value: 'wip', label: 'WIP' },
+    { value: 'rejected', label: 'Rejected' },
+    { value: 'rescheduled', label: 'Followups' },
+    { value: 'not_connected', label: 'NC (Not Connected)' },
+];
+
 // CSP tables — extra columns showing the instance's latest CSP-drive followup
 const CSP_FU_HEADERS = ['Last Follow-up Date', 'Drive', 'SR Subtype', 'Follow-up Mode', 'Flag', 'Status', 'Next Follow-up', 'Activity', 'Reject Reason', 'Remark', 'Quote Sent', 'Quote No.', 'Quote Value', 'Last Letter Sent Date'];
 
@@ -501,8 +510,14 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const [followupView, setFollowupView] = useState('all'); // All-Follow-ups view: 'all' | 'unique' | 'unique_drive'
     const [followupSearchTerm, setFollowupSearchTerm] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
-    const [statusFilter, setStatusFilter] = useState('all');
+    // Multi-select status filter — [] = All, otherwise list of selected statuses
+    const [statusFilter, setStatusFilter] = useState([]);
+    const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
+    const [serviceFilter, setServiceFilter] = useState('all'); // Service column filter in the All-Follow-ups modal
     const [statusLocked, setStatusLocked] = useState(false); // true = a status card opened the modal, so hide the Status dropdown
+    // true = opened via a card's "Active" button — show only each customer+drive
+    // combo's LATEST follow-up (of the locked status)
+    const [activeComboView, setActiveComboView] = useState(false);
     // true = modal opened from a Daily Breakdown date — non-drive rows of EVERY
     // status are merged in so the clicked day shows drive + non-drive together
     const [dateViewActive, setDateViewActive] = useState(false);
@@ -536,7 +551,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const [nonCampaignData, setNonCampaignData] = useState({ total_customers: 0, customers: [] });
     const [loadingNonCampaign, setLoadingNonCampaign] = useState(false);
     const [nonCampaignSearchTerm, setNonCampaignSearchTerm] = useState('');
-    const [nonCampaignStatusFilter, setNonCampaignStatusFilter] = useState('all');
+    // Multi-select status filter — [] = All, otherwise list of selected statuses
+    const [nonCampaignStatusFilter, setNonCampaignStatusFilter] = useState([]);
+    const [nonCampaignStatusDropdownOpen, setNonCampaignStatusDropdownOpen] = useState(false);
     const [nonCampaignServiceFilter, setNonCampaignServiceFilter] = useState('all');
     // 'all' = every taken record; 'unique' = latest record per customer (old behavior)
     const [nonCampaignViewMode, setNonCampaignViewMode] = useState('all');
@@ -607,11 +624,27 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     useEffect(() => {
         if (!showAllFollowupsModal) {
             setFollowupView('all');
-            setStatusFilter('all');
+            setStatusFilter([]);
+            setStatusDropdownOpen(false);
+            setServiceFilter('all');
             setStatusLocked(false);
+            setActiveComboView(false);
             setDateViewActive(false);
         }
     }, [showAllFollowupsModal]);
+
+    // Reset the Non-Drive Customers modal filters whenever it closes, so it always
+    // reopens showing everything (Status: All, no dates, no search)
+    useEffect(() => {
+        if (!showNonCampaignModal) {
+            setNonCampaignStatusDropdownOpen(false);
+            setNonCampaignStatusFilter([]);
+            setNonCampaignServiceFilter('all');
+            setNonCampaignSearchTerm('');
+            setNonCampaignFromDate('');
+            setNonCampaignToDate('');
+        }
+    }, [showNonCampaignModal]);
 
     // Format date for API — use LOCAL (IST) date parts so the chosen day isn't
     // shifted to the previous day by UTC conversion (toISOString shifts IST dates back).
@@ -864,7 +897,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setFollowupSearchTerm('');
         setCreatedFromDate('');
         setCreatedToDate('');
-        setStatusFilter('all');
+        setStatusFilter([]);
         setStatusLocked(false);
         // Rows are prefetched on mount — show them instantly, refresh silently
         fetchAllFollowups(allFollowupsData.length > 0);
@@ -882,10 +915,19 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setFollowupSearchTerm('');
         setCreatedFromDate('');
         setCreatedToDate('');
-        setStatusFilter(status);
+        setStatusFilter([status]);
         setStatusLocked(true);
+        setActiveComboView(false);
         // Rows are prefetched on mount — show them instantly, refresh silently
         fetchAllFollowups(allFollowupsData.length > 0);
+    };
+
+    // "Active" button on a status card — same locked-status view, but only the
+    // LATEST follow-up of each customer+drive combo is shown (so a combo appears
+    // here only if its current/latest status is this one)
+    const handleOpenActiveStatusFollowups = (status) => {
+        handleOpenStatusFollowups(status);
+        setActiveComboView(true);
     };
 
     const handleOpenQuotationFollowups = () => {
@@ -907,7 +949,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setFollowupSearchTerm('');
         setCreatedFromDate('');
         setCreatedToDate('');
-        setStatusFilter('all'); // status is locked to WIP for this view
+        setStatusFilter([]); // status is locked to WIP for this view
         if (allFollowupsData.length === 0) {
             fetchAllFollowups();
         }
@@ -922,7 +964,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setFollowupSearchTerm('');
         setCreatedFromDate('');
         setCreatedToDate('');
-        setStatusFilter('all');
+        setStatusFilter([]);
         if (allFollowupsData.length === 0) {
             fetchAllFollowups();
         }
@@ -937,7 +979,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setFollowupSearchTerm('');
         setCreatedFromDate('');
         setCreatedToDate('');
-        setStatusFilter('all');
+        setStatusFilter([]);
         if (allFollowupsData.length === 0) {
             fetchAllFollowups();
         }
@@ -1618,7 +1660,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     ), [latestUniqueFollowups, isCspFollowup]);
     const cspQuotationSentCount = cspQuotationSentIds.size;
 
-    // Non-campaign COMPLETED customers, reshaped as follow-up rows under campaign "other"
+    // Non-campaign COMPLETED customers, reshaped as follow-up rows under campaign "Non-Drive/PW"
     const otherCompletedFollowups = useMemo(() => {
         return (nonCampaignData.customers || [])
             // Endpoint now returns EVERY record — keep only the latest per customer
@@ -1633,7 +1675,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 phone_number: c.phone_number || '',
                 email: c.email || '',
                 branch_id: c.branch_id || '',
-                campaign_name: 'other',
+                campaign_name: 'Non-Drive/PW',
                 campaign_service: c.service || '',
                 csp_subtype: c.csp_subtype || '',
                 followup_by: c.followup_by || '',
@@ -1662,7 +1704,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             phone_number: c.phone_number || '',
             email: c.email || '',
             branch_id: c.branch_id || '',
-            campaign_name: 'other',
+            campaign_name: 'Non-Drive/PW',
             campaign_service: c.service || '',
             csp_subtype: c.csp_subtype || '',
             followup_by: c.followup_by || '',
@@ -1692,7 +1734,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         rejected: 'Rejected',
         rescheduled: 'Followups',
         not_connected: 'NC (Not Connected)',
-    }[statusFilter] || 'Follow-ups';
+    }[statusFilter[0]] || 'Follow-ups';
 
     const mergedFollowups = useMemo(
         () => dateViewActive
@@ -1700,6 +1742,50 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             : (isPlainAllView ? [...allFollowupsData, ...otherCompletedFollowups] : allFollowupsData),
         [dateViewActive, isPlainAllView, allFollowupsData, allNonDriveFollowups, otherCompletedFollowups]
     );
+
+    // Id of the LATEST follow-up per (instance_id + drive) combo, considering ONLY
+    // follow-ups of ACTIVE drives — used by the cards' "Active" view. Combo key
+    // uses campaign_id so same-named drives can never merge.
+    const latestComboFollowupIds = useMemo(() => {
+        const map = new Map();
+        allFollowupsData.forEach(fu => {
+            if ((fu.campaign_status || '').toLowerCase() !== 'active') return;
+            const key = `${fu.customer_instance_id || ''}__${fu.campaign_id ?? fu.campaign_name ?? ''}`;
+            const existing = map.get(key);
+            if (!existing) { map.set(key, fu); return; }
+            const existingDate = new Date(existing.created_at || existing.followup_date || 0);
+            const currentDate = new Date(fu.created_at || fu.followup_date || 0);
+            if (currentDate >= existingDate) map.set(key, fu);
+        });
+        return new Set(Array.from(map.values()).map(fu => fu.id));
+    }, [allFollowupsData]);
+
+    // Counts for the cards' "Active" buttons — ACTIVE drives only, one record per
+    // customer+drive combo (its latest follow-up), counted in the box of that
+    // record's EXACT status. Same logic as the Active modal view, so button count
+    // always equals the rows shown.
+    const activeStatusCounts = useMemo(() => {
+        const counts = { wip: 0, rescheduled: 0, rejected: 0, not_connected: 0 };
+        allFollowupsData.forEach(fu => {
+            if (!latestComboFollowupIds.has(fu.id)) return;
+            const status = (fu.status || '').trim().toLowerCase();
+            if (status === 'wip') counts.wip++;
+            else if (status === 'rescheduled') counts.rescheduled++;
+            else if (status === 'rejected') counts.rejected++;
+            else if (status === 'not_connected') counts.not_connected++;
+        });
+        return counts;
+    }, [allFollowupsData, latestComboFollowupIds]);
+
+    // Distinct services present in the loaded rows — options for the Service dropdown
+    const followupServiceOptions = useMemo(() => {
+        const set = new Set();
+        mergedFollowups.forEach(fu => {
+            const s = (fu.campaign_service || '').trim();
+            if (s) set.add(s);
+        });
+        return [...set].sort((a, b) => a.localeCompare(b));
+    }, [mergedFollowups]);
 
     // Memoized filtered follow-ups for the All-Follow-ups modal
     const visibleFollowups = useMemo(() => {
@@ -1710,17 +1796,27 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
             if (quotationSentFilterActive && !quotationSentIds.has(fu.id)) return false;
             if (cspQuotationFilterActive && !cspQuotationFollowupIds.has(fu.id)) return false;
             if (cspQuotationSentFilterActive && !cspQuotationSentIds.has(fu.id)) return false;
-            if (statusFilter !== 'all') {
-                if (statusFilter === 'not_connected') {
-                    const status = (fu.status || '').trim().toLowerCase();
-                    const remark = (fu.followup_remark || '').toLowerCase();
-                    const flag = (fu.followup_flag || '').trim().toLowerCase();
-                    const isNC = status === 'not_connected' ||
-                        remark.includes('not connected') || flag === 'nc' || flag.includes('not connected');
-                    if (!isNC) return false;
-                } else if ((fu.status || '').toLowerCase() !== statusFilter) {
-                    return false;
-                }
+            if (statusFilter.length > 0) {
+                const status = (fu.status || '').trim().toLowerCase();
+                const matchesStatus = statusFilter.some(sf => {
+                    // Active card view matches the EXACT status only; the normal NC
+                    // view keeps the broadened match (status OR remark OR flag)
+                    if (sf === 'not_connected' && !activeComboView) {
+                        const remark = (fu.followup_remark || '').toLowerCase();
+                        const flag = (fu.followup_flag || '').trim().toLowerCase();
+                        return status === 'not_connected' ||
+                            remark.includes('not connected') || flag === 'nc' || flag.includes('not connected');
+                    }
+                    return status === sf;
+                });
+                if (!matchesStatus) return false;
+            }
+            // "Active" card view: only the latest follow-up of each customer+drive
+            // combo within ACTIVE drives (the id set already excludes inactive drives)
+            if (activeComboView && !latestComboFollowupIds.has(fu.id)) return false;
+            if (serviceFilter !== 'all' &&
+                (fu.campaign_service || '').trim().toLowerCase() !== serviceFilter.toLowerCase()) {
+                return false;
             }
             if (debouncedSearch.trim()) {
                 const t = debouncedSearch.toLowerCase();
@@ -1753,7 +1849,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         });
     }, [mergedFollowups, quotationFilterActive, quotationSentFilterActive,
         cspQuotationFilterActive, cspQuotationSentFilterActive, statusFilter,
-        debouncedSearch, createdFromDate, createdToDate,
+        activeComboView, latestComboFollowupIds,
+        serviceFilter, debouncedSearch, createdFromDate, createdToDate,
         quotationFollowupIds, cspQuotationFollowupIds,
         quotationSentIds, cspQuotationSentIds]);
 
@@ -2106,7 +2203,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     const handleOpenNonCampaignModal = () => {
         setShowNonCampaignModal(true);
         setNonCampaignSearchTerm('');
-        setNonCampaignStatusFilter('all');
+        setNonCampaignStatusFilter([]);
         setNonCampaignServiceFilter('all');
         setNonCampaignFromDate('');
         setNonCampaignToDate('');
@@ -2121,7 +2218,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         e.stopPropagation(); // don't trigger the card's own "view all" click
         setShowNonCampaignModal(true);
         setNonCampaignSearchTerm('');
-        setNonCampaignStatusFilter(status);
+        setNonCampaignStatusFilter(status && status !== 'all' ? [status] : []);
         setNonCampaignServiceFilter('all');
         setNonCampaignFromDate('');
         setNonCampaignToDate('');
@@ -2144,14 +2241,14 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         setFollowupSearchTerm('');
         setCreatedFromDate(d);
         setCreatedToDate(d);
-        setStatusFilter('all');
+        setStatusFilter([]);
         setStatusLocked(false);
         fetchAllFollowups(allFollowupsData.length > 0);
         fetchNonCampaignCustomers(nonCampaignData.customers.length > 0);
     };
 
     // Base list for the Non-Campaign modal — completed is hidden here (it now
-    // appears in the All-Follow-ups modal under campaign name "other")
+    // appears in the All-Follow-ups modal under campaign name "Non-Drive/PW")
     const nonCampaignBase = useMemo(
         () => (nonCampaignData.customers || []).filter(c => {
             // Completed is never shown here (it rolls into the Completed card)
@@ -2175,8 +2272,8 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
     // Search + status + service filtered rows (completed already excluded by nonCampaignBase)
     const filteredNonCampaignCustomers = useMemo(() => {
         return nonCampaignBase.filter(c => {
-            if (nonCampaignStatusFilter !== 'all') {
-                if ((c.last_status || '').toLowerCase() !== nonCampaignStatusFilter) return false;
+            if (nonCampaignStatusFilter.length > 0) {
+                if (!nonCampaignStatusFilter.includes((c.last_status || '').toLowerCase())) return false;
             }
             if (nonCampaignServiceFilter !== 'all') {
                 if ((c.service || '') !== nonCampaignServiceFilter) return false;
@@ -2602,6 +2699,16 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 >
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Work In Progress</h3>
                     <p className="text-base sm:text-lg font-semibold text-black mt-1"><TimeValue>{performance.wip_count || 0}</TimeValue></p>
+                    <button
+                        onClick={(e) => { e.stopPropagation(); handleOpenActiveStatusFollowups('wip'); }}
+                        className="mt-1 mx-auto px-2 py-0.5 text-[10px] font-semibold rounded-md border transition-colors"
+                        style={{ color: themeColor, borderColor: themeColor }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = themeColor; e.currentTarget.style.color = '#fff'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = themeColor; }}
+                        title="Only customers whose LATEST follow-up (per drive) is WIP"
+                    >
+                        Your Active WIP ({activeStatusCounts.wip})
+                    </button>
                     <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
                         <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
                             Click to view WIP follow-ups
@@ -2616,6 +2723,16 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 >
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Followups</h3>
                     <p className="text-base sm:text-lg font-semibold text-black mt-1"><TimeValue>{performance.rescheduled_count || 0}</TimeValue></p>
+                    <button
+                        onClick={(e) => { e.stopPropagation(); handleOpenActiveStatusFollowups('rescheduled'); }}
+                        className="mt-1 mx-auto px-2 py-0.5 text-[10px] font-semibold rounded-md border transition-colors"
+                        style={{ color: themeColor, borderColor: themeColor }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = themeColor; e.currentTarget.style.color = '#fff'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = themeColor; }}
+                        title="Only customers whose LATEST follow-up (per drive) is Followups"
+                    >
+                        Your Active F ({activeStatusCounts.rescheduled})
+                    </button>
                     <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
                         <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
                             Click to view Followups
@@ -2630,6 +2747,16 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 >
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Rejected</h3>
                     <p className="text-base sm:text-lg font-semibold text-black mt-1"><TimeValue>{performance.rejected_count || 0}</TimeValue></p>
+                    <button
+                        onClick={(e) => { e.stopPropagation(); handleOpenActiveStatusFollowups('rejected'); }}
+                        className="mt-1 mx-auto px-2 py-0.5 text-[10px] font-semibold rounded-md border transition-colors"
+                        style={{ color: themeColor, borderColor: themeColor }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = themeColor; e.currentTarget.style.color = '#fff'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = themeColor; }}
+                        title="Only customers whose LATEST follow-up (per drive) is Rejected"
+                    >
+                        Your Active R ({activeStatusCounts.rejected})
+                    </button>
                     <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
                         <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
                             Click to view rejected follow-ups
@@ -2644,6 +2771,16 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 >
                     <h3 className="text-[11px] sm:text-[12px] font-semibold leading-tight group-hover:font-bold transition-all" style={{ color: themeColor }}>Not Connected</h3>
                     <p className="text-base sm:text-lg font-semibold text-black mt-1"><TimeValue>{notConnectedCount}</TimeValue></p>
+                    <button
+                        onClick={(e) => { e.stopPropagation(); handleOpenActiveStatusFollowups('not_connected'); }}
+                        className="mt-1 mx-auto px-2 py-0.5 text-[10px] font-semibold rounded-md border transition-colors"
+                        style={{ color: themeColor, borderColor: themeColor }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = themeColor; e.currentTarget.style.color = '#fff'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = themeColor; }}
+                        title="Only customers whose LATEST follow-up (per drive) is NC"
+                    >
+                        Your Active NC ({activeStatusCounts.not_connected})
+                    </button>
                     <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
                         <div className="bg-black text-white text-[10px] font-medium rounded-md px-2 py-1 whitespace-nowrap shadow-lg">
                             Click to view not connected (NC) follow-ups
@@ -3394,10 +3531,12 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3 max-md:px-2">
                         <div className="bg-white rounded-xl shadow-xl max-w-[95vw] w-full max-h-[92vh] overflow-hidden flex flex-col">
                             <div
-                                className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2"
+                                className="px-4 py-3 border-b border-gray-200"
                                 style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
                             >
-                                <div className="max-w-[240px] max-sm:max-w-full flex-shrink-0">
+                                {/* Row 1 — title + close */}
+                                <div className="flex justify-between items-center gap-2">
+                                <div>
                                     <h3 className="text-base font-semibold text-white">
                                         CSP Status {userData?.branch ? `— ${userData.branch}` : ''}
                                     </h3>
@@ -3405,7 +3544,17 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         {cspData.total_instances} instance(s) • Showing {filteredCspRows.length} of {uniqueCspRows.length} row(s) • One row per instance (latest SR)
                                     </p>
                                 </div>
-                                <div className="flex flex-wrap items-center gap-2 justify-end flex-1 min-w-0">
+                                    <button
+                                        onClick={() => setShowCspModal(false)}
+                                        className="w-7 h-7 sm:w-8 sm:h-8 bg-white rounded-lg flex items-center justify-center transition-all duration-200 group flex-shrink-0"
+                                    >
+                                        <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black group-hover:rotate-90 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                                {/* Row 2 — filters (right-aligned) */}
+                                <div className="flex flex-wrap items-center justify-end gap-2 mt-2">
                                     {/* Date column selector for the range filter */}
                                     <select
                                         value={cspDateField}
@@ -3524,15 +3673,6 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         onChange={(e) => setCspSearchTerm(e.target.value)}
                                         className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-40 max-md:w-full max-md:min-w-0 bg-white focus:outline-none"
                                     />
-
-                                    <button
-                                        onClick={() => setShowCspModal(false)}
-                                        className="w-7 h-7 sm:w-8 sm:h-8 bg-white rounded-lg flex items-center justify-center transition-all duration-200 group flex-shrink-0"
-                                    >
-                                        <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black group-hover:rotate-90 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
-                                    </button>
                                 </div>
                             </div>
 
@@ -3676,10 +3816,12 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3 max-md:px-2">
                         <div className="bg-white rounded-xl shadow-xl max-w-[95vw] w-full max-h-[92vh] overflow-hidden flex flex-col">
                             <div
-                                className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2"
+                                className="px-4 py-3 border-b border-gray-200"
                                 style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
                             >
-                                <div className="max-w-[240px] max-sm:max-w-full flex-shrink-0">
+                                {/* Row 1 — title + close */}
+                                <div className="flex justify-between items-center gap-2">
+                                <div>
                                     <h3 className="text-base font-semibold text-white">
                                         Open CSP Status {userData?.branch ? `— ${userData.branch}` : ''}
                                     </h3>
@@ -3687,7 +3829,17 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         {openCspInstanceCount} open instance(s) • Showing {filteredOpenCspRows.length} of {openCspRows.length} open row(s)
                                     </p>
                                 </div>
-                                <div className="flex flex-wrap items-center gap-2 justify-end flex-1 min-w-0">
+                                    <button
+                                        onClick={() => setShowOpenCspModal(false)}
+                                        className="w-7 h-7 sm:w-8 sm:h-8 bg-white rounded-lg flex items-center justify-center transition-all duration-200 group flex-shrink-0"
+                                    >
+                                        <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black group-hover:rotate-90 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                                {/* Row 2 — filters (right-aligned) */}
+                                <div className="flex flex-wrap items-center justify-end gap-2 mt-2">
                                     {/* Date column selector for the range filter */}
                                     <select
                                         value={openCspDateField}
@@ -3806,15 +3958,6 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         onChange={(e) => setOpenCspSearchTerm(e.target.value)}
                                         className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-40 max-md:w-full max-md:min-w-0 bg-white focus:outline-none"
                                     />
-
-                                    <button
-                                        onClick={() => setShowOpenCspModal(false)}
-                                        className="w-7 h-7 sm:w-8 sm:h-8 bg-white rounded-lg flex items-center justify-center transition-all duration-200 group flex-shrink-0"
-                                    >
-                                        <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black group-hover:rotate-90 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
-                                    </button>
                                 </div>
                             </div>
 
@@ -3960,13 +4103,15 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                         <div className="bg-white rounded-xl shadow-xl max-w-7xl w-full max-h-[92vh] max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh] overflow-hidden flex flex-col">
                             {/* Header — themed gradient like BranchCustomersModal */}
                             <div
-                                className="px-4 py-3 border-b border-gray-200 flex justify-between items-center max-lg:flex-wrap max-lg:gap-2 max-md:px-2"
+                                className="px-4 py-3 border-b border-gray-200 max-md:px-2"
                                 style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
                             >
+                                {/* Row 1 — title + close */}
+                                <div className="flex justify-between items-center gap-2">
                                 <div>
                                     <h3 className="text-base font-semibold text-white">
                                         {statusLocked
-                                            ? `${lockedStatusLabel} Follow-ups`
+                                            ? `${activeComboView ? 'Your Active ' : ''}${lockedStatusLabel} Follow-ups`
                                             : dateViewActive
                                             ? `Daily Follow-ups (Drive + Non-Drive) — ${createdFromDate ? new Date(createdFromDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}`
                                             : quotationFilterActive
@@ -3983,7 +4128,18 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         {getDateRangeText()} • Total: {displayedFollowups.length} {followupView === 'unique' ? 'unique ' : followupView === 'unique_drive' ? 'unique drive ' : ''}follow-up(s)
                                     </p>
                                 </div>
-                                <div className="flex items-center gap-2 max-lg:flex-wrap">
+                                    {/* Close button — white square like BranchCustomersModal */}
+                                    <button
+                                        onClick={() => setShowAllFollowupsModal(false)}
+                                        className="w-7 h-7 sm:w-8 sm:h-8 bg-white rounded-lg flex items-center justify-center transition-all duration-200 group flex-shrink-0"
+                                    >
+                                        <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black group-hover:rotate-90 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                                {/* Row 2 — filters (right-aligned) */}
+                                <div className="flex flex-wrap items-center justify-end gap-2 mt-2">
                                     {/* Created At range — hidden in the per-date view (the clicked
                                         Daily Breakdown date locks the range to that one day) */}
                                     {!dateViewActive && (
@@ -4029,27 +4185,79 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         <div className="flex items-center gap-1">
                                             <label className="text-[11px] text-white whitespace-nowrap">Status:</label>
                                             <div className="relative">
-                                                <select
-                                                    value={statusFilter}
-                                                    onChange={(e) => setStatusFilter(e.target.value)}
-                                                    className="border border-gray-300 rounded-md pl-2 pr-6 py-1 text-[11px] bg-white text-black appearance-none cursor-pointer focus:outline-none"
+                                                {/* Multi-select status dropdown — check any combination of statuses */}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setStatusDropdownOpen(o => !o)}
+                                                    className="border border-gray-300 rounded-md pl-2 pr-6 py-1 text-[11px] bg-white text-black cursor-pointer focus:outline-none min-w-[110px] text-left whitespace-nowrap"
                                                 >
-                                                    <option value="all">All</option>
-                                                    <option value="completed">Completed</option>
-                                                    <option value="wip">WIP</option>
-                                                    <option value="rejected">Rejected</option>
-                                                    <option value="rescheduled">Followups</option>
-                                                    <option value="not_connected">NC (Not Connected)</option>
-                                                </select>
+                                                    {statusFilter.length === 0
+                                                        ? 'All'
+                                                        : statusFilter.length === 1
+                                                            ? (FOLLOWUP_STATUS_OPTIONS.find(o => o.value === statusFilter[0])?.label || statusFilter[0])
+                                                            : `${statusFilter.length} selected`}
+                                                </button>
                                                 <svg
                                                     className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-black pointer-events-none"
                                                     fill="none" stroke="currentColor" viewBox="0 0 24 24"
                                                 >
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                                 </svg>
+                                                {statusDropdownOpen && (
+                                                    <>
+                                                        {/* click-away backdrop */}
+                                                        <div className="fixed inset-0 z-[10001]" onClick={() => setStatusDropdownOpen(false)} />
+                                                        <div className="absolute left-0 top-full mt-1 z-[10002] bg-white border border-gray-300 rounded-md shadow-lg py-1 min-w-[175px]">
+                                                            <label className="flex items-center gap-2 px-2.5 py-1 text-[11px] text-black hover:bg-gray-100 cursor-pointer">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={statusFilter.length === 0}
+                                                                    onChange={() => setStatusFilter([])}
+                                                                />
+                                                                All
+                                                            </label>
+                                                            {FOLLOWUP_STATUS_OPTIONS.map(opt => (
+                                                                <label key={opt.value} className="flex items-center gap-2 px-2.5 py-1 text-[11px] text-black hover:bg-gray-100 cursor-pointer">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={statusFilter.includes(opt.value)}
+                                                                        onChange={() => setStatusFilter(prev =>
+                                                                            prev.includes(opt.value)
+                                                                                ? prev.filter(v => v !== opt.value)
+                                                                                : [...prev, opt.value])}
+                                                                    />
+                                                                    {opt.label}
+                                                                </label>
+                                                            ))}
+                                                        </div>
+                                                    </>
+                                                )}
                                             </div>
                                         </div>
                                     )}
+
+                                    {/* Service dropdown — filters the Service column */}
+                                    <div className="flex items-center gap-1">
+                                        <label className="text-[11px] text-white whitespace-nowrap">Service:</label>
+                                        <div className="relative">
+                                            <select
+                                                value={serviceFilter}
+                                                onChange={(e) => setServiceFilter(e.target.value)}
+                                                className="border border-gray-300 rounded-md pl-2 pr-6 py-1 text-[11px] bg-white text-black appearance-none cursor-pointer focus:outline-none max-w-[140px]"
+                                            >
+                                                <option value="all">All</option>
+                                                {followupServiceOptions.map(svc => (
+                                                    <option key={svc} value={svc}>{svc}</option>
+                                                ))}
+                                            </select>
+                                            <svg
+                                                className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-black pointer-events-none"
+                                                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                            >
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                            </svg>
+                                        </div>
+                                    </div>
 
                                     {/* View dropdown — All / Unique (latest per Instance ID) / Unique with Drive (latest per Drive + Instance ID) */}
                                     <div className="flex items-center gap-1">
@@ -4084,18 +4292,20 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
 
                                     {/* Clear filters — status resets only when its dropdown is
                                         visible (a status card locks it as the report's subject) */}
-                                    {(followupSearchTerm || (!dateViewActive && (createdFromDate || createdToDate))
-                                        || (!quotationSentFilterActive && !statusLocked && statusFilter !== 'all')) && (
+                                    {(followupSearchTerm || serviceFilter !== 'all'
+                                        || (!dateViewActive && (createdFromDate || createdToDate))
+                                        || (!quotationSentFilterActive && !statusLocked && statusFilter.length > 0)) && (
                                         <button
                                             onClick={() => {
                                                 setFollowupSearchTerm('');
+                                                setServiceFilter('all');
                                                 // per-date view: the clicked day stays locked — Clear
                                                 // only resets search / status there
                                                 if (!dateViewActive) {
                                                     setCreatedFromDate('');
                                                     setCreatedToDate('');
                                                 }
-                                                if (!quotationSentFilterActive && !statusLocked) setStatusFilter('all');
+                                                if (!quotationSentFilterActive && !statusLocked) setStatusFilter([]);
                                             }}
                                             className="px-2 py-1 text-[11px] text-white border border-white/40 rounded-md bg-white/10 hover:bg-white/20 flex items-center gap-1"
                                             title="Clear filters"
@@ -4120,20 +4330,6 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         </button>
                                     )}
 
-                                    {/* Close button — white square like BranchCustomersModal */}
-                                    <button
-                                        onClick={() => setShowAllFollowupsModal(false)}
-                                        className="w-7 h-7 sm:w-8 sm:h-8 bg-white rounded-lg flex items-center justify-center transition-all duration-200 group flex-shrink-0"
-                                    >
-                                        <svg
-                                            className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black group-hover:rotate-90 transition-transform duration-200"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            viewBox="0 0 24 24"
-                                        >
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
-                                    </button>
                                 </div>
                             </div>
 
@@ -4428,9 +4624,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3 max-md:px-2">
                         <div className="bg-white rounded-xl shadow-xl max-w-7xl w-full max-h-[92vh] max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh] overflow-hidden flex flex-col">
                             <div
-                                className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2"
+                                className="px-4 py-3 border-b border-gray-200"
                                 style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
                             >
+                                {/* Row 1 — title + close */}
+                                <div className="flex justify-between items-center gap-2">
                                 <div>
                                     <h3 className="text-base font-semibold text-white">
                                         {letterCspOnly ? 'CSP Letters' : 'Letter Report'} — {userData?.name || 'User'}
@@ -4440,7 +4638,17 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         {!letterCspOnly && letterData.total ? ` • ${letterData.total} total sent` : ''}
                                     </p>
                                 </div>
-                                <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                        onClick={() => setShowLetterModal(false)}
+                                        className="w-7 h-7 sm:w-8 sm:h-8 bg-white rounded-lg flex items-center justify-center transition-all duration-200 group flex-shrink-0"
+                                    >
+                                        <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black group-hover:rotate-90 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                                {/* Row 2 — filters (right-aligned) */}
+                                <div className="flex flex-wrap items-center justify-end gap-2 mt-2">
                                     {/* Sent At - From */}
                                     <div className="flex items-center gap-1">
                                         <label className="text-[11px] text-white whitespace-nowrap">From:</label>
@@ -4534,14 +4742,6 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         </button>
                                     )}
 
-                                    <button
-                                        onClick={() => setShowLetterModal(false)}
-                                        className="w-7 h-7 sm:w-8 sm:h-8 bg-white rounded-lg flex items-center justify-center transition-all duration-200 group flex-shrink-0"
-                                    >
-                                        <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black group-hover:rotate-90 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
-                                    </button>
                                 </div>
                             </div>
 
@@ -4773,9 +4973,11 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     <div className="fixed inset-0 backdrop-blur-sm bg-black/40 flex items-center justify-center z-[10000] p-3 max-md:px-2">
                         <div className="bg-white rounded-xl shadow-xl max-w-7xl w-full max-h-[92vh] max-lg:w-[95vw] max-lg:max-w-[95vw] max-lg:max-h-[90vh] overflow-hidden flex flex-col">
                             <div
-                                className="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2"
+                                className="px-4 py-3 border-b border-gray-200"
                                 style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #2c4a6e 100%)` }}
                             >
+                                {/* Row 1 — title + close */}
+                                <div className="flex justify-between items-center gap-2">
                                 <div>
                                     <h3 className="text-base font-semibold text-white">
                                         Non-Drive Customers by {userData?.name || 'User'}
@@ -4784,7 +4986,17 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         Showing {filteredNonCampaignCustomers.length} of {nonCampaignBase.length} {nonCampaignViewMode === 'all' ? 'record(s)' : 'customer(s)'}
                                     </p>
                                 </div>
-                                <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
+                                    <button
+                                        onClick={() => setShowNonCampaignModal(false)}
+                                        className="w-7 h-7 sm:w-8 sm:h-8 bg-white rounded-lg flex items-center justify-center transition-all duration-200 group flex-shrink-0"
+                                    >
+                                        <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black group-hover:rotate-90 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                                {/* Row 2 — filters (right-aligned) */}
+                                <div className="flex flex-wrap items-center justify-end gap-2 mt-2">
                                     {/* Follow-up date range — From */}
                                     <div className="flex items-center gap-1">
                                         <label className="text-[11px] text-white whitespace-nowrap">From:</label>
@@ -4862,33 +5074,62 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         </div>
                                     </div>
 
-                                    {/* Status filter */}
+                                    {/* Status filter — multi-select (check any combination) */}
                                     <div className="flex items-center gap-1">
                                         <label className="text-[11px] text-white whitespace-nowrap">Status:</label>
                                         <div className="relative">
-                                            <select
-                                                value={nonCampaignStatusFilter}
-                                                onChange={(e) => setNonCampaignStatusFilter(e.target.value)}
-                                                className="border border-gray-300 rounded-md pl-2 pr-6 py-1 text-[11px] bg-white text-black appearance-none cursor-pointer focus:outline-none"
+                                            <button
+                                                type="button"
+                                                onClick={() => setNonCampaignStatusDropdownOpen(o => !o)}
+                                                className="border border-gray-300 rounded-md pl-2 pr-6 py-1 text-[11px] bg-white text-black cursor-pointer focus:outline-none min-w-[110px] text-left whitespace-nowrap"
                                             >
-                                                <option value="all">All</option>
-                                                <option value="wip">WIP</option>
-                                                <option value="rejected">Rejected</option>
-                                                <option value="rescheduled">Followups</option>
-                                                <option value="not_connected">NC (Not Connected)</option>
-                                            </select>
+                                                {nonCampaignStatusFilter.length === 0
+                                                    ? 'All'
+                                                    : nonCampaignStatusFilter.length === 1
+                                                        ? (FOLLOWUP_STATUS_OPTIONS.find(o => o.value === nonCampaignStatusFilter[0])?.label || nonCampaignStatusFilter[0])
+                                                        : `${nonCampaignStatusFilter.length} selected`}
+                                            </button>
                                             <svg className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-black pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                             </svg>
+                                            {nonCampaignStatusDropdownOpen && (
+                                                <>
+                                                    {/* click-away backdrop */}
+                                                    <div className="fixed inset-0 z-[10001]" onClick={() => setNonCampaignStatusDropdownOpen(false)} />
+                                                    <div className="absolute left-0 top-full mt-1 z-[10002] bg-white border border-gray-300 rounded-md shadow-lg py-1 min-w-[175px]">
+                                                        <label className="flex items-center gap-2 px-2.5 py-1 text-[11px] text-black hover:bg-gray-100 cursor-pointer">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={nonCampaignStatusFilter.length === 0}
+                                                                onChange={() => setNonCampaignStatusFilter([])}
+                                                            />
+                                                            All
+                                                        </label>
+                                                        {FOLLOWUP_STATUS_OPTIONS.filter(o => o.value !== 'completed').map(opt => (
+                                                            <label key={opt.value} className="flex items-center gap-2 px-2.5 py-1 text-[11px] text-black hover:bg-gray-100 cursor-pointer">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={nonCampaignStatusFilter.includes(opt.value)}
+                                                                    onChange={() => setNonCampaignStatusFilter(prev =>
+                                                                        prev.includes(opt.value)
+                                                                            ? prev.filter(v => v !== opt.value)
+                                                                            : [...prev, opt.value])}
+                                                                />
+                                                                {opt.label}
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
 
                                     {/* Clear filters */}
-                                    {(nonCampaignSearchTerm || nonCampaignStatusFilter !== 'all' || nonCampaignServiceFilter !== 'all' || nonCampaignFromDate || nonCampaignToDate) && (
+                                    {(nonCampaignSearchTerm || nonCampaignStatusFilter.length > 0 || nonCampaignServiceFilter !== 'all' || nonCampaignFromDate || nonCampaignToDate) && (
                                         <button
                                             onClick={() => {
                                                 setNonCampaignSearchTerm('');
-                                                setNonCampaignStatusFilter('all');
+                                                setNonCampaignStatusFilter([]);
                                                 setNonCampaignServiceFilter('all');
                                                 setNonCampaignFromDate('');
                                                 setNonCampaignToDate('');
@@ -4925,14 +5166,6 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                         </button>
                                     )}
 
-                                    <button
-                                        onClick={() => setShowNonCampaignModal(false)}
-                                        className="w-7 h-7 sm:w-8 sm:h-8 bg-white rounded-lg flex items-center justify-center transition-all duration-200 group flex-shrink-0"
-                                    >
-                                        <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black group-hover:rotate-90 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
-                                    </button>
                                 </div>
                             </div>
 

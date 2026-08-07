@@ -11,7 +11,8 @@ import json
 from app.models.customer_model import (
     Customer, AMCAgreement, AssetDetailed, AssetService,
     AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
-    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, OpenSRData
+    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, OpenSRData,
+    ResponseTimeMaxTTR
 )
 
 # ==========================================================================
@@ -157,6 +158,15 @@ FILE_KNOWN_COLUMNS = {
         'SR SUBTYPE', 'SR OPEN DATE', 'SR CLOSE DATE', 'MODE OF SR',
         'ZERO LABOUR FLAG', 'OIL CHANGE FLAG', 'COUNT OF TASKS'
     ],
+    'Response Time & MaxTTR Details': [
+        'ZONE NAME', 'ASM NAME', 'SD ID', 'SD NAME', 'BRANCH ID', 'BRANCH NAME',
+        'INSTANCE ID', 'APPLICATION CODE', 'ENGINE SERIAL NO', 'SEGMENT',
+        'PRODUCT SEGMENT', 'GOEM OEM', 'ACCOUNT NAME', 'SR NUMBER', 'SR TYPE',
+        'SR SUBTYPE', 'SR OPEN DATE', 'SR TASK START DATE', 'SR TASK END DATE',
+        'SR CLOSE DATE', 'ENGINEER REMARKS', 'SE NAME', 'SE TICKET NUM',
+        'RESPONSE TIME RANGE IN HRS', 'Response Time',
+        'MaxTTR on Task Closed in hrs', 'MaxTTR on SR Closed in hrs'
+    ],
 }
 
 # Known alternate spellings that flexible matching alone cannot bridge
@@ -173,6 +183,15 @@ FILE_COLUMN_ALIASES = {
         'SR SUBTYPE': ['SR SUB TYPE', 'SR SUB-TYPE'],
         'ZERO LABOUR FLAG': ['ZERO LABOR FLAG'],
         'OIL CHANGE FLAG': ['OIL CHANGE FLG'],
+    },
+    'Response Time & MaxTTR Details': {
+        'INSTANCE ID': ['Instance Id [Asset #]', 'Instance Id', 'Asset Number'],
+        'SR NUMBER': ['SR NO', 'SR #', 'SERVICE REQUEST NUMBER'],
+        'SR SUBTYPE': ['SR SUB TYPE', 'SR SUB-TYPE'],
+        'SE TICKET NUM': ['SE TICKET NUMBER', 'SE TICKET NO'],
+        'RESPONSE TIME RANGE IN HRS': ['RESPONSE TIME RANGE IN HOURS'],
+        'MaxTTR on Task Closed in hrs': ['MAXTTR ON TASK CLOSED IN HOURS'],
+        'MaxTTR on SR Closed in hrs': ['MAXTTR ON SR CLOSED IN HOURS'],
     },
     'LMS Data for ERP': {
         'kVA Rating': ['KVA RATING'],
@@ -545,7 +564,8 @@ class ImportController:
             'Pulse Quotation - Service Only': None,  # No branch ID in this file
             'Regular Bandhan Customers Report': None,  # No branch ID in this file
             'LMS Data for ERP': 'BRANCH ID',
-            'Open SR Load Report': None  # No branch ID in this file
+            'Open SR Load Report': None,  # No branch ID in this file
+            'Response Time & MaxTTR Details': 'BRANCH ID'
         }
         
         col_name = column_mapping.get(file_type)
@@ -767,6 +787,11 @@ class ImportController:
                 'email': ['Account Contact Email ID'],
                 'location': ['Installation Site Address']
             }
+        elif file_type == 'Response Time & MaxTTR Details':
+            # File carries only the account name for the customer master
+            field_mappings = {
+                'customer_name': ['ACCOUNT NAME']
+            }
         else:
             field_mappings = {
                 'customer_name': ['CUSTOMER NAME', 'Name', 'CompanyName', 'ACCOUNT NAME', 'Account', 'Customer Name', 'customer_name', 'name'],
@@ -870,6 +895,11 @@ class ImportController:
                 'phone_number': ['Account Contact Number'],
                 'email': ['Account Contact Email ID'],
                 'location': ['Installation Site Address']
+            }
+        elif file_type == 'Response Time & MaxTTR Details':
+            # File carries only the account name for the customer master
+            field_mappings = {
+                'customer_name': ['ACCOUNT NAME']
             }
         else:
             field_mappings = {
@@ -1094,7 +1124,11 @@ class ImportController:
             'Regular Bandhan Customers Report': ['Pulse Instance ID', 'Quotation Ref No'],
             'LMS Data for ERP': ['INSTANCE ID', 'LEAD NUMBER'],
             'Open SR Load Report': ['Service Request #', 'Instance Id [Asset #]', 'Engine Serial#'],
-            'Open SR Data': ['INSTANCE ID', 'SR NUMBER', 'SR TYPE', 'SR SUBTYPE']
+            'Open SR Data': ['INSTANCE ID', 'SR NUMBER', 'SR TYPE', 'SR SUBTYPE'],
+            'Response Time & MaxTTR Details': [
+                'BRANCH ID', 'INSTANCE ID', 'SR NUMBER', 'SR OPEN DATE',
+                'SR CLOSE DATE', 'SE NAME', 'SE TICKET NUM'
+            ]
         }
         return critical.get(file_type, [])
     
@@ -2573,6 +2607,152 @@ class ImportController:
         self.db.commit()
         return imported_count, updated_count
 
+    def import_response_time_maxttr(self, file):
+        """Import 'Response Time & MaxTTR Details' — SR NUMBER is the primary
+        key: ONE row per unique SR NUMBER, upserted on re-import (blank cells
+        never wipe existing data). If the same SR NUMBER appears multiple
+        times in the file, the FIRST row wins. The customers table is also
+        refreshed, but ONLY from the FIRST row of each instance_id in the
+        file (instance_id repeats across SRs) — same empty-safe rules as
+        every other import."""
+        contents = file.file.read()
+        df = pd.read_excel(io.BytesIO(contents))
+
+        # Flexible headers: map known columns to canonical names; the rest are dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'Response Time & MaxTTR Details')
+
+        # Case/spacing-insensitive header lookup so small header variations
+        # don't break the import.
+        norm = {str(c).strip().lower(): c for c in df.columns if pd.notna(c)}
+
+        def col(*names):
+            for n in names:
+                c = norm.get(n.lower())
+                if c is not None:
+                    return c
+            return None
+
+        # Fixed columns — the file must contain every one of them
+        required = [
+            ('BRANCH ID',), ('INSTANCE ID', 'Instance Id [Asset #]', 'Instance Id', 'Asset Number'),
+            ('SR NUMBER', 'SR NO', 'SR #'), ('SR OPEN DATE',), ('SR CLOSE DATE',),
+            ('SE NAME',), ('SE TICKET NUM', 'SE TICKET NUMBER', 'SE TICKET NO')
+        ]
+        for names in required:
+            if not col(*names):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid file format for Response Time & MaxTTR Details: missing '{names[0]}' column"
+                )
+
+        sr_col = col('SR NUMBER', 'SR NO', 'SR #')
+        iid_col = col('INSTANCE ID', 'Instance Id [Asset #]', 'Instance Id', 'Asset Number')
+
+        # value getter for a header (returns None when the column is absent)
+        def val(row, *names):
+            c = col(*names)
+            return row.get(c) if c else None
+
+        def norm_iid(v):
+            s = self.convert_to_string(v)
+            if not s:
+                return None
+            if 'Asset #:' in s:
+                s = s.split('Asset #:')[-1].strip()
+            return s or None
+
+        def norm_sr(v):
+            s = self.convert_to_string(v)
+            return s.strip() if s else None
+
+        records = df.to_dict('records')
+
+        # Unique key = SR NUMBER. Keep ONLY the FIRST row in the file for each
+        # SR number; later duplicates are ignored.
+        unique_rows = {}
+        for row in records:
+            sr = norm_sr(row.get(sr_col))
+            if not sr:
+                continue
+            if sr not in unique_rows:
+                unique_rows[sr] = row
+        records = list(unique_rows.values())
+
+        all_iids = list({norm_iid(r.get(iid_col)) for r in records} - {None})
+        customer_cache = self._bulk_load_by_instance_id(Customer, all_iids)
+
+        # Existing rows keyed by the upsert key (sr_number)
+        all_srs = list(unique_rows.keys())
+        existing = {}
+        for i in range(0, len(all_srs), 1000):
+            chunk = all_srs[i:i + 1000]
+            for rec in self.db.query(ResponseTimeMaxTTR).filter(ResponseTimeMaxTTR.sr_number.in_(chunk)).all():
+                existing[(rec.sr_number or '').strip()] = rec
+
+        imported_count = 0
+        updated_count = 0
+        customers_seen = set()  # only the FIRST row per instance_id touches the customer
+
+        with self.db.no_autoflush:
+            for row in records:
+                sr = norm_sr(row.get(sr_col))
+                if not sr:
+                    continue
+                iid = norm_iid(row.get(iid_col))
+
+                # Customer master: first occurrence of this instance_id only
+                # (instance_id is duplicated across SR rows in this file)
+                if iid and iid not in customers_seen:
+                    customers_seen.add(iid)
+                    self.update_or_create_customer(
+                        iid, row, 'Response Time & MaxTTR Details', cache=customer_cache
+                    )
+
+                data = {
+                    'instance_id': iid,
+                    'zone_name': self.truncate_string(val(row, 'ZONE NAME'), 200),
+                    'asm_name': self.truncate_string(val(row, 'ASM NAME')),
+                    'sd_id': self.truncate_string(val(row, 'SD ID'), 100),
+                    'sd_name': self.truncate_string(val(row, 'SD NAME')),
+                    'branch_id': self.truncate_string(val(row, 'BRANCH ID'), 100),
+                    'branch_name': self.truncate_string(val(row, 'BRANCH NAME')),
+                    'application_code': self.truncate_string(val(row, 'APPLICATION CODE'), 200),
+                    'engine_serial_no': self.truncate_string(val(row, 'ENGINE SERIAL NO'), 200),
+                    'segment': self.truncate_string(val(row, 'SEGMENT'), 200),
+                    'product_segment': self.truncate_string(val(row, 'PRODUCT SEGMENT'), 200),
+                    'goem_oem': self.truncate_string(val(row, 'GOEM OEM'), 200),
+                    'account_name': self.truncate_string(val(row, 'ACCOUNT NAME')),
+                    'sr_type': self.truncate_string(val(row, 'SR TYPE'), 200),
+                    'sr_subtype': self.truncate_string(val(row, 'SR SUBTYPE', 'SR SUB TYPE', 'SR SUB-TYPE'), 200),
+                    'sr_open_date': self.parse_date(val(row, 'SR OPEN DATE')),
+                    'sr_task_start_date': self.parse_date(val(row, 'SR TASK START DATE')),
+                    'sr_task_end_date': self.parse_date(val(row, 'SR TASK END DATE')),
+                    'sr_close_date': self.parse_date(val(row, 'SR CLOSE DATE')),
+                    'engineer_remarks': self.convert_to_string(val(row, 'ENGINEER REMARKS')),
+                    'se_name': self.truncate_string(val(row, 'SE NAME')),
+                    'se_ticket_num': self.truncate_string(val(row, 'SE TICKET NUM', 'SE TICKET NUMBER', 'SE TICKET NO'), 200),
+                    'response_time_range_in_hrs': self.truncate_string(val(row, 'RESPONSE TIME RANGE IN HRS'), 200),
+                    'response_time': self.truncate_string(val(row, 'Response Time'), 200),
+                    'maxttr_on_task_closed_in_hrs': self.truncate_string(val(row, 'MaxTTR on Task Closed in hrs'), 200),
+                    'maxttr_on_sr_closed_in_hrs': self.truncate_string(val(row, 'MaxTTR on SR Closed in hrs'), 200),
+                    'extra_data': self.collect_extra_data(row, extra_cols),
+                }
+
+                rec = existing.get(sr)
+                if rec:
+                    # Same empty-safe update as every other table: blank cells
+                    # never wipe existing data, extra_data is merged.
+                    self.update_record(rec, data)
+                    updated_count += 1
+                else:
+                    rec = ResponseTimeMaxTTR(sr_number=sr, **data)
+                    self.db.add(rec)
+                    existing[sr] = rec
+                    imported_count += 1
+
+        self.db.commit()
+        return imported_count, updated_count
+
     def process_file(self, file: UploadFile, file_type: str, column_mapping: dict = None):
         """Process uploaded file based on type"""
         try:
@@ -2588,7 +2768,8 @@ class ImportController:
                 'Regular Bandhan Customers Report': self.import_regular_bandhan,
                 'LMS Data for ERP': self.import_lms_data,
                 'Open SR Load Report': self.import_open_sr_load_report,
-                'Open SR Data': self.import_open_sr_data
+                'Open SR Data': self.import_open_sr_data,
+                'Response Time & MaxTTR Details': self.import_response_time_maxttr
             }
             
             if file_type not in import_functions:

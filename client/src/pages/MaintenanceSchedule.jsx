@@ -202,8 +202,8 @@ const PrintSheet = ({ app, services, parts, kits = [], section = 'parts', onClos
                                     <tr key={r}>
                                         {pair.map(([k, v], c) => (
                                             <React.Fragment key={c}>
-                                                <td className="w-[16%] bg-gray-50 border border-gray-400 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-gray-700 align-middle whitespace-nowrap">{k}</td>
-                                                <td className="w-[34%] border border-gray-400 px-3 py-2 text-[12.5px] font-semibold font-mono align-middle break-words">{v}</td>
+                                                <td className="w-[20%] bg-gray-50 border border-gray-400 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-gray-700 align-middle whitespace-nowrap">{k}</td>
+                                                <td className="w-[30%] border border-gray-400 px-3 py-2 text-[12.5px] font-semibold font-mono align-middle break-words">{v}</td>
                                             </React.Fragment>
                                         ))}
                                     </tr>

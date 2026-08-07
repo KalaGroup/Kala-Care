@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
+import Swal from 'sweetalert2';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { canExportExcel } from '../utils/exportPermission';
+import EmployeeProductivityReport, { buildEpSheet } from '../components/EmployeeProductivityReport';
 import {
   ChartBarSquareIcon, ArrowUpTrayIcon, DocumentMagnifyingGlassIcon,
-  ClockIcon, BookmarkSquareIcon, XMarkIcon, TrashIcon, ArrowDownTrayIcon,
+  ClockIcon, BookmarkSquareIcon, XMarkIcon, TrashIcon,
   DocumentCheckIcon, TableCellsIcon, ArrowPathIcon, CalendarDaysIcon,
   ChevronDownIcon, MagnifyingGlassIcon,
   ChevronDoubleUpIcon, ChevronDoubleDownIcon,
@@ -92,13 +94,19 @@ const TopScrollbar = ({ scrollRef, watch }) => {
     if (!el || !top) return;
 
     const update = () => {
-      const { scrollWidth, clientWidth } = el;
-      setSpacerWidth(scrollWidth > clientWidth + 1 ? scrollWidth : 0);
+      const { scrollWidth, clientWidth, offsetWidth } = el;
+      // The preview container also scrolls vertically — its v-scrollbar eats
+      // ~15px of clientWidth the top bar doesn't lose, so without this the
+      // top bar's range ends short of the table's true right edge.
+      const vScrollbar = Math.max(0, offsetWidth - clientWidth);
+      setSpacerWidth(scrollWidth > clientWidth + 1 ? scrollWidth + vScrollbar : 0);
     };
     // Assigning an identical scrollLeft doesn't refire 'scroll',
-    // so the two listeners can't ping-pong.
-    const fromTable = () => { top.scrollLeft = el.scrollLeft; };
-    const fromTop = () => { el.scrollLeft = top.scrollLeft; };
+    // so the two listeners can't ping-pong. Both handlers re-measure so the
+    // bar always covers the table's CURRENT full width (lazy-loaded rows /
+    // extra columns can widen it after mount).
+    const fromTable = () => { update(); top.scrollLeft = el.scrollLeft; };
+    const fromTop = () => { update(); el.scrollLeft = top.scrollLeft; };
 
     update();
     el.addEventListener('scroll', fromTable);
@@ -107,10 +115,19 @@ const TopScrollbar = ({ scrollRef, watch }) => {
     ro.observe(el);
     const tableEl = el.querySelector('table');
     if (tableEl) ro.observe(tableEl);
+    // The table NODE itself can be replaced (loading state → data) — watch
+    // for that and re-observe the new node, else the bar stops tracking it.
+    const mo = new MutationObserver(() => {
+      update();
+      const t2 = el.querySelector('table');
+      if (t2) ro.observe(t2);
+    });
+    mo.observe(el, { childList: true, subtree: true });
     return () => {
       el.removeEventListener('scroll', fromTable);
       top.removeEventListener('scroll', fromTop);
       ro.disconnect();
+      mo.disconnect();
     };
   }, [scrollRef, watch]);
 
@@ -133,6 +150,43 @@ const HScrollBox = ({ watch, children }) => {
   );
 };
 
+// Custom select that OPENS ON HOVER and closes when the mouse leaves
+// (native <select> can't do this) — used for every PMS dropdown.
+const HoverSelect = ({ value, onChange, options, minW }) => {
+  const [open, setOpen] = useState(false);
+  const current = options.find((o) => o.value === value);
+  return (
+    <div className="relative"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}>
+      <button type="button" onClick={() => setOpen(!open)}
+        className="w-full border border-gray-300 rounded px-2 py-1 text-xs text-black bg-white flex items-center justify-between gap-1.5"
+        style={minW ? { minWidth: minW } : undefined}>
+        <span className="truncate">{current ? current.label : value}</span>
+        <ChevronDownIcon className={`h-3 w-3 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        /* pt-1 (not a margin) keeps the hover unbroken across the gap */
+        <div className="absolute left-0 top-full z-50 pt-1"
+          style={{ width: 'max-content', minWidth: '100%' }}>
+          <div className="bg-white border border-gray-200 rounded-lg shadow-xl p-1 max-h-64 overflow-y-auto"
+            style={{ width: 'max-content', minWidth: '100%', maxWidth: 320 }}>
+            {options.map((o) => (
+              <button key={String(o.value)} type="button"
+                onClick={() => { onChange(o.value); setOpen(false); }}
+                className={`w-full text-left px-2 py-1 text-xs rounded whitespace-nowrap ${
+                  o.value === value ? 'text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+                style={o.value === value ? { backgroundColor: themeColor } : {}}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const REPORT_TYPES = [
   { key: 'all', name: 'All (Spare + Labour)' },
   { key: 'spare', name: 'Spare Part Sales' },
@@ -142,12 +196,14 @@ const REPORT_TYPES = [
   { key: 'service_head', name: 'Service Report Type-wise Sales' },
   // CATEGORY column exists only in the Part Sale file — spare-only report
   { key: 'category', name: 'Category-wise Sales (Spare)' },
+  // Labour SR numbers matched to the 'Response Time & MaxTTR Details' import
+  { key: 'employee_productivity', name: 'Employee Productivity' },
 ];
 
 // Fixed preview column layouts (business-given) — the Uploaded File Preview
 // shows columns in the SAME ORDER as the standard PMS Excel files.
-// [header shown, canonical field] — field null => value comes from the row's
-// extra_data (unmapped file columns), matched case/punctuation-insensitively.
+// [header shown, canonical field] — EVERY column is a real DB column now
+// (field null only as a legacy fallback to a row's old extra_data JSON).
 const FILE_LAYOUTS = {
   labour: [
     ['ZONE NAME', 'zone_name'], ['SD ID', 'soid'], ['SD NAME', 'sd_name'],
@@ -155,25 +211,32 @@ const FILE_LAYOUTS = {
     ['CLAIM INVOICE NUMBER', 'claim_invoice_no'],
     ['CLAIM INVOICE DATE', 'claim_invoice_date'],
     ['PRODUCT SEGMENT', 'product_segment'], ['SEGMENT', 'segment'],
-    ['SERIES', null], ['SR NUMBER', null], ['SR TYPE', 'sr_type'],
-    ['SR SUBTYPE', null], ['NET TAXABLE AMOUNT', 'net_taxable_amount'],
+    ['SERIES', 'series'], ['SR NUMBER', 'sr_number'], ['SR TYPE', 'sr_type'],
+    ['SR SUBTYPE', 'sr_sub_type'], ['NET TAXABLE AMOUNT', 'net_taxable_amount'],
   ],
   part: [
     ['ZONE NAME', 'zone_name'], ['SD ID', 'soid'], ['SD NAME', 'sd_name'],
     ['BRANCH ID', 'branch_id'], ['BRANCH NAME', 'branch_name'],
-    ['INSTANCE ID', null], ['SEGMENT', 'segment'],
-    ['PRODUCT SEGMENT', 'product_segment'], ['APPLICATION CODE', null],
-    ['ENGINE SERIAL NO', null], ['CLAIM INVOICE NUMBER', 'claim_invoice_no'],
+    ['INSTANCE ID', 'instance_id'], ['SEGMENT', 'segment'],
+    ['PRODUCT SEGMENT', 'product_segment'], ['APPLICATION CODE', 'application_code'],
+    ['ENGINE SERIAL NO', 'engine_serial_no'], ['CLAIM INVOICE NUMBER', 'claim_invoice_no'],
     ['CLAIM INVOICE DATE', 'claim_invoice_date'],
-    ['CLAIM INVOICE SR TYPE', 'sr_type'], ['CLAIM INVOICE SR SUB TYPE', null],
-    ['CATEGORY', null], ['PART CATEGORY', null], ['PART NUMBER', null],
-    ['PART DESCTRIPTION', null], ['QUANTITY', null],
+    ['CLAIM INVOICE SR TYPE', 'sr_type'], ['CLAIM INVOICE SR SUB TYPE', 'sr_sub_type'],
+    ['CATEGORY', 'category'], ['PART CATEGORY', 'part_category'], ['PART NUMBER', 'part_number'],
+    ['PART DESCTRIPTION', 'part_description'], ['QUANTITY', 'quantity'],
     ['NET TAXABLE AMOUNT', 'net_taxable_amount'],
   ],
 };
 
 // "Sr  Number." === "SR NUMBER" — same skeleton matching the import uses
 const tightHeader = (s) => String(s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+// Responsible Person display: FIRST + LAST name only
+// ("Hanumant Nagorao Nelge" -> "Hanumant Nelge"); full name stays in the tooltip.
+const shortName = (s) => {
+  const parts = String(s || '').trim().split(/\s+/).filter(Boolean);
+  return parts.length > 2 ? `${parts[0]} ${parts[parts.length - 1]}` : parts.join(' ');
+};
 
 // Expected file format (shown by "Check file format") — the FULL standard
 // column list of each PMS file, straight from FILE_LAYOUTS so panel and
@@ -472,6 +535,23 @@ const SalesLabourReport = () => {
   // Multi-select branch filter: [] = all branches
   const [branchSel, setBranchSel] = useState([]);
   const [showBranchPick, setShowBranchPick] = useState(false);
+  // Branch-wise Report tab (right of 'Select report type'): shows ONLY the
+  // branch picker + Branch Analysis; picking a report type returns to the
+  // normal all-records view.
+  const [branchMode, setBranchMode] = useState(false);
+  // Week-wise + breakdowns scoped to ONLY the selected branches — each
+  // section has its own checkbox; data fetched from /pms/report/branch-detail
+  // as soon as any section is ticked.
+  const [detailSecs, setDetailSecs] = useState({
+    weeks: false, months: false, segment: false, service_head: false, category: false,
+    records: false,   // SPARE/LABOUR branch tables of ONLY the selected branches
+    employee: false,  // Employee Productivity scoped to the selected branches
+  });
+  // 'records' renders straight from the report payload — no branch-detail fetch
+  const anyDetailSec = detailSecs.weeks || detailSecs.months || detailSecs.segment
+    || detailSecs.service_head || detailSecs.category;
+  const [branchDetail, setBranchDetail] = useState(null);
+  const [branchDetailLoading, setBranchDetailLoading] = useState(false);
   // 'data' shows the Uploaded File Preview box; 'report' replaces it with the
   // generated report (Back to Data returns).
   const [view, setView] = useState('data');
@@ -513,6 +593,10 @@ const SalesLabourReport = () => {
   const [historyLoading, setHistoryLoading] = useState(false);
   // Saved report opened INSIDE the modal: {id, title, as_on_date, payload}
   const [historyDetail, setHistoryDetail] = useState(null);
+  // History list filters: as-on date range + generated-by
+  const [histFrom, setHistFrom] = useState('');
+  const [histTo, setHistTo] = useState('');
+  const [histBy, setHistBy] = useState('');
 
   const loadSummary = useCallback(async () => {
     try {
@@ -585,9 +669,20 @@ const SalesLabourReport = () => {
     const cancel = !row.is_cancelled;
     const typeName = previewType === 'part' ? 'Part Sale' : 'Labour';
     const inv = row.claim_invoice_no ? `invoice ${row.claim_invoice_no}` : 'this row';
-    if (!window.confirm(cancel
-      ? `Cancel this ${typeName} row (${inv})? Only THIS row stays stored but will NOT be counted in any report — other rows of the invoice are not affected.`
-      : `Restore this ${typeName} row (${inv})? It will be counted in reports again.`)) return;
+    const result = await Swal.fire({
+      title: cancel ? 'Cancel this row?' : 'Restore this row?',
+      html: cancel
+        ? `Only THIS ${typeName} row (<b>${inv}</b>) will be excluded from every report.<br/>` +
+          'It stays stored in the database — other rows of the invoice are not affected.'
+        : `This ${typeName} row (<b>${inv}</b>) will be counted in reports again.`,
+      icon: cancel ? 'warning' : 'question',
+      showCancelButton: true,
+      confirmButtonColor: cancel ? '#f59e0b' : '#2f3192',
+      cancelButtonColor: '#6B7280',
+      confirmButtonText: cancel ? 'Yes, cancel row' : 'Yes, restore',
+      cancelButtonText: 'No',
+    });
+    if (!result.isConfirmed) return;
     setCancelBusy(row.id);
     try {
       const res = await fetch(`${API}/pms/data/cancel-row`, {
@@ -615,6 +710,26 @@ const SalesLabourReport = () => {
   }, []);
 
   useEffect(() => { loadSummary(); loadBatches(); }, [loadSummary, loadBatches]);
+
+  // Selected-branch detail: week-wise split + branch-scoped breakdowns.
+  // Refetches whenever the toggle is open and the selection / period changes.
+  useEffect(() => {
+    if (!anyDetailSec || !report || !branchSel.length) { setBranchDetail(null); return; }
+    let stale = false;
+    (async () => {
+      setBranchDetailLoading(true);
+      try {
+        const url = `${API}/pms/report/branch-detail?as_on=${report.as_on}` +
+          (report.from_date ? `&from_date=${report.from_date}` : '') +
+          `&branches=${encodeURIComponent(branchSel.join(','))}`;
+        const res = await fetch(url, { headers: authHeaders() });
+        const data = await res.json();
+        if (!stale && res.ok && data.success) setBranchDetail(data);
+      } catch { if (!stale) setBranchDetail(null); }
+      finally { if (!stale) setBranchDetailLoading(false); }
+    })();
+    return () => { stale = true; };
+  }, [anyDetailSec, report, branchSel]);
   useEffect(() => { loadPreview(previewType); }, [previewType, loadPreview]);
 
   // The uploaded data's overall date range — presets and pickers stay inside it.
@@ -742,25 +857,26 @@ const SalesLabourReport = () => {
   // in the data that the layout doesn't know is appended at the end so
   // nothing from the file is hidden.
   const previewCols = useMemo(() => {
-    const extraKeys = [];          // actual keys, first-seen order
-    const byTight = {};            // skeleton -> actual key
+    const layout = FILE_LAYOUTS[previewType] || [];
+    // Headers already shown as REAL columns — legacy extra_data copies of
+    // these (rows imported before the column split) must NOT repeat at the
+    // end of the table.
+    const layoutTights = new Set(layout.map(([h]) => tightHeader(h)));
+    layoutTights.add('PARTDESCRIPTION');   // correct spelling of the file's typo
+
+    const extraKeys = [];          // truly unknown columns, first-seen order
+    const seenTight = new Set();
     previewRows.forEach((r) => {
       Object.keys(r.extra || {}).forEach((k) => {
         const t = tightHeader(k);
-        if (!(t in byTight)) { byTight[t] = k; extraKeys.push(k); }
+        if (layoutTights.has(t) || seenTight.has(t)) return;
+        seenTight.add(t);
+        extraKeys.push(k);
       });
     });
 
-    const layout = FILE_LAYOUTS[previewType] || [];
-    const cols = layout.map(([header, field]) => (
-      field
-        ? { key: field, label: header, extra: false }
-        : { key: byTight[tightHeader(header)] ?? header, label: header, extra: true }
-    ));
-    const used = new Set(cols.filter((c) => c.extra).map((c) => c.key));
-    extraKeys.forEach((k) => {
-      if (!used.has(k)) cols.push({ key: k, label: k, extra: true });
-    });
+    const cols = layout.map(([header, field]) => ({ key: field, label: header, extra: false }));
+    extraKeys.forEach((k) => cols.push({ key: k, label: k, extra: true }));
     return cols;
   }, [previewRows, previewType]);
 
@@ -802,12 +918,31 @@ const SalesLabourReport = () => {
     if (!report) return;
     setSavingReport(true);
     try {
+      // Snapshot the Employee Productivity source data too, so the saved
+      // report replays it without depending on later uploads (non-fatal).
+      let empProd = null;
+      try {
+        const r2 = await fetch(`${API}/pms/report/employee-productivity`, { headers: authHeaders() });
+        const d2 = await r2.json();
+        if (r2.ok && d2.success) empProd = d2;
+      } catch { /* saved without the productivity section */ }
+      // Branch-wise view saved AS-IS: the selection, the ticked sections and
+      // their loaded detail data — so history replays exactly what's on screen.
+      const payload = empProd ? { ...report, emp_productivity: empProd } : { ...report };
+      if (branchMode && selBranches.length) {
+        payload.branch_view = {
+          branches: selBranches,
+          names: selBranches.map((id) => branchOptions.find((b) => b.id === id)?.name || ''),
+          secs: detailSecs,
+          detail: branchDetail,
+        };
+      }
       const res = await fetch(`${API}/pms/report/save`, {
         method: 'POST', headers: jsonHeaders(),
         body: JSON.stringify({
           as_on: report.as_on,
-          title: `PMS Report as on ${fmtFull(report.as_on)}`,
-          payload: report,
+          title: `PMS ${branchMode && selBranches.length ? 'Branch-wise ' : ''}Report as on ${fmtFull(report.as_on)}`,
+          payload,
         }),
       });
       const data = await res.json();
@@ -845,17 +980,18 @@ const SalesLabourReport = () => {
     }
   };
 
-  // Push the saved report into the main report view (for filters/export).
-  const loadHistoryToPage = () => {
-    if (!historyDetail) return;
-    setReport(historyDetail.payload);
-    setView('report');
-    setSavedHist(true);   // it came from history, so it is already saved
-    setShowHistory(false);
-    setHistoryDetail(null);
-  };
-
   const deleteHistoryItem = async (id) => {
+    const result = await Swal.fire({
+      title: 'Delete this saved report?',
+      text: 'The saved report will be permanently removed from history. This cannot be undone.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#EF4444',
+      cancelButtonColor: '#6B7280',
+      confirmButtonText: 'Yes, delete',
+      cancelButtonText: 'Cancel',
+    });
+    if (!result.isConfirmed) return;
     try {
       const res = await fetch(`${API}/pms/report/history/${id}`, { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
@@ -874,11 +1010,11 @@ const SalesLabourReport = () => {
   const regionRows = typeRows;
   const branchOptions = regionRows.map((r) => ({ id: r.branch_id, name: r.branch_name }));
   // Guard: a branch hidden by the region filter falls back to All
-  // Selected branches present in the current rows; [] = all
+  // Selected branches present in the current rows; [] = all.
+  // Used ONLY by the Branch-wise Report view — the standalone report types
+  // (Spare Part Sales / Labour Sales) always show EVERY branch.
   const selBranches = branchSel.filter((id) => regionRows.some((r) => r.branch_id === id));
-  const branchRows = selBranches.length
-    ? regionRows.filter((r) => selBranches.includes(r.branch_id))
-    : regionRows;
+  const branchRows = regionRows;
   const totals = branchRows.reduce((a, r) => ({
     monthly_target: a.monthly_target + (r.monthly_target || 0),
     daily_target: a.daily_target + (r.daily_target || 0),
@@ -894,27 +1030,31 @@ const SalesLabourReport = () => {
     ? report[reportType] : null;
   // Category-wise (Spare only — the Labour file has no CATEGORY column)
   const categoryRows = report && reportType === 'category' ? (report.category || []) : null;
+  // Employee Productivity — self-contained view (own data fetch + period);
+  // every generated-report section below is hidden while it is selected.
+  const isEmpProd = reportType === 'employee_productivity';
 
   // Required daily run-rate (summary tile): per type, the remaining balance
   // for the period ÷ remaining working days (working days derived from the
   // AOP daily targets: total = target/daily, elapsed = target_till/daily),
   // summed over spares + labour. Current run-rate shown alongside.
-  const runRate = report ? (() => {
-    let req = 0, cur = 0, any = false;
-    [report.spare_rows, report.labour_rows].forEach((rows) => {
+  // Kept separately per type — the tiles show a Spare row and a Labour row.
+  const runRateBy = report ? (() => {
+    const calc = (rows) => {
       const mt = (rows || []).reduce((s, r) => s + (r.monthly_target || 0), 0);
       const dt = (rows || []).reduce((s, r) => s + (r.daily_target || 0), 0);
       const tt = (rows || []).reduce((s, r) => s + (r.target_till || 0), 0);
       const at = (rows || []).reduce((s, r) => s + (r.achieved_till || 0), 0);
-      if (!dt || !mt) return;
-      any = true;
+      if (!dt || !mt) return null;
       const totalWd = mt / dt;
       const elapsedWd = Math.min(totalWd, tt / dt);
       const remainingWd = Math.max(0, totalWd - elapsedWd);
-      if (remainingWd > 0) req += Math.max(0, mt - at) / remainingWd;
-      if (elapsedWd > 0) cur += at / elapsedWd;
-    });
-    return any ? { req, cur } : null;
+      return {
+        req: remainingWd > 0 ? Math.max(0, mt - at) / remainingWd : 0,
+        cur: elapsedWd > 0 ? at / elapsedWd : 0,
+      };
+    };
+    return { spare: calc(report.spare_rows), labour: calc(report.labour_rows) };
   })() : null;
 
   // "All" view — Spare and Labour side by side in one frame, like the
@@ -930,15 +1070,30 @@ const SalesLabourReport = () => {
   // restyle them — the class definitions live in the injected <style> below.
   const pctCellCls = (p) => (p == null ? '' : p >= 100 ? 'pms-pct-good' : p >= 80 ? 'pms-pct-mid' : 'pms-pct-low');
 
-  const renderAllSide = (title, allRows, dl) => {
+  // Spare + Labour side-by-side pair with MERGED region bands: ONE full-width
+  // "Maharashtra (MH)" / "Karnataka (KA)" bar spans BOTH tables, with each
+  // side's block for that region under it. Every small table shares the same
+  // fixed column grid, so rows and columns stay aligned across regions and
+  // between the two sides. Used by the All view AND the Branch-wise view.
+  const renderMergedPair = (spareAll, labourAll) => {
+    const dlS = fmtDay(report?.as_on_part || report?.as_on);
+    const dlL = fmtDay(report?.as_on_labour || report?.as_on);
     const lk = (v) => (v == null ? '—' : (Number(v) / 100000).toFixed(2));
     // Region dropdown: show MH / KA separately (no long scroll) or everything
-    const rows = allRegion === 'All' ? (allRows || [])
-      : (allRows || []).filter((r) => r.region === allRegion);
-    const byRegion = {};
-    rows.forEach((r) => { (byRegion[r.region] = byRegion[r.region] || []).push(r); });
-    const regionKeys = ['MH', 'KA'].filter((k) => byRegion[k])
-      .concat(Object.keys(byRegion).filter((k) => k !== 'MH' && k !== 'KA'));
+    const pick = (allRows) => (allRegion === 'All' ? (allRows || [])
+      : (allRows || []).filter((r) => r.region === allRegion));
+    const spareRows = pick(spareAll);
+    const labourRows = pick(labourAll);
+    const groupBy = (rows) => {
+      const by = {};
+      rows.forEach((r) => { (by[r.region] = by[r.region] || []).push(r); });
+      return by;
+    };
+    const bySp = groupBy(spareRows);
+    const byLb = groupBy(labourRows);
+    const allRegs = { ...bySp, ...byLb };
+    const regionKeys = ['MH', 'KA'].filter((k) => allRegs[k])
+      .concat(Object.keys(allRegs).filter((k) => k !== 'MH' && k !== 'KA'));
     const sum = (rs) => rs.reduce((a, r) => ({
       monthly_target: a.monthly_target + (r.monthly_target || 0),
       daily_target: a.daily_target + (r.daily_target || 0),
@@ -965,86 +1120,121 @@ const SalesLabourReport = () => {
           <td className={`${tdA} font-semibold ${pctCellCls(pct)}`}>
             {pct == null ? '—' : pct + ' %'}
           </td>
-          <td className={tdA}>
-            {lk(s.short_fall_till)}
-          </td>
+          <td className={tdA}>{lk(s.short_fall_till)}</td>
           <td className={tdA}>{lk(s.balance_month)}</td>
         </>
       );
     };
+    // one shared fixed column grid for every small table below
+    const sideCols = (
+      <colgroup>
+        <col style={{ width: '12%' }} />
+        <col style={{ width: '10%' }} />
+        {Array.from({ length: 9 }, (_, ci) => (
+          <col key={ci} style={{ width: `${78 / 9}%` }} />
+        ))}
+      </colgroup>
+    );
+    // Synced horizontal scroll per column (SPARE / LABOUR): scrolling any
+    // block (MH, KA or Total) auto-scrolls the others of the same side.
+    const syncScroll = (grp) => (e) => {
+      const left = e.currentTarget.scrollLeft;
+      document.querySelectorAll(`[data-sync-scroll="${grp}"]`).forEach((el) => {
+        if (el !== e.currentTarget && Math.abs(el.scrollLeft - left) > 1) el.scrollLeft = left;
+      });
+    };
+    const sideTable = (children, grp) => (
+      <div className="border border-gray-200 rounded overflow-x-auto"
+        data-sync-scroll={grp} onScroll={grp ? syncScroll(grp) : undefined}>
+        <table className="w-full text-[11px] border-collapse min-w-[600px]" style={{ tableLayout: 'fixed' }}>
+          {sideCols}
+          <tbody>{children}</tbody>
+        </table>
+      </div>
+    );
+    const regionBlock = (rs, dl, reg, grp) => sideTable(
+      <>
+        <tr>
+          <th className={thA}>Responsible Person</th>
+          <th className={thA}>Branch</th>
+          <th className={thA}>Monthly Target</th>
+          <th className={thA}>Daily Target</th>
+          <th className={thA}>Achi. On {dl}</th>
+          <th className={thA}>Target Till {dl}</th>
+          <th className={thA}>Achi. Till {dl}</th>
+          <th className={thA}>Invoice Count</th>
+          <th className={thA}>% Achieved Till Date</th>
+          <th className={thA}>Short-Fall Till Date</th>
+          <th className={thA}>Balance For Month</th>
+        </tr>
+        {rs.length === 0 ? (
+          <tr><td colSpan={11} className="text-center py-2 text-gray-500 border border-gray-200">No rows</td></tr>
+        ) : rs.map((r) => (
+          <tr key={r.branch_id} className="hover:bg-gray-50/60">
+            <td className="px-1 py-1 border border-gray-200 text-left whitespace-nowrap overflow-hidden text-ellipsis"
+              title={r.responsible_person || ''}>
+              {shortName(r.responsible_person) || '—'}
+            </td>
+            <td className="px-1 py-1 border border-gray-200 text-left whitespace-nowrap overflow-hidden text-ellipsis font-medium"
+              title={r.branch_name || r.branch_id}>
+              {r.branch_name}
+            </td>
+            {metricCells(r)}
+          </tr>
+        ))}
+        {rs.length > 0 && (
+          <tr className="font-semibold pms-subtotal-row">
+            <td className={`${tdA} text-left`} colSpan={2}>
+              {reg === 'MH' ? 'Maharashtra Total' : reg === 'KA' ? 'Karnataka Total' : `${reg} Total`}
+            </td>
+            {metricCells(sum(rs))}
+          </tr>
+        )}
+      </>,
+      grp
+    );
+    const totalBlock = (rows, grp) => sideTable(
+      <tr className="font-bold pms-grand-total">
+        <td className={`${tdA} text-left`} colSpan={2}>Total</td>
+        {metricCells(sum(rows))}
+      </tr>,
+      grp
+    );
     return (
-      <div className="border border-gray-200 rounded-lg overflow-hidden self-start">
-        <div className="px-2 py-1 text-[11px] font-bold text-white flex items-center justify-between gap-2"
-          style={{ backgroundColor: themeColor }}>
-          <span>{title}</span>
-          <span className="font-medium text-white/80">As on {dl} · Lakh ₹</span>
+      <div className="space-y-1.5">
+        {/* SPARE / LABOUR title bars */}
+        <div className="grid grid-cols-2 max-xl:grid-cols-1 gap-2">
+          {[['SPARE', dlS], ['LABOUR', dlL]].map(([t, dl]) => (
+            <div key={t} className="px-2 py-1 text-[11px] font-bold text-white flex items-center justify-between gap-2 rounded"
+              style={{ backgroundColor: themeColor }}>
+              <span>{t}</span>
+              <span className="font-medium text-white/80">As on {dl} · Lakh ₹</span>
+            </div>
+          ))}
         </div>
-        <HScrollBox watch={`${title}-${allRegion}-${rows.length}`}>
-          <table className="w-full text-[11px] border-collapse min-w-[600px]">
-            <tbody>
-              {(rows || []).length === 0 ? (
-                <tr><td colSpan={11} className="text-center py-4 text-gray-500 border border-gray-200">No rows</td></tr>
-              ) : (
-                <>
-                  {regionKeys.map((reg) => {
-                    const rs = byRegion[reg];
-                    const sub = sum(rs);
-                    return (
-                      <React.Fragment key={reg}>
-                        {/* region band first, then that block's column names —
-                            like the Excel sheet */}
-                        <tr>
-                          <td colSpan={11}
-                            className="px-1 py-1 text-center font-bold border border-gray-200 pms-region-band">
-                            {reg === 'MH' ? 'Maharashtra (MH)' : reg === 'KA' ? 'Karnataka (KA)' : reg}
-                          </td>
-                        </tr>
-                        <tr>
-                          <th className={thA}>Responsible Person</th>
-                          <th className={thA}>Branch</th>
-                          <th className={thA}>Monthly Target</th>
-                          <th className={thA}>Daily Target</th>
-                          <th className={thA}>Achi. On {dl}</th>
-                          <th className={thA}>Target Till {dl}</th>
-                          <th className={thA}>Achi. Till {dl}</th>
-                          <th className={thA}>Invoice Count</th>
-                          <th className={thA}>% Achieved Till Date</th>
-                          <th className={thA}>Short-Fall Till Date</th>
-                          <th className={thA}>Balance For Month</th>
-                        </tr>
-                        {rs.map((r) => (
-                          <tr key={r.branch_id} className="hover:bg-gray-50/60">
-                            <td className="px-1 py-1 border border-gray-200 text-left whitespace-nowrap overflow-hidden text-ellipsis max-w-[70px]"
-                              title={r.responsible_person || ''}>
-                              {r.responsible_person || '—'}
-                            </td>
-                            <td className="px-1 py-1 border border-gray-200 text-left leading-tight break-words max-w-[80px] font-medium"
-                              title={r.branch_id}>
-                              {r.branch_name}
-                            </td>
-                            {metricCells(r)}
-                          </tr>
-                        ))}
-                        <tr className="font-semibold pms-subtotal-row">
-                          <td className={`${tdA} text-left`} colSpan={2}>
-                            {reg === 'MH' ? 'Maharashtra Total' : reg === 'KA' ? 'Karnataka Total' : `${reg} Total`}
-                          </td>
-                          {metricCells(sub)}
-                        </tr>
-                      </React.Fragment>
-                    );
-                  })}
-                  {allRegion === 'All' && (
-                    <tr className="bg-gray-50 font-bold">
-                      <td className={`${tdA} text-left`} colSpan={2}>Total</td>
-                      {metricCells(sum(rows || []))}
-                    </tr>
-                  )}
-                </>
-              )}
-            </tbody>
-          </table>
-        </HScrollBox>
+        {regionKeys.map((reg, ri) => (
+          <React.Fragment key={reg}>
+            {/* one-row gap between region blocks (MH ↔ KA) */}
+            {ri > 0 && <div className="h-1.5" />}
+            {/* ONE merged region band across BOTH tables */}
+            <div className="px-1 py-1 text-center text-[11px] font-bold border border-gray-200 rounded pms-region-band">
+              {reg === 'MH' ? 'Maharashtra (MH)' : reg === 'KA' ? 'Karnataka (KA)' : reg}
+            </div>
+            <div className="grid grid-cols-2 max-xl:grid-cols-1 gap-2">
+              {regionBlock(bySp[reg] || [], dlS, reg, 'sp')}
+              {regionBlock(byLb[reg] || [], dlL, reg, 'lb')}
+            </div>
+          </React.Fragment>
+        ))}
+        {regionKeys.length === 0 && (
+          <p className="text-center py-3 text-xs text-gray-500">No rows</p>
+        )}
+        {allRegion === 'All' && regionKeys.length > 0 && (
+          <div className="grid grid-cols-2 max-xl:grid-cols-1 gap-2">
+            {totalBlock(spareRows, 'sp')}
+            {totalBlock(labourRows, 'lb')}
+          </div>
+        )}
       </div>
     );
   };
@@ -1069,36 +1259,182 @@ const SalesLabourReport = () => {
       const XLSX = await import('xlsx');
       const typeName = REPORT_TYPES.find((t) => t.key === reportType)?.name || 'Report';
       const s = report.summary;
+      // Money exported in Lakh — same as every on-screen table (23 = ₹23,00,000)
+      const L = (v) => (v == null ? null : +(Number(v) / 100000).toFixed(2));
+      // Header block mirrors the two summary tile rows (Spare then Labour)
+      const invOf = (rows) => (rows || []).reduce((a, r) => a + (r.invoice_count_till || 0), 0);
+      const tileRows = (nm, sale, target, rows, rr) => [
+        [`${nm} Target (Lakh ₹)`, target ? L(target) : '—'],
+        [`Total ${nm} Sale (Lakh ₹)`, L(sale)],
+        [`${nm} % vs AOP Target`, target ? +(sale / target * 100).toFixed(1) + ' %' : '—'],
+        [`${nm} Invoices`, invOf(rows)],
+        [`Current ${nm} Run-Rate (Lakh ₹/day)`, rr ? L(rr.cur) : '—'],
+        [`Required ${nm} Run-Rate (Lakh ₹/day)`, rr ? L(rr.req) : '—'],
+      ];
       const info = [
         ['Performance Management System — Spare & Labour Sale'],
         [`Generated Report : As on ${fmtFull(report.as_on)}`],
         ['Period', `${fmtFull(report.from_date)} → ${fmtFull(report.as_on)}`],
-        ['Report Type', typeName],
-        ['Total Spare Sale (₹)', s.total_spare_sale],
-        ['Spare % Achieved (vs AOP)', s.total_spare_target
-          ? +(s.total_spare_sale / s.total_spare_target * 100).toFixed(1) + ' %' : '—'],
-        ['Total Labour Sale (₹)', s.total_labour_sale],
-        ['Labour % Achieved (vs AOP)', s.total_labour_target
-          ? +(s.total_labour_sale / s.total_labour_target * 100).toFixed(1) + ' %' : '—'],
-        ['Overall % Achieved', s.overall_pct_achieved != null ? s.overall_pct_achieved + ' %' : '—'],
-        ['Total Invoices', s.total_invoices],
+        ['Report Type', branchMode
+          ? `Branch-wise Report (${selBranches.length} branch${selBranches.length > 1 ? 'es' : ''})`
+          : typeName],
+        ...tileRows('Spare', s.total_spare_sale, s.total_spare_target, report.spare_rows, runRateBy?.spare),
+        ...tileRows('Labour', s.total_labour_sale, s.total_labour_target, report.labour_rows, runRateBy?.labour),
+        ['Values in Lakh ₹ — 23 means ₹23,00,000'],
         [],
       ];
 
-      // "All" view — one workbook, Spare + Labour as separate sheets
-      if (reportType === 'all') {
-        const wb = XLSX.utils.book_new();
+      // Same pivot as the on-screen table: region blocks (MH then KA), a
+      // subtotal row per region, then the grand total — money in Lakh.
+      // Shared by the "All" workbook and the Branch-wise records sheets.
         const mkSheet = (rws, dl) => {
           const hdr = ['Region', 'Branch', 'Responsible Person', 'Monthly Target', 'Daily Target',
             `Achi. On ${dl}`, `Target Till ${dl}`, `Achi. Till ${dl}`, `Invoice Count Till ${dl}`,
             '% Achieved Till Date', 'Short-Fall Till Date', 'Balance For Month'];
-          const data = (rws || []).map((r) => [r.region, r.branch_name, r.responsible_person,
-            r.monthly_target, r.daily_target, r.achieved_on, r.target_till, r.achieved_till,
-            r.invoice_count_till, r.pct_achieved, r.short_fall_till, r.balance_month]);
+          const byRegion = {};
+          (rws || []).forEach((r) => { (byRegion[r.region] = byRegion[r.region] || []).push(r); });
+          const regionKeys = ['MH', 'KA'].filter((k) => byRegion[k])
+            .concat(Object.keys(byRegion).filter((k) => k !== 'MH' && k !== 'KA'));
+          const sumR = (rs) => rs.reduce((a, r) => ({
+            mt: a.mt + (r.monthly_target || 0), dt: a.dt + (r.daily_target || 0),
+            ao: a.ao + (r.achieved_on || 0), tt: a.tt + (r.target_till || 0),
+            at: a.at + (r.achieved_till || 0), ic: a.ic + (r.invoice_count_till || 0),
+            sf: a.sf + (r.short_fall_till || 0), bm: a.bm + (r.balance_month || 0),
+          }), { mt: 0, dt: 0, ao: 0, tt: 0, at: 0, ic: 0, sf: 0, bm: 0 });
+          const totRow = (label, t) => [label, '', '', L(t.mt), L(t.dt), L(t.ao), L(t.tt), L(t.at),
+            t.ic, t.tt ? +(t.at / t.tt * 100).toFixed(1) : null, L(t.sf), L(t.bm)];
+          const data = [];
+          regionKeys.forEach((reg) => {
+            byRegion[reg].forEach((r, i) => data.push([
+              i === 0 ? reg : '', r.branch_name, r.responsible_person,
+              L(r.monthly_target), L(r.daily_target), L(r.achieved_on), L(r.target_till),
+              L(r.achieved_till), r.invoice_count_till, r.pct_achieved,
+              L(r.short_fall_till), L(r.balance_month)]));
+            data.push(totRow(reg === 'MH' ? 'Maharashtra Total'
+              : reg === 'KA' ? 'Karnataka Total' : `${reg} Total`, sumR(byRegion[reg])));
+          });
+          data.push(totRow('Total', sumR(rws || [])));
           const ws = XLSX.utils.aoa_to_sheet([...info, hdr, ...data]);
           ws['!cols'] = hdr.map((h) => ({ wch: Math.max(14, String(h).length + 2) }));
           return ws;
         };
+
+      // ---- Branch-wise Report mode: export the Branch Analysis view ----
+      if (branchMode) {
+        if (!selBranches.length) { toast.error('Branch-wise Report — select branches first'); return; }
+        const wb = XLSX.utils.book_new();
+        const allIds = [...new Set([...(report.spare_rows || []), ...(report.labour_rows || [])]
+          .map((r) => r.branch_id))];
+        const totalOf = (id) =>
+          ((report.spare_rows || []).find((r) => r.branch_id === id)?.achieved_till || 0) +
+          ((report.labour_rows || []).find((r) => r.branch_id === id)?.achieved_till || 0);
+        const ranked = allIds.map((id) => ({ id, t: totalOf(id) })).sort((a, b) => b.t - a.t);
+        const rrOf = (r) => {
+          if (!r || !r.daily_target || !r.monthly_target) return null;
+          const totalWd = r.monthly_target / r.daily_target;
+          const elapsedWd = Math.min(totalWd, (r.target_till || 0) / r.daily_target);
+          const remWd = Math.max(0, totalWd - elapsedWd);
+          return {
+            req: remWd > 0 ? Math.max(0, r.monthly_target - (r.achieved_till || 0)) / remWd : 0,
+            cur: elapsedWd > 0 ? (r.achieved_till || 0) / elapsedWd : 0,
+          };
+        };
+        const hdr1 = ['Branch', 'Rank', 'SPARE', '', '', '', '', '', 'LABOUR', '', '', '', '', ''];
+        const hdr2 = ['', '',
+          'Target', 'Total Sale', '% vs AOP Target', 'Invoices', 'Current Run-Rate (L/day)', 'Required Run-Rate (L/day)',
+          'Target', 'Total Sale', '% vs AOP Target', 'Invoices', 'Current Run-Rate (L/day)', 'Required Run-Rate (L/day)'];
+        const rowsA = selBranches.map((id) => {
+          const sp = (report.spare_rows || []).find((r) => r.branch_id === id);
+          const lb = (report.labour_rows || []).find((r) => r.branch_id === id);
+          const base = sp || lb;
+          if (!base) return null;
+          const half = (r) => {
+            const rr = rrOf(r);
+            const tgt = r?.monthly_target || 0, sale = r?.achieved_till || 0;
+            return [L(tgt), L(sale), tgt ? +(sale / tgt * 100).toFixed(1) : null,
+              r?.invoice_count_till || 0, rr ? L(rr.cur) : null, rr ? L(rr.req) : null];
+          };
+          return [`${base.branch_name} (${base.region})`,
+            `#${1 + ranked.findIndex((x) => x.id === id)} of ${ranked.length}`,
+            ...half(sp), ...half(lb)];
+        }).filter(Boolean);
+        const ws = XLSX.utils.aoa_to_sheet([...info, hdr1, hdr2, ...rowsA]);
+        const r0 = info.length;
+        ws['!merges'] = [
+          { s: { r: r0, c: 0 }, e: { r: r0 + 1, c: 0 } },
+          { s: { r: r0, c: 1 }, e: { r: r0 + 1, c: 1 } },
+          { s: { r: r0, c: 2 }, e: { r: r0, c: 7 } },
+          { s: { r: r0, c: 8 }, e: { r: r0, c: 13 } },
+        ];
+        ws['!cols'] = [{ wch: 26 }, { wch: 10 }, ...Array(12).fill({ wch: 14 })];
+        XLSX.utils.book_append_sheet(wb, ws, 'Branch Analysis');
+
+        // Every ticked "Show for selected branches" section becomes a sheet
+        if (detailSecs.records) {
+          XLSX.utils.book_append_sheet(wb, mkSheet(
+            (report.spare_rows || []).filter((r) => selBranches.includes(r.branch_id)),
+            fmtDay(report.as_on_part || report.as_on)), 'Spare');
+          XLSX.utils.book_append_sheet(wb, mkSheet(
+            (report.labour_rows || []).filter((r) => selBranches.includes(r.branch_id)),
+            fmtDay(report.as_on_labour || report.as_on)), 'Labour');
+        }
+        if (branchDetail) {
+          const simpleSheet = (name, hdr, data) => {
+            const ws2 = XLSX.utils.aoa_to_sheet([...info, hdr, ...data]);
+            ws2['!cols'] = hdr.map((h) => ({ wch: Math.max(14, String(h).length + 2) }));
+            XLSX.utils.book_append_sheet(wb, ws2, name);
+          };
+          if (detailSecs.weeks) {
+            simpleSheet('Week-wise',
+              ['Week', 'From', 'To', 'Spare Sale', 'Labour Sale', 'Total', 'Invoices'],
+              (branchDetail.weeks || []).map((w) => [
+                `Week ${w.week}`, w.start, w.end, L(w.part), L(w.labour), L(w.total), w.invoices]));
+          }
+          if (detailSecs.months) {
+            simpleSheet('Month-wise',
+              ['Month', 'Spare Sale', 'Labour Sale', 'Total', 'Invoices'],
+              (branchDetail.months || []).map((m) => [
+                m.month, L(m.part), L(m.labour), L(m.total), m.invoices]));
+          }
+          if (detailSecs.segment) {
+            simpleSheet('Segment',
+              ['Segment', 'Spare Sale', 'Labour Sale', 'Total', 'Invoices'],
+              (branchDetail.segment || []).map((r) => [
+                r.name, L(r.part), L(r.labour), L(r.total), r.invoices]));
+          }
+          if (detailSecs.service_head) {
+            simpleSheet('Service Head',
+              ['Service Head', 'Spare Sale', 'Labour Sale', 'Total', 'Invoices'],
+              (branchDetail.service_head || []).map((r) => [
+                r.name, L(r.part), L(r.labour), L(r.total), r.invoices]));
+          }
+          if (detailSecs.category) {
+            simpleSheet('Category',
+              ['Category', 'Spare Sale', 'Quantity', 'Line Items', 'Invoices'],
+              (branchDetail.category || []).map((r) => [
+                r.name, L(r.part), Math.round(r.qty || 0), r.lines, r.invoices]));
+          }
+        }
+        // Employee Productivity scoped to the selected branches
+        if (detailSecs.employee) {
+          try {
+            const epRes = await fetch(`${API}/pms/report/employee-productivity`, { headers: authHeaders() });
+            const epData = await epRes.json();
+            if (epRes.ok && epData.success) {
+              const names = selBranches.map((id) => branchOptions.find((b) => b.id === id)?.name || '');
+              const epWs = buildEpSheet(XLSX, epData, report.from_date || '', report.as_on || '', names);
+              if (epWs) XLSX.utils.book_append_sheet(wb, epWs, 'Employee Productivity');
+            }
+          } catch { /* best-effort — the rest of the workbook still exports */ }
+        }
+        XLSX.writeFile(wb, `PMS_Branch_Analysis_${report.as_on}.xlsx`);
+        toast.success('Branch-wise report exported');
+        return;
+      }
+
+      // "All" view — one workbook, Spare + Labour as separate sheets
+      if (reportType === 'all') {
+        const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, mkSheet(report.spare_rows, fmtDay(report.as_on_part || report.as_on)), 'Spare');
         XLSX.utils.book_append_sheet(wb, mkSheet(report.labour_rows, fmtDay(report.as_on_labour || report.as_on)), 'Labour');
         const mkBreak = (label, rws) => {
@@ -1110,9 +1446,9 @@ const SalesLabourReport = () => {
           const hdr = [label, 'Spare Sale', '% Spare', 'Labour Sale', '% Labour',
             'Total', '% Total', 'Invoices', '% Invoices'];
           const data = (rws || []).map((r) => [r.name,
-            r.part, pc(r.part, tot.part), r.labour, pc(r.labour, tot.labour),
-            r.total, pc(r.total, tot.total), r.invoices, pc(r.invoices, tot.invoices)]);
-          data.push(['Total', tot.part, 100, tot.labour, 100, tot.total, 100, tot.invoices, 100]);
+            L(r.part), pc(r.part, tot.part), L(r.labour), pc(r.labour, tot.labour),
+            L(r.total), pc(r.total, tot.total), r.invoices, pc(r.invoices, tot.invoices)]);
+          data.push(['Total', L(tot.part), 100, L(tot.labour), 100, L(tot.total), 100, tot.invoices, 100]);
           const ws = XLSX.utils.aoa_to_sheet([...info, hdr, ...data]);
           ws['!cols'] = hdr.map((h) => ({ wch: Math.max(14, String(h).length + 2) }));
           return ws;
@@ -1130,15 +1466,25 @@ const SalesLabourReport = () => {
           const pc = (v, t) => (t ? +(v / t * 100).toFixed(1) : null);
           const hdr = ['Category', 'Spare Sale', '% Spare', 'Quantity', 'Line Items',
             'Invoices', '% Invoices', 'Avg / Invoice'];
-          const data = cr.map((r) => [r.name, r.part, pc(r.part, ct.part),
+          const data = cr.map((r) => [r.name, L(r.part), pc(r.part, ct.part),
             Math.round(r.qty || 0), r.lines, r.invoices, pc(r.invoices, ct.invoices),
-            r.invoices ? +(r.part / r.invoices).toFixed(2) : null]);
-          data.push(['Total', ct.part, 100, Math.round(ct.qty), ct.lines, ct.invoices, 100,
-            ct.invoices ? +(ct.part / ct.invoices).toFixed(2) : null]);
+            r.invoices ? L(r.part / r.invoices) : null]);
+          data.push(['Total', L(ct.part), 100, Math.round(ct.qty), ct.lines, ct.invoices, 100,
+            ct.invoices ? L(ct.part / ct.invoices) : null]);
           const ws = XLSX.utils.aoa_to_sheet([...info, hdr, ...data]);
           ws['!cols'] = hdr.map((h) => ({ wch: Math.max(14, String(h).length + 2) }));
           XLSX.utils.book_append_sheet(wb, ws, 'Category');
         }
+        // Employee Productivity — same section the All view shows below the
+        // tables (its data comes from its own endpoint, so fetch it here)
+        try {
+          const epRes = await fetch(`${API}/pms/report/employee-productivity`, { headers: authHeaders() });
+          const epData = await epRes.json();
+          if (epRes.ok && epData.success) {
+            const epWs = buildEpSheet(XLSX, epData, report.from_date || '', report.as_on || '');
+            if (epWs) XLSX.utils.book_append_sheet(wb, epWs, 'Employee Productivity');
+          }
+        } catch { /* EP sheet is best-effort — the rest of the workbook still exports */ }
         XLSX.writeFile(wb, `PMS_All_${report.as_on}.xlsx`);
         toast.success('Report exported');
         return;
@@ -1154,11 +1500,11 @@ const SalesLabourReport = () => {
         const pc = (v, t) => (t ? +(v / t * 100).toFixed(1) : null);
         header = ['Category', 'Spare Sale', '% Spare', 'Quantity', 'Line Items',
           'Invoices', '% Invoices', 'Avg / Invoice'];
-        rows = categoryRows.map((r) => [r.name, r.part, pc(r.part, ct.part),
+        rows = categoryRows.map((r) => [r.name, L(r.part), pc(r.part, ct.part),
           Math.round(r.qty || 0), r.lines, r.invoices, pc(r.invoices, ct.invoices),
-          r.invoices ? +(r.part / r.invoices).toFixed(2) : null]);
-        rows.push(['Total', ct.part, 100, Math.round(ct.qty), ct.lines, ct.invoices, 100,
-          ct.invoices ? +(ct.part / ct.invoices).toFixed(2) : null]);
+          r.invoices ? L(r.part / r.invoices) : null]);
+        rows.push(['Total', L(ct.part), 100, Math.round(ct.qty), ct.lines, ct.invoices, 100,
+          ct.invoices ? L(ct.part / ct.invoices) : null]);
       } else if (breakdownRows) {
         const label = reportType === 'regional' ? 'Region'
           : reportType === 'segment' ? 'Segment' : 'Service Head';
@@ -1170,9 +1516,9 @@ const SalesLabourReport = () => {
         header = [label, 'Spare Sale', '% Spare', 'Labour Sale', '% Labour',
           'Total', '% Total', 'Invoices', '% Invoices'];
         rows = breakdownRows.map((r) => [r.name,
-          r.part, pc(r.part, bt.part), r.labour, pc(r.labour, bt.labour),
-          r.total, pc(r.total, bt.total), r.invoices, pc(r.invoices, bt.invoices)]);
-        rows.push(['Total', bt.part, 100, bt.labour, 100, bt.total, 100, bt.invoices, 100]);
+          L(r.part), pc(r.part, bt.part), L(r.labour), pc(r.labour, bt.labour),
+          L(r.total), pc(r.total, bt.total), r.invoices, pc(r.invoices, bt.invoices)]);
+        rows.push(['Total', L(bt.part), 100, L(bt.labour), 100, L(bt.total), 100, bt.invoices, 100]);
       } else {
         header = ['Region', 'Branch', 'Responsible Person', 'Monthly Target', 'Daily Target',
           `Achi. On ${dayLabel}`, `Target Till ${dayLabel}`, `Achi. Till ${dayLabel}`,
@@ -1187,9 +1533,9 @@ const SalesLabourReport = () => {
         regionKeys.forEach((reg) => {
           byRegion[reg].forEach((r, i) => rows.push([
             i === 0 ? reg : '', r.branch_name, r.responsible_person,
-            r.monthly_target, r.daily_target, r.achieved_on, r.target_till,
-            r.achieved_till, r.invoice_count_till, r.pct_achieved,
-            r.short_fall_till, r.balance_month,
+            L(r.monthly_target), L(r.daily_target), L(r.achieved_on), L(r.target_till),
+            L(r.achieved_till), r.invoice_count_till, r.pct_achieved,
+            L(r.short_fall_till), L(r.balance_month),
           ]));
           const s = byRegion[reg].reduce((a, r) => ({
             mt: a.mt + (r.monthly_target || 0), dt: a.dt + (r.daily_target || 0),
@@ -1199,13 +1545,13 @@ const SalesLabourReport = () => {
           }), { mt: 0, dt: 0, ao: 0, tt: 0, at: 0, ic: 0, sf: 0, bm: 0 });
           rows.push([
             reg === 'MH' ? 'Maharashtra Total' : reg === 'KA' ? 'Karnataka Total' : `${reg} Total`,
-            '', '', s.mt, s.dt, s.ao, s.tt, s.at, s.ic,
-            s.tt ? +(s.at / s.tt * 100).toFixed(1) : '—', s.sf, s.bm]);
+            '', '', L(s.mt), L(s.dt), L(s.ao), L(s.tt), L(s.at), s.ic,
+            s.tt ? +(s.at / s.tt * 100).toFixed(1) : '—', L(s.sf), L(s.bm)]);
         });
-        rows.push([`Total (All)`, '', '', totals.monthly_target, totals.daily_target,
-          totals.achieved_on, totals.target_till, totals.achieved_till, totals.invoice_count_till,
+        rows.push([`Total (All)`, '', '', L(totals.monthly_target), L(totals.daily_target),
+          L(totals.achieved_on), L(totals.target_till), L(totals.achieved_till), totals.invoice_count_till,
           totals.target_till ? +(totals.achieved_till / totals.target_till * 100).toFixed(1) : '—',
-          totals.short_fall_till, totals.balance_month]);
+          L(totals.short_fall_till), L(totals.balance_month)]);
       }
 
       const ws = XLSX.utils.aoa_to_sheet([...info, header, ...rows]);
@@ -1266,6 +1612,12 @@ const SalesLabourReport = () => {
       html.dark .pms-behind { color: #fbbf24; }
       html.dark .pms-ahead { color: #4ade80; }
       html.dark .pms-mid { color: #facc15; }
+      /* Grand-total row of the SPARE / LABOUR tables — green bg, black text
+         (region subtotals keep their normal style) */
+      .pms-grand-total td { background-color: #86efac !important; color: #111827 !important; }
+      /* Dark theme — muted green fill with bright readable text, same
+         treatment as the other dark-mode accent fills */
+      html.dark .pms-grand-total td { background-color: rgba(34,197,94,0.30) !important; color: #e6e9ef !important; }
       `}</style>
 
       {/* ===== Hero header (same style as Knowledge Bank) ===== */}
@@ -1299,9 +1651,9 @@ const SalesLabourReport = () => {
         <div className={`px-4 py-2.5 flex flex-wrap items-center gap-2 ${setupOpen ? 'border-b border-gray-100' : ''}`}>
           <ArrowUpTrayIcon className="h-4 w-4 pms-accent" />
           <h2 className="text-sm font-semibold text-gray-900">Report Setup</h2>
-          {/* Steps — plain text only */}
-          <span className="ml-auto text-right text-[11px] font-bold text-gray-700">
-            ① Upload files → ② Preview data → ③ Generate report → ④ Save
+          {/* Steps — plain text only; hidden on phones where it crowds the row */}
+          <span className="ml-auto text-right text-[11px] font-bold text-gray-700 max-md:hidden">
+            Upload files → Preview data → Generate report → Save
           </span>
         </div>
         {/* Collapsible body — always mounted; grid-rows animate 1fr↔0fr so
@@ -1333,10 +1685,14 @@ const SalesLabourReport = () => {
               )}
               {summary && !dataRange.max && <div>No data uploaded yet — upload a file first.</div>}
             </div>
-            {/* Period picker + Generate — one row */}
-            <div className="mt-2 relative flex items-center gap-2">
+            {/* Period picker + Generate — one row. The picker opens on hover
+                and closes when the mouse leaves (click still toggles). */}
+            <div className="mt-2 flex items-center gap-2">
+              <div className="relative flex-1 min-w-0"
+                onMouseEnter={() => dataRange.max && setShowRangePicker(true)}
+                onMouseLeave={() => setShowRangePicker(false)}>
               <button onClick={() => setShowRangePicker(!showRangePicker)} disabled={!dataRange.max}
-                className="flex-1 min-w-0 flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-white shadow-md hover:opacity-90 disabled:opacity-50 transition-all"
+                className="w-full flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-white shadow-md hover:opacity-90 disabled:opacity-50 transition-all"
                 style={{ backgroundColor: themeColor }}>
                 <CalendarDaysIcon className="h-3.5 w-3.5 flex-shrink-0" />
                 <span className="truncate">
@@ -1344,17 +1700,11 @@ const SalesLabourReport = () => {
                 </span>
                 <ChevronDownIcon className={`h-3 w-3 flex-shrink-0 transition-transform ${showRangePicker ? 'rotate-180' : ''}`} />
               </button>
-              <button onClick={() => generate()} disabled={generating || !dataRange.max}
-                className="flex-shrink-0 flex items-center gap-1 px-4 py-1.5 text-xs font-semibold text-white rounded-full shadow-md hover:opacity-90 disabled:opacity-50"
-                style={{ backgroundColor: themeColor }}>
-                {generating ? 'Generating…' : 'Generate →'}
-              </button>
 
               {showRangePicker && (
-                <>
-                  {/* click-outside closes */}
-                  <div className="fixed inset-0 z-40" onClick={() => setShowRangePicker(false)} />
-                  <div className="absolute z-50 left-0 right-0 sm:left-auto sm:right-0 mt-2 sm:w-[440px] max-w-[92vw] bg-white rounded-xl shadow-xl border border-gray-200">
+                /* pt-2 (not a margin) keeps the hover unbroken across the gap */
+                <div className="absolute z-50 left-0 right-0 sm:left-auto sm:right-0 top-full pt-2">
+                  <div className="sm:w-[440px] max-w-[92vw] bg-white rounded-xl shadow-xl border border-gray-200">
                     <div className="p-3 max-h-[75vh] overflow-y-auto">
                       <div className="flex flex-col sm:flex-row gap-4">
                         {/* Quick Select */}
@@ -1460,8 +1810,14 @@ const SalesLabourReport = () => {
                       </div>
                     </div>
                   </div>
-                </>
+                </div>
               )}
+              </div>
+              <button onClick={() => generate()} disabled={generating || !dataRange.max}
+                className="flex-shrink-0 flex items-center gap-1 px-4 py-1.5 text-xs font-semibold text-white rounded-full shadow-md hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: themeColor }}>
+                {generating ? 'Generating…' : 'Generate →'}
+              </button>
             </div>
           </div>
         </div>
@@ -1513,23 +1869,6 @@ const SalesLabourReport = () => {
               className="text-[11px] font-medium text-gray-500 hover:text-gray-800">
               {showBatches ? '▾' : '▸'} Recent uploads ({batches.length})
             </button>
-            {dataRange.max && (
-              <button
-                onClick={async () => {
-                  if (!window.confirm('Delete ALL uploaded Part Sale and Labour data? Targets, SR mapping and saved reports are kept. You can re-upload the files after.')) return;
-                  try {
-                    const res = await fetch(`${API}/pms/data`, { method: 'DELETE', headers: authHeaders() });
-                    const data = await res.json();
-                    if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Clear failed');
-                    toast.success(`Cleared ${inr(data.deleted_rows)} rows`);
-                    setReport(null); setView('data');
-                    onUploaded();
-                  } catch (e) { toast.error(e.message); }
-                }}
-                className="flex items-center gap-1 text-[11px] font-medium text-red-500 hover:text-red-700">
-                <TrashIcon className="h-3 w-3" /> Clear all data
-              </button>
-            )}
           </div>
           {showBatches && batches.length > 0 && (
             <div className="mt-1.5 overflow-x-auto border border-gray-200 rounded">
@@ -1583,13 +1922,13 @@ const SalesLabourReport = () => {
             {previewTotal > 0 ? `${inr(previewRows.length)} of ${inr(previewTotal)} rows` : 'newest first'}
           </span>
           <div className="flex-1" />
-          <div className="relative">
+          <div className="relative max-md:w-full">
             <MagnifyingGlassIcon className="h-3.5 w-3.5 text-gray-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text" value={previewSearch}
               onChange={(e) => setPreviewSearch(e.target.value)}
               placeholder="Search Claim Invoice No…"
-              className="pl-7 pr-6 py-1 w-52 text-[11px] border border-gray-300 rounded-md outline-none focus:ring-1"
+              className="pl-7 pr-6 py-1 w-52 max-md:w-full text-[11px] bg-white text-gray-800 border border-gray-300 rounded-md outline-none focus:ring-1"
               style={{ '--tw-ring-color': themeColor }}
             />
             {previewSearch && (
@@ -1602,7 +1941,7 @@ const SalesLabourReport = () => {
           {[['part', 'Part Sale'], ['labour', 'Labour']].map(([k, n]) => (
             <button key={k} onClick={() => setPreviewType(k)}
               className={`px-2.5 py-1 rounded-md text-[11px] font-medium border ${previewType === k
-                ? 'text-white border-transparent' : 'text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                ? 'text-white border-transparent' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
               style={previewType === k ? { backgroundColor: themeColor } : {}}>
               {n}
             </button>
@@ -1614,14 +1953,14 @@ const SalesLabourReport = () => {
               <button key={k} onClick={() => setPreviewCancelFilter(k)}
                 className={`px-2 py-1 text-[11px] font-medium ${previewCancelFilter === k
                   ? (k === 'cancelled' ? 'bg-amber-500 text-white' : 'text-white')
-                  : (k === 'cancelled' && cancelledTotal ? 'text-amber-700 hover:bg-amber-50' : 'text-gray-600 hover:bg-gray-50')}`}
+                  : (k === 'cancelled' && cancelledTotal ? 'bg-white text-amber-700 hover:bg-amber-50' : 'bg-white text-gray-600 hover:bg-gray-50')}`}
                 style={previewCancelFilter === k && k !== 'cancelled' ? { backgroundColor: themeColor } : {}}>
                 {n}
               </button>
             ))}
           </div>
           <button onClick={() => loadPreview(previewType)} title="Refresh"
-            className="p-1 rounded border border-gray-300 text-gray-500 hover:bg-gray-50">
+            className="p-1 rounded bg-white border border-gray-300 text-gray-500 hover:bg-gray-50">
             <ArrowPathIcon className="h-3.5 w-3.5" />
           </button>
           {dataRange.max && (
@@ -1676,18 +2015,12 @@ const SalesLabourReport = () => {
                     })}
                     <td className={`${tdCls} whitespace-nowrap`}>
                       {r.is_cancelled ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <span
-                            title={`Cancelled${r.cancelled_by ? ` by ${r.cancelled_by}` : ''}${r.cancelled_at ? ` on ${r.cancelled_at.slice(0, 10)}` : ''} — not counted in reports`}
-                            className="inline-flex px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 text-[10px] font-semibold">
-                            Cancelled
-                          </span>
-                          <button onClick={() => toggleRowCancel(r)}
-                            disabled={cancelBusy === r.id}
-                            className="text-[10px] font-medium text-sky-700 hover:underline disabled:opacity-40">
-                            Restore
-                          </button>
-                        </span>
+                        <button onClick={() => toggleRowCancel(r)}
+                          disabled={cancelBusy === r.id}
+                          title={`Cancelled${r.cancelled_by ? ` by ${r.cancelled_by}` : ''}${r.cancelled_at ? ` on ${r.cancelled_at.slice(0, 10)}` : ''} — not counted in reports. Click to restore.`}
+                          className="text-[10px] font-medium text-sky-700 border border-sky-300 bg-sky-50 rounded px-1.5 py-0.5 hover:bg-sky-100 disabled:opacity-40">
+                          Restore
+                        </button>
                       ) : (
                         <button onClick={() => toggleRowCancel(r)}
                           disabled={cancelBusy === r.id}
@@ -1714,7 +2047,7 @@ const SalesLabourReport = () => {
 
       {/* ============ ③ Generated Report (replaces the preview box) ============ */}
       {view === 'report' && report && (
-        <div className="pms-print-area bg-white rounded-2xl border border-gray-200 mb-3 overflow-hidden">
+        <div className="pms-print-area bg-white rounded-2xl border border-gray-200 mb-3 overflow-visible">
           <div className="px-4 py-2.5 border-b border-gray-100 flex flex-wrap items-center gap-2">
             <button onClick={() => setView('data')}
               className="pms-no-print flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
@@ -1735,73 +2068,86 @@ const SalesLabourReport = () => {
               )}
             </h2>
             <div className="flex-1" />
-            <button onClick={saveToHistory} disabled={savingReport}
-              className="pms-no-print flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50">
-              <BookmarkSquareIcon className="h-3.5 w-3.5" /> {savingReport ? 'Saving…' : 'Save to History'}
-            </button>
-            {canExport && (
+            {!isEmpProd && (
+              <button onClick={saveToHistory} disabled={savingReport}
+                className="pms-no-print flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50">
+                <BookmarkSquareIcon className="h-3.5 w-3.5" /> {savingReport ? 'Saving…' : 'Save to History'}
+              </button>
+            )}
+            {canExport && !isEmpProd && (
               <button onClick={exportReport}
                 className="pms-no-print flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
-                <ArrowDownTrayIcon className="h-3.5 w-3.5" /> Export
+                <ArrowUpTrayIcon className="h-3.5 w-3.5" /> Export
               </button>
             )}
           </div>
 
           {/* Summary tiles — Spare / Labour % vs the AOP Master target get
               their own boxes */}
-          <div className="p-2 grid grid-cols-7 max-xl:grid-cols-4 max-md:grid-cols-2 gap-1.5">
-            {[
-              ['Total Spare Sale', '₹ ' + lakh(report.summary.total_spare_sale),
-                report.summary.total_spare_target
-                  ? `target ₹ ${lakh(report.summary.total_spare_target)}` : null],
-              ['Spare % vs AOP Target', report.summary.total_spare_target
-                ? (report.summary.total_spare_sale / report.summary.total_spare_target * 100).toFixed(1) + ' %'
-                : '— (no target)', null],
-              ['Total Labour Sale', '₹ ' + lakh(report.summary.total_labour_sale),
-                report.summary.total_labour_target
-                  ? `target ₹ ${lakh(report.summary.total_labour_target)}` : null],
-              ['Labour % vs AOP Target', report.summary.total_labour_target
-                ? (report.summary.total_labour_sale / report.summary.total_labour_target * 100).toFixed(1) + ' %'
-                : '— (no target)', null],
-              ['Overall % Achieved', report.summary.overall_pct_achieved != null
-                ? report.summary.overall_pct_achieved + ' %' : '— (no targets)', null],
-              ['Total Invoices', inr(report.summary.total_invoices), null],
-              ['Required Daily Run-Rate', runRate ? '₹ ' + lakh(runRate.req) + ' /day' : '—',
-                runRate ? `current ₹ ${lakh(runRate.cur)} /day` : null],
-            ].map(([label, value, sub]) => (
-              <div key={label} className="border border-gray-200 rounded-lg px-2 py-2">
-                <p className="text-[11px] text-gray-500 leading-tight whitespace-nowrap">{label}</p>
-                <p className="text-lg font-bold leading-snug pms-accent">{value}</p>
-                {sub && <p className="text-[10px] text-gray-500 leading-tight">{sub}</p>}
-              </div>
-            ))}
+          <div className="p-2 space-y-1.5">
+            {['spare', 'labour'].map((ty) => {
+              const sm = report.summary;
+              const isSp = ty === 'spare';
+              const nm = isSp ? 'Spare' : 'Labour';
+              const sale = isSp ? sm.total_spare_sale : sm.total_labour_sale;
+              const target = isSp ? sm.total_spare_target : sm.total_labour_target;
+              const inv = ((isSp ? report.spare_rows : report.labour_rows) || [])
+                .reduce((a, r) => a + (r.invoice_count_till || 0), 0);
+              const rr = runRateBy?.[ty];
+              return (
+                <div key={ty} className="grid grid-cols-6 max-xl:grid-cols-3 max-md:grid-cols-2 gap-1.5">
+                  {[
+                    [`${nm} Target`, target ? '₹ ' + lakh(target) : '— (no target)', null],
+                    [`Total ${nm} Sale`, '₹ ' + lakh(sale), null],
+                    [`${nm} % vs AOP Target`, target
+                      ? (sale / target * 100).toFixed(1) + ' %' : '— (no target)', null],
+                    [`${nm} Invoices`, inr(inv), null],
+                    [`Current ${nm} Run-Rate`, rr ? '₹ ' + lakh(rr.cur) + ' /day' : '—', null],
+                    [`Required ${nm} Run-Rate`, rr ? '₹ ' + lakh(rr.req) + ' /day' : '—', null],
+                  ].map(([label, value, sub]) => (
+                    <div key={label} className="border border-gray-200 rounded-lg px-2 py-2 min-w-0">
+                      <p className="text-[11px] text-gray-500 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={label}>{label}</p>
+                      <p className="text-lg font-bold leading-snug pms-accent whitespace-nowrap overflow-hidden text-ellipsis" title={String(value)}>{value}</p>
+                      {sub && <p className="text-[10px] text-gray-500 leading-tight whitespace-nowrap overflow-hidden text-ellipsis">{sub}</p>}
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
           </div>
 
           {/* Report type + region filter */}
           <div className="px-3 pb-2 flex flex-wrap items-end gap-2">
-            <div className="flex flex-col">
-              <label className="text-[10px] font-medium text-gray-500 mb-0.5">Select report type</label>
-              <select value={reportType} onChange={(e) => setReportType(e.target.value)}
-                className="border border-gray-300 rounded px-2 py-1 text-xs text-black bg-white focus:outline-none focus:ring-1"
-                style={{ '--tw-ring-color': themeColor }}>
-                {REPORT_TYPES.map((t) => <option key={t.key} value={t.key}>{t.name}</option>)}
-              </select>
-            </div>
-            {reportType === 'all' && (
-              <div className="flex flex-col ml-auto">
-                <label className="text-[10px] font-medium text-gray-500 mb-0.5">Region</label>
-                <select value={allRegion} onChange={(e) => setAllRegion(e.target.value)}
-                  className="border border-gray-300 rounded px-2 py-1 text-xs text-black bg-white focus:outline-none focus:ring-1 min-w-[160px]"
-                  style={{ '--tw-ring-color': themeColor }}>
-                  <option value="All">All Regions</option>
-                  <option value="MH">MH — Maharashtra</option>
-                  <option value="KA">KA — Karnataka</option>
-                </select>
+            {!branchMode && (
+              <div className="flex flex-col">
+                <label className="text-[10px] font-medium text-gray-500 mb-0.5">Select report type</label>
+                <HoverSelect value={reportType} onChange={setReportType}
+                  options={REPORT_TYPES.map((t) => ({ value: t.key, label: t.name }))} />
               </div>
             )}
-            {!breakdownRows && !categoryRows && reportType !== 'all' && (
+            {reportType === 'all' && !branchMode && (
+              <div className="flex flex-col ml-auto">
+                <label className="text-[10px] font-medium text-gray-500 mb-0.5">Region</label>
+                <HoverSelect value={allRegion} onChange={setAllRegion}
+                  options={[
+                    { value: 'All', label: 'All Regions' },
+                    { value: 'MH', label: 'MH' },
+                    { value: 'KA', label: 'KA' },
+                  ]} />
+              </div>
+            )}
+            {/* Branch-wise Report tab — its own view: pick branches, see ONLY
+                their analysis. While active the report-type dropdown is hidden
+                and this button becomes the way back to all records. */}
+            <button onClick={() => setBranchMode(!branchMode)}
+              className={`${branchMode || reportType === 'all' ? '' : 'ml-auto'} px-2.5 py-1.5 rounded-md text-[11px] font-semibold border ${branchMode
+                ? 'text-white border-transparent' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+              style={branchMode ? { backgroundColor: themeColor } : {}}>
+              {branchMode ? '← All Records' : 'Branch-wise Report'}
+            </button>
+            {branchMode && (
               // Opens on hover, closes when the mouse leaves (click still toggles)
-              <div className="flex flex-col ml-auto relative"
+              <div className="flex flex-col relative"
                 onMouseEnter={() => setShowBranchPick(true)}
                 onMouseLeave={() => setShowBranchPick(false)}>
                 <label className="text-[10px] font-medium text-gray-500 mb-0.5">Branch (multi-select)</label>
@@ -1818,7 +2164,7 @@ const SalesLabourReport = () => {
                 {showBranchPick && (
                   <>
                     {/* pt-1 (not a margin) keeps the hover unbroken across the gap */}
-                    <div className="absolute right-0 top-full z-50 pt-1 w-60 max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-xl p-1.5">
+                    <div className="absolute left-0 top-full z-50 pt-1 w-60 max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-xl p-1.5">
                       <button onClick={() => setBranchSel([])}
                         className={`w-full text-left px-2 py-1 text-xs font-semibold rounded hover:bg-gray-100 ${branchSel.length === 0 ? 'text-white' : 'text-gray-700'}`}
                         style={branchSel.length === 0 ? { backgroundColor: themeColor } : {}}>
@@ -1846,7 +2192,13 @@ const SalesLabourReport = () => {
 
           {/* ===== Branch Analysis (selected branches) — table format with the
               same metrics as the summary tiles, scoped to each branch ===== */}
-          {!breakdownRows && !categoryRows && reportType !== 'all' && selBranches.length >= 1 && (() => {
+          {branchMode && selBranches.length === 0 && (
+            <div className="mx-3 mb-3 border border-gray-200 rounded-lg p-6 text-center text-xs text-gray-500">
+              Branch-wise Report — pick one or more branches from the
+              <b> Branch (multi-select)</b> dropdown above to see their records.
+            </div>
+          )}
+          {branchMode && selBranches.length >= 1 && (() => {
             // Rank by combined Spare + Labour Achi. Till among ALL branches
             const allIds = [...new Set([...(report.spare_rows || []), ...(report.labour_rows || [])]
               .map((r) => r.branch_id))];
@@ -1855,6 +2207,17 @@ const SalesLabourReport = () => {
               ((report.labour_rows || []).find((r) => r.branch_id === id)?.achieved_till || 0);
             const ranked = allIds.map((id) => ({ id, t: totalOf(id) })).sort((a, b) => b.t - a.t);
             const rankOf = (id) => 1 + ranked.findIndex((r) => r.id === id);
+            // Per-type run-rate of one branch row (same formula as the tiles)
+            const rrOf = (r) => {
+              if (!r || !r.daily_target || !r.monthly_target) return null;
+              const totalWd = r.monthly_target / r.daily_target;
+              const elapsedWd = Math.min(totalWd, (r.target_till || 0) / r.daily_target);
+              const remWd = Math.max(0, totalWd - elapsedWd);
+              return {
+                req: remWd > 0 ? Math.max(0, r.monthly_target - (r.achieved_till || 0)) / remWd : 0,
+                cur: elapsedWd > 0 ? (r.achieved_till || 0) / elapsedWd : 0,
+              };
+            };
             const rowsB = selBranches.map((id) => {
               const sp = (report.spare_rows || []).find((r) => r.branch_id === id);
               const lb = (report.labour_rows || []).find((r) => r.branch_id === id);
@@ -1862,84 +2225,358 @@ const SalesLabourReport = () => {
               if (!base) return null;
               const spSale = sp?.achieved_till || 0, spTgt = sp?.monthly_target || 0;
               const lbSale = lb?.achieved_till || 0, lbTgt = lb?.monthly_target || 0;
-              let req = 0, cur = 0;
-              [sp, lb].forEach((r) => {
-                if (!r || !r.daily_target || !r.monthly_target) return;
-                const totalWd = r.monthly_target / r.daily_target;
-                const elapsedWd = Math.min(totalWd, (r.target_till || 0) / r.daily_target);
-                const remWd = Math.max(0, totalWd - elapsedWd);
-                if (remWd > 0) req += Math.max(0, r.monthly_target - (r.achieved_till || 0)) / remWd;
-                if (elapsedWd > 0) cur += (r.achieved_till || 0) / elapsedWd;
-              });
               return {
                 id, rank: rankOf(id), rankOutOf: ranked.length,
                 name: base.branch_name, region: base.region, person: base.responsible_person,
                 spSale, spTgt, spPct: spTgt ? spSale / spTgt * 100 : null,
                 lbSale, lbTgt, lbPct: lbTgt ? lbSale / lbTgt * 100 : null,
-                overall: (spTgt + lbTgt) ? (spSale + lbSale) / (spTgt + lbTgt) * 100 : null,
-                invoices: (sp?.invoice_count_till || 0) + (lb?.invoice_count_till || 0),
-                req, cur,
+                spInv: sp?.invoice_count_till || 0, lbInv: lb?.invoice_count_till || 0,
+                spRR: rrOf(sp), lbRR: rrOf(lb),
               };
             }).filter(Boolean);
             return (
               <div className="mx-3 mb-2 rounded-xl border overflow-hidden"
                 style={{ borderColor: 'rgba(47,49,146,0.25)' }}>
-                <div className="px-2 py-1 text-[11px] font-bold text-white"
+                <div className="px-2 py-1 text-[11px] font-bold text-white flex items-center justify-between gap-2"
                   style={{ backgroundColor: themeColor }}>
-                  Branch Analysis — {rowsB.length} branch{rowsB.length > 1 ? 'es' : ''} selected
+                  <span>Branch Analysis — {rowsB.length} branch{rowsB.length > 1 ? 'es' : ''} selected</span>
+                  <span className="font-medium text-white/80">Values in Lakh ₹</span>
+                </div>
+                {/* Per-section checkboxes — each report of THIS selection can
+                    be shown/hidden independently */}
+                <div className="px-2 py-1.5 border-b border-gray-200 bg-gray-50/60 flex flex-wrap items-center gap-x-4 gap-y-1">
+                  <span className="text-[11px] font-semibold text-gray-700">Show for selected branches:</span>
+                  {[['records', 'Spare & Labour records'],
+                    ['weeks', 'Week-wise'], ['months', 'Month-wise'], ['segment', 'Segment-wise'],
+                    ['service_head', 'Service Report Type-wise'], ['category', 'Category-wise (Spare)'],
+                    ['employee', 'Employee Productivity']].map(([k, n]) => (
+                    <label key={k} className="flex items-center gap-1 text-[11px] text-gray-700 cursor-pointer select-none">
+                      <input type="checkbox" checked={detailSecs[k]}
+                        onChange={() => setDetailSecs((p) => ({ ...p, [k]: !p[k] }))}
+                        className="h-3 w-3 cursor-pointer" style={{ accentColor: themeColor }} />
+                      {n}
+                    </label>
+                  ))}
+                  {branchDetailLoading && <span className="text-[11px] text-gray-400">Loading…</span>}
                 </div>
                 <HScrollBox watch={`analysis-${rowsB.length}`}>
-                  <table className="w-full text-[11px] border-collapse min-w-[860px]">
-                    <thead><tr>
-                      <th className={`${thT} text-left`}>Branch</th>
-                      <th className={thT}>Rank</th>
-                      <th className={thT}>Total Spare Sale</th>
-                      <th className={thT}>Spare % vs AOP Target</th>
-                      <th className={thT}>Total Labour Sale</th>
-                      <th className={thT}>Labour % vs AOP Target</th>
-                      <th className={thT}>Overall % Achieved</th>
-                      <th className={thT}>Total Invoices</th>
-                      <th className={thT}>Required Daily Run-Rate</th>
-                    </tr></thead>
+                  <table className="w-full text-[11px] border-collapse min-w-[1160px]">
+                    <thead>
+                      <tr>
+                        <th className={`${thT} text-left`} rowSpan={2} style={{ width: 100, maxWidth: 100 }}>Branch</th>
+                        <th className={thT} rowSpan={2}>Rank</th>
+                        <th className={thT} colSpan={6}>SPARE</th>
+                        <th className={thT} colSpan={6}>LABOUR</th>
+                      </tr>
+                      <tr>
+                        {['Target', 'Total Sale', '% vs AOP Target', 'Invoices', 'Current Run-Rate', 'Required Run-Rate',
+                          'Target', 'Total Sale', '% vs AOP Target', 'Invoices', 'Current Run-Rate', 'Required Run-Rate']
+                          .map((h, i) => <th key={i} className={thT}>{h}</th>)}
+                      </tr>
+                    </thead>
                     <tbody>
-                      {rowsB.map((b) => (
-                        <tr key={b.id} className="hover:bg-gray-50/60">
-                          <td className={`${tdT} font-medium`} title={b.person || ''}>
-                            {b.name} <span className="text-gray-400">({b.region})</span>
-                          </td>
-                          <td className={`${tdT} text-center font-bold pms-accent`}>
-                            #{b.rank} <span className="font-normal text-gray-400">of {b.rankOutOf}</span>
-                          </td>
-                          <td className={`${tdT} text-right`}>₹ {lakh(b.spSale)}</td>
-                          <td className={`${tdT} text-right font-semibold ${pctCellCls(b.spPct)}`}>
-                            {b.spPct == null ? '—' : b.spPct.toFixed(1) + ' %'}
-                            {b.spTgt ? <div className="text-[9px] font-normal">of ₹ {lakh(b.spTgt)} target</div> : null}
-                          </td>
-                          <td className={`${tdT} text-right`}>₹ {lakh(b.lbSale)}</td>
-                          <td className={`${tdT} text-right font-semibold ${pctCellCls(b.lbPct)}`}>
-                            {b.lbPct == null ? '—' : b.lbPct.toFixed(1) + ' %'}
-                            {b.lbTgt ? <div className="text-[9px] font-normal">of ₹ {lakh(b.lbTgt)} target</div> : null}
-                          </td>
-                          <td className={`${tdT} text-right font-semibold ${pctCellCls(b.overall)}`}>
-                            {b.overall == null ? '—' : b.overall.toFixed(1) + ' %'}
-                          </td>
-                          <td className={`${tdT} text-right`}>{inr(b.invoices)}</td>
-                          <td className={`${tdT} text-right`}>
-                            ₹ {lakh(b.req)} /day
-                            <div className="text-[9px] text-gray-500">current ₹ {lakh(b.cur)} /day</div>
-                          </td>
-                        </tr>
-                      ))}
+                      {rowsB.map((b) => {
+                        const half = (tgt, sale, pct, inv, rr) => (
+                          <>
+                            <td className={`${tdT} text-right`}>{tgt ? `${lkh(tgt)} L` : '—'}</td>
+                            <td className={`${tdT} text-right`}>{lkh(sale)} L</td>
+                            <td className={`${tdT} text-right font-semibold ${pctCellCls(pct)}`}>
+                              {pct == null ? '—' : pct.toFixed(1) + ' %'}
+                            </td>
+                            <td className={`${tdT} text-right`}>{inr(inv)}</td>
+                            <td className={`${tdT} text-right`}>{rr ? `${lkh(rr.cur)} L /day` : '—'}</td>
+                            <td className={`${tdT} text-right`}>{rr ? `${lkh(rr.req)} L /day` : '—'}</td>
+                          </>
+                        );
+                        return (
+                          <tr key={b.id} className="hover:bg-gray-50/60">
+                            <td className={`${tdT} font-medium`} style={{ maxWidth: 100, whiteSpace: 'normal' }}
+                              title={b.person || ''}>
+                              <div className="leading-tight break-words">
+                                {b.name} <span className="text-gray-400">({b.region})</span>
+                              </div>
+                            </td>
+                            <td className={`${tdT} text-center font-bold pms-accent`}>
+                              #{b.rank} <span className="font-normal text-gray-400">of {b.rankOutOf}</span>
+                            </td>
+                            {half(b.spTgt, b.spSale, b.spPct, b.spInv, b.spRR)}
+                            {half(b.lbTgt, b.lbSale, b.lbPct, b.lbInv, b.lbRR)}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </HScrollBox>
+
+                {/* SPARE / LABOUR branch tables scoped to ONLY the selected
+                    branches — same layout as the All view's side-by-side pair */}
+                {detailSecs.records && (
+                  <div className="p-2">
+                    {renderMergedPair(
+                      (report.spare_rows || []).filter((r) => selBranches.includes(r.branch_id)),
+                      (report.labour_rows || []).filter((r) => selBranches.includes(r.branch_id)))}
+                  </div>
+                )}
+
+                {/* ===== Selected-branch detail: week-wise + BOTH spares &
+                    labour + the three breakdowns, ONLY this selection ===== */}
+                {anyDetailSec && branchDetail && (() => {
+                  const dL = (v) => ((Number(v) || 0) / 100000).toFixed(2) + ' L';
+                  const dP = (v, t) => (t ? ((v / t) * 100).toFixed(1) + ' %' : '—');
+                  const fmtD = (iso) => new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+                  const wk = branchDetail.weeks || [];
+                  const wTot = wk.reduce((a, w) => ({
+                    part: a.part + (w.part || 0), labour: a.labour + (w.labour || 0),
+                    total: a.total + (w.total || 0), invoices: a.invoices + (w.invoices || 0),
+                  }), { part: 0, labour: 0, total: 0, invoices: 0 });
+                  const secHead = (title) => (
+                    <div className="px-2 py-1 text-[11px] font-bold text-white flex items-center justify-between gap-2"
+                      style={{ backgroundColor: themeColor }}>
+                      <span>{title}</span>
+                      <span className="font-medium text-white/80">Selected branches only · Lakh ₹</span>
+                    </div>
+                  );
+                  // Segment / Service-head table (both spares + labour)
+                  const bdTable = (title, rows3) => {
+                    const t3 = (rows3 || []).reduce((a, r) => ({
+                      part: a.part + (r.part || 0), labour: a.labour + (r.labour || 0),
+                      total: a.total + (r.total || 0), invoices: a.invoices + (r.invoices || 0),
+                    }), { part: 0, labour: 0, total: 0, invoices: 0 });
+                    return (
+                      <div className="border border-gray-200 rounded-lg overflow-hidden">
+                        {secHead(title)}
+                        <HScrollBox watch={`${title}-${(rows3 || []).length}`}>
+                          <table className="w-full text-[11px] border-collapse min-w-[680px]">
+                            <thead><tr>
+                              {['Name', 'Spare Sale', '% Spare', 'Labour Sale', '% Labour',
+                                'Total', '% Total', 'Invoices'].map((h) => (
+                                <th key={h} className={`${thT} whitespace-nowrap`}>{h}</th>
+                              ))}
+                            </tr></thead>
+                            <tbody>
+                              {(rows3 || []).length === 0 ? (
+                                <tr><td colSpan={8} className="text-center py-3 text-gray-500 border border-gray-200">No data</td></tr>
+                              ) : (
+                                <>
+                                  {rows3.map((r, i) => (
+                                    <tr key={i} className="hover:bg-gray-50/60">
+                                      <td className={`${tdT} font-medium text-center`}>{r.name}</td>
+                                      <td className={`${tdT} text-right`}>{dL(r.part)}</td>
+                                      <td className={`${tdT} text-right`}>{dP(r.part, t3.part)}</td>
+                                      <td className={`${tdT} text-right`}>{dL(r.labour)}</td>
+                                      <td className={`${tdT} text-right`}>{dP(r.labour, t3.labour)}</td>
+                                      <td className={`${tdT} text-right font-semibold`}>{dL(r.total)}</td>
+                                      <td className={`${tdT} text-right`}>{dP(r.total, t3.total)}</td>
+                                      <td className={`${tdT} text-right`}>{inr(r.invoices)}</td>
+                                    </tr>
+                                  ))}
+                                  <tr className="bg-gray-50 font-bold">
+                                    <td className={`${tdT} text-center`}>Total</td>
+                                    <td className={`${tdT} text-right`}>{dL(t3.part)}</td>
+                                    <td className={`${tdT} text-right`}>100 %</td>
+                                    <td className={`${tdT} text-right`}>{dL(t3.labour)}</td>
+                                    <td className={`${tdT} text-right`}>100 %</td>
+                                    <td className={`${tdT} text-right`}>{dL(t3.total)}</td>
+                                    <td className={`${tdT} text-right`}>100 %</td>
+                                    <td className={`${tdT} text-right`}>{inr(t3.invoices)}</td>
+                                  </tr>
+                                </>
+                              )}
+                            </tbody>
+                          </table>
+                        </HScrollBox>
+                      </div>
+                    );
+                  };
+                  const cRows = branchDetail.category || [];
+                  const cTot = cRows.reduce((a, r) => ({
+                    part: a.part + (r.part || 0), qty: a.qty + (r.qty || 0),
+                    lines: a.lines + (r.lines || 0), invoices: a.invoices + (r.invoices || 0),
+                  }), { part: 0, qty: 0, lines: 0, invoices: 0 });
+                  return (
+                    <div className="p-2 space-y-2 border-t border-gray-200">
+                      {/* -------- Week-wise (both Spares + Labour) -------- */}
+                      {detailSecs.weeks && (
+                      <div className="border border-gray-200 rounded-lg overflow-hidden">
+                        {secHead(`Week-wise Sales — ${wk.length} week${wk.length > 1 ? 's' : ''} in period`)}
+                        <HScrollBox watch={`weeks-${wk.length}`}>
+                          <table className="w-full text-[11px] border-collapse min-w-[720px]">
+                            <thead><tr>
+                              <th className={thT}>Week</th>
+                              <th className={thT}>Period</th>
+                              <th className={thT}>Spare Sale</th>
+                              <th className={thT}>% Spare</th>
+                              <th className={thT}>Labour Sale</th>
+                              <th className={thT}>% Labour</th>
+                              <th className={thT}>Total</th>
+                              <th className={thT}>% Total</th>
+                              <th className={thT}>Invoices</th>
+                            </tr></thead>
+                            <tbody>
+                              {wk.map((w) => (
+                                <tr key={w.week} className="hover:bg-gray-50/60">
+                                  <td className={`${tdT} font-medium text-center`}>Week {w.week}</td>
+                                  <td className={`${tdT} text-center`}>{fmtD(w.start)} – {fmtD(w.end)}</td>
+                                  <td className={`${tdT} text-right`}>{dL(w.part)}</td>
+                                  <td className={`${tdT} text-right`}>{dP(w.part, wTot.part)}</td>
+                                  <td className={`${tdT} text-right`}>{dL(w.labour)}</td>
+                                  <td className={`${tdT} text-right`}>{dP(w.labour, wTot.labour)}</td>
+                                  <td className={`${tdT} text-right font-semibold`}>{dL(w.total)}</td>
+                                  <td className={`${tdT} text-right`}>{dP(w.total, wTot.total)}</td>
+                                  <td className={`${tdT} text-right`}>{inr(w.invoices)}</td>
+                                </tr>
+                              ))}
+                              <tr className="bg-gray-50 font-bold">
+                                <td className={`${tdT} text-center`} colSpan={2}>Total</td>
+                                <td className={`${tdT} text-right`}>{dL(wTot.part)}</td>
+                                <td className={`${tdT} text-right`}>100 %</td>
+                                <td className={`${tdT} text-right`}>{dL(wTot.labour)}</td>
+                                <td className={`${tdT} text-right`}>100 %</td>
+                                <td className={`${tdT} text-right`}>{dL(wTot.total)}</td>
+                                <td className={`${tdT} text-right`}>100 %</td>
+                                <td className={`${tdT} text-right`}>{inr(wTot.invoices)}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </HScrollBox>
+                      </div>
+                      )}
+                      {/* -------- Month-wise (both Spares + Labour) -------- */}
+                      {detailSecs.months && (() => {
+                        const mo = branchDetail.months || [];
+                        const mTot = mo.reduce((a, m) => ({
+                          part: a.part + (m.part || 0), labour: a.labour + (m.labour || 0),
+                          total: a.total + (m.total || 0), invoices: a.invoices + (m.invoices || 0),
+                        }), { part: 0, labour: 0, total: 0, invoices: 0 });
+                        const mLabel = (m) => new Date(`${m}-01`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+                        return (
+                          <div className="border border-gray-200 rounded-lg overflow-hidden">
+                            {secHead(`Month-wise Sales — ${mo.length} month${mo.length > 1 ? 's' : ''} in period`)}
+                            <HScrollBox watch={`months-${mo.length}`}>
+                              <table className="w-full text-[11px] border-collapse min-w-[680px]">
+                                <thead><tr>
+                                  <th className={thT}>Month</th>
+                                  <th className={thT}>Spare Sale</th>
+                                  <th className={thT}>% Spare</th>
+                                  <th className={thT}>Labour Sale</th>
+                                  <th className={thT}>% Labour</th>
+                                  <th className={thT}>Total</th>
+                                  <th className={thT}>% Total</th>
+                                  <th className={thT}>Invoices</th>
+                                </tr></thead>
+                                <tbody>
+                                  {mo.length === 0 ? (
+                                    <tr><td colSpan={8} className="text-center py-3 text-gray-500 border border-gray-200">No data</td></tr>
+                                  ) : (
+                                    <>
+                                      {mo.map((m) => (
+                                        <tr key={m.month} className="hover:bg-gray-50/60">
+                                          <td className={`${tdT} font-medium text-center`}>{mLabel(m.month)}</td>
+                                          <td className={`${tdT} text-right`}>{dL(m.part)}</td>
+                                          <td className={`${tdT} text-right`}>{dP(m.part, mTot.part)}</td>
+                                          <td className={`${tdT} text-right`}>{dL(m.labour)}</td>
+                                          <td className={`${tdT} text-right`}>{dP(m.labour, mTot.labour)}</td>
+                                          <td className={`${tdT} text-right font-semibold`}>{dL(m.total)}</td>
+                                          <td className={`${tdT} text-right`}>{dP(m.total, mTot.total)}</td>
+                                          <td className={`${tdT} text-right`}>{inr(m.invoices)}</td>
+                                        </tr>
+                                      ))}
+                                      <tr className="bg-gray-50 font-bold">
+                                        <td className={`${tdT} text-center`}>Total</td>
+                                        <td className={`${tdT} text-right`}>{dL(mTot.part)}</td>
+                                        <td className={`${tdT} text-right`}>100 %</td>
+                                        <td className={`${tdT} text-right`}>{dL(mTot.labour)}</td>
+                                        <td className={`${tdT} text-right`}>100 %</td>
+                                        <td className={`${tdT} text-right`}>{dL(mTot.total)}</td>
+                                        <td className={`${tdT} text-right`}>100 %</td>
+                                        <td className={`${tdT} text-right`}>{inr(mTot.invoices)}</td>
+                                      </tr>
+                                    </>
+                                  )}
+                                </tbody>
+                              </table>
+                            </HScrollBox>
+                          </div>
+                        );
+                      })()}
+                      {/* -------- Breakdowns scoped to the selection -------- */}
+                      {detailSecs.segment && bdTable('Segment-wise Sales', branchDetail.segment)}
+                      {detailSecs.service_head && bdTable('Service Report Type-wise Sales', branchDetail.service_head)}
+                      {detailSecs.category && (
+                      <div className="border border-gray-200 rounded-lg overflow-hidden">
+                        {secHead('Category-wise Sales (Spare)')}
+                        <HScrollBox watch={`bd-category-${cRows.length}`}>
+                          <table className="w-full text-[11px] border-collapse min-w-[560px]">
+                            <thead><tr>
+                              <th className={thT}>Category</th>
+                              <th className={thT}>Spare Sale</th>
+                              <th className={thT}>% Spare</th>
+                              <th className={thT}>Quantity</th>
+                              <th className={thT}>Line Items</th>
+                              <th className={thT}>Invoices</th>
+                            </tr></thead>
+                            <tbody>
+                              {cRows.length === 0 ? (
+                                <tr><td colSpan={6} className="text-center py-3 text-gray-500 border border-gray-200">No data</td></tr>
+                              ) : (
+                                <>
+                                  {cRows.map((r, i) => (
+                                    <tr key={i} className="hover:bg-gray-50/60">
+                                      <td className={`${tdT} font-medium text-center`}>{r.name}</td>
+                                      <td className={`${tdT} text-right`}>{dL(r.part)}</td>
+                                      <td className={`${tdT} text-right`}>{dP(r.part, cTot.part)}</td>
+                                      <td className={`${tdT} text-right`}>{inr(Math.round(r.qty || 0))}</td>
+                                      <td className={`${tdT} text-right`}>{inr(r.lines)}</td>
+                                      <td className={`${tdT} text-right`}>{inr(r.invoices)}</td>
+                                    </tr>
+                                  ))}
+                                  <tr className="bg-gray-50 font-bold">
+                                    <td className={`${tdT} text-center`}>Total</td>
+                                    <td className={`${tdT} text-right`}>{dL(cTot.part)}</td>
+                                    <td className={`${tdT} text-right`}>100 %</td>
+                                    <td className={`${tdT} text-right`}>{inr(Math.round(cTot.qty))}</td>
+                                    <td className={`${tdT} text-right`}>{inr(cTot.lines)}</td>
+                                    <td className={`${tdT} text-right`}>{inr(cTot.invoices)}</td>
+                                  </tr>
+                                </>
+                              )}
+                            </tbody>
+                          </table>
+                        </HScrollBox>
+                      </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Employee Productivity scoped to ONLY the selected branches
+                    — LAST, matching its position in the checkbox row */}
+                {detailSecs.employee && (
+                  <div className="p-2">
+                    <EmployeeProductivityReport
+                      periodFrom={report.from_date || ''} periodTo={report.as_on || ''}
+                      onlyBranches={selBranches.map((id) => branchOptions.find((b) => b.id === id)?.name || '')} />
+                  </div>
+                )}
               </div>
             );
           })()}
 
           {/* "All" — every report in one frame: Spare + Labour side by side,
               then the three breakdown tables below */}
-          {reportType === 'all' && (() => {
+          {!branchMode && reportType === 'all' && (() => {
+            // One shared column grid for the stacked breakdown tables
+            // (Regional / Segment / Service Head) so their vertical column
+            // lines sit at the same position in every table. Category keeps
+            // its own natural layout (different column set).
+            const breakColgroup = (
+              <colgroup>
+                <col style={{ width: '16%' }} />
+                {Array.from({ length: 8 }, (_, ci) => (
+                  <col key={ci} style={{ width: '10.5%' }} />
+                ))}
+              </colgroup>
+            );
             // Full-width breakdown table; after each metric a "% of total"
             // share column (row ÷ column total).
             const renderAllBreakdown = (label, rows2) => {
@@ -1960,7 +2597,8 @@ const SalesLabourReport = () => {
                     <span className="font-medium text-white/80">Lakh ₹ · % of total</span>
                   </div>
                   <HScrollBox watch={`${label}-${(rows2 || []).length}`}>
-                    <table className="w-full text-[11px] border-collapse min-w-[640px]">
+                    <table className="w-full text-[11px] border-collapse min-w-[640px]" style={{ tableLayout: 'fixed' }}>
+                      {breakColgroup}
                       <thead><tr>
                         <th className={thB}>Name</th>
                         <th className={thB}>Spare Sale</th>
@@ -2080,14 +2718,15 @@ const SalesLabourReport = () => {
             };
             return (
               <div className="px-3 pb-3 space-y-2">
-                <div className="grid grid-cols-2 max-xl:grid-cols-1 gap-2">
-                  {renderAllSide('SPARE', report.spare_rows, fmtDay(report.as_on_part || report.as_on))}
-                  {renderAllSide('LABOUR', report.labour_rows, fmtDay(report.as_on_labour || report.as_on))}
-                </div>
+                {renderMergedPair(report.spare_rows, report.labour_rows)}
                 {renderAllBreakdown('Regional-wise Sales', report.regional)}
                 {renderAllBreakdown('Segment-wise Sales', report.segment)}
                 {renderAllBreakdown('Service Report Type-wise Sales', report.service_head)}
                 {renderAllCategory()}
+                {/* Employee Productivity — SE-wise, same reporting period */}
+                <EmployeeProductivityReport
+                  periodFrom={report.from_date || ''}
+                  periodTo={report.as_on || ''} />
               </div>
             );
           })()}
@@ -2095,14 +2734,24 @@ const SalesLabourReport = () => {
           {/* Branch table (Spare / Labour) — pivot layout: Region first with a
               merged cell per region (MH then KA), each region followed by its
               own subtotal row, then the grand total. */}
-          {!breakdownRows && !categoryRows && reportType !== 'all' && (
+          {/* ===== Employee Productivity (SE-wise) — uses the SAME reporting
+              period the report above was generated with (top period picker) ===== */}
+          {!branchMode && isEmpProd && (
+            <div className="px-3 pb-3">
+              <EmployeeProductivityReport
+                periodFrom={report.from_date || ''}
+                periodTo={report.as_on || ''} />
+            </div>
+          )}
+
+          {!branchMode && !breakdownRows && !categoryRows && reportType !== 'all' && !isEmpProd && (
             <div className="px-3 pb-3">
               <p className="text-[10px] text-gray-400 text-right mb-1">Values in Lakh ₹ — 23 means ₹23,00,000</p>
               <HScrollBox watch={`${reportType}-${branchRows.length}`}>
               <table className="w-full text-[11px] border-collapse min-w-[900px]">
                 <thead><tr>
                   <th className={thT}>Region</th>
-                  <th className={thT}>Branch</th>
+                  <th className={thT} style={{ width: 100, maxWidth: 100 }}>Branch</th>
                   <th className={thT}>Responsible Person</th>
                   <th className={thT}>Monthly Target</th>
                   <th className={thT}>Daily Target</th>
@@ -2154,11 +2803,15 @@ const SalesLabourReport = () => {
                     );
                     return (
                       <>
-                        {regionKeys.map((reg) => {
+                        {regionKeys.map((reg, ri) => {
                           const rows = byRegion[reg];
                           const sub = sumRows(rows);
                           return (
                             <React.Fragment key={reg}>
+                              {/* one-row gap between region blocks (MH ↔ KA) */}
+                              {ri > 0 && (
+                                <tr aria-hidden="true"><td colSpan={12} className="py-1.5" /></tr>
+                              )}
                               {rows.map((r, i) => (
                                 <tr key={r.branch_id} className="hover:bg-gray-50/60">
                                   {i === 0 && (
@@ -2167,8 +2820,10 @@ const SalesLabourReport = () => {
                                       {reg}
                                     </td>
                                   )}
-                                  <td className={tdT}>{r.branch_name}</td>
-                                  <td className={tdT}>{r.responsible_person}</td>
+                                  <td className={tdT} style={{ maxWidth: 100 }} title={r.branch_name || ''}>
+                                    <div className="truncate">{r.branch_name}</div>
+                                  </td>
+                                  <td className={tdT} title={r.responsible_person || ''}>{shortName(r.responsible_person)}</td>
                                   <td className={`${tdT} text-right`}>{lkh(r.monthly_target)}</td>
                                   <td className={`${tdT} text-right`}>{lkh(r.daily_target)}</td>
                                   <td className={`${tdT} text-right`}>{lkh(r.achieved_on)}</td>
@@ -2197,7 +2852,7 @@ const SalesLabourReport = () => {
                           );
                         })}
                         {/* grand total */}
-                        <tr className="bg-gray-50 font-bold">
+                        <tr className="font-bold pms-grand-total">
                           <td className={tdT} colSpan={3}>Total (All)</td>
                           {metricCells(totals)}
                         </tr>
@@ -2212,7 +2867,7 @@ const SalesLabourReport = () => {
 
           {/* Breakdown tables (Regional / Segment / Service head) — compact,
               with a "% of total" share column after each metric */}
-          {breakdownRows && (() => {
+          {!branchMode && breakdownRows && (() => {
             const bTot = breakdownRows.reduce((a, r) => ({
               part: a.part + (r.part || 0), labour: a.labour + (r.labour || 0),
               total: a.total + (r.total || 0), invoices: a.invoices + (r.invoices || 0),
@@ -2276,7 +2931,7 @@ const SalesLabourReport = () => {
 
           {/* Category-wise (Spare only) — the CATEGORY column of the Part
               Sale file; the Labour file has no such column */}
-          {categoryRows && (() => {
+          {!branchMode && categoryRows && (() => {
             const cTot = categoryRows.reduce((a, r) => ({
               part: a.part + (r.part || 0), invoices: a.invoices + (r.invoices || 0),
               qty: a.qty + (r.qty || 0), lines: a.lines + (r.lines || 0),
@@ -2340,8 +2995,8 @@ const SalesLabourReport = () => {
       {/* ============ History modal (list → in-modal report viewer) ============ */}
       {showHistory && (
         <div className="pms-no-print fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-lg shadow-2xl max-w-6xl w-full max-h-[92vh] overflow-hidden flex flex-col">
-            <div className="px-4 py-2.5 border-b border-gray-200 flex items-center gap-2">
+          <div className="bg-white rounded-lg shadow-2xl max-w-[86rem] w-full max-h-[92vh] overflow-hidden flex flex-col">
+            <div className="px-4 py-2.5 border-b border-gray-200 flex flex-wrap items-center gap-2">
               {historyDetail && (
                 <button onClick={() => setHistoryDetail(null)}
                   className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-gray-700 border border-gray-300 rounded hover:bg-gray-50">
@@ -2351,12 +3006,35 @@ const SalesLabourReport = () => {
               <h2 className="text-sm font-semibold text-gray-900 flex-1 truncate">
                 {historyDetail ? historyDetail.title : 'Report History'}
               </h2>
-              {historyDetail && (
-                <button onClick={loadHistoryToPage}
-                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white rounded-md hover:opacity-90"
-                  style={{ backgroundColor: themeColor }}>
-                  Open in Report View
-                </button>
+              {/* List filters — live in the header, right side */}
+              {!historyDetail && !historyLoading && history.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                  <span className="text-[10px] font-medium text-gray-500">As on</span>
+                  <input type="date" value={histFrom} onChange={(e) => setHistFrom(e.target.value)}
+                    title="As on — from"
+                    className="border border-gray-300 rounded px-1.5 py-1 text-[11px] text-black bg-white focus:outline-none focus:ring-1"
+                    style={{ '--tw-ring-color': themeColor }} />
+                  <span className="text-[10px] text-gray-400">to</span>
+                  <input type="date" value={histTo} onChange={(e) => setHistTo(e.target.value)}
+                    title="As on — to"
+                    className="border border-gray-300 rounded px-1.5 py-1 text-[11px] text-black bg-white focus:outline-none focus:ring-1"
+                    style={{ '--tw-ring-color': themeColor }} />
+                  <div title="Generated by" className="max-w-[140px]">
+                    <HoverSelect value={histBy} onChange={setHistBy}
+                      options={[
+                        { value: '', label: 'All users' },
+                        ...[...new Set(history.map((h) => h.created_by_name || h.created_by).filter(Boolean))]
+                          .map((n) => ({ value: n, label: n })),
+                      ]} />
+                  </div>
+                  {(histFrom || histTo || histBy) && (
+                    <button onClick={() => { setHistFrom(''); setHistTo(''); setHistBy(''); }}
+                      title="Clear filters"
+                      className="px-1.5 py-1 text-[11px] font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50">
+                      Clear
+                    </button>
+                  )}
+                </div>
               )}
               <button onClick={() => setShowHistory(false)} className="p-1 rounded hover:bg-gray-100">
                 <XMarkIcon className="h-4 w-4 text-gray-500" />
@@ -2373,7 +3051,16 @@ const SalesLabourReport = () => {
                     <ClockIcon className="h-8 w-8" />
                     <p className="text-sm">No saved reports yet.</p>
                   </div>
-                ) : (
+                ) : (() => {
+                  const listRows = history.filter((h) =>
+                    (!histFrom || h.as_on_date >= histFrom) &&
+                    (!histTo || h.as_on_date <= histTo) &&
+                    (!histBy || (h.created_by_name || h.created_by) === histBy));
+                  return (
+                  <>
+                  {listRows.length === 0 ? (
+                    <p className="text-center py-6 text-xs text-gray-500">No saved reports match the filters.</p>
+                  ) : (
                   <table className="w-full text-xs border-collapse">
                     <thead><tr>
                       <th className={thCls}>Title</th>
@@ -2383,7 +3070,7 @@ const SalesLabourReport = () => {
                       <th className={thCls} style={{ width: 90 }}>Action</th>
                     </tr></thead>
                     <tbody>
-                      {history.map((h) => (
+                      {listRows.map((h) => (
                         <tr key={h.id} className="border-b border-gray-100 hover:bg-gray-50/60">
                           <td className={tdCls}>
                             <button onClick={() => openHistoryItem(h.id)}
@@ -2404,85 +3091,268 @@ const SalesLabourReport = () => {
                       ))}
                     </tbody>
                   </table>
-                )
+                  )}
+                  </>
+                  );
+                })()
               ) : (
                 /* ---------- IN-MODAL REPORT VIEWER ---------- */
                 (() => {
                   const p = historyDetail.payload;
                   const d = fmtDay(p.as_on);
-                  const branchTable = (rows, title) => (
-                    <div className="mt-3">
-                      <h3 className="text-xs font-bold text-gray-800 mb-1.5">{title}</h3>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-[11px] border-collapse min-w-[1000px]">
+                  const s = p.summary || {};
+                  const hL = (v) => ((Number(v) || 0) / 100000).toFixed(2) + ' L';
+                  const hP = (v, t) => (t ? ((v / t) * 100).toFixed(1) + ' %' : '—');
+                  // Per-type run-rate — same aggregate formula as the live tiles
+                  const rrOfRows = (rows) => {
+                    const mt = (rows || []).reduce((a, r) => a + (r.monthly_target || 0), 0);
+                    const dt = (rows || []).reduce((a, r) => a + (r.daily_target || 0), 0);
+                    const tt = (rows || []).reduce((a, r) => a + (r.target_till || 0), 0);
+                    const at = (rows || []).reduce((a, r) => a + (r.achieved_till || 0), 0);
+                    if (!dt || !mt) return null;
+                    const totalWd = mt / dt;
+                    const elapsedWd = Math.min(totalWd, tt / dt);
+                    const remWd = Math.max(0, totalWd - elapsedWd);
+                    return {
+                      req: remWd > 0 ? Math.max(0, mt - at) / remWd : 0,
+                      cur: elapsedWd > 0 ? at / elapsedWd : 0,
+                    };
+                  };
+                  // Branch pivot table — same layout as the live report (region
+                  // merged cell, region subtotals, grand total, Lakh values)
+                  const branchTable = (rows, title) => {
+                    const byRegion = {};
+                    (rows || []).forEach((r) => { (byRegion[r.region] = byRegion[r.region] || []).push(r); });
+                    const regionKeys = ['MH', 'KA'].filter((k) => byRegion[k])
+                      .concat(Object.keys(byRegion).filter((k) => k !== 'MH' && k !== 'KA'));
+                    const sum = (rs) => rs.reduce((a, r) => ({
+                      mt: a.mt + (r.monthly_target || 0), dt: a.dt + (r.daily_target || 0),
+                      ao: a.ao + (r.achieved_on || 0), tt: a.tt + (r.target_till || 0),
+                      at: a.at + (r.achieved_till || 0), ic: a.ic + (r.invoice_count_till || 0),
+                      sf: a.sf + (r.short_fall_till || 0), bm: a.bm + (r.balance_month || 0),
+                    }), { mt: 0, dt: 0, ao: 0, tt: 0, at: 0, ic: 0, sf: 0, bm: 0 });
+                    // Compact cells (same as the live All view) so the whole
+                    // table fits the modal WITHOUT a horizontal scrollbar
+                    const hTh = 'px-1 py-1 text-center text-[11px] font-semibold text-gray-600 leading-tight bg-gray-50 border border-gray-200';
+                    const hTd = 'px-1 py-0.5 border border-gray-200 text-right whitespace-nowrap';
+                    const metric = (x) => (
+                      <>
+                        <td className={hTd}>{hL(x.mt)}</td>
+                        <td className={hTd}>{hL(x.dt)}</td>
+                        <td className={hTd}>{hL(x.ao)}</td>
+                        <td className={hTd}>{hL(x.tt)}</td>
+                        <td className={`${hTd} font-medium`}>{hL(x.at)}</td>
+                        <td className={hTd}>{inr(x.ic)}</td>
+                        <td className={`${hTd} font-semibold ${pctCellCls(x.tt ? +((x.at / x.tt) * 100).toFixed(1) : null)}`}>
+                          {x.tt ? ((x.at / x.tt) * 100).toFixed(1) + ' %' : '—'}
+                        </td>
+                        <td className={hTd}>{hL(x.sf)}</td>
+                        <td className={hTd}>{hL(x.bm)}</td>
+                      </>
+                    );
+                    return (
+                      <div className="mt-3">
+                        <h3 className="text-xs font-bold text-gray-800 mb-1.5">
+                          {title} <span className="font-normal text-gray-400">(Lakh ₹)</span>
+                        </h3>
+                        {/* fits without a scrollbar on desktop; small screens
+                            fall back to horizontal scroll instead of clipping */}
+                        <div className="overflow-x-auto">
+                        <table className="w-full text-[11px] border-collapse">
                           <thead><tr>
-                            <th className={thCls}>Responsible Person</th>
-                            <th className={thCls}>Branch</th>
-                            <th className={thCls}>Region</th>
-                            <th className={thCls}>Monthly Target</th>
-                            <th className={thCls}>Daily Target</th>
-                            <th className={thCls}>Achi. on {d}</th>
-                            <th className={thCls}>Target Till {d}</th>
-                            <th className={thCls}>Achi. Till {d}</th>
-                            <th className={thCls}>Invoices</th>
-                            <th className={thCls}>% Achieved</th>
-                            <th className={thCls}>Short-Fall</th>
-                            <th className={thCls}>Balance</th>
+                            <th className={hTh}>Region</th>
+                            <th className={hTh}>Branch</th>
+                            <th className={hTh}>Responsible Person</th>
+                            <th className={hTh}>Monthly Target</th>
+                            <th className={hTh}>Daily Target</th>
+                            <th className={hTh}>Achi. on {d}</th>
+                            <th className={hTh}>Target Till {d}</th>
+                            <th className={hTh}>Achi. Till {d}</th>
+                            <th className={hTh}>Invoice Count</th>
+                            <th className={hTh}>% Achieved Till Date</th>
+                            <th className={hTh}>Short-Fall Till Date</th>
+                            <th className={hTh}>Balance For Month</th>
                           </tr></thead>
                           <tbody>
-                            {(rows || []).map((r, i) => (
-                              <tr key={i} className="hover:bg-gray-50/60">
-                                <td className={tdCls}>{r.responsible_person}</td>
-                                <td className={tdCls}>{r.branch_name}</td>
-                                <td className={`${tdCls} text-center`}>{r.region}</td>
-                                <td className={`${tdCls} text-right`}>{inr(r.monthly_target)}</td>
-                                <td className={`${tdCls} text-right`}>{inr(r.daily_target)}</td>
-                                <td className={`${tdCls} text-right`}>{inr(r.achieved_on)}</td>
-                                <td className={`${tdCls} text-right`}>{inr(r.target_till)}</td>
-                                <td className={`${tdCls} text-right font-medium`}>{inr(r.achieved_till)}</td>
-                                <td className={`${tdCls} text-right`}>{inr(r.invoice_count_till)}</td>
-                                <td className={`${tdCls} text-right font-semibold ${
-                                  r.pct_achieved == null ? '' : r.pct_achieved >= 100 ? 'pms-ahead' : r.pct_achieved >= 70 ? 'pms-mid' : 'pms-behind'}`}>
-                                  {r.pct_achieved == null ? '—' : r.pct_achieved + ' %'}
-                                </td>
-                                <td className={`${tdCls} text-right`}>
-                                  {inr(r.short_fall_till)}
-                                </td>
-                                <td className={`${tdCls} text-right`}>{inr(r.balance_month)}</td>
-                              </tr>
-                            ))}
+                            {regionKeys.map((reg, ri) => {
+                              const rs = byRegion[reg];
+                              return (
+                                <React.Fragment key={reg}>
+                                  {/* one-row gap between region blocks (MH ↔ KA) */}
+                                  {ri > 0 && (
+                                    <tr aria-hidden="true"><td colSpan={12} className="py-1.5" /></tr>
+                                  )}
+                                  {rs.map((r, i) => (
+                                    <tr key={r.branch_id || i} className="hover:bg-gray-50/60">
+                                      {i === 0 && (
+                                        <td rowSpan={rs.length}
+                                          className="px-1 py-0.5 border border-gray-200 text-center font-bold align-middle pms-region-cell">
+                                          {reg}
+                                        </td>
+                                      )}
+                                      <td className="px-1 py-0.5 border border-gray-200 text-left leading-tight break-words max-w-[90px] font-medium">
+                                        {r.branch_name}
+                                      </td>
+                                      <td className="px-1 py-0.5 border border-gray-200 text-left whitespace-nowrap overflow-hidden text-ellipsis max-w-[80px]"
+                                        title={r.responsible_person || ''}>
+                                        {shortName(r.responsible_person)}
+                                      </td>
+                                      <td className={hTd}>{hL(r.monthly_target)}</td>
+                                      <td className={hTd}>{hL(r.daily_target)}</td>
+                                      <td className={hTd}>{hL(r.achieved_on)}</td>
+                                      <td className={hTd}>{hL(r.target_till)}</td>
+                                      <td className={`${hTd} font-medium`}>{hL(r.achieved_till)}</td>
+                                      <td className={hTd}>{inr(r.invoice_count_till)}</td>
+                                      <td className={`${hTd} font-semibold ${pctCellCls(r.pct_achieved)}`}>
+                                        {r.pct_achieved == null ? '—' : r.pct_achieved + ' %'}
+                                      </td>
+                                      <td className={hTd}>{hL(r.short_fall_till)}</td>
+                                      <td className={`${hTd} ${r.balance_month != null && r.balance_month <= 0 ? 'pms-ahead' : ''}`}>
+                                        {hL(r.balance_month)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                  <tr className="font-semibold pms-subtotal-row">
+                                    <td className="px-1 py-0.5 border border-gray-200 text-left" colSpan={3}>
+                                      {reg === 'MH' ? 'Maharashtra Total' : reg === 'KA' ? 'Karnataka Total' : `${reg} Total`}
+                                    </td>
+                                    {metric(sum(rs))}
+                                  </tr>
+                                </React.Fragment>
+                              );
+                            })}
+                            <tr className="font-bold pms-grand-total">
+                              <td className="px-1 py-0.5 border border-gray-200 text-left" colSpan={3}>Total (All)</td>
+                              {metric(sum(rows || []))}
+                            </tr>
                           </tbody>
                         </table>
+                        </div>
                       </div>
-                    </div>
+                    );
+                  };
+                  // Shared column grid — same vertical column lines in the
+                  // stacked breakdown tables (Category keeps its own layout)
+                  const histColgroup = (
+                    <colgroup>
+                      <col style={{ width: '16%' }} />
+                      {Array.from({ length: 8 }, (_, ci) => (
+                        <col key={ci} style={{ width: '10.5%' }} />
+                      ))}
+                    </colgroup>
                   );
-                  const breakdownTable = (rows, title, label) => (
-                    <div className="mt-3">
-                      <h3 className="text-xs font-bold text-gray-800 mb-1.5">{title}</h3>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-[11px] border-collapse min-w-[480px]">
-                          <thead><tr>
-                            <th className={thCls}>{label}</th>
-                            <th className={thCls}>Spare Sale</th>
-                            <th className={thCls}>Labour Sale</th>
-                            <th className={thCls}>Total</th>
-                            <th className={thCls}>Invoices</th>
-                          </tr></thead>
-                          <tbody>
-                            {(rows || []).map((r, i) => (
-                              <tr key={i} className="hover:bg-gray-50/60">
-                                <td className={`${tdCls} font-medium`}>{r.name}</td>
-                                <td className={`${tdCls} text-right`}>{inr(r.part)}</td>
-                                <td className={`${tdCls} text-right`}>{inr(r.labour)}</td>
-                                <td className={`${tdCls} text-right font-semibold`}>{inr(r.total)}</td>
-                                <td className={`${tdCls} text-right`}>{inr(r.invoices)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                  // Breakdown table — full columns with % shares + Total row
+                  const breakdownTable = (rows, title, label) => {
+                    const t = (rows || []).reduce((a, r) => ({
+                      part: a.part + (r.part || 0), labour: a.labour + (r.labour || 0),
+                      total: a.total + (r.total || 0), invoices: a.invoices + (r.invoices || 0),
+                    }), { part: 0, labour: 0, total: 0, invoices: 0 });
+                    return (
+                      <div className="mt-3">
+                        <h3 className="text-xs font-bold text-gray-800 mb-1.5">
+                          {title} <span className="font-normal text-gray-400">(Lakh ₹ · % of total)</span>
+                        </h3>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-[11px] border-collapse min-w-[640px]" style={{ tableLayout: 'fixed' }}>
+                            {histColgroup}
+                            <thead><tr>
+                              <th className={thCls}>{label}</th>
+                              <th className={thCls}>Spare Sale</th>
+                              <th className={thCls}>% Spare</th>
+                              <th className={thCls}>Labour Sale</th>
+                              <th className={thCls}>% Labour</th>
+                              <th className={thCls}>Total</th>
+                              <th className={thCls}>% Total</th>
+                              <th className={thCls}>Invoices</th>
+                              <th className={thCls}>% Invoices</th>
+                            </tr></thead>
+                            <tbody>
+                              {(rows || []).map((r, i) => (
+                                <tr key={i} className="hover:bg-gray-50/60">
+                                  <td className={`${tdCls} font-medium text-center`}>{r.name}</td>
+                                  <td className={`${tdCls} text-right`}>{hL(r.part)}</td>
+                                  <td className={`${tdCls} text-right`}>{hP(r.part, t.part)}</td>
+                                  <td className={`${tdCls} text-right`}>{hL(r.labour)}</td>
+                                  <td className={`${tdCls} text-right`}>{hP(r.labour, t.labour)}</td>
+                                  <td className={`${tdCls} text-right font-semibold`}>{hL(r.total)}</td>
+                                  <td className={`${tdCls} text-right`}>{hP(r.total, t.total)}</td>
+                                  <td className={`${tdCls} text-right`}>{inr(r.invoices)}</td>
+                                  <td className={`${tdCls} text-right`}>{hP(r.invoices, t.invoices)}</td>
+                                </tr>
+                              ))}
+                              {(rows || []).length > 0 && (
+                                <tr className="bg-gray-50 font-bold">
+                                  <td className={`${tdCls} text-center`}>Total</td>
+                                  <td className={`${tdCls} text-right`}>{hL(t.part)}</td>
+                                  <td className={`${tdCls} text-right`}>100 %</td>
+                                  <td className={`${tdCls} text-right`}>{hL(t.labour)}</td>
+                                  <td className={`${tdCls} text-right`}>100 %</td>
+                                  <td className={`${tdCls} text-right`}>{hL(t.total)}</td>
+                                  <td className={`${tdCls} text-right`}>100 %</td>
+                                  <td className={`${tdCls} text-right`}>{inr(t.invoices)}</td>
+                                  <td className={`${tdCls} text-right`}>100 %</td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
-                    </div>
-                  );
+                    );
+                  };
+                  // Category table — Spare only, all columns like the live view
+                  const categoryTable = (rows) => {
+                    const t = (rows || []).reduce((a, r) => ({
+                      part: a.part + (r.part || 0), invoices: a.invoices + (r.invoices || 0),
+                      qty: a.qty + (r.qty || 0), lines: a.lines + (r.lines || 0),
+                    }), { part: 0, invoices: 0, qty: 0, lines: 0 });
+                    return (
+                      <div className="mt-3">
+                        <h3 className="text-xs font-bold text-gray-800 mb-1.5">
+                          Category-wise Sales (Spare) <span className="font-normal text-gray-400">(Spare only · Lakh ₹)</span>
+                        </h3>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-[11px] border-collapse min-w-[640px]">
+                            <thead><tr>
+                              <th className={thCls}>Category</th>
+                              <th className={thCls}>Spare Sale</th>
+                              <th className={thCls}>% Spare</th>
+                              <th className={thCls}>Quantity</th>
+                              <th className={thCls}>Line Items</th>
+                              <th className={thCls}>Invoices</th>
+                              <th className={thCls}>% Invoices</th>
+                              <th className={thCls}>Avg / Invoice</th>
+                            </tr></thead>
+                            <tbody>
+                              {(rows || []).map((r, i) => (
+                                <tr key={i} className="hover:bg-gray-50/60">
+                                  <td className={`${tdCls} font-medium text-center`}>{r.name}</td>
+                                  <td className={`${tdCls} text-right font-medium`}>{hL(r.part)}</td>
+                                  <td className={`${tdCls} text-right`}>{hP(r.part, t.part)}</td>
+                                  <td className={`${tdCls} text-right`}>{inr(Math.round(r.qty || 0))}</td>
+                                  <td className={`${tdCls} text-right`}>{inr(r.lines || 0)}</td>
+                                  <td className={`${tdCls} text-right`}>{inr(r.invoices)}</td>
+                                  <td className={`${tdCls} text-right`}>{hP(r.invoices, t.invoices)}</td>
+                                  <td className={`${tdCls} text-right`}>{r.invoices ? hL(r.part / r.invoices) : '—'}</td>
+                                </tr>
+                              ))}
+                              {(rows || []).length > 0 && (
+                                <tr className="bg-gray-50 font-bold">
+                                  <td className={`${tdCls} text-center`}>Total</td>
+                                  <td className={`${tdCls} text-right`}>{hL(t.part)}</td>
+                                  <td className={`${tdCls} text-right`}>100 %</td>
+                                  <td className={`${tdCls} text-right`}>{inr(Math.round(t.qty))}</td>
+                                  <td className={`${tdCls} text-right`}>{inr(t.lines)}</td>
+                                  <td className={`${tdCls} text-right`}>{inr(t.invoices)}</td>
+                                  <td className={`${tdCls} text-right`}>100 %</td>
+                                  <td className={`${tdCls} text-right`}>{t.invoices ? hL(t.part / t.invoices) : '—'}</td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  };
                   return (
                     <div>
                       <p className="text-[11px] text-gray-500">
@@ -2491,26 +3361,188 @@ const SalesLabourReport = () => {
                         {historyDetail.created_by_name && <> · Generated by <b>{historyDetail.created_by_name}</b></>}
                         {historyDetail.created_at && <> on {new Date(historyDetail.created_at).toLocaleString('en-GB')}</>}
                       </p>
-                      {/* Summary tiles */}
-                      <div className="mt-2 grid grid-cols-4 max-md:grid-cols-2 gap-2">
-                        {[
-                          ['Total Spare Sale', '₹ ' + lakh(p.summary?.total_spare_sale)],
-                          ['Total Labour Sale', '₹ ' + lakh(p.summary?.total_labour_sale)],
-                          ['Overall % Achieved', p.summary?.overall_pct_achieved != null
-                            ? p.summary.overall_pct_achieved + ' %' : '—'],
-                          ['Total Invoices', inr(p.summary?.total_invoices)],
-                        ].map(([label, value]) => (
-                          <div key={label} className="border border-gray-200 rounded-lg px-3 py-2">
-                            <p className="text-[11px] text-gray-500">{label}</p>
-                            <p className="text-base font-bold pms-accent">{value}</p>
+                      {/* Summary tiles — same two-row (Spare / Labour) layout
+                          as the live report */}
+                      {['spare', 'labour'].map((ty) => {
+                        const isSp = ty === 'spare';
+                        const nm = isSp ? 'Spare' : 'Labour';
+                        const rows = isSp ? p.spare_rows : p.labour_rows;
+                        const sale = isSp ? s.total_spare_sale : s.total_labour_sale;
+                        const target = isSp ? s.total_spare_target : s.total_labour_target;
+                        const inv = (rows || []).reduce((a, r) => a + (r.invoice_count_till || 0), 0);
+                        const rr = rrOfRows(rows);
+                        return (
+                          <div key={ty} className="mt-2 grid grid-cols-6 max-xl:grid-cols-3 max-md:grid-cols-2 gap-2">
+                            {[
+                              [`${nm} Target`, target ? '₹ ' + lakh(target) : '—'],
+                              [`Total ${nm} Sale`, '₹ ' + lakh(sale)],
+                              [`${nm} % vs AOP Target`, target
+                                ? (sale / target * 100).toFixed(1) + ' %' : '—'],
+                              [`${nm} Invoices`, inr(inv)],
+                              [`Current ${nm} Run-Rate`, rr ? '₹ ' + lakh(rr.cur) + ' /day' : '—'],
+                              [`Required ${nm} Run-Rate`, rr ? '₹ ' + lakh(rr.req) + ' /day' : '—'],
+                            ].map(([label, value]) => (
+                              <div key={label} className="border border-gray-200 rounded-lg px-2 py-2">
+                                <p className="text-[11px] text-gray-500 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={label}>{label}</p>
+                                <p className="text-base font-bold pms-accent whitespace-nowrap">{value}</p>
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
+                        );
+                      })}
                       {branchTable(p.spare_rows, 'Spare Part Sales')}
                       {branchTable(p.labour_rows, 'Labour Sales')}
                       {breakdownTable(p.regional, 'Regional-wise Sales', 'Region')}
                       {breakdownTable(p.segment, 'Segment-wise Sales', 'Segment')}
                       {breakdownTable(p.service_head, 'Service Report Type-wise Sales', 'Service Head')}
+                      {categoryTable(p.category)}
+                      {/* ---- Branch-wise view saved with the report (as-is) ---- */}
+                      {p.branch_view && (() => {
+                        const bv = p.branch_view;
+                        const ids = bv.branches || [];
+                        const secs = bv.secs || {};
+                        const det = bv.detail || null;
+                        const spSel = (p.spare_rows || []).filter((r) => ids.includes(r.branch_id));
+                        const lbSel = (p.labour_rows || []).filter((r) => ids.includes(r.branch_id));
+                        const allIds = [...new Set([...(p.spare_rows || []), ...(p.labour_rows || [])]
+                          .map((r) => r.branch_id))];
+                        const totOf = (id) =>
+                          ((p.spare_rows || []).find((r) => r.branch_id === id)?.achieved_till || 0) +
+                          ((p.labour_rows || []).find((r) => r.branch_id === id)?.achieved_till || 0);
+                        const ranked = allIds.map((id) => ({ id, t: totOf(id) })).sort((a, b) => b.t - a.t);
+                        const rrOne = (r) => {
+                          if (!r || !r.daily_target || !r.monthly_target) return null;
+                          const totalWd = r.monthly_target / r.daily_target;
+                          const elapsedWd = Math.min(totalWd, (r.target_till || 0) / r.daily_target);
+                          const remWd = Math.max(0, totalWd - elapsedWd);
+                          return {
+                            req: remWd > 0 ? Math.max(0, r.monthly_target - (r.achieved_till || 0)) / remWd : 0,
+                            cur: elapsedWd > 0 ? (r.achieved_till || 0) / elapsedWd : 0,
+                          };
+                        };
+                        const hTd2 = 'px-1 py-0.5 border border-gray-200 text-right whitespace-nowrap';
+                        const hLn = (v) => ((Number(v) || 0) / 100000).toFixed(2);
+                        const half = (r) => {
+                          const rr = rrOne(r);
+                          const tgt = r?.monthly_target || 0, sale = r?.achieved_till || 0;
+                          const pct = tgt ? +(sale / tgt * 100).toFixed(1) : null;
+                          return (
+                            <>
+                              <td className={hTd2}>{hLn(tgt)} L</td>
+                              <td className={hTd2}>{hLn(sale)} L</td>
+                              <td className={`${hTd2} font-semibold ${pctCellCls(pct)}`}>
+                                {pct == null ? '—' : pct + ' %'}
+                              </td>
+                              <td className={hTd2}>{inr(r?.invoice_count_till || 0)}</td>
+                              <td className={hTd2}>{rr ? `${hLn(rr.cur)} L /day` : '—'}</td>
+                              <td className={hTd2}>{rr ? `${hLn(rr.req)} L /day` : '—'}</td>
+                            </>
+                          );
+                        };
+                        const miniTable = (title, hdrs, rows2) => (
+                          <div className="mt-3">
+                            <h3 className="text-xs font-bold text-gray-800 mb-1.5">
+                              {title} <span className="font-normal text-gray-400">(Lakh ₹ · selected branches)</span>
+                            </h3>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-[11px] border-collapse min-w-[520px]">
+                                <thead><tr>{hdrs.map((h) => <th key={h} className={thCls}>{h}</th>)}</tr></thead>
+                                <tbody>
+                                  {rows2.map((cells, i) => (
+                                    <tr key={i} className="hover:bg-gray-50/60">
+                                      {cells.map((c, j) => (
+                                        <td key={j} className={`${tdCls} ${j === 0 ? 'text-center font-medium' : 'text-right'}`}>{c}</td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                        return (
+                          <div className="mt-4 pt-3 border-t-2 border-gray-200">
+                            <h3 className="text-xs font-bold text-gray-800 mb-1.5">
+                              Branch Analysis — {ids.length} branch{ids.length > 1 ? 'es' : ''} saved{' '}
+                              <span className="font-normal text-gray-400">(Values in Lakh ₹)</span>
+                            </h3>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-[11px] border-collapse min-w-[1100px]">
+                                <thead>
+                                  <tr>
+                                    <th className={`${thCls} text-left`} rowSpan={2}
+                                      style={{ width: 130, minWidth: 130 }}>Branch</th>
+                                    <th className={thCls} rowSpan={2} style={{ width: 80, minWidth: 80 }}>Rank</th>
+                                    <th className={thCls} colSpan={6}>SPARE</th>
+                                    <th className={thCls} colSpan={6}>LABOUR</th>
+                                  </tr>
+                                  <tr>
+                                    {['Target', 'Total Sale', '% vs AOP Target', 'Invoices', 'Current Run-Rate', 'Required Run-Rate',
+                                      'Target', 'Total Sale', '% vs AOP Target', 'Invoices', 'Current Run-Rate', 'Required Run-Rate']
+                                      .map((h, i) => <th key={i} className={thCls}>{h}</th>)}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {ids.map((id) => {
+                                    const sp = (p.spare_rows || []).find((r) => r.branch_id === id);
+                                    const lb = (p.labour_rows || []).find((r) => r.branch_id === id);
+                                    const base = sp || lb;
+                                    if (!base) return null;
+                                    return (
+                                      <tr key={id} className="hover:bg-gray-50/60">
+                                        <td className={`${tdCls} font-medium`} style={{ maxWidth: 130 }}
+                                          title={`${base.branch_name} (${base.region})`}>
+                                          <div className="truncate leading-tight">
+                                            {base.branch_name} <span className="text-gray-400">({base.region})</span>
+                                          </div>
+                                        </td>
+                                        <td className={`${tdCls} text-center font-bold pms-accent whitespace-nowrap`}>
+                                          #{1 + ranked.findIndex((x) => x.id === id)}{' '}
+                                          <span className="font-normal text-gray-400">of {ranked.length}</span>
+                                        </td>
+                                        {half(sp)}
+                                        {half(lb)}
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                            {secs.records && branchTable(spSel, 'Spare — selected branches')}
+                            {secs.records && branchTable(lbSel, 'Labour — selected branches')}
+                            {det && secs.weeks && miniTable('Week-wise Sales',
+                              ['Week', 'Period', 'Spare Sale', 'Labour Sale', 'Total', 'Invoices'],
+                              (det.weeks || []).map((w) => [
+                                `Week ${w.week}`, `${w.start} → ${w.end}`,
+                                hLn(w.part), hLn(w.labour), hLn(w.total), inr(w.invoices)]))}
+                            {det && secs.months && miniTable('Month-wise Sales',
+                              ['Month', 'Spare Sale', 'Labour Sale', 'Total', 'Invoices'],
+                              (det.months || []).map((m) => [
+                                m.month, hLn(m.part), hLn(m.labour), hLn(m.total), inr(m.invoices)]))}
+                            {det && secs.segment && breakdownTable(det.segment, 'Segment-wise Sales — selected branches', 'Segment')}
+                            {det && secs.service_head && breakdownTable(det.service_head, 'Service Report Type-wise Sales — selected branches', 'Service Head')}
+                            {det && secs.category && categoryTable(det.category)}
+                            {secs.employee && p.emp_productivity && (
+                              <div className="mt-3">
+                                <EmployeeProductivityReport
+                                  preloaded={p.emp_productivity}
+                                  periodFrom={p.from_date || ''}
+                                  periodTo={p.as_on || ''}
+                                  onlyBranches={bv.names || []} />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                      {/* Employee Productivity — from the snapshot saved with the report */}
+                      {p.emp_productivity && !(p.branch_view?.secs?.employee) && (
+                        <div className="mt-3">
+                          <EmployeeProductivityReport
+                            preloaded={p.emp_productivity}
+                            periodFrom={p.from_date || ''}
+                            periodTo={p.as_on || ''} />
+                        </div>
+                      )}
                     </div>
                   );
                 })()

@@ -1315,6 +1315,70 @@ async def bulk_delete_open_sr_data(
     return controller.bulk_delete_open_sr_data(request.ids)
 
 
+# ==================== Response Time & MaxTTR Endpoints ====================
+
+@router.get("/response-time-maxttr/export")
+async def export_response_time_maxttr(
+    user_id: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    """Export Response Time & MaxTTR Details to CSV - checks if user has export permission"""
+    check_export_permission(user_id, db)
+
+    controller = CustomerController(db)
+    rows = controller.get_response_time_maxttr(skip=0, limit=None)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    if rows:
+        headers = list(rows[0].keys())
+        writer.writerow(headers)
+        for r in rows:
+            writer.writerow([r.get(h) for h in headers])
+    output.seek(0)
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=response_time_maxttr_export.csv"}
+    )
+
+
+@router.get("/response-time-maxttr/")
+async def get_response_time_maxttr(
+    response: Response,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=-1),  # Allow -1 for all records
+    search: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get all Response Time & MaxTTR rows with pagination (use limit=-1 for all records)"""
+    controller = CustomerController(db)
+
+    total_count = controller.get_response_time_maxttr_count(search)
+    response.headers["X-Total-Count"] = str(total_count)
+
+    actual_limit = None if limit == -1 else limit
+    return controller.get_response_time_maxttr(skip, actual_limit, search)
+
+
+@router.delete("/response-time-maxttr/{record_id}", response_model=MessageResponse)
+async def delete_response_time_maxttr(record_id: int, db: Session = Depends(get_db)):
+    """Delete one Response Time & MaxTTR row"""
+    controller = CustomerController(db)
+    return controller.delete_response_time_maxttr(record_id)
+
+
+@router.post("/response-time-maxttr/bulk-delete", response_model=MessageResponse)
+async def bulk_delete_response_time_maxttr(
+    request: BulkDeleteRequest,
+    db: Session = Depends(get_db)
+):
+    """Delete multiple Response Time & MaxTTR rows"""
+    controller = CustomerController(db)
+    return controller.bulk_delete_response_time_maxttr(request.ids)
+
+
 # ==================== Data Retrieval by Instance ID ====================
 
 @router.get("/instance/{instance_id}/amc-agreements", response_model=List[AMCAgreement])
@@ -1460,7 +1524,8 @@ async def get_all_table_counts(
         "regular_bandhan": controller.get_regular_bandhan_count(),
         "lms_data": controller.get_lms_data_count(),
         "open_sr_load_reports": controller.get_open_sr_load_reports_count(),
-        "open_sr_data": controller.get_open_sr_data_count()
+        "open_sr_data": controller.get_open_sr_data_count(),
+        "response_time_maxttr": controller.get_response_time_maxttr_count()
     }
     
     return counts    

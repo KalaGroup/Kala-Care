@@ -19,7 +19,7 @@ import {
 import {
     createApplication, updateApplication, approveApplication, rejectApplication,
     deleteApplication, sendResultEmail, attachmentViewUrl, attachmentDownloadUrl,
-    approvalPdfUrl, getExpenseTypes, getAccess, getChainPreview, errText,
+    attachmentsZipUrl, approvalPdfUrl, getExpenseTypes, getAccess, getChainPreview, errText,
 } from './approvalApi';
 
 export const BRAND = '#2f3192';
@@ -358,10 +358,10 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const escHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 const emailGroupHtml = (prefix, labelText) => `
-    <p style="margin:10px 0 4px;font-size:12px;color:#555">${labelText}</p>
+    <p style="margin:10px 0 4px;font-size:12px;color:var(--apv-muted)">${labelText}</p>
     <div style="display:flex;gap:6px">
         <input id="${prefix}-in" type="email" placeholder="name@email.com"
-            style="flex:1;min-width:0;border:1px solid #d1d5db;border-radius:8px;padding:7px 10px;font-size:13px;outline:none">
+            style="flex:1;min-width:0;border:1px solid var(--apv-field-border);border-radius:8px;padding:7px 10px;font-size:13px;outline:none;background:var(--apv-field-bg);color:var(--apv-field-text)">
         <button type="button" id="${prefix}-add"
             style="background:${BRAND};color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">+ Add</button>
     </div>
@@ -374,8 +374,8 @@ const wireEmailGroup = (prefix, added) => {
     const list = document.getElementById(`${prefix}-list`);
     const render = () => {
         list.innerHTML = added.map((e, i) =>
-            `<span style="display:inline-flex;align-items:center;gap:6px;background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;border-radius:999px;padding:3px 10px;font-size:12px">${escHtml(e)}
-                 <b data-i="${i}" title="Remove" style="cursor:pointer;color:#6b7280;font-size:13px;line-height:1">×</b></span>`).join('');
+            `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--apv-chip-bg);color:var(--apv-chip-text);border:1px solid var(--apv-chip-border);border-radius:999px;padding:3px 10px;font-size:12px">${escHtml(e)}
+                 <b data-i="${i}" title="Remove" style="cursor:pointer;color:var(--apv-dim);font-size:13px;line-height:1">×</b></span>`).join('');
         list.querySelectorAll('b[data-i]').forEach(b =>
             b.addEventListener('click', () => { added.splice(Number(b.dataset.i), 1); render(); }));
     };
@@ -426,7 +426,7 @@ export async function promptCcEmails(initial = []) {
     await Swal.fire({
         title: 'CC emails for the result mail',
         html: `<div style="text-align:left;font-size:13px">
-                   <p style="margin:0 0 2px;font-size:12px;color:#555">
+                   <p style="margin:0 0 2px;font-size:12px;color:var(--apv-muted)">
                        When this NFA is approved / rejected the result email goes
                        <b>To: you (creator)</b> with the <b>approvers in CC automatically</b>.
                    </p>
@@ -697,7 +697,16 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
 
                     {/* Attachments */}
                     <div>
-                        <p className="text-[10px] uppercase tracking-wide text-black font-bold mb-1.5">Attachments</p>
+                        <div className="flex items-center justify-between mb-1.5">
+                            <p className="text-[10px] uppercase tracking-wide text-black font-bold">Attachments</p>
+                            {app.attachments?.length > 0 && (
+                                <a href={attachmentsZipUrl(app.id)}
+                                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800"
+                                    title="Download all attachments as ZIP">
+                                    <Download size={12} /> Download All (ZIP)
+                                </a>
+                            )}
+                        </div>
                         {app.attachments?.length ? (
                             <div className="flex flex-wrap gap-2">
                                 {app.attachments.map(f => (
@@ -983,6 +992,18 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
             li('Attachments', files.length ? files.map(f => f.name).join(', ') : ''),
         ].join('');
 
+        // The approval path this record will follow — fetched live so the CC
+        // box's right panel shows the hierarchy and offers a per-level
+        // approver pick where SEVERAL people hold a level. No pick = every
+        // assigned approver may act (the panel just hides on fetch error).
+        // Kicked off BEFORE the confirmation box so it loads while the user
+        // reads it — by the time they press Yes it is usually already here.
+        let chainReady = false;
+        const chainPromise = getChainPreview(form.branch, form.category, form.request_type)
+            .then(d => d.levels || null)
+            .catch(() => null)   /* submit still works without the flow panel */
+            .finally(() => { chainReady = true; });
+
         const res = await Swal.fire({
             title: 'Are you sure to submit for approval?',
             html: `<div style="text-align:left;max-height:45vh;overflow-y:auto;font-size:13px">
@@ -996,15 +1017,20 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
         });
         if (!res.isConfirmed) return;
 
-        // The approval path this record will follow — fetched live so the CC
-        // box's right panel shows the hierarchy and offers a per-level
-        // approver pick where SEVERAL people hold a level. No pick = every
-        // assigned approver may act (the panel just hides on fetch error).
-        let chainLevels = null;
-        try {
-            const d = await getChainPreview(form.branch, form.category, form.request_type);
-            chainLevels = d.levels || null;
-        } catch { /* submit still works without the flow panel */ }
+        // Loader ONLY when the fetch is still in flight — showing it when the
+        // data is already here races its didOpen/showLoading onto the CC box
+        // (the spinner would replace the OK button).
+        if (!chainReady) {
+            Swal.fire({
+                title: 'Preparing approval flow…',
+                html: 'Please wait',
+                allowOutsideClick: false,
+                allowEscapeKey: false,
+                showConfirmButton: false,
+                didOpen: () => Swal.showLoading(),
+            });
+        }
+        const chainLevels = await chainPromise;
 
         const pickerLevels = [];
         // An L2/L3/L4 creator's record only travels UPWARD — levels at or
@@ -1018,11 +1044,11 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
             const tag = `${l.level.toUpperCase()} – ${esc(levelName(l.level))}`;
             const row = (body) => `<div style="margin:6px 0"><b style="font-size:11px">${tag}</b>${body}</div>`;
             if (l.skipped)
-                return row(`<div style="font-size:11px;color:#6b7280">${esc(l.skipped)}</div>`);
+                return row(`<div style="font-size:11px;color:var(--apv-dim)">${esc(l.skipped)}</div>`);
             const cands = l.candidates || [];
             const hoL4 = isHO && l.level === 'l4';
             if (cands.length <= 1 && !hoL4)
-                return row(`<div style="font-size:11px;color:#374151">${esc(cands.map(c => c.name).join(', ') || '—')}</div>`);
+                return row(`<div style="font-size:11px;color:var(--apv-strong)">${esc(cands.map(c => c.name).join(', ') || '—')}</div>`);
             pickerLevels.push(l.level);
             const preset = l.level === 'l4' ? form.l4_approver_id : '';
             // HO must pick ONE L4 (validated below) — no "all approvers" option
@@ -1031,7 +1057,7 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
                 : '<option value="">All approvers — anyone may act</option>';
             const opts = cands.map(c =>
                 `<option value="${esc(c.user_id)}" ${c.user_id === preset ? 'selected' : ''}>${esc(c.name)} (${esc(c.user_id)})</option>`).join('');
-            return row(`<select id="chainpick_${l.level}" style="display:block;width:100%;border:1px solid #d1d5db;border-radius:8px;padding:5px 8px;font-size:12px;margin-top:2px;background:#fff">${allOpt}${opts}</select>`);
+            return row(`<select id="chainpick_${l.level}" style="display:block;width:100%;border:1px solid var(--apv-field-border);border-radius:8px;padding:5px 8px;font-size:12px;margin-top:2px;background:var(--apv-field-bg);color:var(--apv-field-text)">${allOpt}${opts}</select>`);
         }).join('');
 
         // Creator attaches CC addresses for the future result email (left)
@@ -1042,17 +1068,17 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
             width: 720,
             html: `<div style="display:flex;gap:14px;text-align:left;font-size:13px;flex-wrap:wrap">
                        <div style="flex:1;min-width:230px">
-                           <p style="margin:0 0 2px;font-size:12px;color:#555">
+                           <p style="margin:0 0 2px;font-size:12px;color:var(--apv-muted)">
                                When this NFA is approved / rejected the result email goes
                                <b>To: you (creator)</b> with the <b>approvers in CC automatically</b>.
                            </p>
                            ${emailGroupHtml('apv-ccsub', 'Add more CC emails (optional):')}
                        </div>
-                       <div style="flex:1;min-width:230px;border-left:1px solid #e5e7eb;padding-left:14px">
-                           <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:#374151">
+                       <div style="flex:1;min-width:230px;border-left:1px solid var(--apv-divider);padding-left:14px">
+                           <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:var(--apv-strong)">
                                APPROVAL FLOW — pick who approves where several people hold a level
                            </p>
-                           ${flowRows || '<p style="font-size:11px;color:#6b7280">Flow preview unavailable — default approvers apply</p>'}
+                           ${flowRows || '<p style="font-size:11px;color:var(--apv-dim)">Flow preview unavailable — default approvers apply</p>'}
                        </div>
                    </div>`,
             showCancelButton: false,
@@ -1060,7 +1086,10 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
             allowEscapeKey: false,
             confirmButtonText: 'OK — Continue',
             confirmButtonColor: BRAND,
-            didOpen: () => wireEmailGroup('apv-ccsub', ccAdded),
+            didOpen: () => {
+                Swal.hideLoading();   // if the transient loader's spinner landed here, put the OK button back
+                wireEmailGroup('apv-ccsub', ccAdded);
+            },
             preConfirm: () => {
                 if (!flushEmailGroup('apv-ccsub', ccAdded)) return false;
                 const picks = {};
@@ -1080,6 +1109,16 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
         const ccList = ccAdded;
 
         setSaving(true);
+        // attachments upload here — keep a blocking loader on screen so the
+        // user sees the submit is in progress (closed on success / failure)
+        Swal.fire({
+            title: 'Submitting application…',
+            html: 'Please wait',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            showConfirmButton: false,
+            didOpen: () => Swal.showLoading(),
+        });
         try {
             let res;
             const fd = buildFormData();
@@ -1104,7 +1143,10 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
             onClose();
         } catch (err) {
             toast.error(errText(err, 'Failed to submit application'));
-        } finally { setSaving(false); }
+        } finally {
+            Swal.close();   // drop the loader on success and failure alike
+            setSaving(false);
+        }
     };
 
     const input = 'w-full border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white text-gray-900';

@@ -8,6 +8,7 @@
 //   PUT    /maintenance/app-codes/{code}     -> { success, item }            (master_admin)
 //   DELETE /maintenance/app-codes/{code}     -> { success }                  (master_admin)
 //   POST   /maintenance/app-codes/import     -> { success, added, replaced } (master_admin)
+//   GET    /maintenance/app-codes/last-updated -> { success, last_updated, total_records }
 //   GET    /maintenance/services             -> { success, items:[service] }
 //   PUT    /maintenance/services/{key}       -> { success, item }            (master_admin)
 //   GET    /maintenance/activity?limit=      -> { success, items:[activity] }
@@ -89,6 +90,9 @@ export const updateAppCode = (code, rec) => jsend('PUT', `/maintenance/app-codes
 export const deleteAppCode = (code) => jsend('DELETE', `/maintenance/app-codes/${encodeURIComponent(code)}`);
 export const importAppCodes = (items) =>
     jsend('POST', '/maintenance/app-codes/import', { items }).then((d) => ({ added: d.added || [], replaced: d.replaced || [] }));
+// Last master change + total app codes — the Import Data tab's "Last data
+// update" banner (same shape as the Data Upload page's /import/last-updated).
+export const getMasterLastUpdated = () => jget('/maintenance/app-codes/last-updated');
 
 // -- Services -----------------------------------------------------------------
 export const getServices = () => jget('/maintenance/services').then((d) => d.items || []);

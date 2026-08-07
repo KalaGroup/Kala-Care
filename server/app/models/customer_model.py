@@ -618,6 +618,54 @@ class OpenSRLoadReport(Base):
     created_at = Column(DateTime, default=now_ist)
     updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
+
+class ResponseTimeMaxTTR(Base):
+    """'Response Time & MaxTTR Details' import — ONE row per unique SR NUMBER
+    (the file's primary key), upserted on re-import. The FIRST row per
+    instance_id in each file also refreshes the customers table (same
+    empty-safe rules as every other import). Shown on the Customer page."""
+    __tablename__ = "response_time_maxttr"
+    __table_args__ = (
+        Index('UQ_response_time_maxttr_sr_number', 'sr_number', unique=True),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    sr_number = Column(String(200), index=True, nullable=False)
+    instance_id = Column(String(100), index=True, nullable=True)
+
+    zone_name = Column(String(200), nullable=True)
+    asm_name = Column(String(500), nullable=True)
+    sd_id = Column(String(100), nullable=True)
+    sd_name = Column(String(500), nullable=True)
+    branch_id = Column(String(100), nullable=True)
+    branch_name = Column(String(500), nullable=True)
+    application_code = Column(String(200), nullable=True)
+    engine_serial_no = Column(String(200), nullable=True, index=True)
+    segment = Column(String(200), nullable=True)
+    product_segment = Column(String(200), nullable=True)
+    goem_oem = Column(String(200), nullable=True)
+    account_name = Column(String(500), nullable=True)
+    sr_type = Column(String(200), nullable=True)
+    sr_subtype = Column(String(200), nullable=True)
+    sr_open_date = Column(DateTime, nullable=True)
+    sr_task_start_date = Column(DateTime, nullable=True)
+    sr_task_end_date = Column(DateTime, nullable=True)
+    sr_close_date = Column(DateTime, nullable=True)
+    engineer_remarks = Column(Text, nullable=True)
+    se_name = Column(String(500), nullable=True)
+    se_ticket_num = Column(String(200), nullable=True)
+    response_time_range_in_hrs = Column(String(200), nullable=True)
+    response_time = Column(String(200), nullable=True)
+    maxttr_on_task_closed_in_hrs = Column(String(200), nullable=True)
+    maxttr_on_sr_closed_in_hrs = Column(String(200), nullable=True)
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
+
+
 class OpenSRData(Base):
     """'Open SR Data' (Close SR Report) import — ONE row per unique
     (instance_id, sr_number) combination, upserted on re-import. Only

@@ -41,10 +41,14 @@ def serialize_kit(k: MaintenanceKit):
 
 
 def serialize_app(a: MaintenanceAppCode):
+    # Imports re-insert rows (fresh created_at, null updated_at) while inline
+    # edits stamp updated_at — the newest of the two is the last-touched moment.
+    touched = a.updated_at or a.created_at
     return {
         "id": a.id, "appCode": a.app_code, "systemAppCode": a.system_app_code or "",
         "segment": a.segment or "", "engineModel": a.engine_model or "",
         "kva": a.kva or "", "emission": a.emission or "",
+        "updatedAt": touched.replace(tzinfo=None).isoformat() if touched else "",
         "createdBy": a.created_by or "", "updatedBy": a.updated_by or "",
         "parts": [serialize_part(p) for p in a.parts],
         "kits": [serialize_kit(k) for k in a.kits],
@@ -319,6 +323,25 @@ def import_apps(db: Session, items: list):
     return {"added": added, "replaced": replaced}
 
 
+def master_last_updated(db: Session):
+    """Newest change across the master's app codes + total code count — the
+    Import Data tab's "Last data update" banner (same payload shape as the Data
+    Upload page's /import/last-updated). Imports re-insert rows (fresh
+    created_at, null updated_at) while inline edits stamp updated_at, so the
+    newest of the two is the real last-touched moment."""
+    from sqlalchemy import func
+    last, total = db.query(
+        func.max(func.coalesce(MaintenanceAppCode.updated_at, MaintenanceAppCode.created_at)),
+        func.count(MaintenanceAppCode.id),
+    ).one()
+    # Stored timestamps are naive IST — send them naive so the browser shows
+    # the wall-clock as saved instead of shifting it to the viewer's timezone.
+    return {
+        "last_updated": last.replace(tzinfo=None).isoformat() if last else None,
+        "total_records": total or 0,
+    }
+
+
 # ---------------- ONE-TIME KIT BACKFILL ---------------- #
 
 def _legacy_kits_of(parts: list) -> list:
@@ -415,7 +438,12 @@ def _ts_ms(dt):
 
 
 def list_activity(db: Session, limit: int = 1000):
+    # The Master Admin's own look-ups (kala000001) are hidden from the Search
+    # Activity Count report — still logged in the table, just never listed.
+    from sqlalchemy import func, or_
     rows = (db.query(MaintenanceActivity)
+            .filter(or_(MaintenanceActivity.user_id.is_(None),
+                        func.lower(MaintenanceActivity.user_id) != "kala000001"))
             .order_by(MaintenanceActivity.created_at.desc(), MaintenanceActivity.id.desc())
             .limit(limit).all())
     return [{

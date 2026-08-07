@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import {
@@ -36,12 +36,13 @@ const FILE_TYPES = [
     "Regular Bandhan Customers Report",
     "LMS Data for ERP",
     "Open SR Load Report",
-    "Open SR Data"
+    "Open SR Data",
+    "Response Time & MaxTTR Details"
 ];
 
 // Frontend-only display names; the original value is still sent to the backend
 const FILE_TYPE_LABELS = {
-    "Open SR Data": "Close SR Report"
+    "Open SR Data": "MaxTTR - Oil Change SR Zero Labour Flag"
 };
 const getFileTypeLabel = (type) => FILE_TYPE_LABELS[type] || type;
 
@@ -209,6 +210,15 @@ const FILE_TYPE_COLUMNS = {
         "SEGMENT", "PRODUCT SEGMENT", "ACCOUNT NAME", "SR NUMBER", "SR TYPE",
         "SR SUBTYPE", "SR OPEN DATE", "SR CLOSE DATE", "MODE OF SR",
         "ZERO LABOUR FLAG", "OIL CHANGE FLAG", "COUNT OF TASKS"
+    ],
+    "Response Time & MaxTTR Details": [
+        "ZONE NAME", "ASM NAME", "SD ID", "SD NAME", "BRANCH ID", "BRANCH NAME",
+        "INSTANCE ID", "APPLICATION CODE", "ENGINE SERIAL NO", "SEGMENT",
+        "PRODUCT SEGMENT", "GOEM OEM", "ACCOUNT NAME", "SR NUMBER", "SR TYPE",
+        "SR SUBTYPE", "SR OPEN DATE", "SR TASK START DATE", "SR TASK END DATE",
+        "SR CLOSE DATE", "ENGINEER REMARKS", "SE NAME", "SE TICKET NUM",
+        "RESPONSE TIME RANGE IN HRS", "Response Time",
+        "MaxTTR on Task Closed in hrs", "MaxTTR on SR Closed in hrs"
     ]
 };
 
@@ -227,7 +237,11 @@ const FILE_TYPE_REQUIRED_COLUMNS = {
     "Regular Bandhan Customers Report": ["Pulse Instance ID", "Quotation Ref No"],
     "LMS Data for ERP": ["Instance ID", "Lead Number"],
     "Open SR Load Report": ["Service Request #", "Instance Id [Asset #]", "Engine Serial#"],
-    "Open SR Data": ["INSTANCE ID", "SR NUMBER", "SR TYPE", "SR SUBTYPE"]
+    "Open SR Data": ["INSTANCE ID", "SR NUMBER", "SR TYPE", "SR SUBTYPE"],
+    "Response Time & MaxTTR Details": [
+        "BRANCH ID", "INSTANCE ID", "SR NUMBER", "SR OPEN DATE",
+        "SR CLOSE DATE", "SE NAME", "SE TICKET NUM"
+    ]
 };
 
 // ============================================================================
@@ -296,6 +310,10 @@ const FILE_TYPE_IMPORTANT_COLUMNS = {
         "INSTANCE ID", "BRANCH ID", "ENGINE SERIAL NO", "ACCOUNT NAME",
         "SR NUMBER", "SR TYPE", "SR SUBTYPE", "SR OPEN DATE", "SR CLOSE DATE",
         "OIL CHANGE FLAG", "ZERO LABOUR FLAG"
+    ],
+    "Response Time & MaxTTR Details": [
+        "BRANCH ID", "INSTANCE ID", "SR NUMBER", "SR OPEN DATE",
+        "SR CLOSE DATE", "SE NAME", "SE TICKET NUM"
     ]
 };
 
@@ -313,6 +331,12 @@ const IMPORTANT_COLUMN_ALIASES = {
         "SR SUBTYPE": ["SR SUB TYPE", "SR SUB-TYPE"],
         "ZERO LABOUR FLAG": ["ZERO LABOR FLAG"],
         "OIL CHANGE FLAG": ["OIL CHANGE FLG"]
+    },
+    "Response Time & MaxTTR Details": {
+        "INSTANCE ID": ["Instance Id [Asset #]", "Instance Id", "Asset Number"],
+        "SR NUMBER": ["SR NO", "SR #", "SERVICE REQUEST NUMBER"],
+        "SR SUBTYPE": ["SR SUB TYPE", "SR SUB-TYPE"],
+        "SE TICKET NUM": ["SE TICKET NUMBER", "SE TICKET NO"]
     },
     "Regular Bandhan Customers Report": {
         "Genset Number": ["Genset No", "Engine No"],
@@ -350,6 +374,8 @@ const Import = () => {
     const busy = uploading || activeJobs.some((j) => j.id === activeImportJobId);
     const [results, setResults] = useState([]);
     const [selectedFileType, setSelectedFileType] = useState('');
+    const [fileTypeMenuOpen, setFileTypeMenuOpen] = useState(false);
+    const fileTypeMenuCloseTimer = useRef(null);
     const [dragActive, setDragActive] = useState(false);
     const [filePreview, setFilePreview] = useState(null);
     const [previewLoading, setPreviewLoading] = useState(false);
@@ -827,9 +853,9 @@ const Import = () => {
                 </div>
 
                 {/* Main Card */}
-                <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg sm:shadow-xl overflow-hidden">
+                <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg sm:shadow-xl">
                     {/* Card Header */}
-                    <div className="px-3 sm:px-4 py-2 sm:py-3 bg-[#2f3192]">
+                    <div className="px-3 sm:px-4 py-2 sm:py-3 bg-[#2f3192] rounded-t-xl sm:rounded-t-2xl">
                         <h2 className="text-sm sm:text-base font-semibold text-white">Upload New File</h2>
                         <p className="text-white text-opacity-90 text-[10px] sm:text-xs mt-0.5 sm:mt-1">Select a file type and upload your Excel document</p>
                     </div>
@@ -844,28 +870,47 @@ const Import = () => {
                                     <label className="block text-[11px] sm:text-xs font-semibold text-black mb-1 sm:mb-1.5">
                                         File Type <span className="text-red-500">*</span>
                                     </label>
-                                    <div className="relative w-full md:w-80">
-                                        <select
-                                            value={selectedFileType}
-                                            onChange={handleFileTypeChange}
-                                            className="w-full appearance-none border border-gray-200 rounded-lg shadow-sm px-2 sm:px-3 py-1.5 sm:py-2 pr-7 sm:pr-8 text-[11px] sm:text-xs focus:ring-2 transition-all bg-white text-black"
-                                            style={{
-                                                borderColor: selectedFileType ? 'var(--erp-accent)' : '#D1D5DB',
-                                                '--tw-ring-color': 'var(--erp-accent)'
-                                            }}
-                                            onFocus={(e) => e.target.style.borderColor = 'var(--erp-accent)'}
-                                            onBlur={(e) => e.target.style.borderColor = selectedFileType ? 'var(--erp-accent)' : '#D1D5DB'}
+                                    <div
+                                        className="relative w-full md:w-80"
+                                        onMouseEnter={() => {
+                                            if (busy) return;
+                                            if (fileTypeMenuCloseTimer.current) clearTimeout(fileTypeMenuCloseTimer.current);
+                                            setFileTypeMenuOpen(true);
+                                        }}
+                                        onMouseLeave={() => {
+                                            fileTypeMenuCloseTimer.current = setTimeout(() => setFileTypeMenuOpen(false), 150);
+                                        }}
+                                    >
+                                        <button
+                                            type="button"
+                                            onClick={() => !busy && setFileTypeMenuOpen(prev => !prev)}
                                             disabled={busy}
+                                            className="w-full text-left border border-gray-200 rounded-lg shadow-sm px-2 sm:px-3 py-1.5 sm:py-2 pr-7 sm:pr-8 text-[11px] sm:text-xs transition-all bg-white text-black disabled:bg-gray-50 disabled:cursor-not-allowed"
+                                            style={{ borderColor: selectedFileType ? 'var(--erp-accent)' : '#D1D5DB' }}
                                         >
-                                            <option value="" disabled>Select a file type</option>
-                                            {FILE_TYPES.map(type => (
-                                                <option key={type} value={type}>{getFileTypeLabel(type)}</option>
-                                            ))}
-                                        </select>
+                                            {selectedFileType ? getFileTypeLabel(selectedFileType) : <span className="text-gray-500">Select a file type</span>}
+                                        </button>
                                         <ChevronDownIcon
-                                            className="absolute right-2 sm:right-2.5 top-1/2 transform -translate-y-1/2 h-3 w-3 sm:h-3.5 sm:w-3.5 pointer-events-none"
+                                            className={`absolute right-2 sm:right-2.5 top-1/2 -translate-y-1/2 h-3 w-3 sm:h-3.5 sm:w-3.5 pointer-events-none transition-transform ${fileTypeMenuOpen ? 'rotate-180' : ''}`}
                                             style={{ color: selectedFileType ? 'var(--erp-accent)' : '#9CA3AF' }}
                                         />
+                                        {fileTypeMenuOpen && (
+                                            <div className="absolute left-0 right-0 top-full z-30 bg-white border border-gray-200 rounded-lg shadow-lg">
+                                                {FILE_TYPES.map(type => (
+                                                    <button
+                                                        key={type}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            handleFileTypeChange({ target: { value: type } });
+                                                            setFileTypeMenuOpen(false);
+                                                        }}
+                                                        className={`w-full text-left px-2 sm:px-3 py-1.5 sm:py-2 text-[11px] sm:text-xs hover:bg-gray-100 transition-colors ${selectedFileType === type ? 'font-semibold text-[#2f3192] bg-blue-50' : 'text-black'}`}
+                                                    >
+                                                        {getFileTypeLabel(type)}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                     <p className="mt-0.5 text-[10px] text-black">Choose the type of data you're importing</p>
                                 </div>

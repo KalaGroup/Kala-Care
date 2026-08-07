@@ -1,0 +1,165 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="1560" viewBox="0 0 1160 1560" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#15803d"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#b91c1c"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect x="0" y="0" width="1160" height="1560" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="580" y="38" text-anchor="middle" font-size="24" font-weight="700" fill="#0f172a">KalaCare ERP — Automatic Build &amp; Deployment Flow</text>
+  <text x="580" y="62" text-anchor="middle" font-size="14" fill="#64748b">git push → GitHub Actions → Self-hosted runner on company server → IIS + Backend service</text>
+
+  <!-- Swimlane backgrounds -->
+  <rect x="30"  y="80" width="280" height="1180" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+  <rect x="330" y="80" width="280" height="1180" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
+  <rect x="630" y="80" width="500" height="1180" rx="10" fill="#f0fdf4" stroke="#bbf7d0"/>
+
+  <!-- Lane headers -->
+  <text x="170" y="112" text-anchor="middle" font-size="17" font-weight="700" fill="#1d4ed8">DEVELOPER PC</text>
+  <text x="470" y="112" text-anchor="middle" font-size="17" font-weight="700" fill="#6d28d9">GITHUB (private repo)</text>
+  <text x="880" y="112" text-anchor="middle" font-size="17" font-weight="700" fill="#15803d">COMPANY SERVER (runner)</text>
+
+  <!-- ===== Developer lane ===== -->
+  <rect x="55" y="140" width="230" height="52" rx="8" fill="#ffffff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="170" y="162" text-anchor="middle" font-size="13.5" fill="#0f172a">1. Developer finishes</text>
+  <text x="170" y="180" text-anchor="middle" font-size="13.5" fill="#0f172a">code changes</text>
+
+  <line x1="170" y1="192" x2="170" y2="222" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="55" y="226" width="230" height="52" rx="8" fill="#ffffff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="170" y="248" text-anchor="middle" font-size="13.5" fill="#0f172a">2. git commit</text>
+  <text x="170" y="266" text-anchor="middle" font-size="13.5" font-weight="600" fill="#0f172a">git push  (main branch)</text>
+
+  <!-- elbow: dev -> github -->
+  <path d="M 170 278 L 170 334 L 342 334" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ===== GitHub lane ===== -->
+  <rect x="355" y="308" width="230" height="52" rx="8" fill="#ffffff" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="470" y="330" text-anchor="middle" font-size="13.5" fill="#0f172a">3. Repo receives push</text>
+  <text x="470" y="348" text-anchor="middle" font-size="13.5" fill="#0f172a">(code + .env inside)</text>
+
+  <line x1="470" y1="360" x2="470" y2="390" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="355" y="394" width="230" height="52" rx="8" fill="#ffffff" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="470" y="416" text-anchor="middle" font-size="13.5" fill="#0f172a">4. GitHub Actions triggers</text>
+  <text x="470" y="434" text-anchor="middle" font-size="13.5" font-weight="600" fill="#0f172a">deploy.yml workflow</text>
+
+  <!-- elbow: github -> server -->
+  <path d="M 470 446 L 470 502 L 717 502" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ===== Server lane ===== -->
+  <rect x="730" y="476" width="300" height="52" rx="8" fill="#ffffff" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="880" y="498" text-anchor="middle" font-size="13.5" fill="#0f172a">5. Self-hosted runner (Windows service)</text>
+  <text x="880" y="516" text-anchor="middle" font-size="13.5" fill="#0f172a">picks up the job</text>
+
+  <line x1="880" y1="528" x2="880" y2="556" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="730" y="560" width="300" height="42" rx="8" fill="#ffffff" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="880" y="586" text-anchor="middle" font-size="13.5" fill="#0f172a">6. Checkout latest code on server</text>
+
+  <line x1="880" y1="602" x2="880" y2="636" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- FRONTEND group -->
+  <rect x="650" y="640" width="460" height="196" rx="10" fill="#ecfeff" stroke="#67e8f9"/>
+  <text x="668" y="664" font-size="13" font-weight="700" fill="#0e7490">FRONTEND</text>
+
+  <rect x="730" y="674" width="300" height="40" rx="8" fill="#ffffff" stroke="#06b6d4" stroke-width="1.5"/>
+  <text x="880" y="699" text-anchor="middle" font-size="13.5" fill="#0f172a">7. npm ci  +  npm run build  (client)</text>
+
+  <line x1="880" y1="714" x2="880" y2="730" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="730" y="734" width="300" height="40" rx="8" fill="#ffffff" stroke="#06b6d4" stroke-width="1.5"/>
+  <text x="880" y="759" text-anchor="middle" font-size="13.5" fill="#0f172a">8. Backup current IIS website folder</text>
+
+  <line x1="880" y1="774" x2="880" y2="790" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="730" y="794" width="300" height="40" rx="8" fill="#ffffff" stroke="#06b6d4" stroke-width="1.5"/>
+  <text x="880" y="819" text-anchor="middle" font-size="13.5" fill="#0f172a">9. Copy client\dist → IIS folder</text>
+  <text x="662" y="810" font-size="12" fill="#0e7490">No IIS restart</text>
+  <text x="662" y="826" font-size="12" fill="#0e7490">needed ✓</text>
+
+  <line x1="880" y1="836" x2="880" y2="864" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- BACKEND group -->
+  <rect x="650" y="868" width="460" height="258" rx="10" fill="#fefce8" stroke="#fde047"/>
+  <text x="668" y="892" font-size="13" font-weight="700" fill="#a16207">BACKEND</text>
+
+  <rect x="730" y="902" width="300" height="40" rx="8" fill="#ffffff" stroke="#eab308" stroke-width="1.5"/>
+  <text x="880" y="927" text-anchor="middle" font-size="13.5" fill="#0f172a">10. pyinstaller backend.spec → backend.exe</text>
+
+  <line x1="880" y1="942" x2="880" y2="958" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="730" y="962" width="300" height="40" rx="8" fill="#ffffff" stroke="#eab308" stroke-width="1.5"/>
+  <text x="880" y="987" text-anchor="middle" font-size="13.5" fill="#0f172a">11. Stop-Service  KalaCareBackend</text>
+
+  <line x1="880" y1="1002" x2="880" y2="1018" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="730" y="1022" width="300" height="40" rx="8" fill="#ffffff" stroke="#eab308" stroke-width="1.5"/>
+  <text x="880" y="1047" text-anchor="middle" font-size="13.5" fill="#0f172a">12. Backup old exe → copy new backend.exe</text>
+
+  <line x1="880" y1="1062" x2="880" y2="1078" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="730" y="1082" width="300" height="40" rx="8" fill="#ffffff" stroke="#eab308" stroke-width="1.5"/>
+  <text x="880" y="1107" text-anchor="middle" font-size="13.5" fill="#0f172a">13. Start-Service  KalaCareBackend</text>
+
+  <line x1="880" y1="1126" x2="880" y2="1152" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Decision diamond -->
+  <polygon points="880,1152 970,1197 880,1242 790,1197" fill="#ffffff" stroke="#475569" stroke-width="2"/>
+  <text x="880" y="1192" text-anchor="middle" font-size="13.5" font-weight="600" fill="#0f172a">All steps</text>
+  <text x="880" y="1210" text-anchor="middle" font-size="13.5" font-weight="600" fill="#0f172a">OK?</text>
+
+  <!-- YES path -->
+  <line x1="880" y1="1242" x2="880" y2="1288" stroke="#15803d" stroke-width="2" marker-end="url(#arrowGreen)"/>
+  <text x="895" y="1270" font-size="13" font-weight="700" fill="#15803d">YES</text>
+
+  <rect x="700" y="1292" width="360" height="56" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+  <text x="880" y="1315" text-anchor="middle" font-size="14" font-weight="700" fill="#14532d">✓  DEPLOYED — green check in Actions tab</text>
+  <text x="880" y="1336" text-anchor="middle" font-size="13" fill="#14532d">Users get the updated ERP immediately</text>
+
+  <!-- NO path -->
+  <path d="M 790 1197 L 600 1197" fill="none" stroke="#b91c1c" stroke-width="2" marker-end="url(#arrowRed)"/>
+  <text x="700" y="1188" text-anchor="middle" font-size="13" font-weight="700" fill="#b91c1c">NO</text>
+
+  <rect x="360" y="1169" width="236" height="76" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/>
+  <text x="478" y="1192" text-anchor="middle" font-size="13.5" font-weight="700" fill="#7f1d1d">✗  Red X in Actions tab</text>
+  <text x="478" y="1211" text-anchor="middle" font-size="12.5" fill="#7f1d1d">Open failed step log on GitHub.</text>
+  <text x="478" y="1229" text-anchor="middle" font-size="12.5" fill="#7f1d1d">Old backup still safe on server.</text>
+
+  <!-- Fix & push again loop -->
+  <path d="M 360 1207 L 170 1207 L 170 288" fill="none" stroke="#b91c1c" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrowRed)"/>
+  <text x="178" y="740" font-size="12.5" font-weight="600" fill="#b91c1c" transform="rotate(-90 178 740)">fix the problem  →  push again</text>
+
+  <!-- ===== One-time setup panel ===== -->
+  <rect x="30" y="1290" width="640" height="240" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="50" y="1322" font-size="16" font-weight="700" fill="#0f172a">⚙  ONE-TIME SETUP (done once, before first auto-deploy)</text>
+
+  <text x="50" y="1354" font-size="13.5" fill="#334155">1.  Make backend.exe a Windows service with NSSM  →  "KalaCareBackend"</text>
+  <text x="70" y="1373" font-size="12.5" fill="#64748b">(auto-starts on reboot, restartable by script — no PowerShell window)</text>
+
+  <text x="50" y="1400" font-size="13.5" fill="#334155">2.  Install GitHub self-hosted runner on the server, as a Windows service</text>
+  <text x="70" y="1419" font-size="12.5" fill="#64748b">(repo → Settings → Actions → Runners → New self-hosted runner)</text>
+
+  <text x="50" y="1446" font-size="13.5" fill="#334155">3.  Install build tools on server: Node.js, Python + requirements, PyInstaller</text>
+
+  <text x="50" y="1473" font-size="13.5" fill="#334155">4.  Keep repo PRIVATE (it contains .env) — limit who can push to main</text>
+
+  <text x="50" y="1505" font-size="13.5" fill="#334155">5.  Add .github\workflows\deploy.yml to the repo  →  automation is live</text>
+
+  <!-- Legend under server lane -->
+  <rect x="700" y="1380" width="430" height="150" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="720" y="1410" font-size="15" font-weight="700" fill="#0f172a">Key points</text>
+  <text x="720" y="1438" font-size="12.5" fill="#334155">•  Runner connects OUTBOUND to GitHub — no firewall ports opened</text>
+  <text x="720" y="1461" font-size="12.5" fill="#334155">•  Backend must STOP before copying exe (Windows locks running exe)</text>
+  <text x="720" y="1484" font-size="12.5" fill="#334155">•  Frontend is static files — IIS serves new files instantly, no restart</text>
+  <text x="720" y="1507" font-size="12.5" fill="#334155">•  Every deploy keeps a dated backup for instant rollback</text>
+</svg>

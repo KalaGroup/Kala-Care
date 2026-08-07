@@ -2740,7 +2740,17 @@ function MeetingSheetModal({ data, categories, canExport, onExport, onClose }) {
                     <td className="px-2 py-2 text-center"><FlagChip f={r.flag} small /></td>
                     <td className="px-2 py-2 text-center text-black">{r.flag === 'T' ? fmt(r.due) : '—'}</td>
                     <td className="px-2 py-2"><RemarkHistory list={r.prevRemarks} /></td>
-                    <td className="px-2 py-2 text-black">{r.remark ? <BulletText text={r.remark} /> : <span className="text-gray-300">—</span>}</td>
+                    <td className="px-2 py-2 text-black">
+                      {r.remark ? (
+                        <div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="fs-10 font-bold" style={{ color: '#475569' }}>{fmtDDMMYY(data.date)}</span>
+                            <span className="fs-10 text-gray-400">by {data.heads?.[0] || data.conductedBy}</span>
+                          </div>
+                          <div className="mt-0.5 leading-snug"><BulletText text={r.remark} /></div>
+                        </div>
+                      ) : <span className="text-gray-300">—</span>}
+                    </td>
                     <td className="px-2 py-2 text-center"><StatusBadge r={r} /></td>
                   </tr>
                 )))}

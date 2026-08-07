@@ -215,7 +215,7 @@ const TABLES = [
   },
   {
     id: 'open_sr_data',
-    name: 'Close SR Report',
+    name: 'MaxTTR - Oil Change SR Zero Labour Flag',
     icon: DocumentTextIcon,
     color: '#14B8A6',
     bgColor: '#F0FDFA',
@@ -225,6 +225,20 @@ const TABLES = [
     deleteEndpoint: (id) => `/customers/open-sr-data/${id}`,
     bulkDeleteEndpoint: '/customers/open-sr-data/bulk-delete',
     exportEndpoint: '/customers/open-sr-data/export',
+    supportsPagination: true
+  },
+  {
+    id: 'response_time_maxttr',
+    name: 'Response Time & MaxTTR Details',
+    icon: DocumentTextIcon,
+    color: '#F59E0B',
+    bgColor: '#FFFBEB',
+    endpoint: '/customers/response-time-maxttr/',
+    singleEndpoint: (id) => `/customers/response-time-maxttr/${id}`,
+    updateEndpoint: (id) => `/customers/response-time-maxttr/${id}`,
+    deleteEndpoint: (id) => `/customers/response-time-maxttr/${id}`,
+    bulkDeleteEndpoint: '/customers/response-time-maxttr/bulk-delete',
+    exportEndpoint: '/customers/response-time-maxttr/export',
     supportsPagination: true
   }
 ];
@@ -799,7 +813,8 @@ const Customer = () => {
     'regular_bandhan': SYSTEM_FIELDS,
     'lms_data': SYSTEM_FIELDS,
     'open_sr_load_reports': SYSTEM_FIELDS,
-    'open_sr_data': SYSTEM_FIELDS
+    'open_sr_data': SYSTEM_FIELDS,
+    'response_time_maxttr': SYSTEM_FIELDS
   };
 
   // IMPORTANT columns per table (★ in the header): the fields the app actually
@@ -807,7 +822,7 @@ const Customer = () => {
   // Everything else — including dynamic columns from extra_data — is reference data.
   const IMPORTANT_DB_FIELDS = {
     // 'customers' is intentionally absent: it is a derived table built FROM the
-    // 11 uploaded files, not an uploaded file itself — no bold / grey styling.
+    // 12 uploaded files, not an uploaded file itself — no bold / grey styling.
     'amc_agreements': ['instance_id', 'agreement_status', 'agreement_number', 'agreement_name', 'branch_id', 'agreement_start_date', 'agreement_end_date', 'kva_rating'],
     'asset_detailed': ['instance_id', 'engine_serial_no', 'branch_id', 'warranty_expiry_date', 'goem_oem', 'segment', 'engine_model', 'kva_rating', 'account_name', 'customer_name', 'contact_phone_number', 'contact_email_id', 'installation_site_address', 'commissioning_date', 'product_segment', 'krm_number', 'krm_status'],
     'asset_services': ['instance_id', 'asset_number', 'engine_serial_no', 'branch_id', 'last_oil_change_date', 'last_oil_change_sr_type', 'last_sr_close_date', 'last_closed_sr_number', 'last_sr_type', 'last_sr_subtype', 'last_service_hrs', 'account_name', 'contact_phone_number'],
@@ -818,7 +833,8 @@ const Customer = () => {
     'regular_bandhan': ['instance_id', 'engine_no', 'quotation_ref_no', 'company_name', 'mobile_no', 'email_id', 'location', 'city'],
     'lms_data': ['instance_id', 'lead_number', 'branch_id', 'account_name', 'account_contact_number', 'account_contact_email_id', 'installation_site_address', 'lead_created_date', 'lead_status', 'lead_raised_by', 'sr_type', 'sr_sub_type', 'kva_rating', 'service_engineer_name', 'tele_caller_name', 'quotation_number', 'quotation_submit_date', 'quotation_approval_date', 'order_number'],
     'open_sr_load_reports': ['instance_id', 'service_request_no', 'engine_serial_no', 'sr_due_date', 'sr_type', 'sr_sub_type', 'status', 'account', 'customer_name', 'customer_mobile_no', 'primary_phone_no', 'installation_site_address', 'oil_change_flg', 'segment', 'engine_model'],
-    'open_sr_data': ['instance_id', 'branch_id', 'engine_serial_no', 'account_name', 'sr_number', 'sr_type', 'sr_subtype', 'sr_open_date', 'sr_close_date', 'oil_change_flag', 'zero_labour_flag']
+    'open_sr_data': ['instance_id', 'branch_id', 'engine_serial_no', 'account_name', 'sr_number', 'sr_type', 'sr_subtype', 'sr_open_date', 'sr_close_date', 'oil_change_flag', 'zero_labour_flag'],
+    'response_time_maxttr': ['instance_id', 'branch_id', 'sr_number', 'sr_open_date', 'sr_close_date', 'se_name', 'se_ticket_num']
   };
 
   // Dynamic columns: each imported row may carry an `extra_data` JSON object with
@@ -1671,7 +1687,8 @@ const Customer = () => {
                     {customerCompleteData.regular_bandhan?.length > 0 && renderRelatedTable('Regular Bandhan', customerCompleteData.regular_bandhan, 'regular_bandhan')}
                     {customerCompleteData.lms_data?.length > 0 && renderRelatedTable('LMS Data', customerCompleteData.lms_data, 'lms_data')}
                     {customerCompleteData.open_sr_load_reports?.length > 0 && renderRelatedTable('Open SR Load Reports', customerCompleteData.open_sr_load_reports, 'open_sr_load_reports')}
-                    {customerCompleteData.open_sr_data?.length > 0 && renderRelatedTable('Close SR Report', customerCompleteData.open_sr_data, 'open_sr_data')}
+                    {customerCompleteData.open_sr_data?.length > 0 && renderRelatedTable('MaxTTR - Oil Change SR Zero Labour Flag', customerCompleteData.open_sr_data, 'open_sr_data')}
+                    {customerCompleteData.response_time_maxttr?.length > 0 && renderRelatedTable('Response Time & MaxTTR Details', customerCompleteData.response_time_maxttr, 'response_time_maxttr')}
                   </div>
                 ) : (
                   <p className="text-center text-black py-3 text-xs">No customer data available</p>

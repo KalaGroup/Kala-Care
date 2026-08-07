@@ -200,6 +200,30 @@ def _stage_approver_ids(db: Session, branch: str, stage: str) -> list:
     ).all()]
 
 
+def _l4_category_map_ids(db: Session, branch: str, category: str):
+    """(mapped_ids, branch_specific) — the raw HOD ids the L4 category map
+    assigns to this branch+category, falling back to the ids covering the
+    category on ANY row. (None, False) = the category is mapped nowhere,
+    so no category filtering applies."""
+    if not category:
+        return None, False
+    branch = _row_branch(db, branch)
+    rows = db.query(ApprovalHODCategory).filter(
+        ApprovalHODCategory.branch == branch,
+        ApprovalHODCategory.category == category,
+        ApprovalHODCategory.user_id.isnot(None),
+    ).all()
+    if rows:
+        return {r.user_id for r in rows}, True
+    rows = db.query(ApprovalHODCategory).filter(
+        ApprovalHODCategory.category == category,
+        ApprovalHODCategory.user_id.isnot(None),
+    ).all()
+    if rows:
+        return {r.user_id for r in rows}, False
+    return None, False
+
+
 def _available_approvers(db: Session, level: str, branch: str, category: str,
                          creator_id: str, l4_choice: str = None, l5_choice: str = None,
                          l2_choice: str = None, l3_choice: str = None) -> set:
@@ -224,23 +248,17 @@ def _available_approvers(db: Session, level: str, branch: str, category: str,
         if l4_choice and _usable_ids(db, [l4_choice]):
             ids = {l4_choice}
         else:
-            mappings = db.query(ApprovalHODCategory).filter(
-                ApprovalHODCategory.branch == branch,
-                ApprovalHODCategory.category == category,
-                ApprovalHODCategory.user_id.isnot(None),
-            ).all()
-            if mappings:
-                ids = {m.user_id for m in mappings} & all_l4
+            # An NFA goes only to the HODs of its category: the branch's own
+            # map wins; a branch without one falls back to the L4 users
+            # covering the category on any row; only when NO row maps the
+            # category at all may any L4 user act.
+            mapped, branch_specific = _l4_category_map_ids(db, branch, category)
+            if mapped is None:
+                ids = all_l4
+            elif branch_specific:
+                ids = mapped & all_l4
             else:
-                # No mapping rows for THIS branch+category: fall back to the
-                # L4 users covering this CATEGORY on any row (an NFA goes
-                # only to the HODs of its category), and only when NO row
-                # maps the category at all may any L4 user act.
-                cat_ids = {r.user_id for r in db.query(ApprovalHODCategory).filter(
-                    ApprovalHODCategory.category == category,
-                    ApprovalHODCategory.user_id.isnot(None),
-                ).all()} & all_l4
-                ids = cat_ids or all_l4
+                ids = (mapped & all_l4) or all_l4
     else:  # l5 — rights masters + any explicitly granted L5 users
         ids = _usable_ids(db, set(RIGHTS_MASTER_IDS) | _level_user_ids(db, "l5"))
         if l5_choice and l5_choice in ids:
@@ -333,7 +351,12 @@ def reroute_pending(db: Session) -> int:
     if not pending_rows:
         return 0
 
-    rule_memo, creator_memo, ho_memo = {}, {}, {}
+    rule_memo, ho_memo = {}, {}
+    # ONE batched fetch of every distinct creator (was one query per creator)
+    creator_ids = list({a.created_by for a in pending_rows if a.created_by})
+    creator_memo = {u.user_id: u for u in
+                    db.query(User).filter(User.user_id.in_(creator_ids)).all()
+                    } if creator_ids else {}
 
     def _rule_of(uid):
         if uid not in rule_memo:
@@ -342,9 +365,7 @@ def reroute_pending(db: Session) -> int:
 
     def _is_ho_of(uid):
         if uid not in ho_memo:
-            if uid not in creator_memo:
-                creator_memo[uid] = db.query(User).filter(User.user_id == uid).first()
-            creator = creator_memo[uid]
+            creator = creator_memo.get(uid)
             ho_memo[uid] = _is_ho_user(db, creator) if creator else False
         return ho_memo[uid]
 
@@ -526,28 +547,53 @@ def _effective_metric_limit(db: Session, user_id: str, level: str, branch: str, 
     return None if level == "l5" else 0
 
 
-def _qualifying_ho_l4_ids(db: Session, creator: User, branch: str, request_type: str) -> set:
+def _qualifying_ho_l4_ids(db: Session, creator: User, branch: str, request_type: str,
+                          category: str = None) -> set:
     """The USEFUL L4 choices for an HO creator's record: HO members holding
     L4 whose limit for EVERY metric of `request_type` is HIGHER than the
     creator's own (an approver at or below the creator's authority could
-    never finalize anything the creator's own limit doesn't already cover).
+    never finalize anything the creator's own limit doesn't already cover),
+    AND who cover the record's CATEGORY per the L4 category map (a category
+    mapped nowhere = no category filtering).
     Blank / unknown request type = no limit filtering."""
     ids = _usable_ids(db, _ho_member_ids(db) & _level_user_ids(db, "l4"))
     ids -= {creator.user_id} | set(RIGHTS_MASTER_IDS)
+    mapped, _branch_specific = _l4_category_map_ids(db, branch, category)
+    if mapped is not None:
+        ids &= mapped
     attrs = METRIC_ATTRS.get((request_type or "").strip())
     if not attrs or not ids:
         return ids
     my_level = resolve_level(db, creator)
+    # Batched _effective_metric_limit: ONE rights query for creator + every
+    # candidate and the two branch cfg rows, instead of 2-3 queries per
+    # candidate per metric (the dropdown build was the slow part of submit).
+    rights = {r.user_id: r for r in db.query(ApprovalRight).filter(
+        ApprovalRight.user_id.in_(list(ids | {creator.user_id}))).all()}
+    my_cfg = _branch_level_cfg(db, branch, my_level)
+    l4_cfg = my_cfg if my_level == "l4" else _branch_level_cfg(db, branch, "l4")
+
+    def _limit(uid, level, cfg, attr):
+        if uid in RIGHTS_MASTER_IDS:
+            return None
+        right = rights.get(uid)
+        ind = getattr(right, attr, None) if right else None
+        if ind is not None:
+            return ind
+        val = getattr(cfg, attr, None) if cfg else None
+        if val is not None:
+            return val
+        return None if level == "l5" else 0
+
+    mine = {attr: _limit(creator.user_id, my_level, my_cfg, attr) for attr in attrs}
+    if any(v is None for v in mine.values()):
+        return set()   # creator is unlimited on a metric — nobody is higher
     out = set()
     for uid in ids:
         ok = True
         for attr in attrs:
-            mine = _effective_metric_limit(db, creator.user_id, my_level, branch, attr)
-            if mine is None:   # creator is unlimited — nobody is higher
-                ok = False
-                break
-            his = _effective_metric_limit(db, uid, "l4", branch, attr)
-            if his is not None and float(his) <= float(mine):
+            his = _limit(uid, "l4", l4_cfg, attr)
+            if his is not None and float(his) <= float(mine[attr]):
                 ok = False
                 break
         if ok:
@@ -704,15 +750,18 @@ def get_access(db: Session, user_id: str):
     }
 
 
-def get_ho_l4_choices(db: Session, user_id: str, branch: str = None, request_type: str = None):
+def get_ho_l4_choices(db: Session, user_id: str, branch: str = None, request_type: str = None,
+                      category: str = None):
     """The L4 approver dropdown of an HO creator's form, filtered for ONE
     record: HO members holding L4 whose authority for the record's type is
-    HIGHER than the creator's own. Empty list = no useful HOD — the record
-    may be submitted without an L4 pick and goes straight to L5."""
+    HIGHER than the creator's own AND who cover the record's category.
+    Empty list = no useful HOD — the record may be submitted without an L4
+    pick and goes straight to L5."""
     user = _get_user(db, user_id)
     if not _is_ho_user(db, user):
         return {"l4_choices": []}   # non-HO: the branch row decides the chain
-    ids = _qualifying_ho_l4_ids(db, user, (branch or "").strip(), request_type)
+    ids = _qualifying_ho_l4_ids(db, user, (branch or "").strip(), request_type,
+                                (category or "").strip() or None)
     rows = db.query(User).filter(User.user_id.in_(list(ids))).all() if ids else []
     return {"l4_choices": sorted(({"user_id": u.user_id, "name": u.name} for u in rows),
                                  key=lambda x: x["name"])}
@@ -739,12 +788,12 @@ def get_chain_preview(db: Session, user_id: str, branch: str = None,
     if is_ho:
         levels.append({"level": "l2", "skipped": "Head Office records go directly to L4/L5"})
         levels.append({"level": "l3", "skipped": "Head Office records go directly to L4/L5"})
-        ids = _qualifying_ho_l4_ids(db, user, branch, request_type)
+        ids = _qualifying_ho_l4_ids(db, user, branch, request_type, category)
         if ids:
             levels.append({"level": "l4", "candidates": _people(ids), "required_pick": True})
         else:
             levels.append({"level": "l4",
-                           "skipped": "No L4 with higher authority than yours — goes straight to L5"})
+                           "skipped": "No qualifying L4 (HOD) for this record's category / authority — goes straight to L5"})
     else:
         for lvl in ("l2", "l3"):
             if not rule[f"require_{lvl}"]:
@@ -1675,7 +1724,7 @@ def _validate_for_submit(db, user, fields, request_type):
     # higher authority than the creator, the record goes straight to L5.
     if _is_ho_user(db, user) and user.user_id not in RIGHTS_MASTER_IDS:
         if not (fields.get("l4_approver_id") or "").strip():
-            if _qualifying_ho_l4_ids(db, user, (fields.get("branch") or "").strip(), request_type):
+            if _qualifying_ho_l4_ids(db, user, (fields.get("branch") or "").strip(), request_type, category):
                 raise HTTPException(status_code=400, detail="Select your L4 (HOD) approver")
 
 
@@ -1711,11 +1760,11 @@ def _resolve_chosen_approvers(db: Session, user: User, fields: dict, strict: boo
             # the choice must hold L4 AND beat the creator's own limit for the
             # record's type — same rule the dropdown is filtered by
             if strict and l4_id not in _qualifying_ho_l4_ids(
-                db, user, branch, (fields.get("request_type") or "").strip(),
+                db, user, branch, (fields.get("request_type") or "").strip(), category or None,
             ):
                 raise HTTPException(
                     status_code=400,
-                    detail="Chosen L4 approver must be a Head Office HOD with higher authority than yours for this record type",
+                    detail="Chosen L4 approver must be a Head Office HOD covering this record's category with higher authority than yours",
                 )
             out["l4_id"], out["l4_name"] = l4_id, _name_of(l4_id)
         if l5_id:
@@ -2320,6 +2369,40 @@ def _attachment_payloads(db: Session, app_id: int):
     rows = db.query(ApprovalAttachment).options(undefer(ApprovalAttachment.data)).filter(
         ApprovalAttachment.application_id == app_id).all()
     return [(r.original_name or "attachment", r.content_type or "", r.data or b"") for r in rows]
+
+
+def build_attachments_zip(db: Session, app_id: int):
+    """(filename, zip_bytes) bundling every attachment of one application."""
+    import io
+    import os
+    import zipfile
+
+    app_row = _get_application(db, app_id)
+    payloads = _attachment_payloads(db, app_id)
+
+    buffer = io.BytesIO()
+    written = 0
+    used_names = set()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, _ctype, data in payloads:
+            if not data:
+                continue
+            arcname = os.path.basename(name or "attachment") or "attachment"
+            if arcname in used_names:
+                stem, ext = os.path.splitext(arcname)
+                n = 2
+                while f"{stem} ({n}){ext}" in used_names:
+                    n += 1
+                arcname = f"{stem} ({n}){ext}"
+            used_names.add(arcname)
+            zf.writestr(arcname, data)
+            written += 1
+    if not written:
+        raise HTTPException(status_code=404, detail="No attachment files available for this application")
+
+    buffer.seek(0)
+    safe_no = (app_row.app_no or f"application-{app_row.id}").replace("/", "-")
+    return f"Attachments_{safe_no}.zip", buffer.getvalue()
 
 
 def get_approval_pdf(db: Session, app_id: int):

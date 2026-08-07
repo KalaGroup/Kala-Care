@@ -40,7 +40,7 @@ const UploadGuard = () => {
     if (!busy) return null;
 
     return (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[400] flex max-w-[92vw] items-center gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 shadow-lg">
+        <div className="upload-guard-box fixed bottom-4 left-1/2 -translate-x-1/2 z-[400] flex max-w-[92vw] items-center gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 shadow-lg">
             <span className="h-4 w-4 flex-shrink-0 animate-spin rounded-full border-2 border-amber-300 border-t-amber-700" />
             <div className="min-w-0">
                 <p className="text-[12.5px] font-bold leading-tight text-amber-900">

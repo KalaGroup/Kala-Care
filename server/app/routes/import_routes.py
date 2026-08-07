@@ -14,7 +14,8 @@ from app.time_utils import now_ist
 from app.models.customer_model import (
     AMCAgreement, AssetDetailed, AssetService,
     AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
-    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, OpenSRData
+    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, OpenSRData,
+    ResponseTimeMaxTTR
 )
 
 router = APIRouter(prefix="/import", tags=["import"])
@@ -40,7 +41,8 @@ FILE_TYPES = [
     "Regular Bandhan Customers Report",
     "LMS Data for ERP",
     "Open SR Load Report",
-    "Open SR Data"
+    "Open SR Data",
+    "Response Time & MaxTTR Details"
 ]
 
 
@@ -180,6 +182,7 @@ FILE_TYPE_MODELS = {
     "LMS Data for ERP": LMSData,
     "Open SR Load Report": OpenSRLoadReport,
     "Open SR Data": OpenSRData,
+    "Response Time & MaxTTR Details": ResponseTimeMaxTTR,
 }
 
 # In-memory cache so clicking through the dropdown doesn't re-hit the DB.
@@ -194,7 +197,7 @@ _UPDATED_AT_TABLES = [
     "amc_agreements", "asset_detailed", "oil_services",
     "anubandhan_plus_quotes", "anubandhan_quotes", "bandhan_plus_quotes",
     "pulse_quotations", "regular_bandhan", "lms_data", "open_sr_load_reports",
-    "open_sr_data",
+    "open_sr_data", "response_time_maxttr",
 ]
 
 

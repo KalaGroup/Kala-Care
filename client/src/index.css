@@ -503,6 +503,10 @@ html.dark .bg-yellow-50,
 html.dark .bg-amber-50 { background-color: rgba(234, 179, 8, 0.1) !important; }
 html.dark .bg-yellow-100,
 html.dark .bg-amber-100 { background-color: rgba(234, 179, 8, 0.17) !important; }
+/* NFA "Rejected" status badge (bg-amber-200 text-amber-900) — without this the
+   light-yellow bg survives into dark mode while text-amber-900 flips to light
+   yellow, making the label unreadable */
+html.dark .bg-amber-200 { background-color: rgba(234, 179, 8, 0.24) !important; }
 html.dark .bg-orange-50 { background-color: rgba(249, 115, 22, 0.1) !important; }
 html.dark .bg-orange-100 { background-color: rgba(249, 115, 22, 0.17) !important; }
 html.dark .bg-purple-50 { background-color: rgba(168, 85, 247, 0.1) !important; }
@@ -575,6 +579,11 @@ html.dark .border-\[\#2f3192\] { border-color: #38bdf8 !important; }
 /* Loading spinners (border-t accent ring) — the border-gray-200 override above
    repaints all four sides, hiding the brand-colored arc; restore it in sky */
 html.dark .border-t-\[\#2f3192\] { border-top-color: #38bdf8 !important; }
+/* Sticky-column left edge drawn as an inset box-shadow (Profile Actions,
+   approval tables) — the hard-coded #e5e7eb isn't caught by the border
+   overrides above and shows as a white line in dark mode */
+html.dark [class*="shadow-[inset_1px_0_0_#e5e7eb]"] { box-shadow: inset 1px 0 0 #2e3440 !important; }
+html.dark [class*="shadow-[inset_1px_0_0_#e5e7eb,"] { box-shadow: inset 1px 0 0 #2e3440, -4px 0 6px -4px rgba(0, 0, 0, 0.55) !important; }
 /* Row/column divider lines (divide-y / divide-x).
    Tailwind v4 emits `> :not(:last-child)`; the `~` form is kept as a
    fallback for any v3-style output. Without this, dividers stay light
@@ -623,6 +632,35 @@ html.dark .swal2-popup {
 }
 html.dark .swal2-title { color: #e6e9ef !important; }
 html.dark .swal2-html-container { color: #c3c9d4 !important; }
+
+/* Approval (NFA) Swal popups build their HTML from strings with inline
+   styles (CC emails & approval flow box, result-email box) — those inline
+   styles read these variables so the popup content flips to dark too
+   (see ApprovalShared.jsx emailGroupHtml / flowRows) */
+:root {
+  --apv-muted: #555;
+  --apv-strong: #374151;
+  --apv-dim: #6b7280;
+  --apv-field-bg: #fff;
+  --apv-field-text: #111827;
+  --apv-field-border: #d1d5db;
+  --apv-divider: #e5e7eb;
+  --apv-chip-bg: #eef2ff;
+  --apv-chip-text: #3730a3;
+  --apv-chip-border: #c7d2fe;
+}
+html.dark {
+  --apv-muted: #a8b0bf;
+  --apv-strong: #dde2ec;
+  --apv-dim: #8b93a3;
+  --apv-field-bg: #1e232c;
+  --apv-field-text: #e6e9ef;
+  --apv-field-border: #3a4150;
+  --apv-divider: #2c323e;
+  --apv-chip-bg: rgba(99, 102, 241, 0.18);
+  --apv-chip-text: #c7d2fe;
+  --apv-chip-border: rgba(99, 102, 241, 0.45);
+}
 
 /* ---------- Toasts (react-hot-toast) ---------- */
 html.dark .react-hot-toast {
@@ -1668,3 +1706,56 @@ html.dark .text-sky-900 { color: #bae6fd !important; }
 html.dark .hover\:bg-sky-100:hover { background-color: rgba(56, 189, 248, 0.16) !important; }
 html.dark .bg-rose-50\/60 { background-color: rgba(244, 63, 94, 0.08) !important; }
 html.dark .border-rose-200 { border-color: rgba(244, 63, 94, 0.3) !important; }
+
+/* ============================================================
+   Floating "upload in progress" box (UploadGuard) — the generic
+   .bg-amber-50 dark override is a 10% TRANSLUCENT tint, fine for
+   inline badges but this box floats over page content, so the
+   table behind bled through the text. Needs an OPAQUE dark
+   amber surface (same hue family as the sidebar brand panels).
+   ============================================================ */
+html.dark .upload-guard-box {
+  background-color: #2a2413 !important;
+  border-color: rgba(234, 179, 8, 0.45) !important;
+}
+/* its secondary line uses the /80 opacity variant the generic
+   .text-amber-800 net can't reach */
+html.dark .text-amber-800\/80 { color: rgba(252, 211, 77, 0.8) !important; }
+
+/* ============================================================
+   DARK THEME — MOM Tracking: Meeting-type dropdown.
+   Row hover is applied from JS (style.background = '#f7f9ff'),
+   so the class-based hover nets never catch it — the hovered
+   row stayed a glaring white bar with unreadable text. Also
+   catch the BRAND_SOFT tint rgba(47,49,146,.1) (selected row,
+   count chips, active tab) which the solid rgb(47,49,146) net
+   misses, and the light radio-circle outline. Light untouched.
+   ============================================================ */
+html.dark [style*="background: rgb(247, 249, 255)"],
+html.dark [style*="background-color: rgb(247, 249, 255)"] { background-color: #262c38 !important; }
+html.dark [style*="background: rgba(47, 49, 146, 0.1)"],
+html.dark [style*="background-color: rgba(47, 49, 146, 0.1)"] { background-color: rgba(56, 189, 248, 0.14) !important; }
+html.dark [style*="border-color: rgb(215, 219, 231)"] { border-color: #4b5563 !important; }
+
+/* ============================================================
+   Number inputs — hide the browser's up/down spinner arrows
+   app-wide (values are typed; the arrows just eat cell space).
+   ============================================================ */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* ============================================================
+   PMS Uploaded File Preview — dark theme bits the generic nets
+   miss: the cancelled row uses the /50 opacity variant of
+   rose-50 (only /60 and the solid class were themed), and the
+   Restore pill's sky-300 border.
+   ============================================================ */
+html.dark .bg-rose-50\/50 { background-color: rgba(244, 63, 94, 0.12) !important; }
+html.dark .border-sky-300 { border-color: rgba(56, 189, 248, 0.45) !important; }
