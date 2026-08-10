@@ -814,10 +814,11 @@ def get_targets_year_payload(db: Session, fy_start: int):
              .filter(PmsMonthSettings.target_month.in_(months)).all()}
     all_wd = _all_wd_map(db)
 
-    # Region-wise working days (MH / KA). The universal ('ALL-MM', every FY)
-    # row wins; old year-specific rows and the legacy single value fall back.
+    # Region-wise working days (MH / KA), PER FINANCIAL YEAR: this FY's own
+    # saved month row wins; the universal ('ALL-MM') master and the legacy
+    # single value are the fallback for months never saved for this FY.
     def _wd_pair(m):
-        s = all_wd.get(m[5:7]) or saved.get(m)
+        s = saved.get(m) or all_wd.get(m[5:7])
         base = (s.working_days if s and s.working_days else default_wd[m])
         return {
             "mh": (s.working_days_mh if s and s.working_days_mh else base),
@@ -856,9 +857,10 @@ def save_targets_year(db: Session, fy_start: int, rows: list, user_id: str,
             mh = ka = _iv(wd)
         if mh is None and ka is None:
             continue
-        # Saved under the UNIVERSAL month key ('ALL-04') — one master for
-        # every financial year, not per-FY.
-        key = _ALL_WD_PREFIX + m[5:7]
+        # Saved PER FINANCIAL YEAR under the real month key ('2026-04') —
+        # each FY keeps its own working-days master. Old universal 'ALL-MM'
+        # rows stay as a fallback for FYs that were never saved.
+        key = m
         setting = (db.query(PmsMonthSettings)
                    .filter(PmsMonthSettings.target_month == key).first())
         if not setting:
@@ -1106,14 +1108,15 @@ def generate_report(db: Session, as_on: date, from_date: date = None,
     month_by_rt = {rt: _months_till(d) for rt, d in to_by.items()}
     all_months = sorted(set(month_by_rt["part"]) | set(month_by_rt["labour"]))
 
-    # Universal per-month rows ('ALL-MM', apply to EVERY year) win; old
-    # year-specific rows are the fallback for months saved before the change.
+    # FY-WISE working days: the month's own saved row ('2026-04') wins; the
+    # universal 'ALL-MM' master is the fallback for months never saved
+    # for that financial year.
     year_rows = {s.target_month: s for s in
                  db.query(PmsMonthSettings)
                  .filter(PmsMonthSettings.target_month.in_(all_months)).all()}
     all_wd = _all_wd_map(db)
     for month in all_months:
-        s = all_wd.get(month[5:7]) or year_rows.get(month)
+        s = year_rows.get(month) or all_wd.get(month[5:7])
         if s is None:
             continue
         mh = s.working_days_mh or s.working_days

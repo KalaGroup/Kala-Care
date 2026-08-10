@@ -49,10 +49,12 @@ const fyLabel = (fy) => `${fy}–${String(fy + 1).slice(2)}`;
 // Targets are ENTERED and DISPLAYED in Lakh (23 = ₹23,00,000) but stored in
 // rupees in the DB, which is what the report math uses.
 const LAKH = 100000;
+// Zero targets come back as '' so the grid shows an empty cell (dash in the
+// totals), not a wall of 0s.
 const rupeesToLakh = (v) => {
   const n = parseFloat(v);
-  if (!Number.isFinite(n)) return '';
-  return n === 0 ? 0 : parseFloat((n / LAKH).toFixed(4));
+  if (!Number.isFinite(n) || n === 0) return '';
+  return parseFloat((n / LAKH).toFixed(4));
 };
 const lakhToRupees = (v) => (parseFloat(v) || 0) * LAKH;
 const mapVals = (obj, fn) =>
@@ -68,24 +70,24 @@ const wdToState = (wd) => mapVals(wd, (v) => (
 
 const inputCls =
   'w-full border border-gray-300 rounded px-2 py-1 text-xs text-black bg-white focus:outline-none focus:ring-1';
-// Grid-style tables — every cell bordered.
+// Grid-style tables — every cell bordered (dark grey grid lines).
 const thCls =
-  'px-2 py-1.5 text-center text-[11px] font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap bg-gray-50 border border-gray-200';
-const tdCls = 'px-2 py-1 border border-gray-200';
+  'px-2 py-1.5 text-center text-[11px] font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap bg-gray-50 border border-gray-400';
+const tdCls = 'px-2 py-1 border border-gray-400';
 
 // Compact variants for the 15-column FY target grid.
 const thC =
-  'px-1 py-1.5 text-center text-[10px] font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap bg-gray-50 border border-gray-200';
-const tdC = 'px-1 py-0.5 border border-gray-200';
+  'px-1 py-1.5 text-center text-[10px] font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap bg-gray-50 border border-gray-400';
+const tdC = 'px-1 py-0.5 border border-gray-400';
 const cellInput =
   'w-full border border-gray-300 rounded px-1 py-0.5 text-xs text-black bg-white focus:outline-none focus:ring-1';
 
 // Quarter group header + active-month (current month) green tint variants.
 const thQ =
-  'px-1 py-1 text-center text-[10px] font-bold text-gray-700 uppercase tracking-wide whitespace-nowrap bg-gray-100 border border-gray-200';
+  'px-1 py-1 text-center text-[10px] font-bold text-gray-700 uppercase tracking-wide whitespace-nowrap bg-gray-100 border border-gray-400';
 const thCAct =
-  'px-1 py-1.5 text-center text-[10px] font-semibold text-green-800 uppercase tracking-wide whitespace-nowrap bg-green-100 border border-green-200';
-const tdCAct = 'px-1 py-0.5 border border-green-200 bg-green-50';
+  'px-1 py-1.5 text-center text-[10px] font-semibold text-green-800 uppercase tracking-wide whitespace-nowrap bg-green-100 border border-gray-400';
+const tdCAct = 'px-1 py-0.5 border border-gray-400 bg-green-50';
 const cellInputAct =
   'w-full border border-green-300 rounded px-1 py-0.5 text-xs text-black bg-green-50 focus:outline-none focus:ring-1';
 
@@ -145,7 +147,6 @@ const AOPMaster = () => {
 
   // ---- Target Master state (whole financial year) ----
   const [fy, setFy] = useState(currentFy());
-  const [subTab, setSubTab] = useState('spare'); // 'spare' | 'labour'
   const [rows, setRows] = useState([]);          // [{branch_id, region, ..., spare:{m:lakh}, labour:{m:lakh}}]
   const [workingDays, setWorkingDays] = useState({});   // {'YYYY-MM': {mh: 'v', ka: 'v'}}
   const [defaultWd, setDefaultWd] = useState({});       // {'YYYY-MM': int}
@@ -153,7 +154,9 @@ const AOPMaster = () => {
   const [savingTargets, setSavingTargets] = useState(false);
   const [showWdModal, setShowWdModal] = useState(false);
   const [showRegionModal, setShowRegionModal] = useState(false);
-  const targetTableRef = useRef(null);
+  // One scroll container per target box (Spare / Labour grids)
+  const spareGridRef = useRef(null);
+  const labourGridRef = useRef(null);
 
   const months = fyMonths(fy);
 
@@ -257,43 +260,100 @@ const AOPMaster = () => {
 
   // Excel export mirroring the on-screen grid: merged Q1..Q4 header row,
   // month row below it, per-quarter Total columns and the footer totals row.
+  // Styled export via exceljs (loaded on demand) — colored title band,
+  // header rows, zebra data rows and tinted total columns/rows, matching the
+  // on-screen grid. One sheet per metric (Spare + Labour in one workbook).
   const exportTargets = async () => {
     if (!rows.length) { toast.error('Nothing to export'); return; }
     try {
-      const XLSX = await import('xlsx');
-      const metric = subTab;
-      const qs = [0, 1, 2, 3].map((i) => ({ label: `Q${i + 1}`, keys: months.slice(i * 3, i * 3 + 3) }));
-      const val = (r, m) => parseFloat(r[metric]?.[m]) || 0;
-      const rTot = (r) => parseFloat(months.reduce((s, m) => s + val(r, m), 0).toFixed(2));
-      const qTot = (r, q) => parseFloat(q.keys.reduce((s, m) => s + val(r, m), 0).toFixed(2));
-      const cTot = (m) => parseFloat(rows.reduce((s, r) => s + val(r, m), 0).toFixed(2));
+      const _ex = await import('exceljs');
+      const ExcelJS = _ex.default || _ex;
+      // Light palette — only the title band carries the brand color; headers
+      // and totals are light indigo fills with dark text.
+      const BRAND = '2F3192',
+        HEAD = 'E8EAF6', HEAD2 = 'DCDFF2',
+        SOFT = 'F6F7FC', QCOL = 'EEF0F9', FOOT = 'E4E6F5';
+      const A = (hex) => ({ argb: `FF${hex}` });
+      const thin = { style: 'thin', color: A('D3D8E6') };
+      const BORDER = { top: thin, bottom: thin, left: thin, right: thin };
+      const fill = (hex) => ({ type: 'pattern', pattern: 'solid', fgColor: A(hex) });
+      const wb = new ExcelJS.Workbook();
+      const lastCol = 19;   // Branch + Person + 4×(3 months + Total) + FY Total
 
-      const head1 = ['Branch', 'Responsible Person',
-        ...qs.flatMap((q) => [q.label, '', '', '']),
-        `Total FY-${String(fy + 1).slice(2)}`];
-      const head2 = ['', '',
-        ...qs.flatMap((q) => [...q.keys.map(monthLabel), 'Total']), ''];
-      const data = rows.map((r) => [
-        r.branch_name || r.branch_id, r.responsible_person || '',
-        ...qs.flatMap((q) => [...q.keys.map((m) => val(r, m)), qTot(r, q)]),
-        rTot(r),
-      ]);
-      const foot = ['Total (Lakh)', '',
-        ...qs.flatMap((q) => [...q.keys.map(cTot),
-          parseFloat(q.keys.reduce((s, m) => s + cTot(m), 0).toFixed(2))]),
-        parseFloat(rows.reduce((s, r) => s + rTot(r), 0).toFixed(2))];
+      ['spare', 'labour'].forEach((metric) => {
+        const ws = wb.addWorksheet(metric === 'spare' ? 'Spare Targets' : 'Labour Targets', {
+          pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+        });
+        ws.columns = [{ width: 22 }, { width: 20 }, ...Array(16).fill({ width: 9 }), { width: 12 }];
+        const put = (r, c, v, opts = {}) => {
+          const cl = ws.getCell(r, c);
+          cl.value = v;
+          cl.border = BORDER;
+          cl.font = { size: 10, ...(opts.font || {}) };
+          if (opts.fill) cl.fill = fill(opts.fill);
+          cl.alignment = { vertical: 'middle', ...(opts.align || {}) };
+          return cl;
+        };
+        const center = { horizontal: 'center' };
+        const right = { horizontal: 'right' };
 
-      const ws = XLSX.utils.aoa_to_sheet([head1, head2, ...data, foot]);
-      ws['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } },     // Branch
-        { s: { r: 0, c: 1 }, e: { r: 1, c: 1 } },     // Responsible Person
-        ...qs.map((_, i) => ({ s: { r: 0, c: 2 + i * 4 }, e: { r: 0, c: 5 + i * 4 } })),
-        { s: { r: 0, c: 18 }, e: { r: 1, c: 18 } },   // Total FY
-      ];
-      ws['!cols'] = [{ wch: 20 }, { wch: 20 }, ...Array(16).fill({ wch: 8 }), { wch: 11 }];
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, metric === 'spare' ? 'Spare Targets' : 'Labour Targets');
-      XLSX.writeFile(wb, `AOP_${metric === 'spare' ? 'Spare' : 'Labour'}_Targets_FY${fy}-${String(fy + 1).slice(2)}.xlsx`);
+        // Title band
+        put(1, 1, `AOP ${metric === 'spare' ? 'Spare' : 'Labour'} Target — FY ${fyLabel(fy)} (Lakh ₹)`,
+          { font: { bold: true, size: 13, color: A('FFFFFF') }, fill: BRAND, align: center });
+        for (let c = 2; c <= lastCol; c++) put(1, c, '', { fill: BRAND });
+        ws.mergeCells(1, 1, 1, lastCol);
+        ws.getRow(1).height = 24;
+
+        // Header rows: Q1..Q4 groups on top, month names below — light fills
+        const H = { font: { bold: true, size: 10, color: A(BRAND) }, fill: HEAD, align: { ...center, wrapText: true } };
+        put(2, 1, 'Branch', H); ws.mergeCells(2, 1, 3, 1);
+        put(2, 2, 'Responsible Person', H); ws.mergeCells(2, 2, 3, 2);
+        quarters.forEach((q, i) => {
+          const c0 = 3 + i * 4;
+          put(2, c0, q.label, H);
+          for (let c = c0 + 1; c <= c0 + 3; c++) put(2, c, '', H);
+          ws.mergeCells(2, c0, 2, c0 + 3);
+          q.keys.forEach((m, k) => put(3, c0 + k, monthLabel(m), H));
+          put(3, c0 + 3, 'Total', { ...H, fill: HEAD2 });
+        });
+        put(2, lastCol, `Total FY-${String(fy + 1).slice(2)}`, H); ws.mergeCells(2, lastCol, 3, lastCol);
+
+        // Data rows — zebra striping; 0 exported as blank (dash look)
+        const val = (r, m) => parseFloat(r[metric]?.[m]) || 0;
+        const num = (v) => (v ? parseFloat(v.toFixed(2)) : '');
+        rows.forEach((r, i) => {
+          const rr = 4 + i;
+          const zebra = i % 2 === 1 ? SOFT : null;
+          put(rr, 1, r.branch_name || r.branch_id, { font: { bold: true }, fill: zebra });
+          put(rr, 2, r.responsible_person || '', { fill: zebra });
+          quarters.forEach((q, qi) => {
+            const c0 = 3 + qi * 4;
+            q.keys.forEach((m, k) => put(rr, c0 + k, num(val(r, m)), { fill: zebra, align: right }));
+            put(rr, c0 + 3, num(qRowTotal(r, metric, q)), { font: { bold: true }, fill: QCOL, align: right });
+          });
+          put(rr, lastCol, num(rowTotal(r, metric)), { font: { bold: true }, fill: QCOL, align: right });
+        });
+
+        // Footer totals row
+        const fr = 4 + rows.length;
+        put(fr, 1, 'Total (Lakh)', { font: { bold: true }, fill: FOOT });
+        put(fr, 2, '', { fill: FOOT });
+        quarters.forEach((q, qi) => {
+          const c0 = 3 + qi * 4;
+          q.keys.forEach((m, k) => put(fr, c0 + k, num(colTotal(metric, m)), { font: { bold: true }, fill: FOOT, align: right }));
+          put(fr, c0 + 3, num(qColTotal(metric, q)), { font: { bold: true }, fill: FOOT, align: right });
+        });
+        put(fr, lastCol, num(grandTotal(metric)), { font: { bold: true, color: A(BRAND) }, fill: FOOT, align: right });
+      });
+
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `AOP_Targets_FY${fy}-${String(fy + 1).slice(2)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
       toast.success('Exported');
     } catch (e) {
       toast.error('Export failed: ' + e.message);
@@ -388,27 +448,29 @@ const AOPMaster = () => {
 
   const dirtyCount = rows.filter((r) => r._dirty).length;
 
-  // Column totals of the active metric (Lakh) + grand totals of both.
-  const colTotal = (m) =>
-    parseFloat(rows.reduce((s, r) => s + (parseFloat(r[subTab]?.[m]) || 0), 0).toFixed(2));
-  const rowTotal = (r, metric = subTab) =>
+  // Column totals of a metric (Lakh) + grand totals of both.
+  const colTotal = (metric, m) =>
+    parseFloat(rows.reduce((s, r) => s + (parseFloat(r[metric]?.[m]) || 0), 0).toFixed(2));
+  const rowTotal = (r, metric) =>
     parseFloat(months.reduce((s, m) => s + (parseFloat(r[metric]?.[m]) || 0), 0).toFixed(2));
   const grandTotal = (metric) =>
     parseFloat(rows.reduce((s, r) => s + rowTotal(r, metric), 0).toFixed(2));
+  // Every total cell shows a dash instead of 0
+  const dash = (v) => (v ? v : '—');
 
   // Quarters of the FY grid: Q1 = Apr-Jun … Q4 = Jan-Mar, each with its own Total column.
   const quarters = [0, 1, 2, 3].map((i) => ({
     label: `Q${i + 1}`, keys: months.slice(i * 3, i * 3 + 3),
   }));
   const activeMonth = nowMonthKey();  // highlighted only when the selected FY contains it
-  const qRowTotal = (r, q) =>
-    parseFloat(q.keys.reduce((s, m) => s + (parseFloat(r[subTab]?.[m]) || 0), 0).toFixed(2));
-  const qColTotal = (q) =>
-    parseFloat(q.keys.reduce((s, m) => s + colTotal(m), 0).toFixed(2));
+  const qRowTotal = (r, metric, q) =>
+    parseFloat(q.keys.reduce((s, m) => s + (parseFloat(r[metric]?.[m]) || 0), 0).toFixed(2));
+  const qColTotal = (metric, q) =>
+    parseFloat(q.keys.reduce((s, m) => s + colTotal(metric, m), 0).toFixed(2));
 
-  // FY choices: last 5 and next 10 financial years.
+  // FY choices: last 2 and next 2 financial years only.
   const fyChoices = [];
-  for (let y = currentFy() - 5; y <= currentFy() + 10; y++) fyChoices.push(y);
+  for (let y = currentFy() - 2; y <= currentFy() + 2; y++) fyChoices.push(y);
   if (!fyChoices.includes(fy)) fyChoices.push(fy);
 
   const stickyTh = `${thC} sticky left-0 z-10`;
@@ -474,18 +536,6 @@ const AOPMaster = () => {
                 <option key={y} value={y}>FY {fyLabel(y)} (Apr–Mar)</option>
               ))}
             </select>
-            {[
-              { key: 'spare', name: 'Spare Target (Lakh ₹)', icon: TagIcon },
-              { key: 'labour', name: 'Labour Target (Lakh ₹)', icon: WrenchScrewdriverIcon },
-            ].map((t) => (
-              <button key={t.key} onClick={() => setSubTab(t.key)}
-                className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold transition ${
-                  subTab === t.key ? 'text-white' : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'}`}
-                style={subTab === t.key ? { backgroundColor: themeColor } : {}}>
-                <t.icon className="h-3.5 w-3.5" />
-                {t.name}
-              </button>
-            ))}
             <div className="flex-1" />
             <button onClick={() => setShowRegionModal(true)} disabled={loadingTargets}
               className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50">
@@ -507,115 +557,125 @@ const AOPMaster = () => {
             </button>
           </div>
 
-          <TopScrollbar scrollRef={targetTableRef} watch={`${subTab}-${fy}-${rows.length}`} />
-          <div className="overflow-x-auto" ref={targetTableRef}>
-            <table className="w-full text-xs border-collapse min-w-[1020px]">
-              <thead>
-                <tr>
-                  <th className={stickyTh} style={{ width: 90, minWidth: 90, maxWidth: 90 }} rowSpan={2}>Branch</th>
-                  <th className={thC} rowSpan={2}
-                    style={{ width: 90, minWidth: 90, maxWidth: 90, whiteSpace: 'normal' }}>
-                    Responsible Person
-                  </th>
-                  {quarters.map((q) => (
-                    <th key={q.label} colSpan={4}
-                      className={q.keys.includes(activeMonth) ? thCAct : thQ}>
-                      {q.label}
-                    </th>
-                  ))}
-                  <th className={thC} style={{ minWidth: 62 }} rowSpan={2}>Total FY-{String(fy + 1).slice(2)}</th>
-                </tr>
-                <tr>
-                  {quarters.map((q) => (
-                    <React.Fragment key={q.label}>
-                      {q.keys.map((m) => (
-                        <th key={m} className={m === activeMonth ? thCAct : thC} style={{ minWidth: 46 }}>
-                          {monthLabel(m)}
-                        </th>
-                      ))}
-                      <th className={`${thQ} font-semibold`} style={{ minWidth: 46 }}>Total</th>
-                    </React.Fragment>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {loadingTargets ? (
-                  <tr><td colSpan={19} className="border border-gray-200">
-                    <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
-                      <ArrowPathIcon className="h-7 w-7 animate-spin" />
-                      <p className="text-sm">Loading FY {fyLabel(fy)} targets…</p>
-                    </div>
-                  </td></tr>
-                ) : rows.length === 0 ? (
-                  <tr><td colSpan={19} className="border border-gray-200">
-                    <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
-                      <BuildingOffice2Icon className="h-8 w-8" />
-                      <p className="text-sm text-center px-4">
-                        No branches found for FY {fyLabel(fy)}.
-                      </p>
-                    </div>
-                  </td></tr>
-                ) : rows.map((r, idx) => (
-                  <tr key={r.branch_id ?? `new-${idx}`} className="border-b border-gray-100 hover:bg-gray-50/60">
-                    {/* Fixed branch cell — stays visible while scrolling months;
-                        name wraps to two lines, code only on hover */}
-                    <td className={stickyTd} style={{ maxWidth: 90 }}
-                      title={`${r.branch_name || ''}${r.branch_id ? ` (${r.branch_id})` : ''}`}>
-                      <div className="font-semibold text-gray-800 truncate">{r.branch_name || '—'}</div>
-                    </td>
-                    <td className={`${tdC} text-gray-700`} style={{ maxWidth: 90 }}
-                      title={r.responsible_person || ''}>
-                      <div className="truncate">{r.responsible_person || '—'}</div>
-                    </td>
-                    {quarters.map((q) => (
-                      <React.Fragment key={q.label}>
-                        {q.keys.map((m) => (
-                          <td key={m} className={m === activeMonth ? tdCAct : tdC}>
-                            <input type="number" min="0" step="0.01" value={r[subTab]?.[m] ?? ''}
-                              onChange={(e) => setCell(idx, subTab, m, e.target.value)}
-                              onFocus={(e) => e.target.select()}
-                              title={`${monthLabel(m)} — enter in Lakh`}
-                              className={`${m === activeMonth ? cellInputAct : cellInput} text-right`}
-                              style={{ '--tw-ring-color': themeColor }} />
-                          </td>
+          {loadingTargets ? (
+            <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
+              <ArrowPathIcon className="h-7 w-7 animate-spin" />
+              <p className="text-sm">Loading FY {fyLabel(fy)} targets…</p>
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
+              <BuildingOffice2Icon className="h-8 w-8" />
+              <p className="text-sm text-center px-4">
+                No branches found for FY {fyLabel(fy)}.
+              </p>
+            </div>
+          ) : (
+            /* Spare and Labour grids as two stacked boxes — both always visible */
+            <div className="p-3 space-y-3">
+              {[
+                { metric: 'spare', name: 'Spare Target (Lakh ₹)', icon: TagIcon, gridRef: spareGridRef },
+                { metric: 'labour', name: 'Labour Target (Lakh ₹)', icon: WrenchScrewdriverIcon, gridRef: labourGridRef },
+              ].map(({ metric, name, icon: Icon, gridRef }) => (
+                <div key={metric} className="border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="px-2.5 py-1.5 text-[12px] font-bold text-white flex items-center gap-1.5"
+                    style={{ backgroundColor: themeColor }}>
+                    <Icon className="h-3.5 w-3.5" /> {name}
+                  </div>
+                  <TopScrollbar scrollRef={gridRef} watch={`${metric}-${fy}-${rows.length}`} />
+                  <div className="overflow-x-auto" ref={gridRef}>
+                    <table className="w-full text-xs border-collapse min-w-[1020px]">
+                      <thead>
+                        <tr>
+                          <th className={stickyTh} style={{ width: 90, minWidth: 90, maxWidth: 90 }} rowSpan={2}>Branch</th>
+                          <th className={thC} rowSpan={2}
+                            style={{ width: 90, minWidth: 90, maxWidth: 90, whiteSpace: 'normal' }}>
+                            Responsible Person
+                          </th>
+                          {quarters.map((q) => (
+                            <th key={q.label} colSpan={4}
+                              className={q.keys.includes(activeMonth) ? thCAct : thQ}>
+                              {q.label}
+                            </th>
+                          ))}
+                          <th className={thC} style={{ minWidth: 62 }} rowSpan={2}>Total FY-{String(fy + 1).slice(2)}</th>
+                        </tr>
+                        <tr>
+                          {quarters.map((q) => (
+                            <React.Fragment key={q.label}>
+                              {q.keys.map((m) => (
+                                <th key={m} className={m === activeMonth ? thCAct : thC} style={{ minWidth: 46 }}>
+                                  {monthLabel(m)}
+                                </th>
+                              ))}
+                              <th className={`${thQ} font-semibold`} style={{ minWidth: 46 }}>Total</th>
+                            </React.Fragment>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((r, idx) => (
+                          <tr key={r.branch_id ?? `new-${idx}`} className="border-b border-gray-100 hover:bg-gray-50/60">
+                            {/* Fixed branch cell — stays visible while scrolling months;
+                                name wraps to two lines, code only on hover */}
+                            <td className={stickyTd} style={{ maxWidth: 90 }}
+                              title={`${r.branch_name || ''}${r.branch_id ? ` (${r.branch_id})` : ''}`}>
+                              <div className="font-semibold text-gray-800 truncate">{r.branch_name || '—'}</div>
+                            </td>
+                            <td className={`${tdC} text-gray-700`} style={{ maxWidth: 90 }}
+                              title={r.responsible_person || ''}>
+                              <div className="truncate">{r.responsible_person || '—'}</div>
+                            </td>
+                            {quarters.map((q) => (
+                              <React.Fragment key={q.label}>
+                                {q.keys.map((m) => (
+                                  <td key={m} className={m === activeMonth ? tdCAct : tdC}>
+                                    <input type="number" min="0" step="0.01" value={r[metric]?.[m] ?? ''}
+                                      onChange={(e) => setCell(idx, metric, m, e.target.value)}
+                                      onFocus={(e) => e.target.select()}
+                                      title={`${monthLabel(m)} — enter in Lakh`}
+                                      className={`${m === activeMonth ? cellInputAct : cellInput} text-right`}
+                                      style={{ '--tw-ring-color': themeColor }} />
+                                  </td>
+                                ))}
+                                <td className={`${tdC} text-center font-semibold text-gray-700 bg-gray-100/70`}>
+                                  {dash(qRowTotal(r, metric, q))}
+                                </td>
+                              </React.Fragment>
+                            ))}
+                            <td className={`${tdC} text-center font-semibold text-gray-800 bg-gray-50/60`}>
+                              {dash(rowTotal(r, metric))}
+                            </td>
+                          </tr>
                         ))}
-                        <td className={`${tdC} text-center font-semibold text-gray-700 bg-gray-100/70`}>
-                          {qRowTotal(r, q)}
-                        </td>
-                      </React.Fragment>
-                    ))}
-                    <td className={`${tdC} text-center font-semibold text-gray-800 bg-gray-50/60`}>
-                      {rowTotal(r)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              {rows.length > 0 && !loadingTargets && (
-                <tfoot>
-                  <tr>
-                    <td className={`${stickyTd} font-semibold text-gray-700 bg-gray-50`} colSpan={1}>Total (Lakh)</td>
-                    <td className={`${tdC} bg-gray-50`} colSpan={1} />
-                    {quarters.map((q) => (
-                      <React.Fragment key={q.label}>
-                        {q.keys.map((m) => (
-                          <td key={m}
-                            className={`${m === activeMonth ? tdCAct : `${tdC} bg-gray-50`} text-center font-semibold text-gray-800`}>
-                            {colTotal(m)}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td className={`${stickyTd} font-semibold text-gray-700 bg-gray-50`} colSpan={1}>Total (Lakh)</td>
+                          <td className={`${tdC} bg-gray-50`} colSpan={1} />
+                          {quarters.map((q) => (
+                            <React.Fragment key={q.label}>
+                              {q.keys.map((m) => (
+                                <td key={m}
+                                  className={`${m === activeMonth ? tdCAct : `${tdC} bg-gray-50`} text-center font-semibold text-gray-800`}>
+                                  {dash(colTotal(metric, m))}
+                                </td>
+                              ))}
+                              <td className={`${tdC} text-center font-bold text-gray-800 bg-gray-100`}>
+                                {dash(qColTotal(metric, q))}
+                              </td>
+                            </React.Fragment>
+                          ))}
+                          <td className={`${tdC} text-center font-bold bg-gray-100 text-[#2f3192]`}>
+                            {dash(grandTotal(metric))}
                           </td>
-                        ))}
-                        <td className={`${tdC} text-center font-bold text-gray-800 bg-gray-100`}>
-                          {qColTotal(q)}
-                        </td>
-                      </React.Fragment>
-                    ))}
-                    <td className={`${tdC} text-center font-bold bg-gray-100 text-[#2f3192]`}>
-                      {grandTotal(subTab)}
-                    </td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {rows.length > 0 && (
             <div className="px-4 py-2 border-t border-gray-100 flex flex-wrap gap-4 text-[11px] text-gray-600">
@@ -638,10 +698,6 @@ const AOPMaster = () => {
             <button onClick={() => srAction('sync', (d) => `Synced — ${d.added} new SR type(s) from data`)}
               className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
               <ArrowPathIcon className="h-3.5 w-3.5" /> Sync from data
-            </button>
-            <button onClick={() => srAction('reset', () => 'Default mapping restored')}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
-              <ArrowPathIcon className="h-3.5 w-3.5" /> Reset defaults
             </button>
             <button onClick={() => setShowHeadModal(true)}
               className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
@@ -772,7 +828,7 @@ const AOPMaster = () => {
             <div className="px-4 py-2.5 border-b border-gray-200 flex justify-between items-center">
               <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
                 <CalendarDaysIcon className="h-4 w-4 text-[#2f3192]" />
-                Monthly Working Days — all financial years
+                Monthly Working Days — FY {fyLabel(fy)}
               </h2>
               <button onClick={() => setShowWdModal(false)} className="p-1 rounded hover:bg-gray-100">
                 <XMarkIcon className="h-4 w-4 text-gray-500" />
@@ -780,11 +836,11 @@ const AOPMaster = () => {
             </div>
             <div className="p-4 flex-1 overflow-y-auto">
               <p className="text-[11px] text-gray-500 mb-3">
-                One master for <b>every financial year</b> — no year attached; set each
-                month once and it applies to all FYs. Set <b>per region</b> — MH and KA
-                have different holidays; the report spreads each region's targets
-                over its own working days. Default = all days except Sundays.
-                Saved with <b>Save All</b>.
+                Working days of <b>FY {fyLabel(fy)}</b> only — pick another financial
+                year at the top to set its own days; the report uses each FY's own
+                values. Set <b>per region</b> — MH and KA have different holidays;
+                the report spreads each region's targets over its own working days.
+                Default = all days except Sundays. Saved with <b>Save All</b>.
               </p>
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                 {months.map((m) => (

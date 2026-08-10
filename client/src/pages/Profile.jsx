@@ -941,6 +941,7 @@ const Profile = () => {
     const [employees, setEmployees] = useState([]);
     const [filteredEmployees, setFilteredEmployees] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
+    const [branchFilter, setBranchFilter] = useState('all');
     const [showAddModal, setShowAddModal] = useState(false);
     const [editingUser, setEditingUser] = useState(null);
     const [showSettings, setShowSettings] = useState(false);
@@ -1107,24 +1108,39 @@ const Profile = () => {
         }
     }, [user]);
 
+    // Branch dropdown options, kept in the same order as BRANCH_OPTIONS
+    // (HO first, then the rest in their defined sequence), limited to
+    // branches that actually have employees.
+    const employeeBranchOptions = useMemo(() => {
+        const presentBranches = new Set(
+            employees.filter(e => e.user_id !== MASTER_ADMIN_ID).map(e => e.branch)
+        );
+        return Object.entries(BRANCH_OPTIONS).filter(([code]) => presentBranches.has(code));
+    }, [employees]);
+
     useEffect(() => {
         if (employees && employees.length > 0) {
+            let filtered = employees;
+
+            if (branchFilter !== 'all') {
+                filtered = filtered.filter(emp => emp.branch === branchFilter);
+            }
+
             if (searchTerm) {
-                const filtered = employees.filter(emp =>
+                filtered = filtered.filter(emp =>
                     emp.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                     emp.user_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                     emp.branch?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                     emp.branch_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                     emp.mobile_number?.toLowerCase().includes(searchTerm.toLowerCase())
                 );
-                setFilteredEmployees(filtered);
-            } else {
-                setFilteredEmployees(employees);
             }
+
+            setFilteredEmployees(filtered);
         } else {
             setFilteredEmployees([]);
         }
-    }, [searchTerm, employees]);
+    }, [searchTerm, branchFilter, employees]);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -1193,10 +1209,10 @@ const Profile = () => {
         return () => observer.disconnect();
     }, [visibleEmployeeCount, filteredEmployees.length]);
 
-    // Reset visible count when search changes
+    // Reset visible count when search or branch filter changes
     useEffect(() => {
         setVisibleEmployeeCount(50);
-    }, [searchTerm]);
+    }, [searchTerm, branchFilter]);
 
     const fetchUserProfile = async () => {
         try {
@@ -2672,23 +2688,37 @@ const Profile = () => {
                                             </div>
                                         )}
 
-                                        <div className="relative flex-1 max-w-md sm:ml-auto order-2 sm:order-1 mr-2 max-sm:w-full max-sm:min-w-0">
-                                            <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
-                                            <input
-                                                type="text"
-                                                placeholder="Search employees..."
-                                                value={searchTerm}
-                                                onChange={(e) => setSearchTerm(e.target.value)}
-                                                className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent text-black"
-                                            />
-                                            {searchTerm && (
-                                                <button
-                                                    onClick={() => setSearchTerm('')}
-                                                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-black hover:text-gray-600"
-                                                >
-                                                    <FaTimes className="text-xs" />
-                                                </button>
-                                            )}
+                                        <div className="flex items-center justify-end gap-2 flex-1 sm:ml-auto order-2 sm:order-1 max-sm:w-full max-sm:flex-wrap">
+                                            <select
+                                                value={branchFilter}
+                                                onChange={(e) => setBranchFilter(e.target.value)}
+                                                title="Filter by branch"
+                                                className={`bg-white border border-gray-300 hover:bg-gray-50 px-2.5 py-1.5 rounded-lg text-xs cursor-pointer max-w-[180px] focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent transition-all ${branchFilter !== 'all' ? 'text-[#2f3192] border-[#2f3192] font-semibold' : 'text-black'}`}
+                                            >
+                                                <option value="all">Branch: All</option>
+                                                {employeeBranchOptions.map(([code, name]) => (
+                                                    <option key={code} value={code}>{name} ({code})</option>
+                                                ))}
+                                            </select>
+
+                                            <div className="relative max-w-md flex-1 max-sm:w-full max-sm:min-w-0">
+                                                <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
+                                                <input
+                                                    type="text"
+                                                    placeholder="Search employees..."
+                                                    value={searchTerm}
+                                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                                    className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2f3192] focus:border-transparent text-black"
+                                                />
+                                                {searchTerm && (
+                                                    <button
+                                                        onClick={() => setSearchTerm('')}
+                                                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-black hover:text-gray-600"
+                                                    >
+                                                        <FaTimes className="text-xs" />
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
 
@@ -2702,12 +2732,12 @@ const Profile = () => {
                                         {/* Table container */}
                                         <div id="employees-table-container" ref={empTableScrollRef} onScroll={mirrorEmpScroll(empTableScrollRef, empTopScrollRef)}
                                             className="overflow-auto max-h-[150vh]" style={{ scrollbarWidth: 'thin' }}>
-                                            <table className="border-collapse min-w-[1420px] w-full">
+                                            <table className="border-separate border-spacing-0 min-w-[1420px] w-full">
                                                 <thead className="bg-gray-50 sticky top-0 z-10">
                                                     <tr>
-                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-16">Sr. No.</th>
-                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Employee</th>
-                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">User ID</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-16 max-w-[64px] box-border overflow-hidden sticky left-0 z-20 bg-gray-50">Sr. No.</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-[140px] max-w-[140px] box-border overflow-hidden sticky left-16 z-20 bg-gray-50">Employee</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-[130px] max-w-[130px] box-border overflow-hidden sticky left-[204px] z-20 bg-gray-50">User ID</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Mobile</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Email</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Branch Code</th>
@@ -2720,7 +2750,7 @@ const Profile = () => {
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">MOM Tracking</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Note For Approval</th>
                                                         {!isRestrictedUser && (
-                                                            <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap sticky right-0 z-20 bg-gray-50 shadow-[inset_1px_0_0_#e5e7eb]">Actions</th>
+                                                            <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap">Actions</th>
                                                         )}
                                                     </tr>
                                                 </thead>
@@ -2738,10 +2768,10 @@ const Profile = () => {
                                                         visibleSortedEmployees
                                                             .map((emp, index) => (
                                                                 <tr key={emp.id || emp.user_id} className="group hover:bg-gray-50 transition-colors">
-                                                                    <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200">
+                                                                    <td className="px-2 py-1 text-center text-xs text-black border-r border-b border-gray-200 w-16 max-w-[64px] box-border overflow-hidden sticky left-0 z-10 bg-white group-hover:bg-gray-50">
                                                                         {index + 1}
                                                                     </td>
-                                                                    <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200">
+                                                                    <td className="px-2 py-1 text-center text-xs text-black border-r border-b border-gray-200 w-[140px] max-w-[140px] box-border overflow-hidden sticky left-16 z-10 bg-white group-hover:bg-gray-50">
                                                                         <span
                                                                             className="text-black truncate max-w-[120px] block"
                                                                             title={emp.name}
@@ -2749,8 +2779,12 @@ const Profile = () => {
                                                                             {highlightText(emp.name, searchTerm)}
                                                                         </span>
                                                                     </td>
-                                                                    <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200">
+                                                                    <td className="px-2 py-1 text-center text-xs text-black border-r border-b border-gray-200 w-[130px] max-w-[130px] box-border overflow-hidden sticky left-[204px] z-10 bg-white group-hover:bg-gray-50">                                                                        <span
+                                                                        className="text-black truncate max-w-[112px] block mx-auto"
+                                                                        title={emp.user_id}
+                                                                    >
                                                                         {highlightText(emp.user_id, searchTerm)}
+                                                                    </span>
                                                                     </td>
                                                                     <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200">
                                                                         {emp.mobile_number ? highlightText(emp.mobile_number, searchTerm) : '-'}
@@ -2818,7 +2852,7 @@ const Profile = () => {
                                                                         )}
                                                                     </td>
                                                                     {!isRestrictedUser && (
-                                                                        <td className="px-2 py-1 text-center sticky right-0 z-10 bg-white group-hover:bg-gray-50 shadow-[inset_1px_0_0_#e5e7eb]">
+                                                                        <td className="px-2 py-1 text-center">
                                                                             <div className="flex items-center justify-center gap-1">
                                                                                 <button
                                                                                     onClick={() => setEditingUser(emp)}

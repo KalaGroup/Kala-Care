@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kala Care — Service Engineer Productivity</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#EAEBE5; --panel:#FFFFFF; --ink:#15211D; --muted:#5C665F;
+  --line:#9AA192; --line-soft:#B7BCAE;
+  --teal:#0E7C6B; --teal-d:#0A5A4E; --teal-ink:#083b33;
+  --amber:#E0850F;
+  --shadow:0 1px 2px rgba(20,32,28,.05), 0 6px 22px rgba(20,32,28,.06);
+  --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+  --disp:'Space Grotesk',system-ui,sans-serif;
+  --body:'Inter',system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--body);font-size:13px;line-height:1.4;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1560px;margin:0 auto;padding:24px 20px 56px}
+
+.mast{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px;padding-bottom:16px;border-bottom:2px solid var(--ink)}
+.brand{display:flex;align-items:center;gap:12px}
+.mark{width:38px;height:38px;border-radius:9px;background:var(--teal);position:relative;flex:none;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.18)}
+.mark:before,.mark:after{content:"";position:absolute;background:#fff;border-radius:2px}
+.mark:before{left:8px;right:8px;bottom:8px;height:4px;opacity:.55}
+.mark:after{left:8px;bottom:12px;width:4px;height:14px;box-shadow:7px -4px 0 #fff,14px -8px 0 #fff;opacity:.95}
+.brand h1{font-family:var(--disp);font-weight:600;font-size:17.5px;letter-spacing:-.01em;margin:0;line-height:1.15}
+.brand .sub{font-size:11.5px;color:var(--muted);letter-spacing:.02em;margin-top:2px}
+.tag-temp{font-family:var(--mono);font-size:9.5px;color:var(--amber);border:1px solid var(--amber);border-radius:5px;padding:2px 6px;margin-left:7px;letter-spacing:.06em;vertical-align:1px}
+
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:16px 0 6px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:7px 12px;font-size:12px;font-weight:500;cursor:pointer;font-family:var(--body);color:var(--ink);display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--teal);color:var(--teal-d)}
+.btn.on{background:var(--teal);border-color:var(--teal);color:#fff}
+.btn .ico{font-size:10px;transition:transform .15s}
+.btn.on .ico{transform:rotate(90deg)}
+.rightgroup{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.search{position:relative}
+.search input{font-family:var(--body);font-size:13px;padding:8px 12px 8px 32px;border:1px solid var(--line);border-radius:9px;background:var(--panel);width:210px;color:var(--ink)}
+.search svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:.5}
+
+.daterow{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.daterow input[type=date]{font-family:var(--body);font-size:12px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)}
+.daterow .btn{padding:7px 10px}
+.dr-badge{display:none;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;color:var(--teal-d);background:#EAF5F2;border:1px solid var(--teal);border-radius:7px;padding:4px 9px;width:100%;margin-top:2px}
+.dr-badge.on{display:inline-flex}
+.dr-badge b{font-weight:600}
+.dr-clear-x{cursor:pointer;font-weight:700;color:var(--teal-d);margin-left:2px}
+
+.tablecard{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+
+.tbl-scroll-top{overflow-x:auto;overflow-y:hidden;height:14px}
+.tbl-scroll-top #scrollTopInner{height:1px}
+
+.tbl-scroll{overflow-x:auto;overflow-y:visible}
+
+.tbl-scroll-top, .tbl-scroll{scrollbar-width:thin;scrollbar-color:var(--line) var(--paper)}
+.tbl-scroll-top::-webkit-scrollbar, .tbl-scroll::-webkit-scrollbar{height:8px}
+.tbl-scroll-top::-webkit-scrollbar-track, .tbl-scroll::-webkit-scrollbar-track{background:var(--paper)}
+.tbl-scroll-top::-webkit-scrollbar-thumb, .tbl-scroll::-webkit-scrollbar-thumb{background:var(--line-soft);border-radius:8px}
+.tbl-scroll-top::-webkit-scrollbar-thumb:hover, .tbl-scroll::-webkit-scrollbar-thumb:hover{background:var(--line)}
+
+table{border-collapse:collapse;width:100%;min-width:1560px}
+thead th{font-family:var(--body);font-weight:600;font-size:10px;letter-spacing:.02em;color:var(--muted);text-align:center;padding:7px 7px;border-bottom:1px solid var(--line);border-left:1px solid var(--line-soft);white-space:nowrap;background:#FBFBF9;position:sticky;top:0;z-index:2}
+thead tr.grp th{font-size:9.5px;text-transform:uppercase;letter-spacing:.07em;background:#F3F4EF;color:#838d80;font-weight:600}
+thead th.grp-col{position:sticky;left:0;z-index:6;background:#FBFBF9;width:34px;min-width:34px}
+thead th.name-col{text-align:left;position:sticky;left:34px;z-index:6;background:#FBFBF9;min-width:230px;box-shadow:2px 0 4px -2px rgba(20,32,28,.18)}
+thead th.wk-col{background:#EFF6F4}
+tbody td{padding:6px 7px;border-bottom:1px solid var(--line-soft);border-left:1px solid var(--line-soft);text-align:right;font-family:var(--mono);font-size:11px;white-space:nowrap;vertical-align:middle}
+td.grp-col{position:sticky;left:0;background:inherit;z-index:3;width:34px;min-width:34px;text-align:center;padding:6px 4px}
+td.name-col{text-align:left;font-family:var(--body);position:sticky;left:34px;background:inherit;z-index:2;font-size:12px;box-shadow:2px 0 4px -2px rgba(20,32,28,.18)}
+td.se-col{text-align:left;font-family:var(--body)}
+.zero{color:#c5cbc4}
+.wk-col{display:none}
+.show-weeks .wk-col{display:table-cell}
+td.wk-col{background:#F7FBFA}
+td.wk-excluded{opacity:.32;background:repeating-linear-gradient(135deg,#F7FBFA,#F7FBFA 4px,#EEF0EA 4px,#EEF0EA 8px)}
+
+tr.branch-row td.name-col{font-weight:600;cursor:pointer}
+tr.branch-row td.name-col:hover{color:var(--teal-d)}
+tr.branch-row td.grp-col, tr.branch-row td.name-col{background:#FFFFFF}
+.chev{display:inline-block;width:12px;color:var(--muted);transition:transform .18s;font-size:9px}
+.gchev{display:inline-block;color:var(--ink);font-weight:700;transition:transform .18s;font-size:11px}
+td.grp-col:has(.gchev){cursor:pointer}
+td.grp-col:has(.gchev){background:#F3F4EF}
+td.grp-col:has(.gchev):hover{background:#E7EBE3}
+td.grp-col:has(.gchev):hover .gchev{color:var(--teal-d)}
+.gchev.open{transform:rotate(90deg)}
+.chev.open{transform:rotate(90deg);color:var(--teal-d)}
+.bid{font-family:var(--mono);font-size:9.5px;color:var(--muted);font-weight:400;margin-right:6px}
+.tagpill{font-family:var(--mono);font-size:9px;color:#5c6659;font-weight:400;margin-left:6px;letter-spacing:.03em;text-transform:uppercase;background:rgba(255,255,255,.6);border-radius:4px;padding:1px 5px}
+
+tr.se-row td.name-col{padding-left:26px;cursor:default}
+tr.se-row td.name-col:hover{color:inherit}
+tr.se-row.row-a td{border-bottom:none;background:#F7F8F5}
+tr.se-row.row-b td{background:#F1F3EE}
+.subtype{font-family:var(--mono);font-size:9px;color:#8b968f;display:block}
+
+tr.branch-total td{border-top:1px solid #b9c0b3;font-weight:700;background:#EDEFE9}
+tr.branch-total td.name-col{font-family:var(--disp);font-size:11px;cursor:default}
+tr.branch-total td.name-col:hover{color:var(--ink)}
+
+/* category total row - visible only when expanded */
+tr.cat-total td{border-top:1px solid var(--ink);border-bottom:2px solid var(--ink);font-weight:700;background:#EFF1EA}
+tr.cat-total td.name-col{font-family:var(--disp);font-size:11.5px;background:#EFF1EA;cursor:default}
+tr.cat-total td.name-col:hover{color:var(--ink)}
+
+tr.grand-total td{border-top:2px solid var(--ink);font-weight:700;background:var(--ink);color:#fff}
+tr.grand-total td.name-col{font-family:var(--disp);font-size:12.5px;background:var(--ink);color:#fff;cursor:default}
+td.prod-c{color:var(--teal-ink);font-weight:600}
+
+.note{margin-top:16px;font-size:11.5px;color:var(--muted);line-height:1.6;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+.note b{color:var(--ink)}
+footer{margin-top:16px;font-size:10.5px;color:var(--muted);text-align:center;font-family:var(--mono)}
+:focus-visible{outline:2px solid var(--teal);outline-offset:2px;border-radius:4px}
+@media (max-width:820px){ .search{margin-left:0;width:100%} .search input{width:100%} .daterow .period{margin-left:0;width:100%} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="mast">
+    <div class="brand">
+      <div class="mark" aria-hidden="true"></div>
+      <div>
+        <h1>Service Engineer Productivity Report <span class="tag-temp">TEMP DATA</span></h1>
+        <div class="sub">Kala Care Global · branches, IDs, categories &amp; fields as in your workbook</div>
+      </div>
+    </div>
+  </header>
+
+  <div class="controls">
+    <button class="btn" id="weekBtn"><span class="ico">▶</span> Weekly breakdown (W1–W3)</button>
+    <div class="rightgroup">
+      <div class="daterow">
+        <input type="date" id="dfStart" title="From">
+        <span style="color:var(--muted);font-size:11px">–</span>
+        <input type="date" id="dfEnd" title="To">
+        <button class="btn" id="dfApply">Apply</button>
+        <button class="btn" id="dfClear">Clear</button>
+        <span class="dr-badge" id="drBadge"></span>
+      </div>
+      <div class="search">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input type="text" id="searchI" placeholder="Filter branch or SE name">
+      </div>
+    </div>
+  </div>
+
+  <div class="tablecard">
+    <div class="tbl-scroll-top" id="scrollTop"><div id="scrollTopInner"></div></div>
+    <div class="tbl-scroll" id="scrollMain">
+      <table id="tbl">
+        <thead>
+          <tr class="grp">
+            <th class="grp-col" rowspan="2"></th>
+            <th class="name-col" rowspan="2">Branch / Category / SE</th>
+            <th rowspan="2">Total<br>SR</th>
+            <th colspan="4">Oil Change</th>
+            <th rowspan="2">Working<br>Days</th>
+            <th rowspan="2">Days<br>Present</th>
+            <th rowspan="2">Product-<br>ivity</th>
+            <th colspan="3" class="wk-col">Weekly Total SR</th>
+            <th rowspan="2">Nos<br>Lead</th>
+            <th colspan="9">Nos Lead — by product</th>
+            <th rowspan="2">Spare Conv.<br>Amount</th>
+            <th rowspan="2">Labour Conv.<br>Amount</th>
+          </tr>
+          <tr class="grp">
+            <th>Warranty</th><th>PW</th><th>AMC</th><th>KOEL AMC</th>
+            <th class="wk-col" id="wkH1">W1</th><th class="wk-col" id="wkH2">W2</th><th class="wk-col" id="wkH3">W3</th>
+            <th>Allied<br>Prod.</th><th>AMC</th><th>Battery</th><th>Coolant</th><th>DEF</th><th>K-Oil</th><th>Others</th><th>Spares</th><th>Whole<br>Goods</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="note">
+    Col 1 ▶ toggles the whole group · Col 2 ▶ toggles one branch's SEs · Date range filters SR/Productivity only. TEMP DATA.
+  </div>
+
+  <footer id="footer"></footer>
+</div>
+
+<script>
+const DATA = {"branches": [{"id": "420435_1", "name": "Aurangabad", "ses": [{"name": "Karan Ganesh Sonare", "sr": 28, "workDays": 26, "daysPresent": 22, "oil": {"warranty": [10, 5], "pw": [5, 0], "amc": [0, 3], "koelAmc": [5, 0]}, "nosLead": 5, "lead": {"alliedProduct": [1, 0], "amc": [2, 1], "battery": [1, 1], "coolant": [1, 0], "def_": [0, 0], "koil": [0, 0], "others": [0, 0], "spares": [0, 0], "wholeGoods": [0, 0]}, "spareConvAmt": 100000, "labourConvAmt": 100000, "weekly": [9, 8, 11]}, {"name": "Hanumant Nagorao Nelge", "sr": 30, "workDays": 27, "daysPresent": 20, "oil": {"warranty": [2, 5], "pw": [2, 1], "amc": [1, 1], "koelAmc": [5, 0]}, "nosLead": 2, "lead": {"alliedProduct": [3, 0], "amc": [0, 0], "battery": [1, 0], "coolant": [0, 2], "def_": [1, 2], "koil": [3, 0], "others": [3, 2], "spares": [2, 0], "wholeGoods": [1, 2]}, "spareConvAmt": 75000, "labourConvAmt": 40000, "weekly": [11, 9, 10]}, {"name": "Rahul Vishnupant Kulkarni", "sr": 60, "workDays": 24, "daysPresent": 18, "oil": {"warranty": [5, 6], "pw": [2, 0], "amc": [0, 3], "koelAmc": [0, 2]}, "nosLead": 6, "lead": {"alliedProduct": [2, 0], "amc": [3, 2], "battery": [0, 1], "coolant": [0, 2], "def_": [2, 2], "koil": [2, 2], "others": [1, 2], "spares": [0, 0], "wholeGoods": [1, 1]}, "spareConvAmt": 0, "labourConvAmt": 20000, "weekly": [22, 19, 19]}, {"name": "Sagar Ajinath Sonavne", "sr": 100, "workDays": 22, "daysPresent": 21, "oil": {"warranty": [6, 3], "pw": [5, 2], "amc": [1, 2], "koelAmc": [2, 1]}, "nosLead": 5, "lead": {"alliedProduct": [0, 2], "amc": [1, 2], "battery": [1, 0], "coolant": [3, 1], "def_": [2, 2], "koil": [1, 2], "others": [2, 0], "spares": [1, 0], "wholeGoods": [2, 1]}, "spareConvAmt": 50000, "labourConvAmt": 0, "weekly": [31, 33, 36]}]}, {"id": "420435_4", "name": "Nanded", "ses": [{"name": "Atmaram Govindrao Rajegore", "sr": 87, "workDays": 27, "daysPresent": 24, "oil": {"warranty": [5, 5], "pw": [3, 3], "amc": [3, 1], "koelAmc": [2, 1]}, "nosLead": 4, "lead": {"alliedProduct": [2, 2], "amc": [3, 2], "battery": [3, 1], "coolant": [1, 0], "def_": [3, 0], "koil": [0, 0], "others": [1, 2], "spares": [1, 2], "wholeGoods": [3, 2]}, "spareConvAmt": 0, "labourConvAmt": 60000, "weekly": [26, 28, 33]}]}, {"id": "420435_7", "name": "Parbhani", "ses": [{"name": "Swapnil Bhushan Kale", "sr": 74, "workDays": 26, "daysPresent": 22, "oil": {"warranty": [10, 6], "pw": [0, 0], "amc": [4, 2], "koelAmc": [5, 2]}, "nosLead": 2, "lead": {"alliedProduct": [2, 1], "amc": [1, 1], "battery": [0, 2], "coolant": [2, 2], "def_": [1, 2], "koil": [0, 2], "others": [2, 2], "spares": [1, 0], "wholeGoods": [2, 0]}, "spareConvAmt": 100000, "labourConvAmt": 80000, "weekly": [23, 21, 30]}, {"name": "Hanumant Nagorao Nelge", "sr": 56, "workDays": 25, "daysPresent": 17, "oil": {"warranty": [3, 2], "pw": [6, 2], "amc": [1, 0], "koelAmc": [1, 0]}, "nosLead": 2, "lead": {"alliedProduct": [3, 0], "amc": [1, 0], "battery": [3, 2], "coolant": [1, 1], "def_": [3, 0], "koil": [1, 2], "others": [2, 1], "spares": [2, 1], "wholeGoods": [3, 0]}, "spareConvAmt": 25000, "labourConvAmt": 20000, "weekly": [20, 20, 16]}]}, {"id": "420435_2", "name": "Ahmednagar", "ses": [{"name": "Vikas Changdev Antre", "sr": 58, "workDays": 22, "daysPresent": 18, "oil": {"warranty": [11, 1], "pw": [0, 0], "amc": [0, 1], "koelAmc": [0, 0]}, "nosLead": 6, "lead": {"alliedProduct": [0, 2], "amc": [1, 1], "battery": [3, 0], "coolant": [1, 2], "def_": [3, 0], "koil": [3, 1], "others": [1, 0], "spares": [0, 2], "wholeGoods": [3, 1]}, "spareConvAmt": 75000, "labourConvAmt": 60000, "weekly": [18, 18, 22]}, {"name": "Pragati", "sr": 21, "workDays": 27, "daysPresent": 20, "oil": {"warranty": [2, 3], "pw": [5, 2], "amc": [0, 1], "koelAmc": [1, 1]}, "nosLead": 8, "lead": {"alliedProduct": [1, 1], "amc": [1, 1], "battery": [3, 0], "coolant": [0, 1], "def_": [0, 0], "koil": [0, 0], "others": [1, 0], "spares": [3, 1], "wholeGoods": [3, 0]}, "spareConvAmt": 150000, "labourConvAmt": 60000, "weekly": [8, 8, 5]}]}, {"id": "420435_3", "name": "Beed", "ses": [{"name": "Rajaram Ramrao Rathod", "sr": 36, "workDays": 25, "daysPresent": 17, "oil": {"warranty": [8, 2], "pw": [6, 3], "amc": [2, 3], "koelAmc": [5, 3]}, "nosLead": 3, "lead": {"alliedProduct": [1, 1], "amc": [1, 0], "battery": [0, 2], "coolant": [2, 0], "def_": [0, 2], "koil": [3, 2], "others": [1, 0], "spares": [0, 0], "wholeGoods": [0, 2]}, "spareConvAmt": 0, "labourConvAmt": 100000, "weekly": [13, 12, 11]}]}, {"id": "420435_5", "name": "Babhleshwar", "ses": [{"name": "Sagar Ajinath Sonavne", "sr": 66, "workDays": 22, "daysPresent": 18, "oil": {"warranty": [11, 4], "pw": [0, 4], "amc": [0, 3], "koelAmc": [5, 2]}, "nosLead": 5, "lead": {"alliedProduct": [1, 2], "amc": [2, 0], "battery": [2, 1], "coolant": [1, 2], "def_": [2, 1], "koil": [2, 0], "others": [0, 1], "spares": [0, 0], "wholeGoods": [1, 2]}, "spareConvAmt": 50000, "labourConvAmt": 20000, "weekly": [28, 19, 19]}, {"name": "Prashant Bharamanna Kakatikar", "sr": 23, "workDays": 23, "daysPresent": 20, "oil": {"warranty": [6, 1], "pw": [3, 4], "amc": [2, 4], "koelAmc": [5, 0]}, "nosLead": 5, "lead": {"alliedProduct": [0, 0], "amc": [2, 0], "battery": [0, 2], "coolant": [1, 1], "def_": [2, 2], "koil": [1, 2], "others": [2, 0], "spares": [2, 2], "wholeGoods": [3, 1]}, "spareConvAmt": 150000, "labourConvAmt": 0, "weekly": [9, 7, 7]}, {"name": "Arun Fakkirappa Matti", "sr": 69, "workDays": 24, "daysPresent": 16, "oil": {"warranty": [2, 2], "pw": [6, 1], "amc": [2, 1], "koelAmc": [5, 3]}, "nosLead": 7, "lead": {"alliedProduct": [0, 0], "amc": [0, 2], "battery": [1, 2], "coolant": [0, 1], "def_": [1, 1], "koil": [1, 0], "others": [2, 1], "spares": [0, 1], "wholeGoods": [1, 2]}, "spareConvAmt": 25000, "labourConvAmt": 100000, "weekly": [22, 20, 27]}]}, {"id": "420435_6", "name": "Latur", "ses": [{"name": "Suraj Ghangaokar", "sr": 60, "workDays": 26, "daysPresent": 24, "oil": {"warranty": [11, 5], "pw": [1, 1], "amc": [1, 1], "koelAmc": [3, 0]}, "nosLead": 3, "lead": {"alliedProduct": [2, 1], "amc": [1, 1], "battery": [1, 2], "coolant": [0, 1], "def_": [0, 1], "koil": [1, 0], "others": [3, 1], "spares": [2, 0], "wholeGoods": [1, 0]}, "spareConvAmt": 125000, "labourConvAmt": 20000, "weekly": [20, 22, 18]}]}, {"id": "420435_8", "name": "Hubli", "ses": [{"name": "Nikita P Hiremath", "sr": 50, "workDays": 22, "daysPresent": 19, "oil": {"warranty": [7, 5], "pw": [4, 3], "amc": [4, 2], "koelAmc": [0, 0]}, "nosLead": 5, "lead": {"alliedProduct": [1, 2], "amc": [2, 0], "battery": [0, 2], "coolant": [3, 1], "def_": [2, 1], "koil": [0, 1], "others": [1, 1], "spares": [0, 2], "wholeGoods": [3, 0]}, "spareConvAmt": 100000, "labourConvAmt": 80000, "weekly": [16, 17, 17]}, {"name": "Manjula K Nandalli", "sr": 40, "workDays": 24, "daysPresent": 22, "oil": {"warranty": [3, 5], "pw": [2, 4], "amc": [2, 0], "koelAmc": [5, 2]}, "nosLead": 5, "lead": {"alliedProduct": [3, 1], "amc": [3, 2], "battery": [2, 2], "coolant": [1, 0], "def_": [3, 2], "koil": [3, 2], "others": [1, 2], "spares": [2, 1], "wholeGoods": [0, 1]}, "spareConvAmt": 50000, "labourConvAmt": 20000, "weekly": [15, 13, 12]}]}, {"id": "420435_9", "name": "Belagavi", "ses": [{"name": "Anita Sachin Ajarekar", "sr": 89, "workDays": 26, "daysPresent": 23, "oil": {"warranty": [9, 3], "pw": [3, 1], "amc": [4, 3], "koelAmc": [5, 1]}, "nosLead": 2, "lead": {"alliedProduct": [2, 2], "amc": [2, 0], "battery": [1, 2], "coolant": [2, 0], "def_": [1, 0], "koil": [0, 0], "others": [1, 1], "spares": [0, 1], "wholeGoods": [3, 2]}, "spareConvAmt": 100000, "labourConvAmt": 20000, "weekly": [33, 25, 31]}]}, {"id": "420435_10", "name": "Hospet", "ses": [{"name": "Sneha B", "sr": 64, "workDays": 25, "daysPresent": 23, "oil": {"warranty": [5, 1], "pw": [5, 0], "amc": [0, 3], "koelAmc": [1, 1]}, "nosLead": 8, "lead": {"alliedProduct": [0, 2], "amc": [1, 0], "battery": [3, 0], "coolant": [3, 2], "def_": [2, 1], "koil": [3, 2], "others": [3, 0], "spares": [3, 1], "wholeGoods": [2, 0]}, "spareConvAmt": 150000, "labourConvAmt": 100000, "weekly": [20, 19, 25]}, {"name": "Naveena Kumara E", "sr": 81, "workDays": 25, "daysPresent": 20, "oil": {"warranty": [6, 3], "pw": [0, 2], "amc": [1, 2], "koelAmc": [2, 2]}, "nosLead": 2, "lead": {"alliedProduct": [1, 0], "amc": [1, 1], "battery": [1, 2], "coolant": [1, 0], "def_": [3, 1], "koil": [2, 2], "others": [3, 1], "spares": [0, 0], "wholeGoods": [3, 1]}, "spareConvAmt": 150000, "labourConvAmt": 80000, "weekly": [31, 26, 24]}]}, {"id": "420435_11", "name": "Ballari", "ses": [{"name": "Javid Mahmadrafik Shaikh", "sr": 88, "workDays": 25, "daysPresent": 24, "oil": {"warranty": [2, 2], "pw": [2, 3], "amc": [3, 4], "koelAmc": [5, 1]}, "nosLead": 8, "lead": {"alliedProduct": [1, 1], "amc": [3, 1], "battery": [0, 1], "coolant": [2, 2], "def_": [3, 2], "koil": [1, 1], "others": [1, 2], "spares": [0, 1], "wholeGoods": [0, 0]}, "spareConvAmt": 125000, "labourConvAmt": 60000, "weekly": [30, 30, 28]}, {"name": "Rajaram Ramrao Rathod", "sr": 74, "workDays": 23, "daysPresent": 15, "oil": {"warranty": [6, 3], "pw": [2, 1], "amc": [3, 2], "koelAmc": [2, 3]}, "nosLead": 5, "lead": {"alliedProduct": [3, 1], "amc": [0, 1], "battery": [0, 2], "coolant": [0, 1], "def_": [1, 2], "koil": [0, 2], "others": [0, 0], "spares": [1, 0], "wholeGoods": [0, 2]}, "spareConvAmt": 25000, "labourConvAmt": 20000, "weekly": [26, 23, 25]}, {"name": "Rahul Balasaheb Bhor", "sr": 29, "workDays": 26, "daysPresent": 21, "oil": {"warranty": [9, 5], "pw": [2, 2], "amc": [1, 4], "koelAmc": [4, 0]}, "nosLead": 3, "lead": {"alliedProduct": [2, 0], "amc": [0, 1], "battery": [3, 1], "coolant": [1, 0], "def_": [1, 0], "koil": [2, 2], "others": [0, 2], "spares": [0, 1], "wholeGoods": [3, 2]}, "spareConvAmt": 50000, "labourConvAmt": 0, "weekly": [11, 10, 8]}]}, {"id": "420435_12", "name": "Bagalkote", "ses": [{"name": "Khajisab Babusab Sandimani", "sr": 58, "workDays": 22, "daysPresent": 21, "oil": {"warranty": [9, 0], "pw": [3, 2], "amc": [3, 1], "koelAmc": [3, 1]}, "nosLead": 5, "lead": {"alliedProduct": [3, 1], "amc": [3, 2], "battery": [2, 1], "coolant": [1, 0], "def_": [2, 1], "koil": [1, 1], "others": [3, 1], "spares": [0, 1], "wholeGoods": [2, 0]}, "spareConvAmt": 75000, "labourConvAmt": 20000, "weekly": [19, 20, 19]}]}, {"id": "420435_13", "name": "Kalaburagi", "ses": [{"name": "Nagesh Shivaputra Dhuttargi", "sr": 48, "workDays": 24, "daysPresent": 20, "oil": {"warranty": [11, 5], "pw": [2, 4], "amc": [0, 4], "koelAmc": [1, 0]}, "nosLead": 4, "lead": {"alliedProduct": [3, 1], "amc": [1, 2], "battery": [3, 2], "coolant": [3, 1], "def_": [0, 0], "koil": [2, 0], "others": [3, 2], "spares": [1, 1], "wholeGoods": [2, 1]}, "spareConvAmt": 100000, "labourConvAmt": 80000, "weekly": [17, 18, 13]}, {"name": "Shrikanth S Astagi", "sr": 85, "workDays": 24, "daysPresent": 21, "oil": {"warranty": [9, 2], "pw": [2, 2], "amc": [1, 0], "koelAmc": [5, 1]}, "nosLead": 6, "lead": {"alliedProduct": [0, 2], "amc": [1, 0], "battery": [1, 2], "coolant": [3, 1], "def_": [2, 0], "koil": [1, 1], "others": [1, 1], "spares": [1, 1], "wholeGoods": [0, 2]}, "spareConvAmt": 100000, "labourConvAmt": 20000, "weekly": [33, 26, 26]}]}, {"id": "420435_14", "name": "Vijayapura", "ses": [{"name": "Sudha Krishna Murthy", "sr": 52, "workDays": 27, "daysPresent": 21, "oil": {"warranty": [12, 6], "pw": [6, 3], "amc": [0, 0], "koelAmc": [4, 2]}, "nosLead": 8, "lead": {"alliedProduct": [3, 1], "amc": [2, 0], "battery": [0, 1], "coolant": [3, 0], "def_": [0, 1], "koil": [3, 0], "others": [0, 0], "spares": [1, 2], "wholeGoods": [2, 0]}, "spareConvAmt": 25000, "labourConvAmt": 0, "weekly": [22, 15, 15]}]}], "categories": [{"type": "group", "branches": ["420435_1", "420435_4", "420435_7"]}, {"type": "group", "branches": ["420435_2", "420435_3", "420435_5", "420435_6"]}, {"type": "standalone", "branchId": "420435_8"}, {"type": "standalone", "branchId": "420435_9"}, {"type": "group", "branches": ["420435_10", "420435_11", "420435_12"]}, {"type": "group", "branches": ["420435_13", "420435_14"]}], "categoryColors": ["FFFFFF", "FFFFFF", "FFFFFF", "FFFFFF", "FFFFFF", "FFFFFF"]};
+const $=s=>document.getElementById(s);
+const num2=v=>v.toFixed(2);
+const fmtAmt=v=>v.toLocaleString('en-IN');
+const byId = id => DATA.branches.find(b=>b.id===id);
+
+const WEEKS = [
+  {n:1, label:'W1', start:'2026-07-01', end:'2026-07-10', short:'Jul 1–10'},
+  {n:2, label:'W2', start:'2026-07-11', end:'2026-07-20', short:'Jul 11–20'},
+  {n:3, label:'W3', start:'2026-07-21', end:'2026-07-31', short:'Jul 21–31'}
+];
+const PERIOD_START = WEEKS[0].start, PERIOD_END = WEEKS[WEEKS.length-1].end;
+
+const state = {
+  showWeeks:false,
+  catExpanded: new Set(DATA.categories.map((c,i)=>i).filter(i=>DATA.categories[i].type==='group')), // groups start EXPANDED
+  branchExpanded: new Set(),   // branch ids expanded (for multi-SE branches) — SE detail starts collapsed
+  query:'',
+  dateFilter: null            // {start,end,weeks:[1,2,3]} or null = full period
+};
+
+function computeDateFilter(startStr, endStr){
+  if(!startStr || !endStr) return null;
+  const s = new Date(startStr), e = new Date(endStr);
+  if(isNaN(s)||isNaN(e)||s>e) return null;
+  const weeks = WEEKS.filter(w=>{
+    const ws = new Date(w.start), we = new Date(w.end);
+    return ws<=e && we>=s;
+  }).map(w=>w.n);
+  return weeks.length ? {start:startStr, end:endStr, weeks} : null;
+}
+function fmtDate(d){
+  const dt = new Date(d);
+  return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+}
+function withEff(se){
+  if(!state.dateFilter) return se;
+  const frac = state.dateFilter.weeks.length/3;
+  const sr = state.dateFilter.weeks.reduce((s,w)=>s+se.weekly[w-1],0);
+  return Object.assign({}, se, {
+    sr,
+    workDays: Math.round(se.workDays*frac),
+    daysPresent: Math.round(se.daysPresent*frac)
+  });
+}
+function wkCls(w, extra){
+  const base = (state.dateFilter && !state.dateFilter.weeks.includes(w)) ? 'wk-col wk-excluded' : 'wk-col';
+  return extra ? `${base} ${extra}` : base;
+}
+
+function emptyTotals(){
+  return {sr:0,warranty:[0,0],pw:[0,0],amc:[0,0],koelAmc:[0,0],workDays:0,daysPresent:0,nosLead:0,
+    lead:{alliedProduct:[0,0],amc:[0,0],battery:[0,0],coolant:[0,0],def_:[0,0],koil:[0,0],others:[0,0],spares:[0,0],wholeGoods:[0,0]},
+    spareConvAmt:0, labourConvAmt:0, weekly:[0,0,0]};
+}
+function addSE(t, se){
+  t.sr+=se.sr; t.workDays+=se.workDays; t.daysPresent+=se.daysPresent; t.nosLead+=se.nosLead;
+  t.spareConvAmt+=se.spareConvAmt; t.labourConvAmt+=se.labourConvAmt;
+  ['warranty','pw','amc','koelAmc'].forEach(k=>{ t[k][0]+=se.oil[k][0]; t[k][1]+=se.oil[k][1]; });
+  Object.keys(t.lead).forEach(k=>{ t.lead[k][0]+=se.lead[k][0]; t.lead[k][1]+=se.lead[k][1]; });
+  t.weekly[0]+=se.weekly[0]; t.weekly[1]+=se.weekly[1]; t.weekly[2]+=se.weekly[2];
+}
+function sumBranch(b){ const t=emptyTotals(); b.ses.forEach(se=>addSE(t, withEff(se))); return t; }
+function sumBranches(ids){ const t=emptyTotals(); ids.forEach(id=>{ byId(id).ses.forEach(se=>addSE(t, withEff(se))); }); return t; }
+function productivity(sr,dp){ return dp>0 ? sr/dp : 0; }
+
+function dataCells(t, extraClass){
+  const prod = num2(productivity(t.sr, t.daysPresent));
+  const c = extraClass || '';
+  return `
+    <td class="${c}">${t.sr}</td>
+    <td class="${c}">${t.warranty[0]+t.warranty[1]}</td><td class="${c}">${t.pw[0]+t.pw[1]}</td><td class="${c}">${t.amc[0]+t.amc[1]}</td><td class="${c}">${t.koelAmc[0]+t.koelAmc[1]}</td>
+    <td class="${c}">${t.workDays}</td><td class="${c}">${t.daysPresent}</td><td class="prod-c ${c}">${prod}</td>
+    <td class="${wkCls(1,c)}">${t.weekly[0]}</td><td class="${wkCls(2,c)}">${t.weekly[1]}</td><td class="${wkCls(3,c)}">${t.weekly[2]}</td>
+    <td class="${c}">${t.nosLead}</td>
+    <td class="${c}">${t.lead.alliedProduct[0]+t.lead.alliedProduct[1]}</td><td class="${c}">${t.lead.amc[0]+t.lead.amc[1]}</td><td class="${c}">${t.lead.battery[0]+t.lead.battery[1]}</td><td class="${c}">${t.lead.coolant[0]+t.lead.coolant[1]}</td><td class="${c}">${t.lead.def_[0]+t.lead.def_[1]}</td><td class="${c}">${t.lead.koil[0]+t.lead.koil[1]}</td><td class="${c}">${t.lead.others[0]+t.lead.others[1]}</td><td class="${c}">${t.lead.spares[0]+t.lead.spares[1]}</td><td class="${c}">${t.lead.wholeGoods[0]+t.lead.wholeGoods[1]}</td>
+    <td class="${c}">${fmtAmt(t.spareConvAmt)}</td><td class="${c}">${fmtAmt(t.labourConvAmt)}</td>`;
+}
+
+function seRows(rawSe, includeGrp){
+  const se = withEff(rawSe);
+  const prod = num2(productivity(se.sr, se.daysPresent));
+  const grpTdA = includeGrp ? '<td class="grp-col" rowspan="2"></td>' : '';
+  const rowA = `<tr class="se-row row-a">
+      ${grpTdA}
+      <td class="name-col se-col">${rawSe.name}<span class="subtype">Wet / Count of lead</span></td>
+      <td rowspan="2">${se.sr}</td>
+      <td>${rawSe.oil.warranty[0]}</td><td>${rawSe.oil.pw[0]}</td><td>${rawSe.oil.amc[0]}</td><td>${rawSe.oil.koelAmc[0]}</td>
+      <td rowspan="2">${se.workDays}</td><td rowspan="2">${se.daysPresent}</td><td rowspan="2" class="prod-c">${prod}</td>
+      <td class="${wkCls(1)}" rowspan="2">${rawSe.weekly[0]}</td><td class="${wkCls(2)}" rowspan="2">${rawSe.weekly[1]}</td><td class="${wkCls(3)}" rowspan="2">${rawSe.weekly[2]}</td>
+      <td rowspan="2">${rawSe.nosLead}</td>
+      <td>${rawSe.lead.alliedProduct[0]}</td><td>${rawSe.lead.amc[0]}</td><td>${rawSe.lead.battery[0]}</td><td>${rawSe.lead.coolant[0]}</td><td>${rawSe.lead.def_[0]}</td><td>${rawSe.lead.koil[0]}</td><td>${rawSe.lead.others[0]}</td><td>${rawSe.lead.spares[0]}</td><td>${rawSe.lead.wholeGoods[0]}</td>
+      <td>&nbsp;</td><td>&nbsp;</td>
+    </tr>`;
+  const rowB = `<tr class="se-row row-b">
+      <td class="name-col se-col">&nbsp;<span class="subtype">Dry / Conversion</span></td>
+      <td>${rawSe.oil.warranty[1]}</td><td>${rawSe.oil.pw[1]}</td><td>${rawSe.oil.amc[1]}</td><td>${rawSe.oil.koelAmc[1]}</td>
+      <td>${rawSe.lead.alliedProduct[1]}</td><td>${rawSe.lead.amc[1]}</td><td>${rawSe.lead.battery[1]}</td><td>${rawSe.lead.coolant[1]}</td><td>${rawSe.lead.def_[1]}</td><td>${rawSe.lead.koil[1]}</td><td>${rawSe.lead.others[1]}</td><td>${rawSe.lead.spares[1]}</td><td>${rawSe.lead.wholeGoods[1]}</td>
+      <td>${rawSe.spareConvAmt?fmtAmt(rawSe.spareConvAmt):'<span class="zero">·</span>'}</td><td>${rawSe.labourConvAmt?fmtAmt(rawSe.labourConvAmt):'<span class="zero">·</span>'}</td>
+    </tr>`;
+  return rowA+rowB;
+}
+
+// Counts the number of physical <tr> rows a branch's block will render (its own header row,
+// plus SE detail + branch-total rows if it is currently expanded). Used to size the group's
+// merged column-1 cell (rowspan) so the arrow can sit in the vertical middle of the group.
+function branchRowCount(b, q, open){
+  let n = 1;
+  if(open){
+    let ses = b.ses;
+    if(q && !(b.name.toLowerCase().includes(q)||b.id.toLowerCase().includes(q))) ses = ses.filter(se=>se.name.toLowerCase().includes(q));
+    n += ses.length*2 + 1;
+  }
+  return n;
+}
+
+// Render one branch row + its expandable SE dropdown.
+// opts: undefined -> standalone branch (gets its own plain, empty column-1 cell on every row)
+//       {mode:'first', ci, rowspan} -> first branch of an EXPANDED group: column-1 cell is
+//         rendered ONCE here with rowspan covering the whole group block (all branches, their
+//         SE rows, branch-total rows, and the group's Total row) — arrow lands in the middle.
+//       {mode:'rest'} -> other branches of an expanded group: no column-1 cell at all (covered
+//         by the rowspan above). Their own ▶ (in the name column) still only opens/closes THEIR SEs.
+function branchHTML(b, q, opts){
+  const open = state.branchExpanded.has(b.id);
+  const t = sumBranch(b);
+  const seLabel = `${b.ses.length} SE${b.ses.length>1?'s':''}`;
+  const standalone = !opts;
+  let grpTd;
+  if(!opts){
+    grpTd = `<td class="grp-col"></td>`;
+  } else if(opts.mode==='first'){
+    grpTd = `<td class="grp-col" rowspan="${opts.rowspan}" data-cat="${opts.ci}"><span class="gchev open" data-cat="${opts.ci}">▶</span></td>`;
+  } else {
+    grpTd = '';
+  }
+  let html = `<tr class="branch-row" data-bid="${b.id}">
+    ${grpTd}
+    <td class="name-col"><span class="chev ${open?'open':''}">▶</span><span class="bid">${b.id}</span>${b.name}<span class="tagpill">${seLabel}</span></td>
+    ${dataCells(t)}
+  </tr>`;
+  if(open){
+    let ses = b.ses;
+    if(q && !(b.name.toLowerCase().includes(q)||b.id.toLowerCase().includes(q))) ses = ses.filter(se=>se.name.toLowerCase().includes(q));
+    ses.forEach(se=>{ html += seRows(se, standalone); });
+    html += `<tr class="branch-total">
+      ${standalone ? '<td class="grp-col"></td>' : ''}
+      <td class="name-col">${b.name} — branch total</td>
+      ${dataCells(t)}
+    </tr>`;
+  }
+  return html;
+}
+
+function render(){
+  const q = state.query.trim().toLowerCase();
+  let html='';
+
+  DATA.categories.forEach((cat, ci)=>{
+    if(cat.type==='standalone'){
+      const b = byId(cat.branchId);
+      if(q && !(b.name.toLowerCase().includes(q) || b.id.toLowerCase().includes(q) || b.ses.some(se=>se.name.toLowerCase().includes(q)))) return;
+      html += branchHTML(b, q);
+      return;
+    }
+    // group category
+    const ids = cat.branches;
+    const bs = ids.map(byId);
+    const matches = !q || bs.some(b=> b.name.toLowerCase().includes(q) || b.id.toLowerCase().includes(q) || b.ses.some(se=>se.name.toLowerCase().includes(q)));
+    if(!matches) return;
+    const open = state.catExpanded.has(ci);
+
+    if(!open){
+      // collapsed: ONE row only. Column-1 arrow lives in its own cell (rowspan 1), first
+      // branch's name follows, data cells show the WHOLE group's combined total.
+      const t = sumBranches(ids);
+      const first = bs[0];
+      html += `<tr class="branch-row" data-cat="${ci}">
+        <td class="grp-col" data-cat="${ci}"><span class="gchev" data-cat="${ci}">▶</span></td>
+        <td class="name-col"><span class="bid">${first.id}</span>${first.name} <span class="tagpill">+ (${bs.length} branches)</span></td>
+        ${dataCells(t)}
+      </tr>`;
+    } else {
+      // expanded: column-1 cell is ONE merged cell spanning every row this group renders
+      // (all its branches + their SE rows/branch-totals + the group Total row), so the arrow
+      // sits in the vertical middle and clicking it only ever collapses the whole group.
+      let rowspan = 1; // the group's own Total row at the end
+      bs.forEach(b=>{ rowspan += branchRowCount(b, q, state.branchExpanded.has(b.id)); });
+
+      html += branchHTML(bs[0], q, {mode:'first', ci, rowspan});
+      bs.slice(1).forEach(b=>{ html += branchHTML(b, q, {mode:'rest'}); });
+
+      const t = sumBranches(ids);
+      html += `<tr class="cat-total">
+        <td class="name-col">Total</td>
+        ${dataCells(t)}
+      </tr>`;
+    }
+  });
+
+  const grandIds = DATA.branches.map(b=>b.id);
+  const grand = sumBranches(grandIds);
+  html += `<tr class="grand-total"><td class="grp-col"></td><td class="name-col">All branches — grand total</td>${dataCells(grand)}</tr>`;
+
+  $('tbody').innerHTML = html;
+  $('footer').textContent = `Kala Care · Service Engineer Productivity · ${DATA.branches.length} branches, ${DATA.categories.length} groups · TEMP DATA for layout review`;
+  syncScrollWidth();
+
+  // week header labels + badge
+  WEEKS.forEach(w=>{ $('wkH'+w.n).innerHTML = `${w.label}<br><span style="font-weight:400;opacity:.7">${w.short}</span>`; });
+  const badge = $('drBadge');
+  if(state.dateFilter){
+    badge.classList.add('on');
+    badge.innerHTML = `Filtered: <b>${fmtDate(state.dateFilter.start)} – ${fmtDate(state.dateFilter.end)}</b> (${state.dateFilter.weeks.map(w=>'W'+w).join('–')})<span class="dr-clear-x" id="drBadgeClear" title="Clear filter">&times;</span>`;
+  } else {
+    badge.classList.remove('on');
+    badge.innerHTML = '';
+  }
+}
+
+// Click handling:
+//  - a click on the column-1 arrow (.grp-col with data-cat) ONLY toggles that whole group.
+//  - a click on a branch row's NAME COLUMN toggles ONLY that branch's own SE rows — except for
+//    the collapsed group summary row (no data-bid), where the name column re-expands the group.
+document.getElementById('tbody').addEventListener('click', e=>{
+  const grpCol = e.target.closest('.grp-col');
+  if(grpCol && grpCol.dataset.cat !== undefined && grpCol.dataset.cat !== ''){
+    const ci = +grpCol.dataset.cat;
+    if(state.catExpanded.has(ci)) state.catExpanded.delete(ci); else state.catExpanded.add(ci);
+    render(); return;
+  }
+  const nameCol = e.target.closest('td.name-col');
+  if(!nameCol) return;
+  const row = nameCol.closest('tr');
+  if(!row || !row.classList.contains('branch-row')) return;
+
+  if(row.dataset.bid){
+    const bid = row.dataset.bid;
+    if(state.branchExpanded.has(bid)) state.branchExpanded.delete(bid); else state.branchExpanded.add(bid);
+    render();
+  } else if(row.dataset.cat !== undefined && row.dataset.cat !== ''){
+    const ci = +row.dataset.cat;
+    state.catExpanded.add(ci);
+    render();
+  }
+});
+
+$('weekBtn').onclick = ()=>{
+  state.showWeeks = !state.showWeeks;
+  $('weekBtn').classList.toggle('on', state.showWeeks);
+  $('tbl').parentElement.parentElement.classList.toggle('show-weeks', state.showWeeks);
+};
+$('searchI').oninput = e=>{ state.query = e.target.value; render(); };
+
+$('dfStart').min = PERIOD_START; $('dfStart').max = PERIOD_END;
+$('dfEnd').min = PERIOD_START; $('dfEnd').max = PERIOD_END;
+$('dfStart').title = `From (period: ${fmtDate(PERIOD_START)} – ${fmtDate(PERIOD_END)})`;
+$('dfEnd').title = `To (period: ${fmtDate(PERIOD_START)} – ${fmtDate(PERIOD_END)})`;
+
+$('dfApply').onclick = ()=>{
+  const s = $('dfStart').value, e = $('dfEnd').value;
+  if(!s || !e){ alert('Pick both a From and a To date.'); return; }
+  const f = computeDateFilter(s, e);
+  if(!f){ alert('That range doesn\'t fall inside the report period, or From is after To.'); return; }
+  state.dateFilter = f;
+  render();
+};
+$('dfClear').onclick = ()=>{
+  $('dfStart').value=''; $('dfEnd').value='';
+  state.dateFilter = null;
+  render();
+};
+document.getElementById('tbody').addEventListener('click', e=>{}); // no-op placeholder kept for stable listener order
+document.addEventListener('click', e=>{
+  if(e.target && e.target.id==='drBadgeClear'){
+    $('dfStart').value=''; $('dfEnd').value='';
+    state.dateFilter = null;
+    render();
+  }
+});
+
+render();
+
+// Top scrollbar mirrors the table's real horizontal scrollbar (so users don't have to
+// scroll all the way down just to move the table sideways).
+function syncScrollWidth(){
+  $('scrollTopInner').style.width = $('tbl').scrollWidth + 'px';
+}
+let syncing = false;
+$('scrollTop').addEventListener('scroll', ()=>{
+  if(syncing) return; syncing = true;
+  $('scrollMain').scrollLeft = $('scrollTop').scrollLeft;
+  syncing = false;
+});
+$('scrollMain').addEventListener('scroll', ()=>{
+  if(syncing) return; syncing = true;
+  $('scrollTop').scrollLeft = $('scrollMain').scrollLeft;
+  syncing = false;
+});
+window.addEventListener('resize', syncScrollWidth);
+syncScrollWidth();
+</script>
+</body>
+</html>
