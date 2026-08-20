@@ -159,6 +159,14 @@ class MomRow(Base):
     prev_remarks:
       JSON list [{date, text, status, by}] — the remark trail from earlier
       meetings, one entry per past review of this tracked task.
+
+    edited_at:
+      When this row's DEFINITION (area / category / point / owners / due /
+      flag) was last written. Stamped when the Master Admin rewrites a point
+      while editing a past meeting, so the newest wording of a tracked task
+      wins in the next meeting's carry-forward even though the already-saved
+      later meetings keep their own snapshot untouched. NULL = never edited
+      (the row still reads as of its meeting's date).
     """
     __tablename__ = "mom_rows"
 
@@ -180,5 +188,6 @@ class MomRow(Base):
     origin_date = Column(Date, nullable=True)                        # when the task was first raised
     carried = Column(Boolean, nullable=False, default=False)
     prev_remarks = Column(UnicodeText, nullable=True)                # JSON list (see docstring)
+    edited_at = Column(DateTime, nullable=True)                      # last definition rewrite (see docstring)
 
     meeting = relationship("MomMeeting", back_populates="rows")

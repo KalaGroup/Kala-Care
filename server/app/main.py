@@ -50,7 +50,8 @@ from app.routes import (
     maintenance_routes,
     mom_routes,
     approval_routes,
-    pms_routes
+    pms_routes,
+    welcome_letter_routes
 )
 
 # ---------------- LOAD ENV ---------------- #
@@ -70,6 +71,7 @@ from app.models import maintenance_model
 from app.models import mom_model
 from app.models import approval_application_model
 from app.models import pms_model
+from app.models import welcome_letter_model
 from app.time_utils import now_ist
 
 # ---------------- CREATE UPLOAD DIRECTORIES ---------------- #
@@ -84,13 +86,23 @@ os.makedirs(BANNER_DIR, exist_ok=True)
 # create_all creates any table that does not exist yet; it NEVER alters an
 # existing table. Schema changes to existing tables (new columns, key/index
 # changes) are applied manually via databaseSQl.txt in SSMS.
+from app.performance_indexes import (
+    ensure_performance_indexes, ensure_schema, ensure_table_renames
+)
+
+# Renamed tables MUST be renamed BEFORE create_all — otherwise create_all sees
+# the new name missing and creates a second, EMPTY table, orphaning the data.
+try:
+    ensure_table_renames(engine)
+except Exception as e:
+    print(f"[table-rename] skipped: {e}")
+
 print("Creating/Updating database tables...")
 Base.metadata.create_all(bind=engine)
 print("Tables created/updated successfully!")
 
 # Ensure performance indexes for the hot list/dashboard queries. Idempotent
 # (IF NOT EXISTS) — after the first run this is a fast no-op on every startup.
-from app.performance_indexes import ensure_performance_indexes, ensure_schema
 # Top up columns the models expect but create_all can't add to existing tables
 # (e.g. asset_detailed.emission_norm), backfilling from extra_data on first add.
 try:
@@ -117,6 +129,53 @@ try:
         _db.close()
 except Exception as e:
     print(f"[kit-backfill] skipped: {e}")
+
+# EFSR rows imported before task_assigned_date existed keep that date only in
+# their extra_data JSON. Lift it into the real column so the Employee
+# Productivity report's Allocate SR column can use it. Idempotent.
+try:
+    from app.controllers.import_controller import backfill_efsr_task_assigned as _efsr_bf
+
+    _db = SessionLocal()
+    try:
+        _n = _efsr_bf(_db)
+        if _n:
+            print(f"✅ Backfilled EFSR task-assigned date for {_n} SR(s)")
+        # Same story for Task End Date — the SR Allocation report counts its
+        # Closed SR on it, so old rows need it lifted out of extra_data too.
+        from app.controllers.import_controller import backfill_efsr_task_end as _efsr_end_bf
+        _ne = _efsr_end_bf(_db)
+        if _ne:
+            print(f"✅ Backfilled EFSR task-end date for {_ne} SR(s)")
+        from app.controllers.import_controller import backfill_cdi_activity_end as _cdi_bf
+        _m = _cdi_bf(_db)
+        if _m:
+            print(f"✅ Backfilled CDI activity-end date for {_m} row(s)")
+        # The Customer Delight Index report groups by the CDI file's BRANCH
+        # NAME - the one branch column that file has. Lifts it out of the
+        # dynamic JSON into its column and drops the now-duplicate key.
+        from app.controllers.import_controller import backfill_cdi_branch_name as _cdi_bn
+        _b = _cdi_bn(_db)
+        if _b:
+            print(f"✅ Moved CDI branch name into its column for {_b} row(s)")
+    finally:
+        _db.close()
+except Exception as e:
+    print(f"[efsr-backfill] skipped: {e}")
+
+# Welcome Letter attachments are stored IN the database. Pull any file left on
+# disk by the earlier build into its row and delete the legacy folder.
+# Idempotent — a no-op once nothing has a stored_path.
+try:
+    from app.controllers.welcome_letter_controller import migrate_files_to_db as _wl_migrate
+
+    _db = SessionLocal()
+    try:
+        _wl_migrate(_db)
+    finally:
+        _db.close()
+except Exception as e:
+    print(f"[welcome-letter-files] skipped: {e}")
 
 # ---------------- FASTAPI APP ---------------- #
 
@@ -309,6 +368,7 @@ app.include_router(maintenance_routes.router, prefix="/api")
 app.include_router(mom_routes.router, prefix="/api")
 app.include_router(approval_routes.router, prefix="/api")
 app.include_router(pms_routes.router, prefix="/api")
+app.include_router(welcome_letter_routes.router, prefix="/api")
 
 # ---------------- ROOT ---------------- #
 

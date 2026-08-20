@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, desc, and_, func
+from sqlalchemy import or_, desc, and_, func, exists
 from fastapi import HTTPException
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -7,8 +7,8 @@ from datetime import datetime
 from app.models.customer_model import (
     Customer, AMCAgreement, AssetDetailed, AssetService,
     AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
-    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, OpenSRData,
-    ResponseTimeMaxTTR
+    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, MaxTTROilChangeSRZeroLabourFlag,
+    ResponseTimeMaxTTR, CDIDetailReport, EFSRReport
 )
 from app.time_utils import now_ist
 from app.schemas.customer_schema import (
@@ -1018,77 +1018,99 @@ class CustomerController:
             LMSData.instance_id == instance_id
         ).order_by(desc(LMSData.lead_created_date)).all()
     
-    def get_open_sr_load_reports_by_instance(self, instance_id: str):
-        """Get Open SR Load Reports by instance ID"""
-        return self.db.query(OpenSRLoadReport).filter(
+    @staticmethod
+    def _sr_closed_in_maxttr():
+        """EXISTS(...) that is true when an Open SR row has already been closed.
+
+        The 'MaxTTR - Oil Change SR Zero Labour Flag' file IS the closure
+        record — every row of it carries a real SR CLOSE DATE — so an SR is
+        closed exactly when the same (instance_id, sr_number) is present there.
+        Matched on BOTH columns, never on the SR number alone: that pair is the
+        upsert key of both tables."""
+        return exists().where(and_(
+            MaxTTROilChangeSRZeroLabourFlag.instance_id == OpenSRLoadReport.instance_id,
+            MaxTTROilChangeSRZeroLabourFlag.sr_number == OpenSRLoadReport.service_request_no,
+        ))
+
+    def get_open_sr_load_reports_by_instance(self, instance_id: str, include_closed: bool = False):
+        """Get the STILL-OPEN Open SR Load Report rows of one instance.
+
+        Every SR the Open SR file has ever carried is kept in the table, so
+        "open" is decided here, at read time: a row is returned only while no
+        MaxTTR row closes it. include_closed=True skips that check and returns
+        the customer's full raw SR record — the Customers Data Hub only."""
+        query = self.db.query(OpenSRLoadReport).filter(
             OpenSRLoadReport.instance_id == instance_id
-        ).order_by(desc(OpenSRLoadReport.sr_due_date)).all()
+        )
+        if not include_closed:
+            query = query.filter(~self._sr_closed_in_maxttr())
+        return query.order_by(desc(OpenSRLoadReport.sr_due_date)).all()
 
     # ==================== OPEN SR DATA ====================
 
     def get_open_sr_data_count(self, search: Optional[str] = None):
-        """Get total count of Open SR Data rows with optional search"""
-        query = self.db.query(OpenSRData)
+        """Get total count of MaxTTR - Oil Change SR rows with optional search"""
+        query = self.db.query(MaxTTROilChangeSRZeroLabourFlag)
         if search:
             search_term = f"%{search}%"
             query = query.filter(
                 or_(
-                    OpenSRData.instance_id.ilike(search_term),
-                    OpenSRData.branch_id.ilike(search_term),
-                    OpenSRData.branch_name.ilike(search_term),
-                    OpenSRData.account_name.ilike(search_term),
-                    OpenSRData.sr_number.ilike(search_term),
-                    OpenSRData.sr_type.ilike(search_term),
-                    OpenSRData.engine_serial_no.ilike(search_term),
-                    OpenSRData.oil_change_flag.ilike(search_term),
-                    OpenSRData.zero_labour_flag.ilike(search_term)
+                    MaxTTROilChangeSRZeroLabourFlag.instance_id.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.branch_id.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.branch_name.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.account_name.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.sr_number.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.sr_type.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.engine_serial_no.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.oil_change_flag.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.zero_labour_flag.ilike(search_term)
                 )
             )
         return query.count()
 
     def get_open_sr_data(self, skip: int = 0, limit: Optional[int] = 100, search: Optional[str] = None):
-        """Get all Open SR Data rows with optional search + pagination"""
-        query = self.db.query(OpenSRData)
+        """Get all MaxTTR - Oil Change SR rows with optional search + pagination"""
+        query = self.db.query(MaxTTROilChangeSRZeroLabourFlag)
         if search:
             search_term = f"%{search}%"
             query = query.filter(
                 or_(
-                    OpenSRData.instance_id.ilike(search_term),
-                    OpenSRData.branch_id.ilike(search_term),
-                    OpenSRData.branch_name.ilike(search_term),
-                    OpenSRData.account_name.ilike(search_term),
-                    OpenSRData.sr_number.ilike(search_term),
-                    OpenSRData.sr_type.ilike(search_term),
-                    OpenSRData.engine_serial_no.ilike(search_term),
-                    OpenSRData.oil_change_flag.ilike(search_term),
-                    OpenSRData.zero_labour_flag.ilike(search_term)
+                    MaxTTROilChangeSRZeroLabourFlag.instance_id.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.branch_id.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.branch_name.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.account_name.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.sr_number.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.sr_type.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.engine_serial_no.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.oil_change_flag.ilike(search_term),
+                    MaxTTROilChangeSRZeroLabourFlag.zero_labour_flag.ilike(search_term)
                 )
             )
-        query = query.order_by(desc(OpenSRData.updated_at)).offset(skip)
+        query = query.order_by(desc(MaxTTROilChangeSRZeroLabourFlag.updated_at)).offset(skip)
         if limit is not None:
             query = query.limit(limit)
         return [self._open_sr_data_to_dict(r) for r in query.all()]
 
     def get_open_sr_data_by_instance(self, instance_id: str):
-        """Get Open SR Data rows by instance ID (one row per instance)"""
-        return self.db.query(OpenSRData).filter(
-            OpenSRData.instance_id == instance_id
+        """Get MaxTTR - Oil Change SR rows by instance ID (one row per instance)"""
+        return self.db.query(MaxTTROilChangeSRZeroLabourFlag).filter(
+            MaxTTROilChangeSRZeroLabourFlag.instance_id == instance_id
         ).all()
 
     def delete_open_sr_data(self, record_id: int):
-        """Delete one Open SR Data row"""
-        rec = self.db.query(OpenSRData).filter(OpenSRData.id == record_id).first()
+        """Delete one MaxTTR - Oil Change SR row"""
+        rec = self.db.query(MaxTTROilChangeSRZeroLabourFlag).filter(MaxTTROilChangeSRZeroLabourFlag.id == record_id).first()
         if not rec:
-            raise HTTPException(status_code=404, detail="Open SR Data record not found")
+            raise HTTPException(status_code=404, detail="MaxTTR - Oil Change SR record not found")
         self.db.delete(rec)
         self.db.commit()
-        return {"message": "Open SR Data record deleted successfully"}
+        return {"message": "MaxTTR - Oil Change SR record deleted successfully"}
 
     def bulk_delete_open_sr_data(self, record_ids: List[int]):
-        """Delete multiple Open SR Data rows"""
-        self.db.query(OpenSRData).filter(OpenSRData.id.in_(record_ids)).delete(synchronize_session=False)
+        """Delete multiple MaxTTR - Oil Change SR rows"""
+        self.db.query(MaxTTROilChangeSRZeroLabourFlag).filter(MaxTTROilChangeSRZeroLabourFlag.id.in_(record_ids)).delete(synchronize_session=False)
         self.db.commit()
-        return {"message": f"{len(record_ids)} Open SR Data records deleted successfully"}
+        return {"message": f"{len(record_ids)} MaxTTR - Oil Change SR records deleted successfully"}
 
     def _open_sr_data_to_dict(self, rec):
         if not rec:
@@ -1213,10 +1235,147 @@ class CustomerController:
             "updated_at": rec.updated_at
         }
 
+    # ==================== CDI DETAIL REPORT ====================
+    # Standalone table (no instance_id link): filled ONLY by the 'CDI Detail
+    # Report' import and read back by the Customer page.
+
+    def _cdi_detail_report_search_filter(self, query, search: Optional[str]):
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                or_(
+                    CDIDetailReport.sr_number.ilike(search_term),
+                    CDIDetailReport.branch_name.ilike(search_term),
+                    CDIDetailReport.x_technician_id.ilike(search_term),
+                    CDIDetailReport.x_technician_name.ilike(search_term),
+                    CDIDetailReport.cdi_category.ilike(search_term),
+                    CDIDetailReport.overall_experience.ilike(search_term)
+                )
+            )
+        return query
+
+    def get_cdi_detail_report_count(self, search: Optional[str] = None):
+        """Get total count of CDI Detail Report rows with optional search"""
+        query = self._cdi_detail_report_search_filter(self.db.query(CDIDetailReport), search)
+        return query.count()
+
+    def get_cdi_detail_report(self, skip: int = 0, limit: Optional[int] = 100, search: Optional[str] = None):
+        """Get all CDI Detail Report rows with optional search + pagination"""
+        query = self._cdi_detail_report_search_filter(self.db.query(CDIDetailReport), search)
+        query = query.order_by(desc(CDIDetailReport.updated_at)).offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return [self._cdi_detail_report_to_dict(r) for r in query.all()]
+
+    def delete_cdi_detail_report(self, record_id: int):
+        """Delete one CDI Detail Report row"""
+        rec = self.db.query(CDIDetailReport).filter(CDIDetailReport.id == record_id).first()
+        if not rec:
+            raise HTTPException(status_code=404, detail="CDI Detail Report record not found")
+        self.db.delete(rec)
+        self.db.commit()
+        return {"message": "CDI Detail Report record deleted successfully"}
+
+    def bulk_delete_cdi_detail_report(self, record_ids: List[int]):
+        """Delete multiple CDI Detail Report rows"""
+        self.db.query(CDIDetailReport).filter(CDIDetailReport.id.in_(record_ids)).delete(synchronize_session=False)
+        self.db.commit()
+        return {"message": f"{len(record_ids)} CDI Detail Report records deleted successfully"}
+
+    def _cdi_detail_report_to_dict(self, rec):
+        if not rec:
+            return None
+        return {
+            "id": rec.id,
+            "sr_number": rec.sr_number,
+            "branch_name": rec.branch_name,
+            "x_technician_id": rec.x_technician_id,
+            "x_technician_name": rec.x_technician_name,
+            "cdi_category": rec.cdi_category,
+            "overall_experience": rec.overall_experience,
+            "activity_end_date": rec.activity_end_date,
+            "extra_data": rec.extra_data,
+            "created_at": rec.created_at,
+            "updated_at": rec.updated_at
+        }
+
+    # ==================== EFSR REPORT ====================
+    # Standalone table (no instance_id link): filled ONLY by the 'EFSR Report'
+    # import and read back by the Customer page.
+
+    def _efsr_report_search_filter(self, query, search: Optional[str]):
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                or_(
+                    EFSRReport.service_request_no.ilike(search_term),
+                    EFSRReport.appointment_number.ilike(search_term),
+                    EFSRReport.sd_branch_code.ilike(search_term),
+                    EFSRReport.sr_type.ilike(search_term),
+                    EFSRReport.sr_status.ilike(search_term),
+                    EFSRReport.service_engineer_name.ilike(search_term),
+                    EFSRReport.service_engineer_uid.ilike(search_term)
+                )
+            )
+        return query
+
+    def get_efsr_report_count(self, search: Optional[str] = None):
+        """Get total count of EFSR Report rows with optional search"""
+        query = self._efsr_report_search_filter(self.db.query(EFSRReport), search)
+        return query.count()
+
+    def get_efsr_report(self, skip: int = 0, limit: Optional[int] = 100, search: Optional[str] = None):
+        """Get all EFSR Report rows with optional search + pagination"""
+        query = self._efsr_report_search_filter(self.db.query(EFSRReport), search)
+        query = query.order_by(desc(EFSRReport.updated_at)).offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return [self._efsr_report_to_dict(r) for r in query.all()]
+
+    def delete_efsr_report(self, record_id: int):
+        """Delete one EFSR Report row"""
+        rec = self.db.query(EFSRReport).filter(EFSRReport.id == record_id).first()
+        if not rec:
+            raise HTTPException(status_code=404, detail="EFSR Report record not found")
+        self.db.delete(rec)
+        self.db.commit()
+        return {"message": "EFSR Report record deleted successfully"}
+
+    def bulk_delete_efsr_report(self, record_ids: List[int]):
+        """Delete multiple EFSR Report rows"""
+        self.db.query(EFSRReport).filter(EFSRReport.id.in_(record_ids)).delete(synchronize_session=False)
+        self.db.commit()
+        return {"message": f"{len(record_ids)} EFSR Report records deleted successfully"}
+
+    def _efsr_report_to_dict(self, rec):
+        if not rec:
+            return None
+        return {
+            "id": rec.id,
+            "service_request_no": rec.service_request_no,
+            "appointment_number": rec.appointment_number,
+            "sd_branch_code": rec.sd_branch_code,
+            "sr_type": rec.sr_type,
+            "task_assigned_date": rec.task_assigned_date,
+            "task_end_date": rec.task_end_date,
+            "sr_closed_date": rec.sr_closed_date,
+            "sr_status": rec.sr_status,
+            "service_engineer_name": rec.service_engineer_name,
+            "service_engineer_uid": rec.service_engineer_uid,
+            "extra_data": rec.extra_data,
+            "created_at": rec.created_at,
+            "updated_at": rec.updated_at
+        }
+
     # ==================== COMPLETE CUSTOMER DATA ====================
     
-    def get_customer_complete_data(self, instance_id: str):
-        """Get customer with ALL data from all tables based on instance_id"""
+    def get_customer_complete_data(self, instance_id: str, include_closed: bool = False):
+        """Get customer with ALL data from all tables based on instance_id.
+
+        include_closed applies to the Open SR Load Reports only: False (the
+        default, used by the Drive / Non-Drive pages) returns just the SRs that
+        are still open — i.e. not yet closed in the MaxTTR file. True (Customers
+        Data Hub) returns the customer's full raw SR record instead."""
         customer = self.get_customer_by_instance_id(instance_id)
         if not customer:
             return None
@@ -1232,7 +1391,10 @@ class CustomerController:
         pulse_quotations_count = self.db.query(PulseQuotation).filter(PulseQuotation.instance_id == instance_id).count()
         regular_bandhan_count = self.db.query(RegularBandhan).filter(RegularBandhan.instance_id == instance_id).count()
         lms_data_count = self.db.query(LMSData).filter(LMSData.instance_id == instance_id).count()
-        open_sr_load_reports_count = self.db.query(OpenSRLoadReport).filter(OpenSRLoadReport.instance_id == instance_id).count()
+        open_sr_query = self.db.query(OpenSRLoadReport).filter(OpenSRLoadReport.instance_id == instance_id)
+        if not include_closed:
+            open_sr_query = open_sr_query.filter(~self._sr_closed_in_maxttr())
+        open_sr_load_reports_count = open_sr_query.count()
 
         complete_data = {
             "customer": self._customer_to_dict(customer),
@@ -1245,7 +1407,7 @@ class CustomerController:
             "pulse_quotations": [self._pulse_to_dict(a) for a in self.get_pulse_quotations_by_instance(instance_id)],
             "regular_bandhan": [self._regular_bandhan_to_dict(a) for a in self.get_regular_bandhan_by_instance(instance_id)],
             "lms_data": [self._lms_data_to_dict(a) for a in self.get_lms_data_by_instance(instance_id)],
-            "open_sr_load_reports": [self._open_sr_load_report_to_dict(a) for a in self.get_open_sr_load_reports_by_instance(instance_id)],
+            "open_sr_load_reports": [self._open_sr_load_report_to_dict(a) for a in self.get_open_sr_load_reports_by_instance(instance_id, include_closed)],
             "open_sr_data": [self._open_sr_data_to_dict(a) for a in self.get_open_sr_data_by_instance(instance_id)],
             "response_time_maxttr": [self._response_time_maxttr_to_dict(a) for a in self.get_response_time_maxttr_by_instance(instance_id)],
 
@@ -1742,6 +1904,7 @@ class CustomerController:
             "sic_code": record.sic_code,
             "sic_code_type": record.sic_code_type,
             "labour_invoice_number": record.labour_invoice_number,
+            "labour_invoice_amount": record.labour_invoice_amount,
             "part_invoice_amount": record.part_invoice_amount,
             "part_invoice_number": record.part_invoice_number,
             "lead_source": record.lead_source,
@@ -1849,8 +2012,10 @@ class CustomerController:
             'regular_bandhan': RegularBandhan,
             'lms_data': LMSData,
             'open_sr_load_reports': OpenSRLoadReport,
-            'open_sr_data': OpenSRData,
-            'response_time_maxttr': ResponseTimeMaxTTR
+            'open_sr_data': MaxTTROilChangeSRZeroLabourFlag,
+            'response_time_maxttr': ResponseTimeMaxTTR,
+            'cdi_detail_report': CDIDetailReport,
+            'efsr_report': EFSRReport
         }
         
         if table_name not in model_map:

@@ -6,7 +6,8 @@ import axios from 'axios';
 import SitemapModal from './SitemapModal';
 import { prefetchRoute } from '../routePrefetch';
 import { applyTheme } from '../theme';
-import { canAccessPartDetail, canAccessMom, canAccessApproval } from '../utils/pagePermission';
+import { canAccessPartDetail, canAccessMom, canAccessApproval, canAccessPms, canViewAop } from '../utils/pagePermission';
+import { getSummary as getApprovalSummary } from './approval/approvalApi';
 
 import {
   Bars3Icon,
@@ -37,7 +38,8 @@ import {
   PresentationChartLineIcon,
   EyeIcon,
   PencilSquareIcon,
-  DocumentTextIcon
+  DocumentTextIcon,
+  EnvelopeIcon
 } from '@heroicons/react/24/outline';
 import { CiFlag1 } from "react-icons/ci";
 
@@ -218,6 +220,12 @@ const engagementItems = [
     name: 'Non-Drive Data',
     description: 'Non-drive customer interactions',
     allowedRoles: ['master_admin', 'branch_admin', 'employee']
+  },
+  {
+    path: '/welcome-letter',
+    name: 'Welcome Letter',
+    description: 'Commissioning (CC) customers — welcome letter dispatch & report',
+    allowedRoles: ['master_admin', 'branch_admin']
   }
 ];
 
@@ -242,10 +250,14 @@ const partDetailItems = [
   { path: '/maintenance-reports', name: 'Master Report' },
 ];
 
-// PMS dropdown items — master admin only for now (view opens to other roles later).
+// PMS dropdown items. Visibility is per user: the module flag (PMS Access)
+// opens the menu, and "AOP & Master" additionally needs its own view/edit right.
 const pmsItems = [
-  { path: '/aop-master', name: 'AOP Master' },
+  { path: '/aop-master', name: 'AOP & Master' },
   { path: '/sales-labour-report', name: 'Sales & Labour Report' },
+  { path: '/employee-productivity', name: 'Employee Productivity' },
+  { path: '/sr-allocation', name: 'SR Allocation Report' },
+  { path: '/annual-reports', name: 'Annual Reports' },
 ];
 
 function Navbar({ children }) {
@@ -388,6 +400,41 @@ function Navbar({ children }) {
   const canSeePartDetail = canAccessPartDetail(user);
   const canSeeMom = canAccessMom(user);
   const canSeeApproval = canAccessApproval(user);
+  // PMS: the module flag opens the menu; AOP & Master needs its own right, so
+  // it drops out of the list for users who only have the reports.
+  const canSeePms = canAccessPms(user) || canViewAop(user);
+  const visiblePmsItems = pmsItems.filter(
+    (i) => i.path !== '/aop-master' || canViewAop(user));
+
+  // NFAs waiting on THIS user's approval (any level L2–L5) — shown as a
+  // flashing count on the "Note For Approval" link. Refreshes on every
+  // route change and once a minute.
+  const [nfaPendingCount, setNfaPendingCount] = useState(0);
+  useEffect(() => {
+    if (!user?.user_id || !canSeeApproval) return;
+    let alive = true;
+    let retryT = null;
+    const fetchCount = () =>
+      getApprovalSummary()
+        .then(d => { if (alive) setNfaPendingCount(d?.summary?.my_pending || 0); })
+        .catch(() => {
+          // the very first call can land while the server is still warming
+          // up — retry once so the badge appears without any navigation
+          if (alive && !retryT) retryT = setTimeout(fetchCount, 5000);
+        });
+    fetchCount();
+    const onFocus = () => fetchCount();
+    window.addEventListener('focus', onFocus);
+    const t = setInterval(fetchCount, 60000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+      clearTimeout(retryT);
+      window.removeEventListener('focus', onFocus);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.user_id, canSeeApproval, location.pathname]);
+
   // Inside Part Detail Info: master admin gets both pages; everyone else
   // only the Quotation Template.
   const visiblePartDetailItems = isMasterAdmin
@@ -892,6 +939,37 @@ function Navbar({ children }) {
   // Only rebuilt when the user actually changes — not on every hover/route render.
   const mainNavItems = useMemo(() => getMainNavItems(), [user]);
 
+  // Customer Engagement dropdown, filtered by role (Welcome Letter is
+  // Master Admin + Branch Admin only).
+  const visibleEngagementItems = useMemo(
+    () => engagementItems.filter(
+      (item) => !item.allowedRoles || item.allowedRoles.includes(user?.role)),
+    [user]);
+
+  // Welcome letters still to be sent — scoped to the user's branches by the
+  // server. Shown as a count on the Welcome Letter link, same as NFA above.
+  const [wlPendingCount, setWlPendingCount] = useState(0);
+  const canSeeWelcomeLetter = ['master_admin', 'branch_admin'].includes(user?.role);
+  useEffect(() => {
+    if (!user?.user_id || !canSeeWelcomeLetter) { setWlPendingCount(0); return; }
+    let alive = true;
+    const fetchCount = () =>
+      axios.get(`${import.meta.env.VITE_BACKEND_URL}/welcome-letter/pending-count`,
+        { headers: { 'user-id': String(user.user_id), 'user-role': user.role || '' } })
+        .then(r => { if (alive) setWlPendingCount(r?.data?.pending || 0); })
+        .catch(() => { });
+    fetchCount();
+    const onFocus = () => fetchCount();
+    window.addEventListener('focus', onFocus);
+    const t = setInterval(fetchCount, 60000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+      window.removeEventListener('focus', onFocus);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.user_id, canSeeWelcomeLetter, location.pathname]);
+
   // Engagement Masters dropdown items — master/IT admin only.
   // (Moved out of the flat main nav into one grouped dropdown.)
   const getEngagementMastersItems = () => {
@@ -990,7 +1068,8 @@ function Navbar({ children }) {
   // Check if any engagement route is active
   const isEngagementActive = () => {
     return location.pathname === '/customer-engagement' ||
-      location.pathname === '/customer-engagement-2';
+      location.pathname === '/customer-engagement-2' ||
+      location.pathname === '/welcome-letter';
   };
 
   const isPartInfoActive = () =>
@@ -999,7 +1078,10 @@ function Navbar({ children }) {
 
   const isPmsActive = () =>
     location.pathname === '/aop-master' ||
-    location.pathname === '/sales-labour-report';
+    location.pathname === '/sales-labour-report' ||
+    location.pathname === '/employee-productivity' ||
+    location.pathname === '/sr-allocation' ||
+    location.pathname === '/annual-reports';
 
   // Master Admin / IT Admin always have access.
   // Branch Admin and Employee need explicit permission (can_access_expense)
@@ -1610,51 +1692,85 @@ function Navbar({ children }) {
             >
               <style>
                 {`
-                  /* Thin vertical (top↕bottom) scrollbar only — shown when the
-                     sidebar is expanded. No horizontal scrollbar. */
-                  .nav-scroll::-webkit-scrollbar {
-                    width: 7px;
-                  }
-                  .nav-scroll::-webkit-scrollbar-track {
-                    background: transparent;
-                  }
-                  .nav-scroll::-webkit-scrollbar-thumb {
-                    background: #cbd5e1;
-                    border-radius: 7px;
-                  }
-                  .nav-scroll::-webkit-scrollbar-thumb:hover {
-                    background: #94a3b8;
-                  }
-                  /* Submenu open/close — always-mounted grid-rows collapse so
-                     BOTH expanding and collapsing glide smoothly (conditional
-                     render used to snap shut with no close animation). */
-                  .nav-dd-wrap {
-                    display: grid;
-                    grid-template-rows: 0fr;
-                    transition: grid-template-rows .45s cubic-bezier(.33, 1, .68, 1);
-                  }
-                  .nav-dd-wrap.nav-dd-open { grid-template-rows: 1fr; }
-                  .nav-dd-inner {
-                    overflow: hidden;
-                    min-height: 0;
-                    opacity: 0;
-                    transform: translateY(-6px);
-                    visibility: hidden; /* keeps closed submenu links out of the tab order */
-                    transition: opacity .3s ease, transform .45s cubic-bezier(.33, 1, .68, 1), visibility 0s .45s;
-                  }
-                  .nav-dd-wrap.nav-dd-open .nav-dd-inner {
-                    opacity: 1;
-                    transform: none;
-                    visibility: visible;
-                    transition: opacity .35s ease .08s, transform .45s cubic-bezier(.33, 1, .68, 1);
-                  }
-                  /* Labels fade+slide in as the rail expands instead of popping */
-                  .nav-label-fade { animation: navLabelIn .4s ease .12s both; }
-                  @keyframes navLabelIn {
-                    from { opacity: 0; transform: translateX(-6px); }
-                    to   { opacity: 1; transform: none; }
-                  }
-                `}
+    /* Thin vertical (top↕bottom) scrollbar only — shown when the
+       sidebar is expanded. No horizontal scrollbar. */
+    .nav-scroll::-webkit-scrollbar {
+      width: 7px;
+    }
+    .nav-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .nav-scroll::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 7px;
+    }
+    .nav-scroll::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+    /* Submenu open/close — always-mounted grid-rows collapse so
+       BOTH expanding and collapsing glide smoothly (conditional
+       render used to snap shut with no close animation). */
+    .nav-dd-wrap {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows .45s cubic-bezier(.33, 1, .68, 1);
+    }
+    .nav-dd-wrap.nav-dd-open { grid-template-rows: 1fr; }
+    .nav-dd-inner {
+      overflow: hidden;
+      min-height: 0;
+      opacity: 0;
+      transform: translateY(-6px);
+      visibility: hidden; /* keeps closed submenu links out of the tab order */
+      transition: opacity .3s ease, transform .45s cubic-bezier(.33, 1, .68, 1), visibility 0s .45s;
+    }
+    .nav-dd-wrap.nav-dd-open .nav-dd-inner {
+      opacity: 1;
+      transform: none;
+      visibility: visible;
+      transition: opacity .35s ease .08s, transform .45s cubic-bezier(.33, 1, .68, 1);
+    }
+    /* Labels fade+slide in as the rail expands instead of popping */
+    .nav-label-fade { animation: navLabelIn .4s ease .12s both; }
+    @keyframes navLabelIn {
+      from { opacity: 0; transform: translateX(-6px); }
+      to   { opacity: 1; transform: none; }
+    }
+
+    /* Enhanced blink animation for notification text - both text and count sync */
+    .nav-blink {
+      animation: notificationPulse 2s ease-in-out infinite;
+      font-weight: 700 !important;
+    }
+
+    @keyframes notificationPulse {
+      0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+      50% {
+        opacity: 0.7;
+        transform: scale(1.03);
+      }
+    }
+
+    /* Count badge - syncs with text animation (same timing) */
+    .nav-badge-count {
+      display: inline-block;
+      font-weight: 800;
+      animation: countPulse 2s ease-in-out infinite;
+      margin-left: 4px;
+    }
+
+    @keyframes countPulse {
+      0%, 100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.2);
+      }
+    }
+  `}
               </style>
               {/* Inner content wrapper. Expanded → min-w-full w-max so each row's
                   active highlight spans the full row width; the outer handles
@@ -1663,94 +1779,94 @@ function Navbar({ children }) {
               <div
                 className={`py-1.5 ${sidebarOpen ? 'min-w-full w-max pl-3 pr-6' : 'overflow-visible w-full px-2'}`}
               >
-              <NavLinks items={mainNavItems} collapsed={!sidebarOpen} hoveredItem={hoveredItem} setHoveredItem={setHoveredItem} />
+                <NavLinks items={mainNavItems} collapsed={!sidebarOpen} hoveredItem={hoveredItem} setHoveredItem={setHoveredItem} />
 
-              {/* Engagement Masters — master/IT admin only. Groups Data-Upload,
+                {/* Engagement Masters — master/IT admin only. Groups Data-Upload,
                   Customers Data Bouquet and Drive Creation under one dropdown. */}
-              {isMasterOrITAdmin && engagementMastersItems.length > 0 && (
-                sidebarOpen ? (
-                  <div className="mt-1">
-                    <button
-                      onClick={() => setEngagementMastersDropdownOpen(!engagementMastersDropdownOpen)}
-                      onMouseEnter={() => { setHoveredItem('engagement-masters'); hoverOpenDropdown('masters'); }}
-                      onMouseLeave={() => setHoveredItem(null)}
-                      className={`
+                {isMasterOrITAdmin && engagementMastersItems.length > 0 && (
+                  sidebarOpen ? (
+                    <div className="mt-1">
+                      <button
+                        onClick={() => setEngagementMastersDropdownOpen(!engagementMastersDropdownOpen)}
+                        onMouseEnter={() => { setHoveredItem('engagement-masters'); hoverOpenDropdown('masters'); }}
+                        onMouseLeave={() => setHoveredItem(null)}
+                        className={`
                         min-w-full w-max group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200
                         ${isEngagementMastersActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
                       `}
-                      style={{
-                        backgroundColor: (isEngagementMastersActive() || engagementMastersDropdownOpen) ? themeShades.light : 'transparent'
-                      }}
-                    >
-                      <TableCellsIcon
-                        className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
                         style={{
-                          color: isEngagementMastersActive() ? themeColor :
-                            hoveredItem === 'engagement-masters' ? themeColor : '#6B7280'
+                          backgroundColor: (isEngagementMastersActive() || engagementMastersDropdownOpen) ? themeShades.light : 'transparent'
                         }}
-                      />
-                      <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap text-left text-black">
-                        Engagement Masters
-                      </span>
-                      {engagementMastersDropdownOpen ? (
-                        <ChevronUpIcon className="h-2.5 w-2.5 text-black" />
-                      ) : (
-                        <ChevronDownIcon className="h-2.5 w-2.5 text-black" />
-                      )}
-                    </button>
+                      >
+                        <TableCellsIcon
+                          className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
+                          style={{
+                            color: isEngagementMastersActive() ? themeColor :
+                              hoveredItem === 'engagement-masters' ? themeColor : '#6B7280'
+                          }}
+                        />
+                        <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap text-left text-black">
+                          Engagement Masters
+                        </span>
+                        {engagementMastersDropdownOpen ? (
+                          <ChevronUpIcon className="h-2.5 w-2.5 text-black" />
+                        ) : (
+                          <ChevronDownIcon className="h-2.5 w-2.5 text-black" />
+                        )}
+                      </button>
 
-                    <div className={`nav-dd-wrap ${(engagementMastersDropdownOpen || isEngagementMastersActive()) ? 'nav-dd-open' : ''}`}>
-                      <div className="nav-dd-inner">
-                        <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
-                        {engagementMastersItems.map((item) => (
-                          <NavLink
-                            key={item.path}
-                            to={item.path}
-                            onClick={() => { if (isMobile) setSidebarOpen(false); }}
-                            className={({ isActive }) =>
-                              `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] min-w-full w-max ${isActive
-                                ? 'text-gray-900 font-medium'
-                                : 'text-black hover:text-gray-900'
-                              }`
-                            }
-                            style={({ isActive }) => ({
-                              backgroundColor: isActive ? themeShades.light : 'transparent',
-                              color: isActive ? themeColor : undefined
-                            })}
-                          >
-                            {({ isActive }) => (
-                              <>
-                                <item.icon
-                                  className="h-3.5 w-3.5 flex-shrink-0 transition-all duration-200"
-                                  style={{ color: isActive ? themeColor : '#6B7280' }}
-                                />
-                                <span className="flex-1 whitespace-nowrap">{item.name}</span>
-                              </>
-                            )}
-                          </NavLink>
-                        ))}
+                      <div className={`nav-dd-wrap ${(engagementMastersDropdownOpen || isEngagementMastersActive()) ? 'nav-dd-open' : ''}`}>
+                        <div className="nav-dd-inner">
+                          <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
+                            {engagementMastersItems.map((item) => (
+                              <NavLink
+                                key={item.path}
+                                to={item.path}
+                                onClick={() => { if (isMobile) setSidebarOpen(false); }}
+                                className={({ isActive }) =>
+                                  `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] min-w-full w-max ${isActive
+                                    ? 'text-gray-900 font-medium'
+                                    : 'text-black hover:text-gray-900'
+                                  }`
+                                }
+                                style={({ isActive }) => ({
+                                  backgroundColor: isActive ? themeShades.light : 'transparent',
+                                  color: isActive ? themeColor : undefined
+                                })}
+                              >
+                                {({ isActive }) => (
+                                  <>
+                                    <item.icon
+                                      className="h-3.5 w-3.5 flex-shrink-0 transition-all duration-200"
+                                      style={{ color: isActive ? themeColor : '#6B7280' }}
+                                    />
+                                    <span className="flex-1 whitespace-nowrap">{item.name}</span>
+                                  </>
+                                )}
+                              </NavLink>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ) : (
-                  /* Collapsed mode */
-                  <div className="relative mt-2 group/flyout">
-                    <button
-                      onClick={() => setEngagementMastersDropdownOpen(!engagementMastersDropdownOpen)}
-                      className="w-full group relative flex items-center justify-center px-2 py-1 rounded-lg transition-all duration-200"
-                      title="Engagement Masters"
-                    >
-                      <TableCellsIcon
-                        className="h-3.5 w-3.5 transition-all duration-200"
-                        style={{ color: isEngagementMastersActive() ? themeColor : '#6B7280' }}
-                      />
-                      {/* Tooltip removed — the hover flyout already shows the submenu. */}
-                    </button>
+                  ) : (
+                    /* Collapsed mode */
+                    <div className="relative mt-2 group/flyout">
+                      <button
+                        onClick={() => setEngagementMastersDropdownOpen(!engagementMastersDropdownOpen)}
+                        className="w-full group relative flex items-center justify-center px-2 py-1 rounded-lg transition-all duration-200"
+                        title="Engagement Masters"
+                      >
+                        <TableCellsIcon
+                          className="h-3.5 w-3.5 transition-all duration-200"
+                          style={{ color: isEngagementMastersActive() ? themeColor : '#6B7280' }}
+                        />
+                        {/* Tooltip removed — the hover flyout already shows the submenu. */}
+                      </button>
 
-                    {/* Hover the icon to reveal this submenu; hidden otherwise.
+                      {/* Hover the icon to reveal this submenu; hidden otherwise.
                         The before-bridge keeps hover continuous across the gap. */}
-                    <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
+                      <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
                         {engagementMastersItems.map((item) => (
                           <NavLink
                             key={item.path}
@@ -1782,100 +1898,100 @@ function Navbar({ children }) {
                           </NavLink>
                         ))}
                       </div>
-                  </div>
-                )
-              )}
+                    </div>
+                  )
+                )}
 
-              {/* Part Detail Info — shown only when Master Admin granted the
+                {/* Part Detail Info — shown only when Master Admin granted the
                   page (can_access_part_detail). Master admin sees both pages;
                   everyone else only the Quotation Template. */}
-              {canSeePartDetail && (
-                sidebarOpen ? (
-                  <div className="mt-1">
-                    <button
-                      onClick={() => setPartInfoDropdownOpen(!partInfoDropdownOpen)}
-                      onMouseEnter={() => { setHoveredItem('part-detail-info'); hoverOpenDropdown('partinfo'); }}
-                      onMouseLeave={() => setHoveredItem(null)}
-                      className={`
+                {canSeePartDetail && (
+                  sidebarOpen ? (
+                    <div className="mt-1">
+                      <button
+                        onClick={() => setPartInfoDropdownOpen(!partInfoDropdownOpen)}
+                        onMouseEnter={() => { setHoveredItem('part-detail-info'); hoverOpenDropdown('partinfo'); }}
+                        onMouseLeave={() => setHoveredItem(null)}
+                        className={`
           min-w-full w-max group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200
           ${isPartInfoActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
         `}
-                      style={{
-                        backgroundColor: (isPartInfoActive() || partInfoDropdownOpen) ? themeShades.light : 'transparent'
-                      }}
-                    >
-                      <ClipboardDocumentListIcon
-                        className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
                         style={{
-                          color: isPartInfoActive() ? themeColor :
-                            hoveredItem === 'part-detail-info' ? themeColor : '#6B7280'
+                          backgroundColor: (isPartInfoActive() || partInfoDropdownOpen) ? themeShades.light : 'transparent'
                         }}
-                      />
-                      <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap text-left text-black">
-                        Part Detail Info
-                      </span>
-                      {partInfoDropdownOpen ? (
-                        <ChevronUpIcon className="h-2.5 w-2.5 text-black" />
-                      ) : (
-                        <ChevronDownIcon className="h-2.5 w-2.5 text-black" />
-                      )}
-                    </button>
+                      >
+                        <ClipboardDocumentListIcon
+                          className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
+                          style={{
+                            color: isPartInfoActive() ? themeColor :
+                              hoveredItem === 'part-detail-info' ? themeColor : '#6B7280'
+                          }}
+                        />
+                        <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap text-left text-black">
+                          Part Detail Info
+                        </span>
+                        {partInfoDropdownOpen ? (
+                          <ChevronUpIcon className="h-2.5 w-2.5 text-black" />
+                        ) : (
+                          <ChevronDownIcon className="h-2.5 w-2.5 text-black" />
+                        )}
+                      </button>
 
-                    <div className={`nav-dd-wrap ${(partInfoDropdownOpen || isPartInfoActive()) ? 'nav-dd-open' : ''}`}>
-                      <div className="nav-dd-inner">
-                        <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
-                        {visiblePartDetailItems.map((item) => (
-                          <NavLink
-                            key={item.path}
-                            to={item.path}
-                            onClick={() => {
-                              if (isMobile) setSidebarOpen(false);
-                            }}
-                            className={({ isActive }) =>
-                              `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] min-w-full w-max ${isActive
-                                ? 'text-black font-medium'
-                                : 'text-black hover:text-black'
-                              }`
-                            }
-                            style={({ isActive }) => ({
-                              backgroundColor: isActive ? themeShades.light : 'transparent',
-                              color: isActive ? 'var(--erp-ink)' : undefined
-                            })}
-                          >
-                            {({ isActive }) => (
-                              <>
-                                <div
-                                  className="w-1 h-1 rounded-full"
-                                  style={{
-                                    backgroundColor: isActive ? 'var(--erp-ink)' : '#D1D5DB'
-                                  }}
-                                />
-                                <span className="flex-1 whitespace-nowrap">{item.name}</span>
-                              </>
-                            )}
-                          </NavLink>
-                        ))}
+                      <div className={`nav-dd-wrap ${(partInfoDropdownOpen || isPartInfoActive()) ? 'nav-dd-open' : ''}`}>
+                        <div className="nav-dd-inner">
+                          <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
+                            {visiblePartDetailItems.map((item) => (
+                              <NavLink
+                                key={item.path}
+                                to={item.path}
+                                onClick={() => {
+                                  if (isMobile) setSidebarOpen(false);
+                                }}
+                                className={({ isActive }) =>
+                                  `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] min-w-full w-max ${isActive
+                                    ? 'text-black font-medium'
+                                    : 'text-black hover:text-black'
+                                  }`
+                                }
+                                style={({ isActive }) => ({
+                                  backgroundColor: isActive ? themeShades.light : 'transparent',
+                                  color: isActive ? 'var(--erp-ink)' : undefined
+                                })}
+                              >
+                                {({ isActive }) => (
+                                  <>
+                                    <div
+                                      className="w-1 h-1 rounded-full"
+                                      style={{
+                                        backgroundColor: isActive ? 'var(--erp-ink)' : '#D1D5DB'
+                                      }}
+                                    />
+                                    <span className="flex-1 whitespace-nowrap">{item.name}</span>
+                                  </>
+                                )}
+                              </NavLink>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ) : (
-                  /* Collapsed mode */
-                  <div className="relative mt-2 group/flyout">
-                    <button
-                      onClick={() => setPartInfoDropdownOpen(!partInfoDropdownOpen)}
-                      className="w-full group relative flex items-center justify-center px-2 py-1 rounded-lg transition-all duration-200"
-                      title="Part Detail Info"
-                    >
-                      <ClipboardDocumentListIcon
-                        className="h-3.5 w-3.5 transition-all duration-200"
-                        style={{ color: '#6B7280' }}
-                      />
-                      {/* Tooltip removed — the hover flyout already shows the submenu. */}
-                    </button>
+                  ) : (
+                    /* Collapsed mode */
+                    <div className="relative mt-2 group/flyout">
+                      <button
+                        onClick={() => setPartInfoDropdownOpen(!partInfoDropdownOpen)}
+                        className="w-full group relative flex items-center justify-center px-2 py-1 rounded-lg transition-all duration-200"
+                        title="Part Detail Info"
+                      >
+                        <ClipboardDocumentListIcon
+                          className="h-3.5 w-3.5 transition-all duration-200"
+                          style={{ color: '#6B7280' }}
+                        />
+                        {/* Tooltip removed — the hover flyout already shows the submenu. */}
+                      </button>
 
-                    {/* Hover the icon to reveal this submenu; hidden otherwise. */}
-                    <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
+                      {/* Hover the icon to reveal this submenu; hidden otherwise. */}
+                      <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
                         {visiblePartDetailItems.map((item) => (
                           <NavLink
                             key={item.path}
@@ -1899,115 +2015,123 @@ function Navbar({ children }) {
                           </NavLink>
                         ))}
                       </div>
-                  </div>
-                )
-              )}
+                    </div>
+                  )
+                )}
 
-              {/* Customer Engagement Dropdown */}
+                {/* Customer Engagement Dropdown */}
 
-              {/* Customer Engagement Dropdown */}
-              {sidebarOpen ? (
-                <div className="mt-1">
-                  <button
-                    onClick={() => setEngagementDropdownOpen(!engagementDropdownOpen)}
-                    onMouseEnter={() => { setHoveredItem('customer-engagement'); hoverOpenDropdown('engagement'); }}
-                    onMouseLeave={() => setHoveredItem(null)}
-                    className={`
+                {/* Customer Engagement Dropdown */}
+                {sidebarOpen ? (
+                  <div className="mt-1">
+                    <button
+                      onClick={() => setEngagementDropdownOpen(!engagementDropdownOpen)}
+                      onMouseEnter={() => { setHoveredItem('customer-engagement'); hoverOpenDropdown('engagement'); }}
+                      onMouseLeave={() => setHoveredItem(null)}
+                      className={`
         min-w-full w-max group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200
         ${isEngagementActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
       `}
-                    style={{
-                      backgroundColor: (isEngagementActive() || engagementDropdownOpen) ? themeShades.light : 'transparent'
-                    }}
-                  >
-                    <PiHandshakeDuotone
-                      className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
                       style={{
-                        color: isEngagementActive() ? 'var(--erp-ink)' :
-                          hoveredItem === 'customer-engagement' ? 'var(--erp-ink)' : 'var(--erp-ink)'
+                        backgroundColor: (isEngagementActive() || engagementDropdownOpen) ? themeShades.light : 'transparent'
                       }}
-                    />
-                    <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap text-left text-black">
-                      Customer Engagement
-                    </span>
-                    {engagementDropdownOpen ? (
-                      <ChevronUpIcon className="h-2.5 w-2.5 text-black" />
-                    ) : (
-                      <ChevronDownIcon className="h-2.5 w-2.5 text-black" />
-                    )}
-                  </button>
-
-                  {/* Dropdown Items */}
-                  <div className={`nav-dd-wrap ${(engagementDropdownOpen || isEngagementActive()) ? 'nav-dd-open' : ''}`}>
-                    <div className="nav-dd-inner">
-                      <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
-                      {/* Drive List Info — opens the modal (not a route); shown first.
-                          Master Admin / IT Admin only. */}
-                      {isMasterOrITAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => { setShowDriveNamesModal(true); if (isMobile) setSidebarOpen(false); }}
-                          className="min-w-full w-max group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] text-black hover:text-black hover:bg-gray-50"
-                        >
-                          <div className="w-1 h-1 rounded-full" style={{ backgroundColor: '#D1D5DB' }} />
-                          <span className="flex-1 whitespace-nowrap text-left">Drive List Info</span>
-                        </button>
+                    >
+                      <PiHandshakeDuotone
+                        className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
+                        style={{
+                          color: isEngagementActive() ? 'var(--erp-ink)' :
+                            hoveredItem === 'customer-engagement' ? 'var(--erp-ink)' : 'var(--erp-ink)'
+                        }}
+                      />
+                      <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap text-left text-black">
+                        Customer Engagement
+                      </span>
+                      {engagementDropdownOpen ? (
+                        <ChevronUpIcon className="h-2.5 w-2.5 text-black" />
+                      ) : (
+                        <ChevronDownIcon className="h-2.5 w-2.5 text-black" />
                       )}
+                    </button>
 
-                      {engagementItems.map((item) => (
-                        <NavLink
-                          key={item.path}
-                          to={item.path}
-                          onClick={() => {
-                            if (isMobile) setSidebarOpen(false);
-                          }}
-                          className={({ isActive }) =>
-                            `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] min-w-full w-max ${isActive
-                              ? 'text-black font-medium'
-                              : 'text-black hover:text-black'
-                            }`
-                          }
-                          style={({ isActive }) => ({
-                            backgroundColor: isActive ? themeShades.light : 'transparent',
-                            color: isActive ? 'var(--erp-ink)' : undefined
-                          })}
-                        >
-                          {({ isActive }) => (
-                            <>
-                              <div
-                                className="w-1 h-1 rounded-full"
-                                style={{
-                                  backgroundColor: isActive ? 'var(--erp-ink)' : '#D1D5DB'
-                                }}
-                              />
-                              <span className="flex-1 whitespace-nowrap">{item.name}</span>
-                            </>
+                    {/* Dropdown Items */}
+                    <div className={`nav-dd-wrap ${(engagementDropdownOpen || isEngagementActive()) ? 'nav-dd-open' : ''}`}>
+                      <div className="nav-dd-inner">
+                        <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
+                          {/* Drive List Info — opens the modal (not a route); shown first.
+                          Master Admin / IT Admin only. */}
+                          {isMasterOrITAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => { setShowDriveNamesModal(true); if (isMobile) setSidebarOpen(false); }}
+                              className="min-w-full w-max group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] text-black hover:text-black hover:bg-gray-50"
+                            >
+                              <div className="w-1 h-1 rounded-full" style={{ backgroundColor: '#D1D5DB' }} />
+                              <span className="flex-1 whitespace-nowrap text-left">Drive List Info</span>
+                            </button>
                           )}
-                        </NavLink>
-                      ))}
+
+                          {visibleEngagementItems.map((item) => (
+                            <NavLink
+                              key={item.path}
+                              to={item.path}
+                              onClick={() => {
+                                setEngagementDropdownOpen(false);
+                                if (isMobile) setSidebarOpen(false);
+                              }}
+                              className={({ isActive }) =>
+                                `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] min-w-full w-max ${isActive
+                                  ? 'text-black font-medium'
+                                  : 'text-black hover:text-black'
+                                }`
+                              }
+                              style={({ isActive }) => ({
+                                color: isActive ? 'var(--erp-ink)' : undefined,
+                                backgroundColor: isActive ? themeShades.light : 'transparent'
+                              })}
+                            >
+                              {({ isActive }) => (
+                                <>
+                                  <div
+                                    className="w-1 h-1 rounded-full"
+                                    style={{
+                                      backgroundColor: isActive ? 'var(--erp-ink)' : '#D1D5DB'
+                                    }}
+                                  />
+                                  <span className={`flex-1 whitespace-nowrap ${item.path === '/welcome-letter' && wlPendingCount > 0 ? 'nav-blink' : ''}`}>
+                                    {item.name}
+                                    {item.path === '/welcome-letter' && wlPendingCount > 0 && (
+                                      <span className="nav-badge-count" style={{ color: themeColor }}>
+                                        {wlPendingCount}
+                                      </span>
+                                    )}
+                                  </span>
+                                </>
+                              )}
+                            </NavLink>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ) : (
-                /* Collapsed mode */
-                <div className="relative mt-2 group/flyout">
-                  <button
-                    onClick={() => setEngagementDropdownOpen(!engagementDropdownOpen)}
-                    className="w-full group relative flex items-center justify-center px-2 py-1 rounded-lg transition-all duration-200"
-                    title="Customer Engagement"
-                  >
-                    <PiHandshakeDuotone
-                      className="h-3.5 w-3.5 transition-all duration-200"
-                      style={{
-                        color: 'var(--erp-ink)'
-                      }}
-                    />
-                    {/* Tooltip removed — the hover flyout already shows the submenu. */}
-                  </button>
+                ) : (
+                  /* Collapsed mode */
+                  <div className="relative mt-2 group/flyout">
+                    <button
+                      onClick={() => setEngagementDropdownOpen(!engagementDropdownOpen)}
+                      className="w-full group relative flex items-center justify-center px-2 py-1 rounded-lg transition-all duration-200"
+                      title="Customer Engagement"
+                    >
+                      <PiHandshakeDuotone
+                        className="h-3.5 w-3.5 transition-all duration-200"
+                        style={{
+                          color: 'var(--erp-ink)'
+                        }}
+                      />
+                      {/* Tooltip removed — the hover flyout already shows the submenu. */}
+                    </button>
 
-                  {/* Hover the icon to reveal this submenu; hidden otherwise. */}
-                  <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
+                    {/* Hover the icon to reveal this submenu; hidden otherwise. */}
+                    <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
                       {/* Drive List Info — opens the modal (not a route); shown first.
                           Master Admin / IT Admin only. */}
                       {isMasterOrITAdmin && (
@@ -2024,7 +2148,7 @@ function Navbar({ children }) {
                         </button>
                       )}
 
-                      {engagementItems.map((item) => (
+                      {visibleEngagementItems.map((item) => (
                         <NavLink
                           key={item.path}
                           to={item.path}
@@ -2036,7 +2160,7 @@ function Navbar({ children }) {
                             `block px-2 py-1 text-[13px] transition-colors ${isActive
                               ? 'text-black font-medium'
                               : 'text-black hover:text-black hover:bg-gray-50'
-                            }`
+                            } ${item.path === '/welcome-letter' && wlPendingCount > 0 ? 'nav-blink' : ''}`
                           }
                           style={({ isActive }) => ({
                             color: isActive ? 'var(--erp-ink)' : undefined,
@@ -2044,104 +2168,109 @@ function Navbar({ children }) {
                           })}
                         >
                           {item.name}
+                          {item.path === '/welcome-letter' && wlPendingCount > 0 && (
+                            <span className="nav-badge-count" style={{ color: themeColor }}>
+                              ({wlPendingCount})
+                            </span>
+                          )}
                         </NavLink>
                       ))}
                     </div>
-                </div>
-              )}
+                  </div>
+                )}
 
-              {/* Expense Tracking Dropdown Section */}
-              {canAccessExpensePages() && (
-                <div className="mt-1 pt-0">
-                  {sidebarOpen ? (
-                    <div className="mt-1">
-                      <button
-                        onClick={() => setExpenseDropdownOpen(!expenseDropdownOpen)}
-                        onMouseEnter={() => { setHoveredItem('expense-tracking'); hoverOpenDropdown('expense'); }}
-                        onMouseLeave={() => setHoveredItem(null)}
-                        className={`
+                {/* Expense Tracking Dropdown Section */}
+                {canAccessExpensePages() && (
+                  <div className="mt-1 pt-0">
+                    {sidebarOpen ? (
+                      <div className="mt-1">
+                        <button
+                          onClick={() => setExpenseDropdownOpen(!expenseDropdownOpen)}
+                          onMouseEnter={() => { setHoveredItem('expense-tracking'); hoverOpenDropdown('expense'); }}
+                          onMouseLeave={() => setHoveredItem(null)}
+                          className={`
             min-w-full w-max group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200
             ${isExpenseActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
           `}
-                        style={{
-                          backgroundColor: (isExpenseActive() || expenseDropdownOpen) ? themeShades.light : 'transparent'
-                        }}
-                      >
-                        <BanknotesIcon
-                          className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
                           style={{
-                            color: isExpenseActive() ? 'var(--erp-ink)' :
-                              hoveredItem === 'expense-tracking' ? 'var(--erp-ink)' : 'var(--erp-ink)'
+                            backgroundColor: (isExpenseActive() || expenseDropdownOpen) ? themeShades.light : 'transparent'
                           }}
-                        />
-                        <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap text-left text-black">
-                          Expense Tracking
-                        </span>
-                        {expenseDropdownOpen ? (
-                          <ChevronUpIcon className="h-2.5 w-2.5 text-black" />
-                        ) : (
-                          <ChevronDownIcon className="h-2.5 w-2.5 text-black" />
-                        )}
-                      </button>
+                        >
+                          <BanknotesIcon
+                            className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
+                            style={{
+                              color: isExpenseActive() ? 'var(--erp-ink)' :
+                                hoveredItem === 'expense-tracking' ? 'var(--erp-ink)' : 'var(--erp-ink)'
+                            }}
+                          />
+                          <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap text-left text-black">
+                            Expense Tracking
+                          </span>
+                          {expenseDropdownOpen ? (
+                            <ChevronUpIcon className="h-2.5 w-2.5 text-black" />
+                          ) : (
+                            <ChevronDownIcon className="h-2.5 w-2.5 text-black" />
+                          )}
+                        </button>
 
-                      {/* Dropdown Items */}
-                      <div className={`nav-dd-wrap ${(expenseDropdownOpen || isExpenseActive()) ? 'nav-dd-open' : ''}`}>
-                        <div className="nav-dd-inner">
-                          <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
-                          {expenseTrackingItems.map((item) => (
-                            <NavLink
-                              key={item.path}
-                              to={item.path}
-                              onClick={() => {
-                                if (isMobile) setSidebarOpen(false);
-                              }}
-                              className={({ isActive }) =>
-                                `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] min-w-full w-max ${isActive
-                                  ? 'text-black font-medium'
-                                  : 'text-black hover:text-black'
-                                }`
-                              }
-                              style={({ isActive }) => ({
-                                backgroundColor: isActive ? themeShades.light : 'transparent',
-                                color: isActive ? 'var(--erp-ink)' : undefined
-                              })}
-                            >
-                              {({ isActive }) => (
-                                <>
-                                  <div
-                                    className="w-1 h-1 rounded-full"
-                                    style={{
-                                      backgroundColor: isActive ? 'var(--erp-ink)' : '#D1D5DB'
-                                    }}
-                                  />
-                                  <span className="flex-1 whitespace-nowrap">{item.name}</span>
-                                </>
-                              )}
-                            </NavLink>
-                          ))}
+                        {/* Dropdown Items */}
+                        <div className={`nav-dd-wrap ${(expenseDropdownOpen || isExpenseActive()) ? 'nav-dd-open' : ''}`}>
+                          <div className="nav-dd-inner">
+                            <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
+                              {expenseTrackingItems.map((item) => (
+                                <NavLink
+                                  key={item.path}
+                                  to={item.path}
+                                  onClick={() => {
+                                    if (isMobile) setSidebarOpen(false);
+                                  }}
+                                  className={({ isActive }) =>
+                                    `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] min-w-full w-max ${isActive
+                                      ? 'text-black font-medium'
+                                      : 'text-black hover:text-black'
+                                    }`
+                                  }
+                                  style={({ isActive }) => ({
+                                    backgroundColor: isActive ? themeShades.light : 'transparent',
+                                    color: isActive ? 'var(--erp-ink)' : undefined
+                                  })}
+                                >
+                                  {({ isActive }) => (
+                                    <>
+                                      <div
+                                        className="w-1 h-1 rounded-full"
+                                        style={{
+                                          backgroundColor: isActive ? 'var(--erp-ink)' : '#D1D5DB'
+                                        }}
+                                      />
+                                      <span className="flex-1 whitespace-nowrap">{item.name}</span>
+                                    </>
+                                  )}
+                                </NavLink>
+                              ))}
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ) : (
-                    /* Collapsed mode */
-                    <div className="relative mt-2 group/flyout">
-                      <button
-                        onClick={() => setExpenseDropdownOpen(!expenseDropdownOpen)}
-                        className="w-full group relative flex items-center justify-center px-2 py-1 rounded-lg transition-all duration-200"
-                        title="Expense Tracking"
-                      >
-                        <BanknotesIcon
-                          className="h-3.5 w-3.5 transition-all duration-200"
-                          style={{
-                            color: 'var(--erp-ink)'
-                          }}
-                        />
-                        {/* Tooltip removed — the hover flyout already shows the submenu. */}
-                      </button>
+                    ) : (
+                      /* Collapsed mode */
+                      <div className="relative mt-2 group/flyout">
+                        <button
+                          onClick={() => setExpenseDropdownOpen(!expenseDropdownOpen)}
+                          className="w-full group relative flex items-center justify-center px-2 py-1 rounded-lg transition-all duration-200"
+                          title="Expense Tracking"
+                        >
+                          <BanknotesIcon
+                            className="h-3.5 w-3.5 transition-all duration-200"
+                            style={{
+                              color: 'var(--erp-ink)'
+                            }}
+                          />
+                          {/* Tooltip removed — the hover flyout already shows the submenu. */}
+                        </button>
 
-                      {/* Hover the icon to reveal this submenu; hidden otherwise. */}
-                      <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
+                        {/* Hover the icon to reveal this submenu; hidden otherwise. */}
+                        <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
                           {expenseTrackingItems.map((item) => (
                             <NavLink
                               key={item.path}
@@ -2165,100 +2294,100 @@ function Navbar({ children }) {
                             </NavLink>
                           ))}
                         </div>
-                    </div>
-                  )}
-                </div>
-              )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
-              {/* PMS — Master Admin only for now (view opens to other roles later). */}
-              {isMasterAdmin && (
-                sidebarOpen ? (
-                  <div className="mt-1">
-                    <button
-                      onClick={() => setPmsDropdownOpen(!pmsDropdownOpen)}
-                      onMouseEnter={() => { setHoveredItem('pms'); hoverOpenDropdown('pms'); }}
-                      onMouseLeave={() => setHoveredItem(null)}
-                      className={`
+                {/* PMS — Master Admin, plus anyone granted PMS Access in Profile. */}
+                {canSeePms && (
+                  sidebarOpen ? (
+                    <div className="mt-1">
+                      <button
+                        onClick={() => setPmsDropdownOpen(!pmsDropdownOpen)}
+                        onMouseEnter={() => { setHoveredItem('pms'); hoverOpenDropdown('pms'); }}
+                        onMouseLeave={() => setHoveredItem(null)}
+                        className={`
           min-w-full w-max group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200
           ${isPmsActive() ? 'text-black font-medium' : 'text-black hover:text-black'}
         `}
-                      style={{
-                        backgroundColor: (isPmsActive() || pmsDropdownOpen) ? themeShades.light : 'transparent'
-                      }}
-                    >
-                      <PresentationChartLineIcon
-                        className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
                         style={{
-                          color: isPmsActive() ? themeColor :
-                            hoveredItem === 'pms' ? themeColor : '#6B7280'
+                          backgroundColor: (isPmsActive() || pmsDropdownOpen) ? themeShades.light : 'transparent'
                         }}
-                      />
-                      <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap text-left text-black">
-                        PMS
-                      </span>
-                      {pmsDropdownOpen ? (
-                        <ChevronUpIcon className="h-2.5 w-2.5 text-black" />
-                      ) : (
-                        <ChevronDownIcon className="h-2.5 w-2.5 text-black" />
-                      )}
-                    </button>
+                      >
+                        <PresentationChartLineIcon
+                          className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
+                          style={{
+                            color: isPmsActive() ? themeColor :
+                              hoveredItem === 'pms' ? themeColor : '#6B7280'
+                          }}
+                        />
+                        <span className="nav-label-fade flex-1 text-[13px] font-medium whitespace-nowrap text-left text-black">
+                          PMS
+                        </span>
+                        {pmsDropdownOpen ? (
+                          <ChevronUpIcon className="h-2.5 w-2.5 text-black" />
+                        ) : (
+                          <ChevronDownIcon className="h-2.5 w-2.5 text-black" />
+                        )}
+                      </button>
 
-                    <div className={`nav-dd-wrap ${(pmsDropdownOpen || isPmsActive()) ? 'nav-dd-open' : ''}`}>
-                      <div className="nav-dd-inner">
-                        <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
-                        {pmsItems.map((item) => (
-                          <NavLink
-                            key={item.path}
-                            to={item.path}
-                            onClick={() => {
-                              if (isMobile) setSidebarOpen(false);
-                            }}
-                            className={({ isActive }) =>
-                              `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] min-w-full w-max ${isActive
-                                ? 'text-black font-medium'
-                                : 'text-black hover:text-black'
-                              }`
-                            }
-                            style={({ isActive }) => ({
-                              backgroundColor: isActive ? themeShades.light : 'transparent',
-                              color: isActive ? 'var(--erp-ink)' : undefined
-                            })}
-                          >
-                            {({ isActive }) => (
-                              <>
-                                <div
-                                  className="w-1 h-1 rounded-full"
-                                  style={{
-                                    backgroundColor: isActive ? 'var(--erp-ink)' : '#D1D5DB'
-                                  }}
-                                />
-                                <span className="flex-1 whitespace-nowrap">{item.name}</span>
-                              </>
-                            )}
-                          </NavLink>
-                        ))}
+                      <div className={`nav-dd-wrap ${(pmsDropdownOpen || isPmsActive()) ? 'nav-dd-open' : ''}`}>
+                        <div className="nav-dd-inner">
+                          <div className="ml-5 mt-0.5 space-y-0.5 border-l border-gray-200 pl-1.5">
+                            {visiblePmsItems.map((item) => (
+                              <NavLink
+                                key={item.path}
+                                to={item.path}
+                                onClick={() => {
+                                  if (isMobile) setSidebarOpen(false);
+                                }}
+                                className={({ isActive }) =>
+                                  `group relative flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all duration-200 text-[13px] min-w-full w-max ${isActive
+                                    ? 'text-black font-medium'
+                                    : 'text-black hover:text-black'
+                                  }`
+                                }
+                                style={({ isActive }) => ({
+                                  backgroundColor: isActive ? themeShades.light : 'transparent',
+                                  color: isActive ? 'var(--erp-ink)' : undefined
+                                })}
+                              >
+                                {({ isActive }) => (
+                                  <>
+                                    <div
+                                      className="w-1 h-1 rounded-full"
+                                      style={{
+                                        backgroundColor: isActive ? 'var(--erp-ink)' : '#D1D5DB'
+                                      }}
+                                    />
+                                    <span className="flex-1 whitespace-nowrap">{item.name}</span>
+                                  </>
+                                )}
+                              </NavLink>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ) : (
-                  /* Collapsed mode */
-                  <div className="relative mt-2 group/flyout">
-                    <button
-                      onClick={() => setPmsDropdownOpen(!pmsDropdownOpen)}
-                      className="w-full group relative flex items-center justify-center px-2 py-1 rounded-lg transition-all duration-200"
-                      title="PMS"
-                    >
-                      <PresentationChartLineIcon
-                        className="h-3.5 w-3.5 transition-all duration-200"
-                        style={{ color: isPmsActive() ? themeColor : '#6B7280' }}
-                      />
-                      {/* Tooltip removed — the hover flyout already shows the submenu. */}
-                    </button>
+                  ) : (
+                    /* Collapsed mode */
+                    <div className="relative mt-2 group/flyout">
+                      <button
+                        onClick={() => setPmsDropdownOpen(!pmsDropdownOpen)}
+                        className="w-full group relative flex items-center justify-center px-2 py-1 rounded-lg transition-all duration-200"
+                        title="PMS"
+                      >
+                        <PresentationChartLineIcon
+                          className="h-3.5 w-3.5 transition-all duration-200"
+                          style={{ color: isPmsActive() ? themeColor : '#6B7280' }}
+                        />
+                        {/* Tooltip removed — the hover flyout already shows the submenu. */}
+                      </button>
 
-                    {/* Hover the icon to reveal this submenu; hidden otherwise. */}
-                    <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
-                        {pmsItems.map((item) => (
+                      {/* Hover the icon to reveal this submenu; hidden otherwise. */}
+                      <div className="hidden group-hover/flyout:block absolute left-full top-0 ml-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1.5 z-50 before:content-[''] before:absolute before:-left-2 before:top-0 before:h-full before:w-2">
+                        {visiblePmsItems.map((item) => (
                           <NavLink
                             key={item.path}
                             to={item.path}
@@ -2281,79 +2410,91 @@ function Navbar({ children }) {
                           </NavLink>
                         ))}
                       </div>
-                  </div>
-                )
-              )}
+                    </div>
+                  )
+                )}
 
-              {/* Other Pages (MOM Tracking, Sales) - Only show if user has access */}
-              {otherPagesItems.length > 0 && (
-                <div className="mt-1 pt-0">
-                  {sidebarOpen ? (
-                    <div className="space-y-1">
-                      {otherPagesItems.map((item) => (
-                        <NavLink
-                          key={item.path}
-                          to={item.path}
-                          onClick={(e) => handleOtherPageClick(e, item.path)}
-                          onMouseEnter={() => setHoveredItem(item.path)}
-                          onMouseLeave={() => setHoveredItem(null)}
-                          className={({ isActive }) =>
-                            `group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200 min-w-full w-max ${isActive
-                              ? 'text-gray-900 font-medium'
-                              : 'text-black hover:text-gray-900'
-                            }`
-                          }
-                          style={({ isActive }) => ({
-                            backgroundColor: isActive ? themeShades.light : 'transparent',
-                            color: isActive ? themeColor : undefined
-                          })}
-                        >
-                          {({ isActive }) => (
-                            <>
-                              <item.icon
-                                className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
-                                style={{
-                                  color: isActive ? themeColor :
-                                    hoveredItem === item.path ? themeColor : '#6B7280'
-                                }}
-                              />
-                              <span className="flex-1 text-[13px] font-medium whitespace-nowrap">
-                                {item.name}
+                {/* Other Pages (MOM Tracking, Sales) - Only show if user has access */}
+                {otherPagesItems.length > 0 && (
+                  <div className="mt-1 pt-0">
+                    {sidebarOpen ? (
+                      <div className="space-y-1">
+                        {otherPagesItems.map((item) => (
+                          <NavLink
+                            key={item.path}
+                            to={item.path}
+                            onClick={(e) => handleOtherPageClick(e, item.path)}
+                            onMouseEnter={() => setHoveredItem(item.path)}
+                            onMouseLeave={() => setHoveredItem(null)}
+                            className={({ isActive }) =>
+                              `group relative flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-200 min-w-full w-max ${isActive
+                                ? 'text-gray-900 font-medium'
+                                : 'text-black hover:text-gray-900'
+                              }`
+                            }
+                            style={({ isActive }) => ({
+                              backgroundColor: isActive ? themeShades.light : 'transparent',
+                              color: isActive ? themeColor : undefined
+                            })}
+                          >
+                            {({ isActive }) => (
+                              <>
+                                <item.icon
+                                  className="h-3.5 w-3.5 transition-all duration-200 flex-shrink-0"
+                                  style={{
+                                    color: isActive ? themeColor :
+                                      hoveredItem === item.path ? themeColor : '#6B7280'
+                                  }}
+                                />
+                                <span className={`flex-1 text-[13px] whitespace-nowrap ${item.path === '/approval-application' && nfaPendingCount > 0 ? 'nav-blink' : 'font-medium'}`}>
+                                  {item.name}
+                                  {item.path === '/approval-application' && nfaPendingCount > 0 && (
+                                    <span className="nav-badge-count" style={{ color: themeColor }}>
+                                      {nfaPendingCount}
+                                    </span>
+                                  )}
+                                </span>
+                              </>
+                            )}
+                          </NavLink>
+                        ))}
+                      </div>
+                    ) : (
+                      /* Collapsed mode */
+                      <div className="space-y-1">
+                        {otherPagesItems.map((item) => (
+                          <NavLink
+                            key={item.path}
+                            to={item.path}
+                            onClick={(e) => handleOtherPageClick(e, item.path)}
+                            className={({ isActive }) =>
+                              `group relative flex items-center justify-center px-1 py-1 rounded-lg transition-all duration-200 ${item.path === '/approval-application' && nfaPendingCount > 0 ? 'nav-blink' : ''}`
+                            }
+                            title={item.name}
+                          >
+                            <item.icon
+                              className="h-3.5 w-3.5 transition-all duration-200"
+                              style={{
+                                color: isActive => isActive ? themeColor : '#6B7280'
+                              }}
+                            />
+                            {item.path === '/approval-application' && nfaPendingCount > 0 && (
+                              <span className="absolute -top-1 -right-1 text-[10px] font-extrabold animate-pulse"
+                                style={{ color: themeColor }}>
+                                {nfaPendingCount}
                               </span>
-                            </>
-                          )}
-                        </NavLink>
-                      ))}
-                    </div>
-                  ) : (
-                    /* Collapsed mode */
-                    <div className="space-y-1">
-                      {otherPagesItems.map((item) => (
-                        <NavLink
-                          key={item.path}
-                          to={item.path}
-                          onClick={(e) => handleOtherPageClick(e, item.path)}
-                          className={({ isActive }) =>
-                            `group relative flex items-center justify-center px-1 py-1 rounded-lg transition-all duration-200`
-                          }
-                          title={item.name}
-                        >
-                          <item.icon
-                            className="h-3.5 w-3.5 transition-all duration-200"
-                            style={{
-                              color: isActive => isActive ? themeColor : '#6B7280'
-                            }}
-                          />
-                          <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
-                            {item.name}
-                            <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
-                          </div>
-                        </NavLink>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+                            )}
+                            <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
+                              {item.name}
+                              {item.path === '/approval-application' && nfaPendingCount > 0 && ` (${nfaPendingCount})`}
+                              <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
+                            </div>
+                          </NavLink>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -2422,76 +2563,76 @@ ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
           <div className="flex-shrink-0 px-3 pb-3 pt-2 space-y-1.5 bg-[#ffdb62]">
             {/* Compact strip — Auto-Hide + Light/Night share ONE row side by side */}
             <div className={sidebarOpen ? 'flex items-stretch gap-1' : 'space-y-1.5'}>
-            {/* Auto-hide (hover to open) toggle — desktop only */}
-            {!isMobile && (sidebarOpen ? (
-              <button
-                type="button"
-                onClick={toggleAutoHide}
-                className={`flex-1 flex items-center justify-center h-6 rounded-full border transition-all duration-200 active:scale-95 ${autoHide ? 'shadow-sm' : 'bg-gray-100 hover:bg-gray-200'}`}
-                style={autoHide ? { backgroundColor: themeColor, borderColor: 'rgba(146, 64, 14, 0.4)' } : { borderColor: 'rgba(146, 64, 14, 0.4)' }}
-                title={autoHide ? 'Auto-Hide is ON — menu opens on hover, tucks away after. Click to pin the menu open.' : 'Auto-Hide the menu — it will open on hover and minimize when you move away. Click to turn on.'}
-              >
-                <svg className={`h-3.5 w-3.5 transition-colors ${autoHide ? 'text-white' : 'text-gray-500'}`}
-                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59" />
-                </svg>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={toggleAutoHide}
-                className="w-full group relative flex items-center justify-center py-0.5 rounded-lg transition-all duration-200"
-                title={autoHide ? 'Pin menu open' : 'Auto-hide menu (open on hover)'}
-              >
-                <span className={`flex items-center justify-center h-5 w-5 rounded-full border transition-colors ${autoHide ? 'shadow-sm' : ''}`}
-                  style={autoHide ? { backgroundColor: themeColor, borderColor: 'rgba(146, 64, 14, 0.4)' } : { borderColor: 'rgba(146, 64, 14, 0.4)' }}>
-                  <svg className={`h-3.5 w-3.5 ${autoHide ? 'text-white' : 'text-gray-500'}`}
+              {/* Auto-hide (hover to open) toggle — desktop only */}
+              {!isMobile && (sidebarOpen ? (
+                <button
+                  type="button"
+                  onClick={toggleAutoHide}
+                  className={`flex-1 flex items-center justify-center h-6 rounded-full border transition-all duration-200 active:scale-95 ${autoHide ? 'shadow-sm' : 'bg-gray-100 hover:bg-gray-200'}`}
+                  style={autoHide ? { backgroundColor: themeColor, borderColor: 'rgba(146, 64, 14, 0.4)' } : { borderColor: 'rgba(146, 64, 14, 0.4)' }}
+                  title={autoHide ? 'Auto-Hide is ON — menu opens on hover, tucks away after. Click to pin the menu open.' : 'Auto-Hide the menu — it will open on hover and minimize when you move away. Click to turn on.'}
+                >
+                  <svg className={`h-3.5 w-3.5 transition-colors ${autoHide ? 'text-white' : 'text-gray-500'}`}
                     fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59" />
                   </svg>
-                </span>
-                <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
-                  {autoHide ? 'Pin Menu Open' : 'Auto-Hide Menu (hover to open)'}
-                  <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
-                </div>
-              </button>
-            ))}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={toggleAutoHide}
+                  className="w-full group relative flex items-center justify-center py-0.5 rounded-lg transition-all duration-200"
+                  title={autoHide ? 'Pin menu open' : 'Auto-hide menu (open on hover)'}
+                >
+                  <span className={`flex items-center justify-center h-5 w-5 rounded-full border transition-colors ${autoHide ? 'shadow-sm' : ''}`}
+                    style={autoHide ? { backgroundColor: themeColor, borderColor: 'rgba(146, 64, 14, 0.4)' } : { borderColor: 'rgba(146, 64, 14, 0.4)' }}>
+                    <svg className={`h-3.5 w-3.5 ${autoHide ? 'text-white' : 'text-gray-500'}`}
+                      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59" />
+                    </svg>
+                  </span>
+                  <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
+                    {autoHide ? 'Pin Menu Open' : 'Auto-Hide Menu (hover to open)'}
+                    <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
+                  </div>
+                </button>
+              ))}
 
-            {/* Dark / Light mode toggle */}
-            {sidebarOpen ? (
-              <button
-                type="button"
-                onClick={toggleTheme}
-                className={`flex-1 flex items-center justify-center h-6 rounded-full border transition-all duration-200 active:scale-95 ${darkMode ? 'shadow-sm' : 'bg-gray-100 hover:bg-gray-200'}`}
-                style={darkMode ? { backgroundColor: themeColor, borderColor: 'rgba(146, 64, 14, 0.4)' } : { borderColor: 'rgba(146, 64, 14, 0.4)' }}
-                title={darkMode ? 'Night Mode is ON — click to switch to light mode' : 'Switch to Night Mode (dark theme)'}
-              >
-                {darkMode ? (
-                  <MoonIcon className="h-3.5 w-3.5 text-white" />
-                ) : (
-                  <SunIcon className="h-3.5 w-3.5" style={{ color: '#92400e' }} />
-                )}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={toggleTheme}
-                className="w-full group relative flex items-center justify-center py-0.5 rounded-lg transition-all duration-200"
-                title={darkMode ? 'Switch to light mode' : 'Switch to night mode'}
-              >
-                <span className="flex items-center justify-center h-5 w-5 rounded-full border" style={{ borderColor: 'rgba(146, 64, 14, 0.4)' }}>
+              {/* Dark / Light mode toggle */}
+              {sidebarOpen ? (
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  className={`flex-1 flex items-center justify-center h-6 rounded-full border transition-all duration-200 active:scale-95 ${darkMode ? 'shadow-sm' : 'bg-gray-100 hover:bg-gray-200'}`}
+                  style={darkMode ? { backgroundColor: themeColor, borderColor: 'rgba(146, 64, 14, 0.4)' } : { borderColor: 'rgba(146, 64, 14, 0.4)' }}
+                  title={darkMode ? 'Night Mode is ON — click to switch to light mode' : 'Switch to Night Mode (dark theme)'}
+                >
                   {darkMode ? (
-                    <MoonIcon className="h-4 w-4 text-sky-400" />
+                    <MoonIcon className="h-3.5 w-3.5 text-white" />
                   ) : (
-                    <SunIcon className="h-4 w-4" style={{ color: '#92400e' }} />
+                    <SunIcon className="h-3.5 w-3.5" style={{ color: '#92400e' }} />
                   )}
-                </span>
-                <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
-                  {darkMode ? 'Switch to Light Mode' : 'Switch to Night Mode'}
-                  <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
-                </div>
-              </button>
-            )}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  className="w-full group relative flex items-center justify-center py-0.5 rounded-lg transition-all duration-200"
+                  title={darkMode ? 'Switch to light mode' : 'Switch to night mode'}
+                >
+                  <span className="flex items-center justify-center h-5 w-5 rounded-full border" style={{ borderColor: 'rgba(146, 64, 14, 0.4)' }}>
+                    {darkMode ? (
+                      <MoonIcon className="h-4 w-4 text-sky-400" />
+                    ) : (
+                      <SunIcon className="h-4 w-4" style={{ color: '#92400e' }} />
+                    )}
+                  </span>
+                  <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
+                    {darkMode ? 'Switch to Light Mode' : 'Switch to Night Mode'}
+                    <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
+                  </div>
+                </button>
+              )}
             </div>
 
             {/* User Info Section - Changed from div to NavLink */}

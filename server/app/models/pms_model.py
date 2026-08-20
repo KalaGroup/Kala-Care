@@ -33,6 +33,63 @@ class PmsBranchTarget(Base):
     )
 
 
+class PmsCdiTarget(Base):
+    """AOP Master → CDI Target tab — the AOP column of the Customer Delight
+    Index report (Annual Reports).
+
+    ONE percentage per financial year and row of that report. The report has
+    three kinds of row and each can carry its own target, so the key is a
+    (scope, scope_key) pair rather than a branch id:
+
+        scope 'branch'   scope_key = branch id ('420435_1')
+        scope 'region'   scope_key = 'MH' | 'KA'   — the region total rows
+        scope 'overall'  scope_key = 'ALL'         — the KCGL Overall row
+
+    The sheet the business prints sets the target at region and overall level
+    only; branch targets are optional and simply stay empty until someone fills
+    them in. Nothing is derived from anything else — an unset row shows no AOP.
+    """
+    __tablename__ = "pms_cdi_targets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    fy = Column(Integer, nullable=False, index=True)   # FY start year: 2026 = Apr 2026–Mar 2027
+    scope = Column(String(10), nullable=False)         # 'branch' | 'region' | 'overall'
+    scope_key = Column(String(60), nullable=False)     # branch id | 'MH'/'KA' | 'ALL'
+    target_pct = Column(Float, nullable=False, default=0)
+    created_by = Column(String(50), nullable=True)
+    updated_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
+
+    __table_args__ = (
+        UniqueConstraint("fy", "scope", "scope_key", name="uq_pms_cdi_target_fy_scope"),
+    )
+
+
+class PmsHoliday(Base):
+    """A non-working DATE in the AOP Master's working-days calendar.
+
+    The month's working-day COUNT used to be typed in by hand, which could not
+    say WHICH days were off — so a report for 01–17 Aug had to guess how much of
+    the month had elapsed. Ticking the actual holidays here makes every
+    part-period exact: working days of any range = days in it, minus Sundays,
+    minus the dates ticked for that region.
+
+    One row per (date, region): a day off in both regions is two rows, so MH and
+    KA keep their own calendars."""
+    __tablename__ = "pms_holidays"
+
+    id = Column(Integer, primary_key=True, index=True)
+    holiday_date = Column(Date, nullable=False, index=True)
+    region = Column(String(10), nullable=False)           # 'MH' | 'KA'
+    name = Column(String(120), nullable=True)             # optional label
+    created_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+
+    __table_args__ = (UniqueConstraint("holiday_date", "region",
+                                       name="uq_pms_holiday_date_region"),)
+
+
 class PmsMonthSettings(Base):
     """Per-month settings for the AOP Master — the number of working days
     (defaults to all days except Sundays; editable). Working days are set
@@ -73,6 +130,130 @@ class PmsSrTypeMapping(Base):
     id = Column(Integer, primary_key=True, index=True)
     sr_type = Column(String(120), nullable=False, unique=True, index=True)
     head = Column(String(60), nullable=True)
+    created_by = Column(String(50), nullable=True)
+    updated_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
+
+
+class PmsSeUid(Base):
+    """SE UID master — Service Engineer NAME ↔ UID, maintained from the
+    Profile page (Master Admin) by hand or by Excel import.
+
+    The bridge between the files the Employee Productivity report joins:
+    'Response Time & MaxTTR Details' carries only the SE NAME, while the LMS
+    and EFSR files identify the engineer by SERVICE ENGINEER UID. Matching is
+    done on the name's squashed upper-case form (name_key) so spacing / case
+    differences between files never split one engineer into two.
+    """
+    __tablename__ = "pms_se_uid_master"
+
+    id = Column(Integer, primary_key=True, index=True)
+    se_name = Column(String(200), nullable=False)
+    name_key = Column(String(200), nullable=False, unique=True, index=True)
+    se_uid = Column(String(100), nullable=True, index=True)
+    # The branch the engineer belongs to — the LAST-RESORT answer for the PMS
+    # reports. They read the branch off the uploaded files first; this is what
+    # places an engineer no file gives a valid KALA branch code for (an EFSR row
+    # can carry another dealer's SD BRANCH CODE). Optional, set by hand on the
+    # Profile page; holds the KALA branch id, e.g. '420435_1'.
+    branch_id = Column(String(100), nullable=True)
+    # Which uploaded file the engineer was found in. Stored on the row (set by
+    # the sync) so listing the master is a plain table read — the two DISTINCT
+    # scans over MaxTTR / LMS only run when the user asks to reload from data.
+    src_maxttr = Column(Boolean, nullable=False, default=False)
+    src_lms = Column(Boolean, nullable=False, default=False)
+    src_efsr = Column(Boolean, nullable=False, default=False)
+    created_by = Column(String(50), nullable=True)
+    updated_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
+
+
+class PmsMaxttrHead(Base):
+    """Head master for the MAXTTR SR Type mapping — the SR Type columns of the
+    Employee Productivity report. Separate from PmsHead: that one groups the
+    Sales/Labour file's SR types for the Sales & Labour report, while this one
+    groups the 'Response Time & MaxTTR Details' file's own SR Type column,
+    which carries values the labour file never has (Courtesy Visit, Dealer AMC,
+    DG Commissioning …)."""
+    __tablename__ = "pms_maxttr_heads"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(60), nullable=False, unique=True)
+    created_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+
+
+class PmsMaxttrSrTypeMap(Base):
+    """MaxTTR 'SR Type' → head (e.g. 'KOEL Bandhan Plus' → 'AMC').
+
+    Values are synced out of the uploaded MaxTTR file and mapped by hand in the
+    AOP Master's 'SR Type Master (MaxTTR)' tab.
+    """
+    __tablename__ = "pms_maxttr_sr_type_map"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sr_type = Column(String(200), nullable=False, unique=True, index=True)
+    head = Column(String(60), nullable=True)
+    created_by = Column(String(50), nullable=True)
+    updated_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
+
+
+class PmsEfsrHead(Base):
+    """Head master for the EFSR SR Type mapping — the 'Allocate SR' SR Type
+    columns of the Employee Productivity report. Kept apart from the MaxTTR
+    head master because the two files carry different SR Type vocabularies
+    (EFSR also has Commercial, RECD Kit …)."""
+    __tablename__ = "pms_efsr_heads"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(60), nullable=False, unique=True)
+    created_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+
+
+class PmsEfsrSrTypeMap(Base):
+    """EFSR 'SR Type' → head. Values are synced out of the uploaded EFSR
+    Report and mapped by hand in the AOP Master's 'SR Type Master (EFSR)' tab.
+    """
+    __tablename__ = "pms_efsr_sr_type_map"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sr_type = Column(String(200), nullable=False, unique=True, index=True)
+    head = Column(String(60), nullable=True)
+    created_by = Column(String(50), nullable=True)
+    updated_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
+
+
+class PmsLeadCategory(Base):
+    """Product category master for leads — the columns of the Employee
+    Productivity report's 'Product Wise Lead Count' group (Allied Oil, Battery,
+    Whole Goods …). Managed from the AOP Master's Lead Category tab; feeds its
+    Category dropdown. Column order follows id."""
+    __tablename__ = "pms_lead_categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(60), nullable=False, unique=True)
+    created_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+
+
+class PmsLeadRaisedForMap(Base):
+    """LMS 'Lead Raised For' → product category (e.g. 'BD Spares' → 'Spares').
+
+    Same shape as the SR Type → Head mapping: the raw values are synced out of
+    the uploaded LMS file and each one is mapped to a category by hand.
+    """
+    __tablename__ = "pms_lead_raised_for_map"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lead_raised_for = Column(String(200), nullable=False, unique=True, index=True)
+    category = Column(String(60), nullable=True)
     created_by = Column(String(50), nullable=True)
     updated_by = Column(String(50), nullable=True)
     created_at = Column(DateTime(timezone=True), default=now_ist)
@@ -149,15 +330,3 @@ class PmsSalesRecord(Base):
         Index("ix_pms_records_type_id", "record_type", "id"),
     )
 
-
-class PmsReportHistory(Base):
-    """A generated report saved to history — the full computed payload is
-    frozen as JSON so the report can be re-opened later exactly as it was."""
-    __tablename__ = "pms_report_history"
-
-    id = Column(Integer, primary_key=True, index=True)
-    as_on_date = Column(Date, nullable=False, index=True)
-    title = Column(String(200), nullable=True)
-    payload = Column(Text, nullable=False)                # JSON report snapshot
-    created_by = Column(String(50), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=now_ist)

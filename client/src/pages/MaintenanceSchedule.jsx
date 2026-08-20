@@ -360,7 +360,7 @@ const MaintenanceScheduleView = () => {
     );
 
     return (
-        <div className="qt-font min-h-screen">
+        <div className="qt-font min-h-screen tbl-grid-dark">
             <style>{`.q-scroll{scrollbar-width:thin;scrollbar-color:#c7c9e0 transparent}.q-scroll::-webkit-scrollbar{height:6px;width:6px}.q-scroll::-webkit-scrollbar-thumb{background:#c7c9e0;border-radius:9999px}
 /* One font for the whole page — font-mono falls back to different fonts per machine, making this page look unlike the rest of the app */
 .qt-font,.qt-font *{font-family:'Inter','Segoe UI',Arial,sans-serif !important}

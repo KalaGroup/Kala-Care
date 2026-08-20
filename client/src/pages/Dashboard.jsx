@@ -3190,13 +3190,13 @@ const Dashboard = () => {
     };
 
     const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 17) return 'Good afternoon';
-    return 'Good evening';
-};
+        const hour = new Date().getHours();
+        if (hour < 12) return 'Good morning';
+        if (hour < 17) return 'Good afternoon';
+        return 'Good evening';
+    };
 
-const getPerformanceTitle = () => {
+    const getPerformanceTitle = () => {
         if (isMasterAdmin || isITAdmin) {
             return 'KALA Performance';
         }
@@ -3428,7 +3428,11 @@ const getPerformanceTitle = () => {
                         </div>
 
                         {/* Consolidated Date Filter Dropdown */}
-                        <div className="relative w-full sm:w-auto self-center max-sm:px-3">
+                        <div
+                            className="relative w-full sm:w-auto self-center max-sm:px-3"
+                            onMouseEnter={() => setShowCustomDatePicker(true)}
+                            onMouseLeave={() => setShowCustomDatePicker(false)}
+                        >
                             {!isEmployee && (
                                 <button
                                     onClick={() => setShowCustomDatePicker(!showCustomDatePicker)}
@@ -3828,434 +3832,434 @@ const getPerformanceTitle = () => {
                             skeleton until its own data lands, then fades in —
                             no box waits for another box's request. */}
 
-                                {/* 3 Summary Cards */}
-                                {!summaryStats ? <SummaryCardsSkeleton /> : (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-3 dash-fade-in">
-                                        {/* 1st Card */}
-                                        <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3">
-                                            <h3 className="text-[11px] font-semibold text-black uppercase mb-2">
-                                                Total Active Customers
-                                            </h3>
-                                            <div className="flex items-center justify-between">
-                                                <div className="w-[30%] flex justify-center">
-                                                    <p className="text-lg font-semibold text-gray-900">
-                                                        {summaryStats?.total_customers || 0}
-                                                    </p>
-                                                </div>
-                                                <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
-                                                <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
-                                                    <div className="flex flex-row justify-between items-baseline">
-                                                        <span>Attended:</span>
-                                                        <span className="font-semibold text-base whitespace-nowrap"><TimeValue>{summaryStats?.attended_customers || 0}</TimeValue></span>
-                                                    </div>
-                                                    <div className="flex flex-row justify-between items-baseline">
-                                                        <span>Remaining:</span>
-                                                        <span className="font-semibold text-base whitespace-nowrap"><TimeValue>{summaryStats?.remaining_customers || 0}</TimeValue></span>
-                                                    </div>
-                                                </div>
+                        {/* 3 Summary Cards */}
+                        {!summaryStats ? <SummaryCardsSkeleton /> : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-3 dash-fade-in">
+                                {/* 1st Card */}
+                                <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3">
+                                    <h3 className="text-[11px] font-semibold text-black uppercase mb-2">
+                                        Total Active Customers
+                                    </h3>
+                                    <div className="flex items-center justify-between">
+                                        <div className="w-[30%] flex justify-center">
+                                            <p className="text-lg font-semibold text-gray-900">
+                                                {summaryStats?.total_customers || 0}
+                                            </p>
+                                        </div>
+                                        <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
+                                        <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
+                                            <div className="flex flex-row justify-between items-baseline">
+                                                <span>Attended:</span>
+                                                <span className="font-semibold text-base whitespace-nowrap"><TimeValue>{summaryStats?.attended_customers || 0}</TimeValue></span>
                                             </div>
-                                        </div>
-
-                                        {/* 2nd Card */}
-                                        <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3">
-                                            <h3 className="text-[11px] font-semibold text-black uppercase mb-2">
-                                                Total Active Assets
-                                            </h3>
-                                            <div className="flex items-center justify-between">
-                                                <div className="w-[30%] flex justify-center">
-                                                    <p className="text-lg font-semibold text-gray-900">
-                                                        {summaryStats?.total_assets || 0}
-                                                    </p>
-                                                </div>
-                                                <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
-                                                <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
-                                                    <div className="flex flex-row justify-between items-baseline">
-                                                        <span>Attended:</span>
-                                                        <span className="font-semibold text-base whitespace-nowrap"><TimeValue>{summaryStats?.attended_assets || 0}</TimeValue></span>
-                                                    </div>
-                                                    <div className="flex flex-row justify-between items-baseline">
-                                                        <span>Remaining:</span>
-                                                        <span className="font-semibold text-base whitespace-nowrap"><TimeValue>{summaryStats?.remaining_assets || 0}</TimeValue></span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* 3rd Card */}
-                                        <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3">
-                                            <h3 className="text-[11px] font-semibold text-black uppercase mb-2">
-                                                Attended Total Active Assets Last Status
-                                            </h3>
-                                            <div className="flex items-center justify-between">
-                                                <div className="w-[30%] flex justify-center">
-                                                    <p className="text-lg font-semibold text-gray-900">
-                                                        {summaryStats?.attended_assets || 0}
-                                                    </p>
-                                                </div>
-                                                <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
-                                                <div className="w-[60%] grid grid-cols-3 gap-x-2 gap-y-1 text-xs font-semibold max-sm:grid-cols-2">
-                                                    <div className="flex flex-row justify-between items-baseline">
-                                                        <span>WIP:</span>
-                                                        <span className="font-semibold text-sm whitespace-nowrap"><TimeValue>{summaryStats?.wip_assets || 0}</TimeValue></span>
-                                                    </div>
-                                                    <div className="flex flex-row justify-between items-baseline">
-                                                        <span>F:</span>
-                                                        <span className="font-semibold text-sm whitespace-nowrap"><TimeValue>{summaryStats?.rescheduled_assets || 0}</TimeValue></span>
-                                                    </div>
-                                                    <div className="flex flex-row justify-between items-baseline">
-                                                        <span>R:</span>
-                                                        <span className="font-semibold text-sm whitespace-nowrap"><TimeValue>{summaryStats?.rejected_assets || 0}</TimeValue></span>
-                                                    </div>
-                                                    <div className="flex flex-row justify-between items-baseline">
-                                                        <span>NC:</span>
-                                                        <span className="font-semibold text-sm whitespace-nowrap"><TimeValue>{summaryStats?.not_connected_assets || 0}</TimeValue></span>
-                                                    </div>
-                                                    <div className="flex flex-row justify-between items-baseline">
-                                                        <span>C:</span>
-                                                        <span className="font-semibold text-sm whitespace-nowrap"><TimeValue>{summaryStats?.completed_assets || 0}</TimeValue></span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Two Graphs Row — skeleton until drive data is ready */}
-                                {!campaignPerformance?.length && (loading || campaignLoading) ? (
-                                    <GraphsSkeleton />
-                                ) : (
-                                <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 mb-3 dash-fade-in">
-                                    {/* Campaign-wise Customer Breakdown - 65% width */}
-                                    <div className="lg:col-span-8 bg-white rounded-xl shadow-sm p-3 border border-gray-100 max-lg:w-full max-lg:min-w-0">
-                                        <h3 className="text-base font-semibold text-gray-800 mb-2">
-                                            Drive-wise Customer Breakdown
-                                        </h3>
-                                        <div className="flex flex-wrap justify-center items-center gap-x-4 gap-y-1 mb-1">
-                                            {[
-                                                ['Remaining', '#3b82f6'],
-                                                ['WIP', '#eab308'],
-                                                ['Followups', '#a855f7'],
-                                                ['Rejected', '#dc6428'],
-                                                ['NC', '#6b7280'],
-                                                ['Completed', '#22c55e']
-                                            ].map(([label, color]) => (
-                                                <span key={label} className="flex items-center gap-1.5 text-[11px] text-gray-600">
-                                                    <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }}></span>
-                                                    {label}
-                                                </span>
-                                            ))}
-                                        </div>
-                                        <div className="h-[320px] w-full overflow-x-auto overflow-y-hidden" style={{ scrollbarWidth: 'thin' }}>
-                                            {campaignBreakdownChartData ? (
-                                                <div className="h-full relative" style={{ minWidth: '100%', width: `${(campaignPerformance?.length || 0) * 160}px` }}>
-                                                    <Bar data={campaignBreakdownChartData} options={campaignBreakdownChartOptions} />
-                                                </div>
-                                            ) : (
-                                                <div className="h-64 flex items-center justify-center text-gray-500">
-                                                    No drive data available
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Asset Status Distribution - 35% width */}
-                                    <div className="lg:col-span-4 bg-white rounded-xl shadow-sm p-3 border border-gray-100 flex flex-col max-lg:w-full max-lg:min-w-0">
-                                        <h3 className="text-base font-semibold text-gray-800 mb-4">
-                                            Asset Status Distribution
-                                        </h3>
-                                        <div className="flex-1 flex items-center justify-center">
-                                            <div className="w-full max-w-[280px] mx-auto">
-                                                <Pie data={assetStatusPieData} options={assetStatusPieOptions} />
+                                            <div className="flex flex-row justify-between items-baseline">
+                                                <span>Remaining:</span>
+                                                <span className="font-semibold text-base whitespace-nowrap"><TimeValue>{summaryStats?.remaining_customers || 0}</TimeValue></span>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
-                                )}
 
-                                {branchPerformance && branchPerformance.length > 0 ? (() => {
-                                    const sortedBranchPerformance = sortedBranchPerformanceMemo;
-                                    return (
-                                        <div className="w-full mb-2 dash-fade-in">
-                                            <div className="bg-white rounded-xl shadow-sm p-3 border border-gray-100">
-                                                <div className="mb-2">
-                                                    <h3 className="text-base font-semibold text-black flex justify-between items-center">
-                                                        <span>Branch-wise Asset Progress</span>
-                                                        <span className="font-semibold text-black text-sm">
-                                                            Total Branches: {branchPerformance?.length || 0}
-                                                        </span>
-                                                    </h3>
-                                                    <p className="text-sm text-gray-500 mt-1">
-                                                        Total Assets vs Completed Assets
-                                                    </p>
-                                                </div>
-
-                                                <div className="h-[600px] w-full overflow-y-auto">
-                                                    {sortedBranchPerformance.length > 0 ? (
-                                                        <Bar
-                                                            data={{
-                                                                labels: sortedBranchPerformance.map(branch => {
-                                                                    const branchName = branchNameMap[branch.branch] || branch.branch;
-                                                                    return branchName.length > 25
-                                                                        ? branchName.substring(0, 22) + '...'
-                                                                        : branchName;
-                                                                }),
-                                                                datasets: [
-                                                                    {
-                                                                        label: 'Total Assets',
-                                                                        data: sortedBranchPerformance.map(branch => {
-                                                                            const engagedData = branchEngagedData[branch.branch];
-                                                                            const remainingData = branchRemainingData[branch.branch];
-
-                                                                            if (!engagedData || !remainingData || !engagedData.campaigns || !remainingData.campaigns) return 0;
-
-                                                                            const getCampaignTotalAllocate = (campaign) => {
-                                                                                if (campaign.total_allocate) return campaign.total_allocate;
-                                                                                const engagedCustomers = campaign.total_customers || 0;
-                                                                                const campaignRemainingData = remainingData.campaigns.find(
-                                                                                    c => Number(c.campaign_id) === Number(campaign.campaign_id)
-                                                                                );
-                                                                                const remainingFromAssets = campaignRemainingData?.remaining_customers || 0;
-                                                                                return engagedCustomers + remainingFromAssets;
-                                                                            };
-
-                                                                            const campaignsWithAllocate = engagedData.campaigns.filter(campaign => {
-                                                                                const totalAllocate = getCampaignTotalAllocate(campaign);
-                                                                                return totalAllocate > 0;
-                                                                            });
-
-                                                                            const totalBranchAssets = campaignsWithAllocate.reduce((sum, campaign) => {
-                                                                                return sum + getCampaignTotalAllocate(campaign);
-                                                                            }, 0);
-
-                                                                            return totalBranchAssets;
-                                                                        }),
-                                                                        backgroundColor: 'rgba(59, 130, 246, 0.85)',
-                                                                        borderColor: '#3b82f6',
-                                                                        borderWidth: 1,
-                                                                        borderRadius: 4,
-                                                                        barPercentage: 0.7,
-                                                                        categoryPercentage: 0.8
-                                                                    },
-                                                                    {
-                                                                        label: 'Completed Assets',
-                                                                        data: sortedBranchPerformance.map(branch => {
-                                                                            const engagedData = branchEngagedData[branch.branch];
-                                                                            return engagedData?.completed_followups || 0;
-                                                                        }),
-                                                                        backgroundColor: 'rgba(34, 197, 94, 0.85)',
-                                                                        borderColor: '#16a34a',
-                                                                        borderWidth: 1,
-                                                                        borderRadius: 4,
-                                                                        barPercentage: 0.7,
-                                                                        categoryPercentage: 0.8
-                                                                    }
-                                                                ]
-                                                            }}
-                                                            options={{
-                                                                indexAxis: 'y',
-                                                                responsive: true,
-                                                                maintainAspectRatio: false,
-                                                                layout: {
-                                                                    padding: {
-                                                                        left: 10,
-                                                                        right: 120,
-                                                                        top: 10,
-                                                                        bottom: 10
-                                                                    }
-                                                                },
-                                                                plugins: {
-                                                                    legend: {
-                                                                        position: 'top',
-                                                                        labels: {
-                                                                            usePointStyle: true,
-                                                                            boxWidth: 12,
-                                                                            font: { size: 11 },
-                                                                            padding: 10
-                                                                        }
-                                                                    },
-                                                                    tooltip: {
-                                                                        backgroundColor: 'rgba(0, 0, 0, 0.95)',
-                                                                        titleColor: '#ffffff',
-                                                                        bodyColor: '#e5e7eb',
-                                                                        borderColor: '#374151',
-                                                                        borderWidth: 1,
-                                                                        padding: 12,
-                                                                        callbacks: {
-                                                                            title: function (tooltipItems) {
-                                                                                const branch = sortedBranchPerformance[tooltipItems[0].dataIndex];
-                                                                                const branchName = branchNameMap[branch.branch] || branch.branch;
-                                                                                return branchName;
-                                                                            },
-                                                                            label: function (context) {
-                                                                                const label = context.dataset.label || '';
-                                                                                const value = context.raw || 0;
-                                                                                return `${label}: ${value.toLocaleString()}`;
-                                                                            },
-                                                                            afterBody: function (tooltipItems) {
-                                                                                const branch = sortedBranchPerformance[tooltipItems[0].dataIndex];
-                                                                                const engagedData = branchEngagedData[branch.branch];
-                                                                                const remainingData = branchRemainingData[branch.branch];
-
-                                                                                if (!engagedData || !remainingData) return [];
-
-                                                                                const getCampaignTotalAllocate = (campaign) => {
-                                                                                    if (campaign.total_allocate) return campaign.total_allocate;
-                                                                                    const engagedCustomers = campaign.total_customers || 0;
-                                                                                    const campaignRemainingData = remainingData.campaigns.find(
-                                                                                        c => Number(c.campaign_id) === Number(campaign.campaign_id)
-                                                                                    );
-                                                                                    const remainingFromAssets = campaignRemainingData?.remaining_customers || 0;
-                                                                                    return engagedCustomers + remainingFromAssets;
-                                                                                };
-
-                                                                                const campaignsWithAllocate = engagedData.campaigns.filter(campaign => {
-                                                                                    const totalAllocate = getCampaignTotalAllocate(campaign);
-                                                                                    return totalAllocate > 0;
-                                                                                });
-
-                                                                                const totalBranchAssets = campaignsWithAllocate.reduce((sum, campaign) => {
-                                                                                    return sum + getCampaignTotalAllocate(campaign);
-                                                                                }, 0);
-
-                                                                                const totalCompleted = engagedData.completed_followups || 0;
-                                                                                const totalWip = engagedData.wip_followups || 0;
-                                                                                const totalRejected = engagedData.rejected_followups || 0;
-                                                                                const totalNotConnected = engagedData.not_connected_followups || 0;
-                                                                                const totalEngagedCustomers = engagedData.total_customers || 0;
-                                                                                const totalFR = totalEngagedCustomers - (totalWip + totalCompleted + totalRejected + totalNotConnected);
-
-                                                                                const completedPercent = totalBranchAssets > 0 ? ((totalCompleted / totalBranchAssets) * 100).toFixed(1) : 0;
-                                                                                const wipPercent = totalEngagedCustomers > 0 ? ((totalWip / totalEngagedCustomers) * 100).toFixed(1) : 0;
-                                                                                const frPercent = totalEngagedCustomers > 0 ? ((totalFR / totalEngagedCustomers) * 100).toFixed(1) : 0;
-                                                                                const rejectedPercent = totalEngagedCustomers > 0 ? ((totalRejected / totalEngagedCustomers) * 100).toFixed(1) : 0;
-                                                                                const ncPercent = totalEngagedCustomers > 0 ? ((totalNotConnected / totalEngagedCustomers) * 100).toFixed(1) : 0;
-
-                                                                                const campaignDetails = [];
-                                                                                engagedData.campaigns.forEach(campaign => {
-                                                                                    const totalAllocate = getCampaignTotalAllocate(campaign);
-                                                                                    if (totalAllocate > 0) {
-                                                                                        const completed = campaign.completed_followups || 0;
-                                                                                        const campaignPercent = totalAllocate > 0 ? ((completed / totalAllocate) * 100).toFixed(1) : 0;
-                                                                                        const campaignName = campaign.campaign_name || `Campaign ${campaign.campaign_id}`;
-                                                                                        const shortName = campaignName.length > 30 ? campaignName.substring(0, 27) + '...' : campaignName;
-
-                                                                                        campaignDetails.push(
-                                                                                            `  • ${shortName}: ${completed.toLocaleString()}/${totalAllocate.toLocaleString()} (${campaignPercent}%)`
-                                                                                        );
-                                                                                    }
-                                                                                });
-
-                                                                                return [
-                                                                                    `━━━━━━━━━━━━━━━━━━━━`,
-                                                                                    `Remaining: ${(totalBranchAssets - totalCompleted).toLocaleString()}`,
-                                                                                    `━━━━━━━━━━━━━━━━━━━━`,
-                                                                                    `Attended Assets: ${totalEngagedCustomers.toLocaleString()}`,
-                                                                                    `Completed: ${totalCompleted.toLocaleString()} (${completedPercent}%)`,
-                                                                                    `WIP: ${totalWip.toLocaleString()} (${wipPercent}%)`,
-                                                                                    `Followups: ${totalFR.toLocaleString()} (${frPercent}%)`,
-                                                                                    `Rejected: ${totalRejected.toLocaleString()} (${rejectedPercent}%)`,
-                                                                                    `NC: ${totalNotConnected.toLocaleString()} (${ncPercent}%)`,
-                                                                                    `━━━━━━━━━━━━━━━━━━━━`,
-                                                                                ];
-                                                                            }
-                                                                        }
-                                                                    },
-                                                                    datalabels: {
-                                                                        display: true,
-                                                                        color: '#1f2937',
-                                                                        anchor: 'end',
-                                                                        align: 'right',
-                                                                        offset: 8,
-                                                                        font: {
-                                                                            weight: 'bold',
-                                                                            size: 10
-                                                                        },
-                                                                        formatter: function (value, context) {
-                                                                            if (value === 0) return '';
-                                                                            if (context.dataset.label === 'Completed Assets') {
-                                                                                const branch = sortedBranchPerformance[context.dataIndex];
-                                                                                const engagedData = branchEngagedData[branch.branch];
-                                                                                const remainingData = branchRemainingData[branch.branch];
-
-                                                                                if (!engagedData || !remainingData) return '';
-
-                                                                                const getCampaignTotalAllocate = (campaign) => {
-                                                                                    if (campaign.total_allocate) return campaign.total_allocate;
-                                                                                    const engagedCustomers = campaign.total_customers || 0;
-                                                                                    const campaignRemainingData = remainingData.campaigns.find(
-                                                                                        c => Number(c.campaign_id) === Number(campaign.campaign_id)
-                                                                                    );
-                                                                                    const remainingFromAssets = campaignRemainingData?.remaining_customers || 0;
-                                                                                    return engagedCustomers + remainingFromAssets;
-                                                                                };
-
-                                                                                const campaignsWithAllocate = engagedData.campaigns.filter(campaign => {
-                                                                                    const totalAllocate = getCampaignTotalAllocate(campaign);
-                                                                                    return totalAllocate > 0;
-                                                                                });
-
-                                                                                const totalBranchAssets = campaignsWithAllocate.reduce((sum, campaign) => {
-                                                                                    return sum + getCampaignTotalAllocate(campaign);
-                                                                                }, 0);
-
-                                                                                const totalCompleted = engagedData.completed_followups || 0;
-                                                                                const completedPercentage = totalBranchAssets > 0 ? ((totalCompleted / totalBranchAssets) * 100).toFixed(1) : 0;
-
-                                                                                return `T: ${totalBranchAssets.toLocaleString()} | C: ${totalCompleted.toLocaleString()} (${completedPercentage}%)`;
-                                                                            }
-                                                                            return '';
-                                                                        }
-                                                                    }
-                                                                },
-                                                                scales: {
-                                                                    x: {
-                                                                        stacked: true,
-                                                                        beginAtZero: true,
-                                                                        title: {
-                                                                            display: true,
-                                                                            text: 'Number of Assets',
-                                                                            font: { size: 11 }
-                                                                        },
-                                                                        grid: { color: '#EDF2F7' },
-                                                                        ticks: {
-                                                                            font: { size: 10 },
-                                                                            callback: function (value) {
-                                                                                return value.toLocaleString();
-                                                                            }
-                                                                        }
-                                                                    },
-                                                                    y: {
-                                                                        stacked: true,
-                                                                        title: {
-                                                                            display: true,
-                                                                            text: 'Branches',
-                                                                            font: { size: 11 }
-                                                                        },
-                                                                        grid: { display: false },
-                                                                        ticks: {
-                                                                            font: { size: 10 }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }}
-                                                        />
-                                                    ) : (
-                                                        <div className="space-y-4 py-2">
-                                                            {[90, 72, 80, 58, 66, 45, 52, 34].map((w, i) => (
-                                                                <div key={i} className="flex items-center gap-3">
-                                                                    <div className="h-3 w-24 rounded dash-shimmer shrink-0" style={{ '--shimmer-delay': `${(i % 5) * 0.1}s` }}></div>
-                                                                    <div className="h-4 rounded-r-md dash-shimmer" style={{ width: `${w}%`, '--shimmer-delay': `${(i % 5) * 0.1}s` }}></div>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>
+                                {/* 2nd Card */}
+                                <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3">
+                                    <h3 className="text-[11px] font-semibold text-black uppercase mb-2">
+                                        Total Active Assets
+                                    </h3>
+                                    <div className="flex items-center justify-between">
+                                        <div className="w-[30%] flex justify-center">
+                                            <p className="text-lg font-semibold text-gray-900">
+                                                {summaryStats?.total_assets || 0}
+                                            </p>
+                                        </div>
+                                        <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
+                                        <div className="w-[60%] flex flex-col text-xs font-semibold space-y-1">
+                                            <div className="flex flex-row justify-between items-baseline">
+                                                <span>Attended:</span>
+                                                <span className="font-semibold text-base whitespace-nowrap"><TimeValue>{summaryStats?.attended_assets || 0}</TimeValue></span>
+                                            </div>
+                                            <div className="flex flex-row justify-between items-baseline">
+                                                <span>Remaining:</span>
+                                                <span className="font-semibold text-base whitespace-nowrap"><TimeValue>{summaryStats?.remaining_assets || 0}</TimeValue></span>
                                             </div>
                                         </div>
-                                    );
-                                })() : (
-                                    <BranchProgressSkeleton />
-                                )}
+                                    </div>
+                                </div>
+
+                                {/* 3rd Card */}
+                                <div className="bg-gray-100 rounded-2xl shadow-sm border border-gray-200 p-3">
+                                    <h3 className="text-[11px] font-semibold text-black uppercase mb-2">
+                                        Attended Total Active Assets Last Status
+                                    </h3>
+                                    <div className="flex items-center justify-between">
+                                        <div className="w-[30%] flex justify-center">
+                                            <p className="text-lg font-semibold text-gray-900">
+                                                {summaryStats?.attended_assets || 0}
+                                            </p>
+                                        </div>
+                                        <div className="w-px h-12 bg-gradient-to-b from-transparent via-gray-400 to-transparent"></div>
+                                        <div className="w-[60%] grid grid-cols-3 gap-x-2 gap-y-1 text-xs font-semibold max-sm:grid-cols-2">
+                                            <div className="flex flex-row justify-between items-baseline">
+                                                <span>WIP:</span>
+                                                <span className="font-semibold text-sm whitespace-nowrap"><TimeValue>{summaryStats?.wip_assets || 0}</TimeValue></span>
+                                            </div>
+                                            <div className="flex flex-row justify-between items-baseline">
+                                                <span>F:</span>
+                                                <span className="font-semibold text-sm whitespace-nowrap"><TimeValue>{summaryStats?.rescheduled_assets || 0}</TimeValue></span>
+                                            </div>
+                                            <div className="flex flex-row justify-between items-baseline">
+                                                <span>R:</span>
+                                                <span className="font-semibold text-sm whitespace-nowrap"><TimeValue>{summaryStats?.rejected_assets || 0}</TimeValue></span>
+                                            </div>
+                                            <div className="flex flex-row justify-between items-baseline">
+                                                <span>NC:</span>
+                                                <span className="font-semibold text-sm whitespace-nowrap"><TimeValue>{summaryStats?.not_connected_assets || 0}</TimeValue></span>
+                                            </div>
+                                            <div className="flex flex-row justify-between items-baseline">
+                                                <span>C:</span>
+                                                <span className="font-semibold text-sm whitespace-nowrap"><TimeValue>{summaryStats?.completed_assets || 0}</TimeValue></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Two Graphs Row — skeleton until drive data is ready */}
+                        {!campaignPerformance?.length && (loading || campaignLoading) ? (
+                            <GraphsSkeleton />
+                        ) : (
+                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 mb-3 dash-fade-in">
+                                {/* Campaign-wise Customer Breakdown - 65% width */}
+                                <div className="lg:col-span-8 bg-white rounded-xl shadow-sm p-3 border border-gray-100 max-lg:w-full max-lg:min-w-0">
+                                    <h3 className={`text-base font-semibold mb-2 ${isTimeFiltered ? 'text-yellow-600' : 'text-gray-800'}`}>
+                                        Drive-wise Customer Breakdown
+                                    </h3>
+                                    <div className="flex flex-wrap justify-center items-center gap-x-4 gap-y-1 mb-1">
+                                        {[
+                                            ['Remaining', '#3b82f6'],
+                                            ['WIP', '#eab308'],
+                                            ['Followups', '#a855f7'],
+                                            ['Rejected', '#dc6428'],
+                                            ['NC', '#6b7280'],
+                                            ['Completed', '#22c55e']
+                                        ].map(([label, color]) => (
+                                            <span key={label} className="flex items-center gap-1.5 text-[11px] text-gray-600">
+                                                <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }}></span>
+                                                {label}
+                                            </span>
+                                        ))}
+                                    </div>
+                                    <div className="h-[320px] w-full overflow-x-auto overflow-y-hidden" style={{ scrollbarWidth: 'thin' }}>
+                                        {campaignBreakdownChartData ? (
+                                            <div className="h-full relative" style={{ minWidth: '100%', width: `${(campaignPerformance?.length || 0) * 160}px` }}>
+                                                <Bar data={campaignBreakdownChartData} options={campaignBreakdownChartOptions} />
+                                            </div>
+                                        ) : (
+                                            <div className="h-64 flex items-center justify-center text-gray-500">
+                                                No drive data available
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Asset Status Distribution - 35% width */}
+                                <div className="lg:col-span-4 bg-white rounded-xl shadow-sm p-3 border border-gray-100 flex flex-col max-lg:w-full max-lg:min-w-0">
+                                    <h3 className={`text-base font-semibold mb-4 ${isTimeFiltered ? 'text-yellow-600' : 'text-gray-800'}`}>
+                                        Asset Status Distribution
+                                    </h3>
+                                    <div className="flex-1 flex items-center justify-center">
+                                        <div className="w-full max-w-[280px] mx-auto">
+                                            <Pie data={assetStatusPieData} options={assetStatusPieOptions} />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {branchPerformance && branchPerformance.length > 0 ? (() => {
+                            const sortedBranchPerformance = sortedBranchPerformanceMemo;
+                            return (
+                                <div className="w-full mb-2 dash-fade-in">
+                                    <div className="bg-white rounded-xl shadow-sm p-3 border border-gray-100">
+                                        <div className="mb-2">
+                                            <h3 className="text-base font-semibold text-black flex justify-between items-center">
+                                                <span>Branch-wise Asset Progress</span>
+                                                <span className="font-semibold text-black text-sm">
+                                                    Total Branches: {branchPerformance?.length || 0}
+                                                </span>
+                                            </h3>
+                                            <p className="text-sm text-gray-500 mt-1">
+                                                Total Assets vs Completed Assets
+                                            </p>
+                                        </div>
+
+                                        <div className="h-[600px] w-full overflow-y-auto">
+                                            {sortedBranchPerformance.length > 0 ? (
+                                                <Bar
+                                                    data={{
+                                                        labels: sortedBranchPerformance.map(branch => {
+                                                            const branchName = branchNameMap[branch.branch] || branch.branch;
+                                                            return branchName.length > 25
+                                                                ? branchName.substring(0, 22) + '...'
+                                                                : branchName;
+                                                        }),
+                                                        datasets: [
+                                                            {
+                                                                label: 'Total Assets',
+                                                                data: sortedBranchPerformance.map(branch => {
+                                                                    const engagedData = branchEngagedData[branch.branch];
+                                                                    const remainingData = branchRemainingData[branch.branch];
+
+                                                                    if (!engagedData || !remainingData || !engagedData.campaigns || !remainingData.campaigns) return 0;
+
+                                                                    const getCampaignTotalAllocate = (campaign) => {
+                                                                        if (campaign.total_allocate) return campaign.total_allocate;
+                                                                        const engagedCustomers = campaign.total_customers || 0;
+                                                                        const campaignRemainingData = remainingData.campaigns.find(
+                                                                            c => Number(c.campaign_id) === Number(campaign.campaign_id)
+                                                                        );
+                                                                        const remainingFromAssets = campaignRemainingData?.remaining_customers || 0;
+                                                                        return engagedCustomers + remainingFromAssets;
+                                                                    };
+
+                                                                    const campaignsWithAllocate = engagedData.campaigns.filter(campaign => {
+                                                                        const totalAllocate = getCampaignTotalAllocate(campaign);
+                                                                        return totalAllocate > 0;
+                                                                    });
+
+                                                                    const totalBranchAssets = campaignsWithAllocate.reduce((sum, campaign) => {
+                                                                        return sum + getCampaignTotalAllocate(campaign);
+                                                                    }, 0);
+
+                                                                    return totalBranchAssets;
+                                                                }),
+                                                                backgroundColor: 'rgba(59, 130, 246, 0.85)',
+                                                                borderColor: '#3b82f6',
+                                                                borderWidth: 1,
+                                                                borderRadius: 4,
+                                                                barPercentage: 0.7,
+                                                                categoryPercentage: 0.8
+                                                            },
+                                                            {
+                                                                label: 'Completed Assets',
+                                                                data: sortedBranchPerformance.map(branch => {
+                                                                    const engagedData = branchEngagedData[branch.branch];
+                                                                    return engagedData?.completed_followups || 0;
+                                                                }),
+                                                                backgroundColor: 'rgba(34, 197, 94, 0.85)',
+                                                                borderColor: '#16a34a',
+                                                                borderWidth: 1,
+                                                                borderRadius: 4,
+                                                                barPercentage: 0.7,
+                                                                categoryPercentage: 0.8
+                                                            }
+                                                        ]
+                                                    }}
+                                                    options={{
+                                                        indexAxis: 'y',
+                                                        responsive: true,
+                                                        maintainAspectRatio: false,
+                                                        layout: {
+                                                            padding: {
+                                                                left: 10,
+                                                                right: 120,
+                                                                top: 10,
+                                                                bottom: 10
+                                                            }
+                                                        },
+                                                        plugins: {
+                                                            legend: {
+                                                                position: 'top',
+                                                                labels: {
+                                                                    usePointStyle: true,
+                                                                    boxWidth: 12,
+                                                                    font: { size: 11 },
+                                                                    padding: 10
+                                                                }
+                                                            },
+                                                            tooltip: {
+                                                                backgroundColor: 'rgba(0, 0, 0, 0.95)',
+                                                                titleColor: '#ffffff',
+                                                                bodyColor: '#e5e7eb',
+                                                                borderColor: '#374151',
+                                                                borderWidth: 1,
+                                                                padding: 12,
+                                                                callbacks: {
+                                                                    title: function (tooltipItems) {
+                                                                        const branch = sortedBranchPerformance[tooltipItems[0].dataIndex];
+                                                                        const branchName = branchNameMap[branch.branch] || branch.branch;
+                                                                        return branchName;
+                                                                    },
+                                                                    label: function (context) {
+                                                                        const label = context.dataset.label || '';
+                                                                        const value = context.raw || 0;
+                                                                        return `${label}: ${value.toLocaleString()}`;
+                                                                    },
+                                                                    afterBody: function (tooltipItems) {
+                                                                        const branch = sortedBranchPerformance[tooltipItems[0].dataIndex];
+                                                                        const engagedData = branchEngagedData[branch.branch];
+                                                                        const remainingData = branchRemainingData[branch.branch];
+
+                                                                        if (!engagedData || !remainingData) return [];
+
+                                                                        const getCampaignTotalAllocate = (campaign) => {
+                                                                            if (campaign.total_allocate) return campaign.total_allocate;
+                                                                            const engagedCustomers = campaign.total_customers || 0;
+                                                                            const campaignRemainingData = remainingData.campaigns.find(
+                                                                                c => Number(c.campaign_id) === Number(campaign.campaign_id)
+                                                                            );
+                                                                            const remainingFromAssets = campaignRemainingData?.remaining_customers || 0;
+                                                                            return engagedCustomers + remainingFromAssets;
+                                                                        };
+
+                                                                        const campaignsWithAllocate = engagedData.campaigns.filter(campaign => {
+                                                                            const totalAllocate = getCampaignTotalAllocate(campaign);
+                                                                            return totalAllocate > 0;
+                                                                        });
+
+                                                                        const totalBranchAssets = campaignsWithAllocate.reduce((sum, campaign) => {
+                                                                            return sum + getCampaignTotalAllocate(campaign);
+                                                                        }, 0);
+
+                                                                        const totalCompleted = engagedData.completed_followups || 0;
+                                                                        const totalWip = engagedData.wip_followups || 0;
+                                                                        const totalRejected = engagedData.rejected_followups || 0;
+                                                                        const totalNotConnected = engagedData.not_connected_followups || 0;
+                                                                        const totalEngagedCustomers = engagedData.total_customers || 0;
+                                                                        const totalFR = totalEngagedCustomers - (totalWip + totalCompleted + totalRejected + totalNotConnected);
+
+                                                                        const completedPercent = totalBranchAssets > 0 ? ((totalCompleted / totalBranchAssets) * 100).toFixed(1) : 0;
+                                                                        const wipPercent = totalEngagedCustomers > 0 ? ((totalWip / totalEngagedCustomers) * 100).toFixed(1) : 0;
+                                                                        const frPercent = totalEngagedCustomers > 0 ? ((totalFR / totalEngagedCustomers) * 100).toFixed(1) : 0;
+                                                                        const rejectedPercent = totalEngagedCustomers > 0 ? ((totalRejected / totalEngagedCustomers) * 100).toFixed(1) : 0;
+                                                                        const ncPercent = totalEngagedCustomers > 0 ? ((totalNotConnected / totalEngagedCustomers) * 100).toFixed(1) : 0;
+
+                                                                        const campaignDetails = [];
+                                                                        engagedData.campaigns.forEach(campaign => {
+                                                                            const totalAllocate = getCampaignTotalAllocate(campaign);
+                                                                            if (totalAllocate > 0) {
+                                                                                const completed = campaign.completed_followups || 0;
+                                                                                const campaignPercent = totalAllocate > 0 ? ((completed / totalAllocate) * 100).toFixed(1) : 0;
+                                                                                const campaignName = campaign.campaign_name || `Campaign ${campaign.campaign_id}`;
+                                                                                const shortName = campaignName.length > 30 ? campaignName.substring(0, 27) + '...' : campaignName;
+
+                                                                                campaignDetails.push(
+                                                                                    `  • ${shortName}: ${completed.toLocaleString()}/${totalAllocate.toLocaleString()} (${campaignPercent}%)`
+                                                                                );
+                                                                            }
+                                                                        });
+
+                                                                        return [
+                                                                            `━━━━━━━━━━━━━━━━━━━━`,
+                                                                            `Remaining: ${(totalBranchAssets - totalCompleted).toLocaleString()}`,
+                                                                            `━━━━━━━━━━━━━━━━━━━━`,
+                                                                            `Attended Assets: ${totalEngagedCustomers.toLocaleString()}`,
+                                                                            `Completed: ${totalCompleted.toLocaleString()} (${completedPercent}%)`,
+                                                                            `WIP: ${totalWip.toLocaleString()} (${wipPercent}%)`,
+                                                                            `Followups: ${totalFR.toLocaleString()} (${frPercent}%)`,
+                                                                            `Rejected: ${totalRejected.toLocaleString()} (${rejectedPercent}%)`,
+                                                                            `NC: ${totalNotConnected.toLocaleString()} (${ncPercent}%)`,
+                                                                            `━━━━━━━━━━━━━━━━━━━━`,
+                                                                        ];
+                                                                    }
+                                                                }
+                                                            },
+                                                            datalabels: {
+                                                                display: true,
+                                                                color: '#1f2937',
+                                                                anchor: 'end',
+                                                                align: 'right',
+                                                                offset: 8,
+                                                                font: {
+                                                                    weight: 'bold',
+                                                                    size: 10
+                                                                },
+                                                                formatter: function (value, context) {
+                                                                    if (value === 0) return '';
+                                                                    if (context.dataset.label === 'Completed Assets') {
+                                                                        const branch = sortedBranchPerformance[context.dataIndex];
+                                                                        const engagedData = branchEngagedData[branch.branch];
+                                                                        const remainingData = branchRemainingData[branch.branch];
+
+                                                                        if (!engagedData || !remainingData) return '';
+
+                                                                        const getCampaignTotalAllocate = (campaign) => {
+                                                                            if (campaign.total_allocate) return campaign.total_allocate;
+                                                                            const engagedCustomers = campaign.total_customers || 0;
+                                                                            const campaignRemainingData = remainingData.campaigns.find(
+                                                                                c => Number(c.campaign_id) === Number(campaign.campaign_id)
+                                                                            );
+                                                                            const remainingFromAssets = campaignRemainingData?.remaining_customers || 0;
+                                                                            return engagedCustomers + remainingFromAssets;
+                                                                        };
+
+                                                                        const campaignsWithAllocate = engagedData.campaigns.filter(campaign => {
+                                                                            const totalAllocate = getCampaignTotalAllocate(campaign);
+                                                                            return totalAllocate > 0;
+                                                                        });
+
+                                                                        const totalBranchAssets = campaignsWithAllocate.reduce((sum, campaign) => {
+                                                                            return sum + getCampaignTotalAllocate(campaign);
+                                                                        }, 0);
+
+                                                                        const totalCompleted = engagedData.completed_followups || 0;
+                                                                        const completedPercentage = totalBranchAssets > 0 ? ((totalCompleted / totalBranchAssets) * 100).toFixed(1) : 0;
+
+                                                                        return `T: ${totalBranchAssets.toLocaleString()} | C: ${totalCompleted.toLocaleString()} (${completedPercentage}%)`;
+                                                                    }
+                                                                    return '';
+                                                                }
+                                                            }
+                                                        },
+                                                        scales: {
+                                                            x: {
+                                                                stacked: true,
+                                                                beginAtZero: true,
+                                                                title: {
+                                                                    display: true,
+                                                                    text: 'Number of Assets',
+                                                                    font: { size: 11 }
+                                                                },
+                                                                grid: { color: '#EDF2F7' },
+                                                                ticks: {
+                                                                    font: { size: 10 },
+                                                                    callback: function (value) {
+                                                                        return value.toLocaleString();
+                                                                    }
+                                                                }
+                                                            },
+                                                            y: {
+                                                                stacked: true,
+                                                                title: {
+                                                                    display: true,
+                                                                    text: 'Branches',
+                                                                    font: { size: 11 }
+                                                                },
+                                                                grid: { display: false },
+                                                                ticks: {
+                                                                    font: { size: 10 }
+                                                                }
+                                                            }
+                                                        }
+                                                    }}
+                                                />
+                                            ) : (
+                                                <div className="space-y-4 py-2">
+                                                    {[90, 72, 80, 58, 66, 45, 52, 34].map((w, i) => (
+                                                        <div key={i} className="flex items-center gap-3">
+                                                            <div className="h-3 w-24 rounded dash-shimmer shrink-0" style={{ '--shimmer-delay': `${(i % 5) * 0.1}s` }}></div>
+                                                            <div className="h-4 rounded-r-md dash-shimmer" style={{ width: `${w}%`, '--shimmer-delay': `${(i % 5) * 0.1}s` }}></div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })() : (
+                            <BranchProgressSkeleton />
+                        )}
                     </div>
                 )}
 
@@ -4683,229 +4687,229 @@ const getPerformanceTitle = () => {
                                     </div>
                                 </div>
                                 <div className="relative">
-                                <TopScrollbar scrollRef={branchEmployeesTableRef} watch={branchEmployees} />
-                                <div ref={branchEmployeesTableRef} className="overflow-x-auto border border-gray-300 rounded">
-                                    <table className="min-w-full border-collapse">
-                                        <thead className="bg-gray-50">
-                                            <tr>
-                                                <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 w-10 whitespace-nowrap">Sr. No.</th>
-                                                <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 sticky left-0 bg-gray-50 z-10 emp-sticky-col min-w-[140px] max-w-[140px]">Employee</th>
-                                                <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 sticky left-[140px] bg-gray-50 z-10 emp-sticky-col min-w-[130px] max-w-[130px]">Branch</th>
-                                                <th
-                                                    onClick={() => handleBranchEmployeeTableSort('totalFollowups')}
-                                                    className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
-                                                >
-                                                    <div className="flex items-center justify-center gap-1 whitespace-nowrap">
-                                                        <span className="leading-tight">Total all Calls &<br />follow-ups</span>
-                                                        {renderBranchEmployeeSortIcon('totalFollowups')}
-                                                    </div>
-                                                </th>
-                                                <th
-                                                    onClick={() => handleBranchEmployeeTableSort('wipCount')}
-                                                    className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
-                                                >
-                                                    <div className="flex items-center justify-center gap-1">
-                                                        WIP
-                                                        {renderBranchEmployeeSortIcon('wipCount')}
-                                                    </div>
-                                                </th>
-                                                <th
-                                                    onClick={() => handleBranchEmployeeTableSort('rescheduledCount')}
-                                                    className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
-                                                >
-                                                    <div className="flex items-center justify-center gap-1">
-                                                        Followups
-                                                        {renderBranchEmployeeSortIcon('rescheduledCount')}
-                                                    </div>
-                                                </th>
-                                                <th
-                                                    onClick={() => handleBranchEmployeeTableSort('rejectedCount')}
-                                                    className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
-                                                >
-                                                    <div className="flex items-center justify-center gap-1">
-                                                        Rejected
-                                                        {renderBranchEmployeeSortIcon('rejectedCount')}
-                                                    </div>
-                                                </th>
-                                                <th
-                                                    onClick={() => handleBranchEmployeeTableSort('notConnectedCount')}
-                                                    className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
-                                                >
-                                                    <div className="flex items-center justify-center gap-1">
-                                                        NC
-                                                        {renderBranchEmployeeSortIcon('notConnectedCount')}
-                                                    </div>
-                                                </th>
-                                                <th
-                                                    onClick={() => handleBranchEmployeeTableSort('completedCount')}
-                                                    className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
-                                                >
-                                                    <div className="flex items-center justify-center gap-1">
-                                                        Completed
-                                                        {renderBranchEmployeeSortIcon('completedCount')}
-                                                    </div>
-                                                </th>
-                                                <th
-                                                    onClick={() => handleBranchEmployeeTableSort('totalCsp')}
-                                                    title="Branch-wide CSP instances (same as the employee's Total CSP box)"
-                                                    className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
-                                                >
-                                                    <div className="flex items-center justify-center gap-1 whitespace-nowrap">
-                                                        <span className="leading-tight">Total<br />CSP</span>
-                                                        {renderBranchEmployeeSortIcon('totalCsp')}
-                                                    </div>
-                                                </th>
-                                                <th
-                                                    onClick={() => handleBranchEmployeeTableSort('openCsp')}
-                                                    title="Branch-wide open SR CSP instances (same as the employee's Open CSP box)"
-                                                    className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
-                                                >
-                                                    <div className="flex items-center justify-center gap-1 whitespace-nowrap">
-                                                        <span className="leading-tight">Open<br />CSP</span>
-                                                        {renderBranchEmployeeSortIcon('openCsp')}
-                                                    </div>
-                                                </th>
-                                                <th
-                                                    onClick={() => handleBranchEmployeeTableSort('cspQuotationRequired')}
-                                                    title="This employee's CSP follow-ups where a quotation is still required"
-                                                    className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
-                                                >
-                                                    <div className="flex items-center justify-center gap-1 whitespace-nowrap">
-                                                        <span className="leading-tight">CSP Quot.<br />Required</span>
-                                                        {renderBranchEmployeeSortIcon('cspQuotationRequired')}
-                                                    </div>
-                                                </th>
-                                                <th
-                                                    onClick={() => handleBranchEmployeeTableSort('cspQuotationSent')}
-                                                    title="This employee's CSP follow-ups with a quotation sent (not yet completed/rejected)"
-                                                    className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
-                                                >
-                                                    <div className="flex items-center justify-center gap-1 whitespace-nowrap">
-                                                        <span className="leading-tight">CSP Quot.<br />Sent</span>
-                                                        {renderBranchEmployeeSortIcon('cspQuotationSent')}
-                                                    </div>
-                                                </th>
-                                                <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 whitespace-nowrap">
-                                                    <span className="leading-tight">Drive<br />Progress</span>
-                                                </th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="bg-white">
-                                            {getSortedBranchEmployeesList().map((employeeRecord, recordIndex) => {
-                                                const totalFollowups = employeeRecord.total_followups || 0;
-                                                const completedFollowups = employeeRecord.completed_count || 0;
-                                                const empBranchCsp = branchCspCounts[employeeRecord.branch] || {};
-                                                const empUserCsp = userCspCounts[employeeRecord.user_id] || {};
-                                                // '…' only while the batch is still loading; 0 afterwards
-                                                const cspCell = (val) => (cspCountsLoading && val === undefined) ? '…' : (val || 0);
+                                    <TopScrollbar scrollRef={branchEmployeesTableRef} watch={branchEmployees} />
+                                    <div ref={branchEmployeesTableRef} className="overflow-x-auto border border-gray-300 rounded">
+                                        <table className="min-w-full border-collapse">
+                                            <thead className="bg-gray-50">
+                                                <tr>
+                                                    <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 w-10 whitespace-nowrap">Sr. No.</th>
+                                                    <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border-y border-gray-300 sticky left-0 bg-gray-50 z-10 emp-sticky-col min-w-[140px] max-w-[140px]">Employee</th>
+                                                    <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border-y border-gray-300 sticky left-[140px] bg-gray-50 z-10 emp-sticky-col min-w-[130px] max-w-[130px]">Branch</th>
+                                                    <th
+                                                        onClick={() => handleBranchEmployeeTableSort('totalFollowups')}
+                                                        className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                                    >
+                                                        <div className="flex items-center justify-center gap-1 whitespace-nowrap">
+                                                            <span className="leading-tight">Total all Calls &<br />follow-ups</span>
+                                                            {renderBranchEmployeeSortIcon('totalFollowups')}
+                                                        </div>
+                                                    </th>
+                                                    <th
+                                                        onClick={() => handleBranchEmployeeTableSort('wipCount')}
+                                                        className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                                    >
+                                                        <div className="flex items-center justify-center gap-1">
+                                                            WIP
+                                                            {renderBranchEmployeeSortIcon('wipCount')}
+                                                        </div>
+                                                    </th>
+                                                    <th
+                                                        onClick={() => handleBranchEmployeeTableSort('rescheduledCount')}
+                                                        className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                                    >
+                                                        <div className="flex items-center justify-center gap-1">
+                                                            Followups
+                                                            {renderBranchEmployeeSortIcon('rescheduledCount')}
+                                                        </div>
+                                                    </th>
+                                                    <th
+                                                        onClick={() => handleBranchEmployeeTableSort('rejectedCount')}
+                                                        className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                                    >
+                                                        <div className="flex items-center justify-center gap-1">
+                                                            Rejected
+                                                            {renderBranchEmployeeSortIcon('rejectedCount')}
+                                                        </div>
+                                                    </th>
+                                                    <th
+                                                        onClick={() => handleBranchEmployeeTableSort('notConnectedCount')}
+                                                        className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                                    >
+                                                        <div className="flex items-center justify-center gap-1">
+                                                            NC
+                                                            {renderBranchEmployeeSortIcon('notConnectedCount')}
+                                                        </div>
+                                                    </th>
+                                                    <th
+                                                        onClick={() => handleBranchEmployeeTableSort('completedCount')}
+                                                        className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                                    >
+                                                        <div className="flex items-center justify-center gap-1">
+                                                            Completed
+                                                            {renderBranchEmployeeSortIcon('completedCount')}
+                                                        </div>
+                                                    </th>
+                                                    <th
+                                                        onClick={() => handleBranchEmployeeTableSort('totalCsp')}
+                                                        title="Branch-wide CSP instances (same as the employee's Total CSP box)"
+                                                        className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                                    >
+                                                        <div className="flex items-center justify-center gap-1 whitespace-nowrap">
+                                                            <span className="leading-tight">Total<br />CSP</span>
+                                                            {renderBranchEmployeeSortIcon('totalCsp')}
+                                                        </div>
+                                                    </th>
+                                                    <th
+                                                        onClick={() => handleBranchEmployeeTableSort('openCsp')}
+                                                        title="Branch-wide open SR CSP instances (same as the employee's Open CSP box)"
+                                                        className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                                    >
+                                                        <div className="flex items-center justify-center gap-1 whitespace-nowrap">
+                                                            <span className="leading-tight">Open<br />CSP</span>
+                                                            {renderBranchEmployeeSortIcon('openCsp')}
+                                                        </div>
+                                                    </th>
+                                                    <th
+                                                        onClick={() => handleBranchEmployeeTableSort('cspQuotationRequired')}
+                                                        title="This employee's CSP follow-ups where a quotation is still required"
+                                                        className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                                    >
+                                                        <div className="flex items-center justify-center gap-1 whitespace-nowrap">
+                                                            <span className="leading-tight">CSP Quot.<br />Required</span>
+                                                            {renderBranchEmployeeSortIcon('cspQuotationRequired')}
+                                                        </div>
+                                                    </th>
+                                                    <th
+                                                        onClick={() => handleBranchEmployeeTableSort('cspQuotationSent')}
+                                                        title="This employee's CSP follow-ups with a quotation sent (not yet completed/rejected)"
+                                                        className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border border-gray-300 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                                    >
+                                                        <div className="flex items-center justify-center gap-1 whitespace-nowrap">
+                                                            <span className="leading-tight">CSP Quot.<br />Sent</span>
+                                                            {renderBranchEmployeeSortIcon('cspQuotationSent')}
+                                                        </div>
+                                                    </th>
+                                                    <th className="px-3 py-2 text-center text-[11px] font-medium text-black uppercase tracking-wide border-y border-gray-300 whitespace-nowrap sticky right-0 bg-gray-50 z-10 emp-sticky-col-right">
+                                                        <span className="leading-tight">Drive<br />Progress</span>
+                                                    </th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="bg-white">
+                                                {getSortedBranchEmployeesList().map((employeeRecord, recordIndex) => {
+                                                    const totalFollowups = employeeRecord.total_followups || 0;
+                                                    const completedFollowups = employeeRecord.completed_count || 0;
+                                                    const empBranchCsp = branchCspCounts[employeeRecord.branch] || {};
+                                                    const empUserCsp = userCspCounts[employeeRecord.user_id] || {};
+                                                    // '…' only while the batch is still loading; 0 afterwards
+                                                    const cspCell = (val) => (cspCountsLoading && val === undefined) ? '…' : (val || 0);
 
-                                                return (
-                                                    <tr key={`${employeeRecord.user_id}_${recordIndex}`} className={recordIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300">{recordIndex + 1}</td>
-                                                        <td className="px-3 py-2 text-center border border-gray-300 sticky left-0 bg-inherit z-10 emp-sticky-col min-w-[140px] max-w-[140px]">
-                                                            <button
-                                                                onClick={() => handleEmployeeNameClick(employeeRecord)}
-                                                                className="text-xs font-medium text-[#2f3192] underline hover:font-bold focus:outline-none transition-colors"
-                                                            >
-                                                                {employeeRecord.user_name}
-                                                            </button>
-                                                        </td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 sticky left-[140px] bg-inherit z-10 emp-sticky-col min-w-[130px] max-w-[130px]">{getBranchDisplayName(employeeRecord.branch)}</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{totalFollowups}</TimeValue></td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.wip_count || 0}</TimeValue></td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.rescheduled_count || 0}</TimeValue></td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.rejected_count || 0}</TimeValue></td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.not_connected_count || 0}</TimeValue></td>
-                                                        <td className="px-3 py-2 text-xs font-medium text-center border border-gray-300 text-black"><TimeValue>{completedFollowups}</TimeValue></td>
-                                                        <td className="px-3 py-2 text-center border border-gray-300">
-                                                            <button
-                                                                onClick={() => handleEmployeeCspCellClick(employeeRecord, 'csp')}
-                                                                className="text-xs font-medium text-[#2f3192] underline hover:font-bold focus:outline-none transition-colors"
-                                                                title="Click to view CSP customers & due dates"
-                                                            >
-                                                                {cspCell(empBranchCsp.total_csp)}
-                                                            </button>
-                                                        </td>
-                                                        <td className="px-3 py-2 text-center border border-gray-300">
-                                                            <button
-                                                                onClick={() => handleEmployeeCspCellClick(employeeRecord, 'openCsp')}
-                                                                className="text-xs font-medium text-[#2f3192] underline hover:font-bold focus:outline-none transition-colors"
-                                                                title="Click to view open SR CSP records"
-                                                            >
-                                                                {cspCell(empBranchCsp.open_csp)}
-                                                            </button>
-                                                        </td>
-                                                        <td className="px-3 py-2 text-center border border-gray-300">
-                                                            <button
-                                                                onClick={() => handleEmployeeCspCellClick(employeeRecord, 'cspQuotationRequired')}
-                                                                className="text-xs font-medium text-[#2f3192] underline hover:font-bold focus:outline-none transition-colors"
-                                                                title="Click to view CSP quotation follow-ups"
-                                                            >
-                                                                {cspCell(empUserCsp.csp_quotation_required)}
-                                                            </button>
-                                                        </td>
-                                                        <td className="px-3 py-2 text-center border border-gray-300">
-                                                            <button
-                                                                onClick={() => handleEmployeeCspCellClick(employeeRecord, 'cspQuotationSent')}
-                                                                className="text-xs font-medium text-[#2f3192] underline hover:font-bold focus:outline-none transition-colors"
-                                                                title="Click to view CSP quotation sent customers"
-                                                            >
-                                                                {cspCell(empUserCsp.csp_quotation_sent)}
-                                                            </button>
-                                                        </td>
-                                                        <td className="px-3 py-2 text-center border border-gray-300">
-                                                            <button
-                                                                onClick={() => handleCampaignProgressClick(employeeRecord)}
-                                                                className="px-2 py-1 text-[10px] font-semibold text-white rounded-lg hover:opacity-90 transition-opacity whitespace-nowrap"
-                                                                style={{ backgroundColor: '#2f3192' }}
-                                                            >
-                                                                View
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
+                                                    return (
+                                                        <tr key={`${employeeRecord.user_id}_${recordIndex}`} className={recordIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300">{recordIndex + 1}</td>
+                                                            <td className="px-3 py-2 text-center border-y border-gray-300 sticky left-0 bg-inherit z-10 emp-sticky-col min-w-[140px] max-w-[140px]">
+                                                                <button
+                                                                    onClick={() => handleEmployeeNameClick(employeeRecord)}
+                                                                    className="text-xs font-medium text-[#2f3192] underline hover:font-bold focus:outline-none transition-colors"
+                                                                >
+                                                                    {employeeRecord.user_name}
+                                                                </button>
+                                                            </td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border-y border-gray-300 sticky left-[140px] bg-inherit z-10 emp-sticky-col min-w-[130px] max-w-[130px]">{getBranchDisplayName(employeeRecord.branch)}</td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{totalFollowups}</TimeValue></td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.wip_count || 0}</TimeValue></td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.rescheduled_count || 0}</TimeValue></td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.rejected_count || 0}</TimeValue></td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300"><TimeValue>{employeeRecord.not_connected_count || 0}</TimeValue></td>
+                                                            <td className="px-3 py-2 text-xs font-medium text-center border border-gray-300 text-black"><TimeValue>{completedFollowups}</TimeValue></td>
+                                                            <td className="px-3 py-2 text-center border border-gray-300">
+                                                                <button
+                                                                    onClick={() => handleEmployeeCspCellClick(employeeRecord, 'csp')}
+                                                                    className="text-xs font-medium text-[#2f3192] underline hover:font-bold focus:outline-none transition-colors"
+                                                                    title="Click to view CSP customers & due dates"
+                                                                >
+                                                                    {cspCell(empBranchCsp.total_csp)}
+                                                                </button>
+                                                            </td>
+                                                            <td className="px-3 py-2 text-center border border-gray-300">
+                                                                <button
+                                                                    onClick={() => handleEmployeeCspCellClick(employeeRecord, 'openCsp')}
+                                                                    className="text-xs font-medium text-[#2f3192] underline hover:font-bold focus:outline-none transition-colors"
+                                                                    title="Click to view open SR CSP records"
+                                                                >
+                                                                    {cspCell(empBranchCsp.open_csp)}
+                                                                </button>
+                                                            </td>
+                                                            <td className="px-3 py-2 text-center border border-gray-300">
+                                                                <button
+                                                                    onClick={() => handleEmployeeCspCellClick(employeeRecord, 'cspQuotationRequired')}
+                                                                    className="text-xs font-medium text-[#2f3192] underline hover:font-bold focus:outline-none transition-colors"
+                                                                    title="Click to view CSP quotation follow-ups"
+                                                                >
+                                                                    {cspCell(empUserCsp.csp_quotation_required)}
+                                                                </button>
+                                                            </td>
+                                                            <td className="px-3 py-2 text-center border border-gray-300">
+                                                                <button
+                                                                    onClick={() => handleEmployeeCspCellClick(employeeRecord, 'cspQuotationSent')}
+                                                                    className="text-xs font-medium text-[#2f3192] underline hover:font-bold focus:outline-none transition-colors"
+                                                                    title="Click to view CSP quotation sent customers"
+                                                                >
+                                                                    {cspCell(empUserCsp.csp_quotation_sent)}
+                                                                </button>
+                                                            </td>
+                                                            <td className="px-3 py-2 text-center border-y border-gray-300 sticky right-0 bg-inherit z-10 emp-sticky-col-right">
+                                                                <button
+                                                                    onClick={() => handleCampaignProgressClick(employeeRecord)}
+                                                                    className="px-2 py-1 text-[10px] font-semibold text-white rounded-lg hover:opacity-90 transition-opacity whitespace-nowrap"
+                                                                    style={{ backgroundColor: '#2f3192' }}
+                                                                >
+                                                                    View
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
 
-                                            {/* TOTAL ROW */}
-                                            {getSortedBranchEmployeesList().length > 0 && (() => {
-                                                const totals = calculateSelectedEmployeesTotals();
-                                                const employeesShown = getSortedBranchEmployeesList();
-                                                // Branch-level counts are the same for every employee of a
-                                                // branch — sum each branch ONCE, not once per employee row.
-                                                let totalCsp = 0, totalOpenCsp = 0;
-                                                for (const b of new Set(employeesShown.map(e => e.branch))) {
-                                                    totalCsp += branchCspCounts[b]?.total_csp || 0;
-                                                    totalOpenCsp += branchCspCounts[b]?.open_csp || 0;
-                                                }
-                                                let totalQuotReq = 0, totalQuotSent = 0;
-                                                for (const e of employeesShown) {
-                                                    totalQuotReq += userCspCounts[e.user_id]?.csp_quotation_required || 0;
-                                                    totalQuotSent += userCspCounts[e.user_id]?.csp_quotation_sent || 0;
-                                                }
-                                                return (
-                                                    <tr className="bg-gray-100 font-bold border-t-2 border-gray-400">
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">TOTAL</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold sticky left-0 bg-inherit z-10 emp-sticky-col min-w-[140px] max-w-[140px]">
-                                                            {totals.totalEmployees} Employees
-                                                        </td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold sticky left-[140px] bg-inherit z-10 emp-sticky-col min-w-[130px] max-w-[130px]">-</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalFollowups.toLocaleString()}</TimeValue></td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalWip.toLocaleString()}</TimeValue></td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalRescheduled.toLocaleString()}</TimeValue></td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalRejected.toLocaleString()}</TimeValue></td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalNotConnected.toLocaleString()}</TimeValue></td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalCompleted.toLocaleString()}</TimeValue></td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{cspCountsLoading ? '…' : totalCsp.toLocaleString()}</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{cspCountsLoading ? '…' : totalOpenCsp.toLocaleString()}</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{cspCountsLoading ? '…' : totalQuotReq.toLocaleString()}</td>
-                                                        <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{cspCountsLoading ? '…' : totalQuotSent.toLocaleString()}</td>
-                                                        <td className="px-3 py-2 text-center border border-gray-300">—</td>
-                                                    </tr>
-                                                );
-                                            })()}
-                                        </tbody>
-                                    </table>
-                                </div>
+                                                {/* TOTAL ROW */}
+                                                {getSortedBranchEmployeesList().length > 0 && (() => {
+                                                    const totals = calculateSelectedEmployeesTotals();
+                                                    const employeesShown = getSortedBranchEmployeesList();
+                                                    // Branch-level counts are the same for every employee of a
+                                                    // branch — sum each branch ONCE, not once per employee row.
+                                                    let totalCsp = 0, totalOpenCsp = 0;
+                                                    for (const b of new Set(employeesShown.map(e => e.branch))) {
+                                                        totalCsp += branchCspCounts[b]?.total_csp || 0;
+                                                        totalOpenCsp += branchCspCounts[b]?.open_csp || 0;
+                                                    }
+                                                    let totalQuotReq = 0, totalQuotSent = 0;
+                                                    for (const e of employeesShown) {
+                                                        totalQuotReq += userCspCounts[e.user_id]?.csp_quotation_required || 0;
+                                                        totalQuotSent += userCspCounts[e.user_id]?.csp_quotation_sent || 0;
+                                                    }
+                                                    return (
+                                                        <tr className="bg-gray-100 font-bold border-t-2 border-gray-400">
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">TOTAL</td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border-y border-gray-300 font-bold sticky left-0 bg-inherit z-10 emp-sticky-col min-w-[140px] max-w-[140px]">
+                                                                {totals.totalEmployees} Employees
+                                                            </td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border-y border-gray-300 font-bold sticky left-[140px] bg-inherit z-10 emp-sticky-col min-w-[130px] max-w-[130px]">-</td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalFollowups.toLocaleString()}</TimeValue></td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalWip.toLocaleString()}</TimeValue></td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalRescheduled.toLocaleString()}</TimeValue></td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalRejected.toLocaleString()}</TimeValue></td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalNotConnected.toLocaleString()}</TimeValue></td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold"><TimeValue>{totals.totalCompleted.toLocaleString()}</TimeValue></td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{cspCountsLoading ? '…' : totalCsp.toLocaleString()}</td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{cspCountsLoading ? '…' : totalOpenCsp.toLocaleString()}</td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{cspCountsLoading ? '…' : totalQuotReq.toLocaleString()}</td>
+                                                            <td className="px-3 py-2 text-xs text-black text-center border border-gray-300 font-bold">{cspCountsLoading ? '…' : totalQuotSent.toLocaleString()}</td>
+                                                            <td className="px-3 py-2 text-center border-y border-gray-300 sticky right-0 bg-gray-100 z-10 emp-sticky-col-right">—</td>
+                                                        </tr>
+                                                    );
+                                                })()}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
                             </div>
                         ) : !branchEmployeesLoading && selectedBranch && branchEmployees.length === 0 ? (
@@ -6500,111 +6504,111 @@ const getPerformanceTitle = () => {
             </div>
 
             <Suspense fallback={null}>
-            <CampaignCustomersFollowupModal
-                isOpen={showCustomersModal || showAllCampaignReport || showAllDataReport}
-                onClose={() => {
-                    setShowCustomersModal(false);
-                    setShowAllCampaignReport(false);
-                    setShowAllDataReport(false);
-                    setSelectedCampaign(null);
-                }}
-                campaign={(showAllCampaignReport || showAllDataReport) ? null : selectedCampaign}
-                apiBaseUrl={API_BASE_URL}
-                allReportCampaigns={(showAllCampaignReport || showAllDataReport) ? getSortedCampaignPerformance() : null}
-                includeNonDrive={showAllDataReport}
-            />
+                <CampaignCustomersFollowupModal
+                    isOpen={showCustomersModal || showAllCampaignReport || showAllDataReport}
+                    onClose={() => {
+                        setShowCustomersModal(false);
+                        setShowAllCampaignReport(false);
+                        setShowAllDataReport(false);
+                        setSelectedCampaign(null);
+                    }}
+                    campaign={(showAllCampaignReport || showAllDataReport) ? null : selectedCampaign}
+                    apiBaseUrl={API_BASE_URL}
+                    allReportCampaigns={(showAllCampaignReport || showAllDataReport) ? getSortedCampaignPerformance() : null}
+                    includeNonDrive={showAllDataReport}
+                />
 
-            <EmployeePerformanceModal
-                isOpen={showEmployeeModal}
-                onClose={() => {
-                    setShowEmployeeModal(false);
-                    setSelectedEmployee(null);
-                    setEmployeeAutoOpenBox(null);
-                }}
-                employee={selectedEmployee}
-                userData={userData}
-                timePeriod={timePeriod}
-                customStartDate={customStartDate}
-                customEndDate={customEndDate}
-                autoOpenBox={employeeAutoOpenBox}
-            />
+                <EmployeePerformanceModal
+                    isOpen={showEmployeeModal}
+                    onClose={() => {
+                        setShowEmployeeModal(false);
+                        setSelectedEmployee(null);
+                        setEmployeeAutoOpenBox(null);
+                    }}
+                    employee={selectedEmployee}
+                    userData={userData}
+                    timePeriod={timePeriod}
+                    customStartDate={customStartDate}
+                    customEndDate={customEndDate}
+                    autoOpenBox={employeeAutoOpenBox}
+                />
 
-            <BranchCustomersModal
-                isOpen={showBranchCustomersModal}
-                onClose={() => {
-                    setShowBranchCustomersModal(false);
-                    setSelectedBranchForModal(null);
-                }}
-                branch={selectedBranchForModal}
-                apiBaseUrl={API_BASE_URL}
-                userData={userData}
-                preloadedEngaged={selectedBranchForModal ? branchEngagedData[selectedBranchForModal.branch] : null}
-                preloadedRemaining={selectedBranchForModal ? branchRemainingData[selectedBranchForModal.branch] : null}
-                preloadedAllocation={selectedBranchForModal ? allocationSummary[selectedBranchForModal.branch] : null}
-                canExportProp={canExport}
-            />
+                <BranchCustomersModal
+                    isOpen={showBranchCustomersModal}
+                    onClose={() => {
+                        setShowBranchCustomersModal(false);
+                        setSelectedBranchForModal(null);
+                    }}
+                    branch={selectedBranchForModal}
+                    apiBaseUrl={API_BASE_URL}
+                    userData={userData}
+                    preloadedEngaged={selectedBranchForModal ? branchEngagedData[selectedBranchForModal.branch] : null}
+                    preloadedRemaining={selectedBranchForModal ? branchRemainingData[selectedBranchForModal.branch] : null}
+                    preloadedAllocation={selectedBranchForModal ? allocationSummary[selectedBranchForModal.branch] : null}
+                    canExportProp={canExport}
+                />
 
-            <BranchLetterReportModal
-                isOpen={showBranchLetterModal}
-                onClose={() => { setShowBranchLetterModal(false); setSelectedBranchForLetters(null); }}
-                branch={selectedBranchForLetters}
-                branchDisplayName={selectedBranchForLetters ? getBranchDisplayName(selectedBranchForLetters.branch) : ''}
-                apiBaseUrl={API_BASE_URL}
-                userData={userData}
-                canExport={canExport}
-            />
-            <OtherFollowupModal
-                isOpen={showOtherFollowupModal}
-                onClose={() => setShowOtherFollowupModal(false)}
-                apiBaseUrl={API_BASE_URL}
-                userData={userData}
-            />
-            <EmployeeCampaignProgress
-                isOpen={showCampaignProgressModal}
-                onClose={() => {
-                    setShowCampaignProgressModal(false);
-                    setSelectedEmployeeForProgress(null);
-                }}
-                employee={selectedEmployeeForProgress}
-                userData={userData}
-            />
-            <EmployeeActivityModal
-                isOpen={showEmployeeActivityModal}
-                onClose={() => {
-                    setShowEmployeeActivityModal(false);
-                    setSelectedActivityUser(null);
-                    setSelectedActivityName('');
-                }}
-                employee={selectedActivityUser}
-                activityName={selectedActivityName}
-                apiBaseUrl={API_BASE_URL}
-                timePeriod={timePeriod}
-                customStartDate={customStartDate}
-                customEndDate={customEndDate}
-                selectedCampaigns={selectedCampaigns}
-                allCampaigns={allCampaigns}
-            />
-            <EmployeeRRModal
-                isOpen={showEmployeeRRModal}
-                onClose={() => {
-                    setShowEmployeeRRModal(false);
-                    setSelectedRRUser(null);
-                    setSelectedRRName('');
-                }}
-                employee={selectedRRUser}
-                rrName={selectedRRName}
-                apiBaseUrl={API_BASE_URL}
-                timePeriod={timePeriod}
-                customStartDate={customStartDate}
-                customEndDate={customEndDate}
-                selectedCampaigns={selectedCampaigns}
-                allCampaigns={allCampaigns}
-            />
-            <EmployeeTime
-                isOpen={showEmployeeTimeModal}
-                onClose={() => setShowEmployeeTimeModal(false)}
-                userData={userData}
-            />
+                <BranchLetterReportModal
+                    isOpen={showBranchLetterModal}
+                    onClose={() => { setShowBranchLetterModal(false); setSelectedBranchForLetters(null); }}
+                    branch={selectedBranchForLetters}
+                    branchDisplayName={selectedBranchForLetters ? getBranchDisplayName(selectedBranchForLetters.branch) : ''}
+                    apiBaseUrl={API_BASE_URL}
+                    userData={userData}
+                    canExport={canExport}
+                />
+                <OtherFollowupModal
+                    isOpen={showOtherFollowupModal}
+                    onClose={() => setShowOtherFollowupModal(false)}
+                    apiBaseUrl={API_BASE_URL}
+                    userData={userData}
+                />
+                <EmployeeCampaignProgress
+                    isOpen={showCampaignProgressModal}
+                    onClose={() => {
+                        setShowCampaignProgressModal(false);
+                        setSelectedEmployeeForProgress(null);
+                    }}
+                    employee={selectedEmployeeForProgress}
+                    userData={userData}
+                />
+                <EmployeeActivityModal
+                    isOpen={showEmployeeActivityModal}
+                    onClose={() => {
+                        setShowEmployeeActivityModal(false);
+                        setSelectedActivityUser(null);
+                        setSelectedActivityName('');
+                    }}
+                    employee={selectedActivityUser}
+                    activityName={selectedActivityName}
+                    apiBaseUrl={API_BASE_URL}
+                    timePeriod={timePeriod}
+                    customStartDate={customStartDate}
+                    customEndDate={customEndDate}
+                    selectedCampaigns={selectedCampaigns}
+                    allCampaigns={allCampaigns}
+                />
+                <EmployeeRRModal
+                    isOpen={showEmployeeRRModal}
+                    onClose={() => {
+                        setShowEmployeeRRModal(false);
+                        setSelectedRRUser(null);
+                        setSelectedRRName('');
+                    }}
+                    employee={selectedRRUser}
+                    rrName={selectedRRName}
+                    apiBaseUrl={API_BASE_URL}
+                    timePeriod={timePeriod}
+                    customStartDate={customStartDate}
+                    customEndDate={customEndDate}
+                    selectedCampaigns={selectedCampaigns}
+                    allCampaigns={allCampaigns}
+                />
+                <EmployeeTime
+                    isOpen={showEmployeeTimeModal}
+                    onClose={() => setShowEmployeeTimeModal(false)}
+                    userData={userData}
+                />
             </Suspense>
         </div>
     );

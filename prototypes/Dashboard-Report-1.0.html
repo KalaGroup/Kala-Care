@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kala Care — Dashboard Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#EAEBE5; --panel:#FFFFFF; --ink:#15211D; --muted:#5C665F;
+  --line:#9AA192; --line-soft:#B7BCAE;
+  --teal:#0E7C6B; --teal-d:#0A5A4E; --teal-ink:#083b33;
+  --amber:#E0850F;
+  --shadow:0 1px 2px rgba(20,32,28,.05), 0 6px 22px rgba(20,32,28,.06);
+  /* One app-wide font — the same stack the application uses
+     (client/src/index.css → --font-sans). Display and "mono" roles are kept as
+     names so the rules below need no edit, but they all resolve to Inter now;
+     numeric columns get font-variant-numeric:tabular-nums to stay aligned. */
+  --body:'Inter','Segoe UI',Arial,sans-serif;
+  --disp:var(--body);
+  --mono:var(--body);
+
+  /* Funnel = ordered stages → ONE-HUE ORDINAL RAMP, light→dark.
+     Validated (ordinal, surface #FFFFFF): monotone L, all ΔL gaps ≥ .06, light end 2.12:1, hue spread 3°. */
+  --st1:#5FC3B0; --st2:#189681; --st3:#0E7C6B; --st4:#0A5749; --st5:#06382F;
+  /* chart chrome */
+  --grid:#E4E6DE; --axis:#C3C2B7; --lbl:#7E877C;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--body);font-size:13px;line-height:1.4;-webkit-font-smoothing:antialiased}
+.wrap{width:100%;max-width:1680px;margin:0 auto;padding:24px 20px 56px}
+
+.mast{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px;padding-bottom:16px;border-bottom:2px solid var(--ink)}
+.brand{display:flex;align-items:center;gap:12px}
+.mark{width:38px;height:38px;border-radius:9px;background:var(--teal);position:relative;flex:none;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.18)}
+.mark:before,.mark:after{content:"";position:absolute;background:#fff;border-radius:2px}
+.mark:before{left:8px;right:8px;bottom:8px;height:4px;opacity:.55}
+.mark:after{left:8px;bottom:12px;width:4px;height:14px;box-shadow:7px -4px 0 #fff,14px -8px 0 #fff;opacity:.95}
+.brand h1{font-family:var(--disp);font-weight:600;font-size:17.5px;letter-spacing:-.01em;margin:0;line-height:1.15}
+.brand .sub{font-size:11.5px;color:var(--muted);letter-spacing:.02em;margin-top:2px}
+.tag-temp{font-family:var(--mono);font-size:9.5px;color:var(--amber);border:1px solid var(--amber);border-radius:5px;padding:2px 6px;margin-left:7px;letter-spacing:.06em;vertical-align:1px}
+.periodnote{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right}
+.periodnote b{color:var(--ink);font-weight:600}
+
+/* ---- ONE filter row, above everything it scopes ---- */
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin:16px 0 14px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:7px 12px;font-size:12px;font-weight:500;cursor:pointer;font-family:var(--body);color:var(--ink);display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--teal);color:var(--teal-d)}
+.btn.on{background:var(--teal);border-color:var(--teal);color:#fff}
+.btn .ico{font-size:10px;transition:transform .15s}
+.rightgroup{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:9px}
+.daterow{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.daterow input[type=date]{font-family:var(--body);font-size:12px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)}
+.daterow .btn{padding:7px 10px}
+
+.ms{position:relative}
+.ms-btn{white-space:nowrap}
+.ms-btn .cnt{font-family:var(--mono);font-size:11px;color:var(--teal-d);font-weight:600}
+.ms.open .ms-btn{border-color:var(--teal);color:var(--teal-d)}
+.ms.open .ms-btn .ico{transform:rotate(180deg)}
+.ms-pop{display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:40;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);min-width:252px;max-width:330px;padding:8px}
+.ms.open .ms-pop{display:block}
+.ms-head{display:flex;align-items:center;gap:6px;padding:0 2px 7px;border-bottom:1px solid var(--line-soft);margin-bottom:5px}
+.ms-head input{flex:1;min-width:0;font-family:var(--body);font-size:12px;padding:5px 8px;border:1px solid var(--line-soft);border-radius:7px;color:var(--ink)}
+.ms-head button{border:1px solid var(--line-soft);background:#FBFBF9;border-radius:6px;font-size:10.5px;font-family:var(--body);padding:4px 7px;cursor:pointer;color:var(--muted)}
+.ms-head button:hover{border-color:var(--teal);color:var(--teal-d)}
+.ms-list{max-height:280px;overflow-y:auto;scrollbar-width:thin}
+.ms-item{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:12px}
+.ms-item:hover{background:#F3F4EF}
+.ms-item input{accent-color:var(--teal);width:14px;height:14px;flex:none;cursor:pointer}
+.ms-item span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ms-item em{font-family:var(--mono);font-size:9.5px;color:var(--muted);font-style:normal;flex:none}
+.ms-empty{font-size:11.5px;color:var(--muted);padding:8px 6px}
+
+/* ---- stage tiles: the number IS the chart ---- */
+.tiles{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:13px 14px 12px;position:relative;overflow:hidden}
+.tile:before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--tint)}
+.tile .tl{font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--lbl);display:flex;align-items:center;gap:6px}
+.tile .tl i{width:8px;height:8px;border-radius:2px;background:var(--tint);flex:none;display:inline-block}
+.tile .tv{font-family:var(--body);font-size:31px;font-weight:600;letter-spacing:-.02em;line-height:1.05;margin:7px 0 2px}
+.tile .tc{font-size:11px;color:var(--muted);line-height:1.4}
+.tile .tp{font-family:var(--mono);font-size:10.5px;color:var(--teal-ink);margin-top:7px;padding-top:7px;border-top:1px solid var(--grid)}
+.tile .tp b{font-weight:600}
+.tile .tp .drop{color:#8a5406}
+
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:14px;margin-top:14px}
+@media (max-width:1100px){ .grid2{grid-template-columns:minmax(0,1fr)} .tiles{grid-template-columns:repeat(2,minmax(0,1fr))} }
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:14px 16px 16px;min-width:0}
+.card h2{font-family:var(--disp);font-size:13px;font-weight:600;margin:0;letter-spacing:-.01em}
+.card .cardsub{font-size:11px;color:var(--muted);margin-top:2px}
+.cardhead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.tabs{display:flex;gap:0;border:1px solid var(--line-soft);border-radius:7px;overflow:hidden;flex:none}
+.tabs button{border:0;background:var(--panel);font-family:var(--body);font-size:10.5px;padding:5px 9px;cursor:pointer;color:var(--muted)}
+.tabs button+button{border-left:1px solid var(--line-soft)}
+.tabs button.on{background:var(--teal);color:#fff;font-weight:600}
+
+.legend{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 8px}
+.legend .li{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.legend .li i{width:12px;height:3px;border-radius:2px;flex:none}
+.legend .li b{color:var(--ink);font-weight:500}
+
+.chartbox{position:relative}
+.chartbox svg{display:block;width:100%;overflow:visible;font-family:var(--body)}
+.chartbox svg text{font-variant-numeric:tabular-nums}
+.tip{position:absolute;pointer-events:none;opacity:0;transition:opacity .1s;background:var(--ink);color:#fff;border-radius:8px;padding:7px 9px;font-size:11px;line-height:1.5;box-shadow:0 6px 18px rgba(20,32,28,.25);white-space:nowrap;z-index:9}
+.tip .th{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:#9FB0A8;margin-bottom:3px}
+.tip .tr{display:flex;align-items:center;gap:7px}
+.tip .tr i{width:8px;height:8px;border-radius:2px;flex:none}
+.tip .tr em{font-style:normal;color:#C6D2CB;flex:1}
+.tip .tr b{font-family:var(--mono);font-weight:600}
+
+table.dt{border-collapse:separate;border-spacing:0;width:100%;font-size:11.5px}
+table.dt th{font-family:var(--body);font-weight:600;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--lbl);text-align:right;padding:6px 7px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.dt th:first-child{text-align:left}
+table.dt td{padding:6px 7px;border-bottom:1px solid var(--grid);text-align:right;font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.dt td:first-child{text-align:left;font-family:var(--body);font-size:12px}
+table.dt tr.reg td{font-weight:600;cursor:pointer;background:#F7F8F5}
+table.dt tr.reg td:first-child{font-weight:600}
+table.dt tr.reg:hover td{background:#F1F3EE}
+table.dt tr.br td:first-child{padding-left:26px;color:var(--muted)}
+table.dt tr.tot td{border-top:1px solid var(--ink);border-bottom:0;font-weight:700;background:#EFF1EA}
+table.dt .chev{display:inline-block;width:12px;color:var(--muted);font-size:9px;transition:transform .18s}
+table.dt .chev.open{transform:rotate(90deg);color:var(--teal-d)}
+.pct{color:var(--teal-ink);font-weight:600}
+.zero{color:#c5cbc4}
+.scrollx{overflow-x:auto;scrollbar-width:thin}
+
+.note{margin-top:14px;font-size:11.5px;color:var(--muted);line-height:1.6;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+.note b{color:var(--ink)}
+footer{margin-top:14px;font-size:10.5px;color:var(--muted);text-align:center;font-family:var(--mono)}
+:focus-visible{outline:2px solid var(--teal);outline-offset:2px;border-radius:4px}
+@media (max-width:820px){ .tiles{grid-template-columns:repeat(1,minmax(0,1fr))} .rightgroup{margin-left:0} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="mast">
+    <div class="brand">
+      <div class="mark" aria-hidden="true"></div>
+      <div>
+        <h1>Dashboard Report <span class="tag-temp">TEMP DATA</span></h1>
+        <div class="sub">Kala Care Global · service request flow — open → allocated → closed → completed → ERP close</div>
+      </div>
+    </div>
+    <div class="periodnote" id="periodNote"></div>
+  </header>
+
+  <div class="controls">
+    <div class="ms" id="msRegion">
+      <button class="btn ms-btn" type="button">Region: <span class="cnt ms-lbl">All</span> <span class="ico">▾</span></button>
+      <div class="ms-pop">
+        <div class="ms-head"><button type="button" data-act="all">Tick all</button><button type="button" data-act="none">Clear</button></div>
+        <div class="ms-list"></div>
+      </div>
+    </div>
+
+    <div class="ms" id="msBranch">
+      <button class="btn ms-btn" type="button">Branch: <span class="cnt ms-lbl">All</span> <span class="ico">▾</span></button>
+      <div class="ms-pop">
+        <div class="ms-head"><input type="text" class="ms-search" placeholder="Search branch"><button type="button" data-act="all">Tick all</button><button type="button" data-act="none">Clear</button></div>
+        <div class="ms-list"></div>
+      </div>
+    </div>
+
+    <div class="ms" id="msWeek">
+      <button class="btn ms-btn" type="button">Weeks: <span class="cnt ms-lbl">All</span> <span class="ico">▾</span></button>
+      <div class="ms-pop">
+        <div class="ms-head"><button type="button" data-act="all">Tick all</button><button type="button" data-act="none">Clear</button></div>
+        <div class="ms-list"></div>
+      </div>
+    </div>
+
+    <div class="rightgroup">
+      <div class="daterow">
+        <input type="date" id="dfStart" title="From">
+        <span style="color:var(--muted);font-size:11px">–</span>
+        <input type="date" id="dfEnd" title="To">
+        <button class="btn" id="dfApply">Apply</button>
+        <button class="btn" id="dfClear">Reset all</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="cardhead">
+        <div>
+          <h2>SR flow for the selected period</h2>
+          <div class="cardsub">Each stage as a share of Open SR — where requests drop out.</div>
+        </div>
+      </div>
+      <div class="chartbox" id="funnelBox"><div class="tip" id="funnelTip"></div></div>
+    </div>
+
+    <div class="card">
+      <div class="cardhead">
+        <div>
+          <h2>Week-wise movement</h2>
+          <div class="cardsub">All five stages across the weeks of the period.</div>
+        </div>
+        <div class="tabs" id="trendTabs">
+          <button class="on" data-v="chart">Chart</button><button data-v="table">Table</button>
+        </div>
+      </div>
+      <div class="legend" id="trendLegend"></div>
+      <div class="chartbox" id="trendBox"><div class="tip" id="trendTip"></div></div>
+      <div class="scrollx" id="trendTable" style="display:none"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="cardhead">
+      <div>
+        <h2>Region &amp; branch breakdown</h2>
+        <div class="cardsub">Maharashtra and Karnataka — click a region to open its branches.</div>
+      </div>
+    </div>
+    <div class="scrollx" id="regionTable"></div>
+  </div>
+
+  <div class="note">
+    <b>How to read this:</b> <b>Open SR</b> is every service request raised across the selected branches · <b>Task Start</b> is how many of those were allocated to a service engineer · <b>Task Close</b> is how many the engineer closed on site · <b>Completed</b> is how many passed completion check · <b>SR Close</b> is how many were finally closed in the ERP. Every stage is a subset of the one before it, so the chain only ever narrows. Region, branch, week and date-range filters scope every tile, chart and table on this page at once. TEMP DATA.
+  </div>
+
+  <footer id="footer"></footer>
+</div>
+
+<script>
+const $=s=>document.getElementById(s);
+const fmt=v=>v.toLocaleString('en-IN');
+
+/* ================= real branch structure (same workbook as the EPR report) ================= */
+const BRANCHES = [
+  {id:'420435_1',  name:'Aurangabad',  ses:4, sr:218},
+  {id:'420435_2',  name:'Ahmednagar',  ses:2, sr:79},
+  {id:'420435_3',  name:'Beed',        ses:1, sr:36},
+  {id:'420435_4',  name:'Nanded',      ses:1, sr:87},
+  {id:'420435_5',  name:'Babhleshwar', ses:3, sr:158},
+  {id:'420435_6',  name:'Latur',       ses:1, sr:60},
+  {id:'420435_7',  name:'Parbhani',    ses:2, sr:130},
+  {id:'420435_8',  name:'Hubli',       ses:2, sr:90},
+  {id:'420435_9',  name:'Belagavi',    ses:1, sr:89},
+  {id:'420435_10', name:'Hospet',      ses:2, sr:145},
+  {id:'420435_11', name:'Ballari',     ses:3, sr:191},
+  {id:'420435_12', name:'Bagalkote',   ses:1, sr:58},
+  {id:'420435_13', name:'Kalaburagi',  ses:2, sr:133},
+  {id:'420435_14', name:'Vijayapura',  ses:1, sr:52}
+];
+const REGIONS = [
+  {id:'MH', name:'Maharashtra', branches:['420435_1','420435_2','420435_3','420435_4','420435_5','420435_6','420435_7']},
+  {id:'KA', name:'Karnataka',   branches:['420435_8','420435_9','420435_10','420435_11','420435_12','420435_13','420435_14']}
+];
+const bIdx = Object.fromEntries(BRANCHES.map((b,i)=>[b.id,i]));
+const regionOf = id => REGIONS.find(r=>r.branches.includes(id));
+
+/* ================= period → weeks ================= */
+const PERIOD_START='2026-07-01', PERIOD_END='2026-07-31';
+const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const shortD=d=>d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
+function buildWeeks(a,b){
+  const out=[]; const end=new Date(b+'T00:00:00');
+  let cur=new Date(a+'T00:00:00'), n=1;
+  while(cur<=end){
+    const dowMon=(cur.getDay()+6)%7;
+    let we=new Date(cur); we.setDate(we.getDate()+(6-dowMon));
+    if(we>end) we=new Date(end);
+    out.push({n,label:'W'+n,start:iso(cur),end:iso(we),range:`${shortD(cur)} – ${shortD(we)}`});
+    cur=new Date(we); cur.setDate(cur.getDate()+1); n++;
+  }
+  return out;
+}
+const WEEKS = buildWeeks(PERIOD_START, PERIOD_END);
+
+/* ================= stage cube: [branch][week] per stage =================
+   Period totals are fixed (Open 500 → Start 350 → Close 250 → Completed 200 → SR Close 200).
+   Open SR is spread over branches by their real SR volume and over weeks by a fixed
+   weekly rhythm; every later stage is derived proportionally from the stage above it,
+   with largest-remainder rounding — so each stage hits its total EXACTLY and no cell
+   can ever exceed the stage before it. */
+const STAGES = [
+  {k:'open',      name:'Open SR',    color:'var(--st1)', hex:'#5FC3B0', total:500, cap:'Raised across the selected branches'},
+  {k:'start',     name:'Task Start', color:'var(--st2)', hex:'#189681', total:350, cap:'Allocated to a service engineer'},
+  {k:'close',     name:'Task Close', color:'var(--st3)', hex:'#0E7C6B', total:250, cap:'Closed by the engineer on site'},
+  {k:'completed', name:'Completed',  color:'var(--st4)', hex:'#0A5749', total:200, cap:'Passed completion check'},
+  {k:'srClose',   name:'SR Close',   color:'var(--st5)', hex:'#06382F', total:200, cap:'Finally closed in the ERP'}
+];
+const WEEK_RHYTHM=[0.86,1.12,0.94,1.15,0.93];   // partial first/last weeks pull their own weight down
+
+function largestRemainder(weights, total){
+  const sum=weights.reduce((a,b)=>a+b,0);
+  if(!sum) return weights.map(()=>0);
+  const raw=weights.map(w=>w*total/sum);
+  const out=raw.map(Math.floor);
+  const rem=total-out.reduce((a,b)=>a+b,0);
+  const order=raw.map((v,i)=>[v-Math.floor(v),i]).sort((a,b)=>b[0]-a[0]||a[1]-b[1]);
+  for(let i=0;i<rem;i++) out[order[i%order.length][1]]++;
+  return out;
+}
+const CUBE={};
+(function buildCube(){
+  const W=WEEKS.length;
+  const days = w => (new Date(w.end)-new Date(w.start))/864e5 + 1;
+  const weights=[];
+  BRANCHES.forEach(b=>WEEKS.forEach((w,wi)=>weights.push(b.sr * WEEK_RHYTHM[wi%WEEK_RHYTHM.length] * days(w)/7)));
+  let prev = largestRemainder(weights, STAGES[0].total);
+  CUBE[STAGES[0].k]=prev;
+  STAGES.slice(1).forEach(st=>{ prev = largestRemainder(prev, st.total); CUBE[st.k]=prev; });
+})();
+const cell=(k,bi,wi)=>CUBE[k][bi*WEEKS.length+wi];
+
+/* ================= filter state ================= */
+const state={ regSel:new Set(), brSel:new Set(), weekSel:new Set(), trendView:'chart', regOpen:new Set(REGIONS.map(r=>r.id)) };
+const activeWeeks = () => WEEKS.filter(w=>!state.weekSel.size || state.weekSel.has(w.n));
+function branchInScope(b){
+  if(state.regSel.size && !state.regSel.has(regionOf(b.id).id)) return false;
+  if(state.brSel.size && !state.brSel.has(b.id)) return false;
+  return true;
+}
+const activeBranches = () => BRANCHES.filter(branchInScope);
+
+function sum(k, branches, weeks){
+  let t=0;
+  branches.forEach(b=>weeks.forEach(w=>{ t+=cell(k,bIdx[b.id],w.n-1); }));
+  return t;
+}
+const totals = () => { const bs=activeBranches(), ws=activeWeeks(); const o={}; STAGES.forEach(s=>o[s.k]=sum(s.k,bs,ws)); return o; };
+
+/* ================= stat tiles ================= */
+function renderTiles(){
+  const t=totals(), open=t.open;
+  $('tiles').innerHTML = STAGES.map((s,i)=>{
+    const v=t[s.k];
+    const share = open ? Math.round(v/open*1000)/10 : 0;
+    let foot;
+    if(i===0){ foot = `<b>${fmt(v)}</b> requests in scope`; }
+    else{
+      const prev=t[STAGES[i-1].k];
+      const dropped = prev-v;
+      const conv = prev ? Math.round(v/prev*1000)/10 : 0;
+      foot = `<b>${conv}%</b> of ${STAGES[i-1].name}` + (dropped>0 ? ` · <span class="drop">${fmt(dropped)} pending</span>` : ' · none pending');
+    }
+    return `<div class="tile" style="--tint:${s.hex}">
+      <div class="tl"><i></i>${s.name}</div>
+      <div class="tv">${fmt(v)}</div>
+      <div class="tc">${s.cap}</div>
+      <div class="tp">${foot}${i? ` · ${share}% of open`:''}</div>
+    </div>`;
+  }).join('');
+}
+
+/* ================= funnel (horizontal bars, ordinal ramp) ================= */
+// Rounded only on the data end; the baseline end stays square.
+function barPath(x,y,w,h,r){
+  r=Math.min(r,w,h/2);
+  return `M${x},${y} H${x+w-r} Q${x+w},${y} ${x+w},${y+r} V${y+h-r} Q${x+w},${y+h} ${x+w-r},${y+h} H${x} Z`;
+}
+function renderFunnel(){
+  const box=$('funnelBox'), tip=$('funnelTip');
+  const t=totals();
+  const W=Math.max(360, box.clientWidth||520);
+  const rowH=44, padT=6, padB=6, labelW=Math.min(112, Math.round(W*0.24)), valW=64;
+  const H=padT+padB+rowH*STAGES.length;
+  const plotW=Math.max(60, W-labelW-valW-8);
+  const max=Math.max(1, t.open);
+
+  let bars='', axis='';
+  // recessive hairline grid at 0/25/50/75/100% of Open SR
+  for(let i=0;i<=4;i++){
+    const x=labelW+plotW*i/4;
+    axis+=`<line x1="${x}" y1="${padT}" x2="${x}" y2="${H-padB}" stroke="var(--grid)" stroke-width="1"/>`;
+  }
+  STAGES.forEach((s,i)=>{
+    const v=t[s.k];
+    const w=Math.max(v?2:0, plotW*v/max);
+    const y=padT+i*rowH+9, h=rowH-20;
+    bars+=`<g class="fbar" data-i="${i}" style="cursor:default">
+      <rect x="0" y="${padT+i*rowH}" width="${W}" height="${rowH}" fill="transparent"/>
+      <text x="${labelW-10}" y="${y+h/2+4}" text-anchor="end" font-size="11" fill="var(--ink)" font-weight="500">${s.name}</text>
+      <path d="${barPath(labelW,y,w,h,4)}" fill="${s.hex}"/>
+      <text x="${labelW+w+9}" y="${y+h/2+4}" font-size="11.5" font-weight="600" fill="var(--ink)">${fmt(v)}</text>
+    </g>`;
+  });
+  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="SR flow funnel">${axis}${bars}</svg>` + tip.outerHTML;
+
+  const tip2=box.querySelector('.tip');
+  box.querySelectorAll('.fbar').forEach(g=>{
+    g.addEventListener('mousemove', e=>{
+      const i=+g.dataset.i, s=STAGES[i], v=t[s.k], open=t.open;
+      const prev = i? t[STAGES[i-1].k] : null;
+      tip2.innerHTML=`<div class="th">${s.name}</div>
+        <div class="tr"><i style="background:${s.hex}"></i><em>Count</em><b>${fmt(v)}</b></div>
+        <div class="tr"><i style="background:transparent"></i><em>Of Open SR</em><b>${open?(v/open*100).toFixed(1):0}%</b></div>
+        ${prev!==null?`<div class="tr"><i style="background:transparent"></i><em>Of ${STAGES[i-1].name}</em><b>${prev?(v/prev*100).toFixed(1):0}%</b></div>`:''}`;
+      const r=box.getBoundingClientRect();
+      tip2.style.opacity=1;
+      tip2.style.left=Math.min(r.width-tip2.offsetWidth-4, Math.max(0,e.clientX-r.left+14))+'px';
+      tip2.style.top=(e.clientY-r.top-10)+'px';
+    });
+    g.addEventListener('mouseleave', ()=>{ tip2.style.opacity=0; });
+  });
+}
+
+/* ================= week-wise line chart ================= */
+function renderTrend(){
+  const box=$('trendBox');
+  const bs=activeBranches();
+  const series=STAGES.map(s=>({name:s.name,hex:s.hex,vals:WEEKS.map(w=>sum(s.k,bs,[w]))}));
+
+  $('trendLegend').innerHTML = series.map(s=>`<span class="li"><i style="background:${s.hex}"></i><b>${s.name}</b></span>`).join('');
+
+  if(state.trendView==='table'){
+    $('trendBox').style.display='none'; $('trendTable').style.display='block';
+    $('trendTable').innerHTML = `<table class="dt"><thead><tr><th>Stage</th>${WEEKS.map(w=>`<th>${w.label}<br><span style="font-weight:400;text-transform:none;letter-spacing:0">${w.range}</span></th>`).join('')}<th>Total</th></tr></thead><tbody>
+      ${series.map(s=>`<tr><td><span style="display:inline-block;width:10px;height:3px;border-radius:2px;background:${s.hex};vertical-align:middle;margin-right:7px"></span>${s.name}</td>${s.vals.map((v,i)=>`<td${activeWeeks().some(w=>w.n===i+1)?'':' style="opacity:.35"'}>${v}</td>`).join('')}<td><b>${sum(STAGES.find(x=>x.name===s.name).k,bs,activeWeeks())}</b></td></tr>`).join('')}
+    </tbody></table>`;
+    return;
+  }
+  $('trendBox').style.display='block'; $('trendTable').style.display='none';
+
+  const W=Math.max(380, box.clientWidth||660), H=250;
+  const mL=34,mR=126,mT=10,mB=26;
+  const pw=W-mL-mR, ph=H-mT-mB;
+  const max=Math.max(1,...series.flatMap(s=>s.vals));
+  const niceMax=Math.ceil(max/10)*10;
+  const x=i=>mL+(WEEKS.length===1?pw/2:pw*i/(WEEKS.length-1));
+  const y=v=>mT+ph-ph*v/niceMax;
+
+  let grid='', ticks='';
+  for(let i=0;i<=4;i++){
+    const v=niceMax*i/4, yy=y(v);
+    grid+=`<line x1="${mL}" y1="${yy}" x2="${mL+pw}" y2="${yy}" stroke="var(--grid)" stroke-width="1"/>`;
+    ticks+=`<text x="${mL-8}" y="${yy+3.5}" text-anchor="end" font-size="9.5" fill="var(--lbl)">${Math.round(v)}</text>`;
+  }
+  let xlab='', shade='';
+  WEEKS.forEach((w,i)=>{
+    const inScope=activeWeeks().some(a=>a.n===w.n);
+    xlab+=`<text x="${x(i)}" y="${H-8}" text-anchor="middle" font-size="10" fill="${inScope?'var(--ink)':'var(--lbl)'}" opacity="${inScope?1:.5}">${w.label}</text>`;
+    if(!inScope){
+      const half=WEEKS.length>1?pw/(WEEKS.length-1)/2:pw/2;
+      shade+=`<rect x="${Math.max(mL,x(i)-half)}" y="${mT}" width="${Math.min(pw,half*2)}" height="${ph}" fill="#EEF0EA" opacity=".55"/>`;
+    }
+  });
+  let lines='', dots='';
+  series.forEach(s=>{
+    const d=s.vals.map((v,i)=>`${i?'L':'M'}${x(i)},${y(v)}`).join(' ');
+    lines+=`<path d="${d}" fill="none" stroke="${s.hex}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    // 2px surface ring keeps overlapping markers separable instead of a border on every mark
+    s.vals.forEach((v,i)=>{ dots+=`<circle cx="${x(i)}" cy="${y(v)}" r="4" fill="${s.hex}" stroke="#fff" stroke-width="2"/>`; });
+  });
+
+  // Direct end-labels — identity without the legend, and the relief the sub-3:1 marks owe.
+  // Stages that currently sit on the same value share ONE label (their lines coincide, so two
+  // labels there would be a lie); anything still crowded is nudged apart.
+  let ends='';
+  const merged=[];
+  series.forEach(s=>{
+    const last=s.vals[s.vals.length-1];
+    const same=merged.find(m=>m.v===last);
+    if(same) same.names.push(s.name); else merged.push({v:last, names:[s.name]});
+  });
+  merged.sort((a,b)=>b.v-a.v);
+  let prevY=-1e9;
+  merged.forEach(m=>{
+    let yy=y(m.v);
+    if(yy-prevY<12) yy=prevY+12;
+    prevY=yy;
+    ends+=`<text x="${x(WEEKS.length-1)+10}" y="${yy+3.5}" font-size="10" fill="var(--ink)">${m.names.join(' / ')}</text>`;
+  });
+
+  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Week-wise stage movement">
+    ${shade}${grid}
+    <line x1="${mL}" y1="${mT+ph}" x2="${mL+pw}" y2="${mT+ph}" stroke="var(--axis)" stroke-width="1"/>
+    ${ticks}${xlab}
+    <line id="cross" x1="0" y1="${mT}" x2="0" y2="${mT+ph}" stroke="var(--axis)" stroke-width="1" opacity="0"/>
+    ${lines}${dots}${ends}
+    <rect id="hitzone" x="${mL}" y="${mT}" width="${pw}" height="${ph}" fill="transparent"/>
+  </svg><div class="tip" id="trendTip"></div>`;
+
+  const tip=box.querySelector('.tip'), cross=box.querySelector('#cross');
+  const hit=box.querySelector('#hitzone');
+  hit.addEventListener('mousemove', e=>{
+    const r=box.getBoundingClientRect();
+    const scale=W/r.width;
+    const px=(e.clientX-r.left)*scale;
+    let i=0, best=1e9;
+    WEEKS.forEach((w,k)=>{ const d=Math.abs(x(k)-px); if(d<best){best=d;i=k;} });
+    cross.setAttribute('x1',x(i)); cross.setAttribute('x2',x(i)); cross.setAttribute('opacity','1');
+    tip.innerHTML=`<div class="th">${WEEKS[i].label} · ${WEEKS[i].range}</div>`+
+      series.map(s=>`<div class="tr"><i style="background:${s.hex}"></i><em>${s.name}</em><b>${s.vals[i]}</b></div>`).join('');
+    tip.style.opacity=1;
+    const lx=x(i)/scale;
+    tip.style.left=Math.min(r.width-tip.offsetWidth-4, Math.max(0,lx+12))+'px';
+    tip.style.top='8px';
+  });
+  hit.addEventListener('mouseleave', ()=>{ tip.style.opacity=0; cross.setAttribute('opacity','0'); });
+}
+
+/* ================= region / branch table ================= */
+function renderRegionTable(){
+  const ws=activeWeeks();
+  const row=(name, cls, data, extra='')=>
+    `<tr class="${cls}" ${extra}><td>${name}</td>${STAGES.map(s=>`<td>${data[s.k]||'<span class="zero">·</span>'}</td>`).join('')}</tr>`;
+  let body='';
+  REGIONS.forEach(r=>{
+    const bs=r.branches.map(id=>BRANCHES[bIdx[id]]).filter(branchInScope);
+    if(!bs.length) return;
+    const rd={}; STAGES.forEach(s=>rd[s.k]=sum(s.k,bs,ws));
+    const open=state.regOpen.has(r.id);
+    body+=row(`<span class="chev ${open?'open':''}">▶</span>${r.name} <span style="font-family:var(--mono);font-size:9.5px;color:var(--muted)">${bs.length} br</span>`,'reg',rd,`data-reg="${r.id}"`);
+    if(open) bs.forEach(b=>{
+      const bd={}; STAGES.forEach(s=>bd[s.k]=sum(s.k,[b],ws));
+      body+=row(`${b.name} <span style="font-family:var(--mono);font-size:9px">${b.id}</span>`,'br',bd);
+    });
+  });
+  const td={}; STAGES.forEach(s=>td[s.k]=sum(s.k,activeBranches(),ws));
+  body+=row('Grand Total','tot',td);
+
+  $('regionTable').innerHTML=`<table class="dt"><thead><tr><th>Region / Branch</th>${STAGES.map(s=>`<th><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${s.hex};margin-right:5px;vertical-align:0"></span>${s.name}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>`;
+}
+$('regionTable').addEventListener('click', e=>{
+  const tr=e.target.closest('tr.reg'); if(!tr) return;
+  const id=tr.dataset.reg;
+  if(state.regOpen.has(id)) state.regOpen.delete(id); else state.regOpen.add(id);
+  renderRegionTable();
+});
+
+/* ================= multi-select ================= */
+function multiSelect(rootId,cfg){
+  const root=$(rootId), btn=root.querySelector('.ms-btn'), lbl=root.querySelector('.ms-lbl');
+  const list=root.querySelector('.ms-list'), searchI=root.querySelector('.ms-search');
+  const sel=cfg.sel;
+  function paint(){
+    const q=(searchI&&searchI.value.trim().toLowerCase())||'';
+    const items=cfg.items().filter(it=>!q||it.t.toLowerCase().includes(q)||(it.sub||'').toLowerCase().includes(q));
+    list.innerHTML = items.length
+      ? items.map(it=>`<label class="ms-item"><input type="checkbox" value="${it.v}" ${sel.has(it.v)?'checked':''}><span title="${it.t}">${it.t}</span>${it.sub?`<em>${it.sub}</em>`:''}</label>`).join('')
+      : '<div class="ms-empty">No match</div>';
+    lbl.textContent = sel.size ? `${sel.size}` : 'All';
+  }
+  btn.addEventListener('click',()=>{
+    const was=root.classList.contains('open');
+    document.querySelectorAll('.ms.open').forEach(m=>m.classList.remove('open'));
+    if(!was){ root.classList.add('open'); paint(); if(searchI) searchI.focus(); }
+  });
+  list.addEventListener('change',e=>{
+    const cb=e.target; if(cb.type!=='checkbox') return;
+    const v=cfg.cast?cfg.cast(cb.value):cb.value;
+    if(cb.checked) sel.add(v); else sel.delete(v);
+    lbl.textContent = sel.size ? `${sel.size}` : 'All';
+    cfg.onChange();
+  });
+  root.querySelectorAll('[data-act]').forEach(b=>b.addEventListener('click',()=>{
+    sel.clear();
+    if(b.dataset.act==='all') cfg.items().forEach(it=>sel.add(it.v));
+    paint(); cfg.onChange();
+  }));
+  if(searchI) searchI.addEventListener('input',paint);
+  return {paint, repaintIfOpen(){ if(root.classList.contains('open')) paint(); }};
+}
+document.addEventListener('click',e=>{ if(!e.target.closest('.ms')) document.querySelectorAll('.ms.open').forEach(m=>m.classList.remove('open')); });
+
+const msRegion=multiSelect('msRegion',{
+  sel:state.regSel,
+  items:()=>REGIONS.map(r=>({v:r.id,t:r.name,sub:r.branches.length+' br'})),
+  onChange:()=>{ msBranch.repaintIfOpen(); renderAll(); }
+});
+const msBranch=multiSelect('msBranch',{
+  sel:state.brSel,
+  items:()=>BRANCHES.filter(b=>!state.regSel.size||state.regSel.has(regionOf(b.id).id)).map(b=>({v:b.id,t:b.name,sub:regionOf(b.id).name})),
+  onChange:()=>renderAll()
+});
+const msWeek=multiSelect('msWeek',{
+  sel:state.weekSel, cast:v=>+v,
+  items:()=>WEEKS.map(w=>({v:w.n,t:w.label,sub:w.range})),
+  onChange:()=>{ syncDates(); renderAll(); }
+});
+
+/* ================= date range ⇄ weeks ================= */
+$('dfStart').min=PERIOD_START; $('dfStart').max=PERIOD_END;
+$('dfEnd').min=PERIOD_START;   $('dfEnd').max=PERIOD_END;
+function syncDates(){
+  const ws=activeWeeks();
+  if(!state.weekSel.size){ $('dfStart').value=''; $('dfEnd').value=''; return; }
+  $('dfStart').value=ws[0].start; $('dfEnd').value=ws[ws.length-1].end;
+}
+$('dfApply').onclick=()=>{
+  const s=$('dfStart').value, e=$('dfEnd').value;
+  if(!s||!e){ alert('Pick both a From and a To date.'); return; }
+  if(s>e){ alert('From is after To.'); return; }
+  const hit=WEEKS.filter(w=>w.start<=e&&w.end>=s).map(w=>w.n);
+  if(!hit.length){ alert('That range falls outside the report period.'); return; }
+  state.weekSel.clear(); hit.forEach(n=>state.weekSel.add(n));
+  msWeek.paint(); renderAll();
+};
+$('dfClear').onclick=()=>{
+  state.weekSel.clear(); state.regSel.clear(); state.brSel.clear();
+  $('dfStart').value=''; $('dfEnd').value='';
+  msWeek.paint(); msRegion.paint(); msBranch.paint(); renderAll();
+};
+$('trendTabs').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  state.trendView=b.dataset.v;
+  $('trendTabs').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+  renderTrend();
+});
+
+/* ================= render ================= */
+function renderAll(){
+  const ws=activeWeeks(), bs=activeBranches();
+  $('periodNote').innerHTML = `Period <b>${shortD(new Date(PERIOD_START))} – ${shortD(new Date(PERIOD_END))} 2026</b><br>${ws.length===WEEKS.length?`all ${WEEKS.length} weeks`:`${ws.map(w=>w.label).join(', ')}`} · ${bs.length===BRANCHES.length?`all ${BRANCHES.length} branches`:`${bs.length} of ${BRANCHES.length} branches`}`;
+  renderTiles(); renderFunnel(); renderTrend(); renderRegionTable();
+  $('footer').textContent=`Kala Care · Dashboard Report · ${bs.length} branches across ${new Set(bs.map(b=>regionOf(b.id).id)).size} regions · TEMP DATA for layout review`;
+}
+msRegion.paint(); msBranch.paint(); msWeek.paint();
+renderAll();
+let rAF;
+window.addEventListener('resize',()=>{ cancelAnimationFrame(rAF); rAF=requestAnimationFrame(()=>{ renderFunnel(); renderTrend(); }); });
+</script>
+</body>
+</html>

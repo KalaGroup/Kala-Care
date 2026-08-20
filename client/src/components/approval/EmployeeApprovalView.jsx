@@ -14,6 +14,7 @@ import ApprovalReports from './ApprovalReports';
 export default function EmployeeApprovalView() {
     const user = JSON.parse(sessionStorage.getItem('user') || '{}');
     const [apps, setApps] = useState([]);
+    const [scope, setScope] = useState(null);   // own | stage | all — captions the cards
     const [loading, setLoading] = useState(true);
     const [showCreate, setShowCreate] = useState(false);
     const [selected, setSelected] = useState(null);
@@ -28,6 +29,7 @@ export default function EmployeeApprovalView() {
         try {
             const data = await getApplications();
             setApps(data.applications || []);
+            setScope(data.scope || null);
         } catch (err) {
             toast.error(errText(err, 'Failed to load applications'));
         } finally { setLoading(false); }
@@ -53,6 +55,7 @@ export default function EmployeeApprovalView() {
         credit: filteredBase.filter(a => a.request_type === 'credit').length,
         discounting_credit: filteredBase.filter(a => a.request_type === 'discounting_credit').length,
         expense: filteredBase.filter(a => a.request_type === 'expense').length,
+        other: filteredBase.filter(a => a.request_type === 'other').length,
     }), [filteredBase]);
 
     const filtered = useMemo(() =>
@@ -68,7 +71,7 @@ export default function EmployeeApprovalView() {
 
     return (
         <div>
-            <SummaryCards apps={apps}
+            <SummaryCards apps={apps} scope={scope} myPending={actionable.length}
                 onCardClick={(key, label) => setCardView({ status: key === 'all' ? '' : key, label })} />
 
             <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -101,7 +104,7 @@ export default function EmployeeApprovalView() {
                 </div>
                 <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
                     className="border border-gray-300 rounded-lg px-2.5 py-2 text-xs bg-white max-sm:w-full">
-                    <option value="">All Statuses</option>
+                    <option value="">Status</option>
                     {Object.keys(STATUS_META).map(v => <option key={v} value={v}>{statusLabel(v)}</option>)}
                 </select>
             </div>
@@ -116,8 +119,11 @@ export default function EmployeeApprovalView() {
                 <CreateApplicationModal onClose={() => setShowCreate(false)} onCreated={load} />
             )}
             {cardView && (
+                /* reuses the list this view already loaded — no second fetch.
+                   allowAct: an NFA opened from a card that is still waiting on
+                   this user shows Approve / Reject right there. */
                 <ApprovalReports initialStatus={cardView.status} title={`${cardView.label} Records`}
-                    onClose={() => setCardView(null)} />
+                    records={apps} allowAct onChanged={load} onClose={() => setCardView(null)} />
             )}
             {editDraft && (
                 <CreateApplicationModal draft={editDraft}

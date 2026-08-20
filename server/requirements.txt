@@ -9,6 +9,7 @@ python-multipart
 pydantic
 cryptography
 xlrd
+lxml            # HTML-table .xls exports (pandas.read_html) - see read_upload_table
 passlib
 bcrypt
 argon2-cffi

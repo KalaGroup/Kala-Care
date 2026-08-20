@@ -15,6 +15,7 @@ import {
     ApplicationsTable, ApplicationDetailModal, TypeTabs,
     STATUS_META, statusLabel, BRAND, typeLabel, catLabel, fmtDate,
 } from './ApprovalShared';
+import { richToTextNoTables } from './richText';
 
 // text-gray-900 is explicit: inputs inside the blue header would otherwise
 // inherit its white text and render invisible on their white background
@@ -37,12 +38,18 @@ const inRange = (value, min, max) => {
     return true;
 };
 
-export default function ApprovalReports({ onClose, initialStatus = '', title = 'Approval Reports' }) {
+/* `records` lets the caller hand over the list it has ALREADY loaded — the
+   parent view and this box show exactly the same visibility-filtered data, so
+   fetching it twice just to open the box was a wasted full round trip on a
+   payload that grows with every application. Without the prop (standalone use)
+   it loads for itself as before. */
+export default function ApprovalReports({ onClose, initialStatus = '', title = 'Approval Reports', records = null, allowAct = false, onChanged = null }) {
     const user = JSON.parse(sessionStorage.getItem('user') || '{}');
     const canExport = user.role === 'master_admin' || user.can_export === true;
 
-    const [apps, setApps] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [apps, setApps] = useState(() =>
+        records ? records.filter(a => a.status !== 'draft') : []);
+    const [loading, setLoading] = useState(!records);
     const [tab, setTab] = useState('discounting');
     const [f, setF] = useState({ ...EMPTY_FILTERS, status: initialStatus });
     const [selected, setSelected] = useState(null);
@@ -58,7 +65,20 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
         } finally { setLoading(false); }
     }, []);
 
-    useEffect(() => { load(); }, [load]);
+    // Handed the parent's list? Track it; otherwise fetch once on open.
+    useEffect(() => {
+        if (records) setApps(records.filter(a => a.status !== 'draft'));
+        else load();
+    }, [records, load]);
+
+    /* After an approve / reject taken from inside this box: when the caller
+       owns the list (summary-card popup) refresh THAT list — its new array
+       flows back through `records` above, so the popup, the table behind it
+       and the summary cards all move together. Standalone box refetches. */
+    const refresh = useCallback(async () => {
+        if (onChanged) await onChanged();
+        else await load();
+    }, [onChanged, load]);
 
     const set = (k) => (e) => setF(prev => ({ ...prev, [k]: e.target.value }));
 
@@ -96,7 +116,7 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
     }), [apps, tab, f]);
 
     const typeCounts = useMemo(() => {
-        const c = { discounting: 0, credit: 0, discounting_credit: 0, expense: 0 };
+        const c = { discounting: 0, credit: 0, discounting_credit: 0, expense: 0, other: 0 };
         apps.forEach(a => { if (commonOk(a)) c[a.request_type] = (c[a.request_type] || 0) + 1; });
         return c;
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -108,31 +128,41 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
         try {
             const XLSX = await import('xlsx-js-style');
             const isExpense = tab === 'expense';
+            const isOther = tab === 'other';   // no SR No., no discount / credit column
             const headers = [
                 'Sr. No.', 'Approval No.', 'Date', 'Category', 'Branch',
-                ...(isExpense ? ['SR No.', 'Expense Amount', 'Expense Type']
-                    : ['Customer Name', 'Instance ID', 'SR No.', 'Invoice', 'Delivery Challan']),
+                ...(isExpense ? ['SR No.', 'Expense Amount', 'Expense Type',
+                    'Paid By', 'Paid By Mode', 'Reimburse To', 'Reimburse Mode', 'Bank Details']
+                    : isOther ? ['Customer Name', 'Instance ID', 'Invoice', 'Delivery Challan']
+                        : ['Customer Name', 'Instance ID', 'SR No.', 'Invoice', 'Delivery Challan']),
                 'Quotation No.', 'Quotation Amount',
                 ...(tab === 'discounting' ? ['Discounting %']
-                    : tab === 'credit' ? ['Credit Period (Days)']
-                        : tab === 'discounting_credit' ? ['Discounting %', 'Credit Period (Days)'] : []),
+                    : tab === 'credit' ? ['Credit Period - Days']
+                        : tab === 'discounting_credit' ? ['Discounting %', 'Credit Period - Days'] : []),
                 'Purpose', 'Remark', 'Created By', 'Status',
                 'L2 Approved By', 'L2 Approved At',
                 'L3 Approved By', 'L3 Approved At',
-                'L4 (HOD) Approved By', 'L4 Approved At',
-                'L5 (COO) Approved By', 'L5 Approved At',
+                'L4 - HOD Approved By', 'L4 Approved At',
+                'L5 - COO Approved By', 'L5 Approved At',
                 'Rejected By', 'Rejection Remark',
             ];
             const rows = filtered.map((a, i) => [
                 i + 1, a.app_no || 'Draft', fmtDate(a.created_at), catLabel(a.category),
                 `${a.branch}${a.branch_name ? ' — ' + a.branch_name : ''}`,
-                ...(isExpense ? [a.sr_no || '', a.expense_amount ?? '', a.expense_type || '']
-                    : [a.customer_name || '', a.instance_id || '', a.sr_no || '', a.invoice_no || '', a.delivery_challan || '']),
+                ...(isExpense ? [a.sr_no || '', a.expense_amount ?? '', a.expense_type || '',
+                    a.paid_by_name || '', a.paid_by_mode || '', a.reimburse_to || '',
+                    a.reimburse_mode || '', a.reimburse_bank_details || '']
+                    : isOther ? [a.customer_name || '', a.instance_id || '', a.invoice_no || '', a.delivery_challan || '']
+                        : [a.customer_name || '', a.instance_id || '', a.sr_no || '', a.invoice_no || '', a.delivery_challan || '']),
                 a.quotation_no || '', a.quotation_amount ?? '',
                 ...(tab === 'discounting' ? [a.discount_percent ?? '']
                     : tab === 'credit' ? [a.credit_days ?? '']
                         : tab === 'discounting_credit' ? [a.discount_percent ?? '', a.credit_days ?? ''] : []),
-                a.description || '', a.remark || '', a.created_by_name || a.created_by,
+                /* a table pasted from Excel is NOT exported — it cannot be laid
+                   out sensibly inside one cell; only the typed text goes out
+                   (the table is in the record, the mail and the PDF) */
+                richToTextNoTables(a.description),
+                a.remark || '', a.created_by_name || a.created_by,
                 statusLabel(a.status),
                 a.l2_action_by_name || '', a.l2_action_at ? fmtDate(a.l2_action_at) : '',
                 a.l3_action_by_name || '', a.l3_action_at ? fmtDate(a.l3_action_at) : '',
@@ -151,10 +181,11 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
                     alignment: { horizontal: 'center', vertical: 'center' },
                 };
             });
-            ws['!cols'] = headers.map((h, c) => ({
-                wch: Math.min(40, Math.max(h.length + 2,
-                    ...rows.map(r => String(r[c] ?? '').length + 2))),
-            }));
+            ws['!cols'] = headers.map((h, c) => {
+                // a value may still hold typed line breaks — measure line by line
+                const widest = (r) => Math.max(...String(r[c] ?? '').split('\n').map(l => l.length));
+                return { wch: Math.min(40, Math.max(h.length + 2, ...rows.map(r => widest(r) + 2))) };
+            });
 
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, `${typeLabel(tab)} Report`);
@@ -200,7 +231,8 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
                                 <option key={b.branch} value={b.branch}>{b.branch}{b.branch_name ? ` — ${b.branch_name}` : ''}</option>
                             ))}
                         </select>
-                        <TypeTabs value={tab} onChange={setTab} counts={typeCounts} />
+                        {/* onDark: this bar sits inside the blue header */}
+                        <TypeTabs value={tab} onChange={setTab} counts={typeCounts} onDark />
                         {canExport && (
                             <button onClick={exportExcel} disabled={exporting || loading}
                                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 whitespace-nowrap">
@@ -219,7 +251,7 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
                     {/* Filters */}
                     <div className="flex flex-wrap items-center gap-2">
                         <select className={input} value={f.status} onChange={set('status')}>
-                            <option value="">All Statuses</option>
+                            <option value="">Status</option>
                             <option value="pending">All Pending</option>
                             {Object.keys(STATUS_META).filter(v => v !== 'draft')
                                 .map(v => <option key={v} value={v}>{statusLabel(v)}</option>)}
@@ -251,9 +283,12 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
                 </div>
 
                 {selected && (
+                    /* allowAct: opened from a summary card, so an NFA still
+                       waiting on THIS user is approvable right here — the
+                       server's can_act flag stays the only gate. */
                     <ApplicationDetailModal
-                        app={selected} canAct={false} canDelete={false}
-                        onClose={() => setSelected(null)} onChanged={load}
+                        app={selected} canAct={allowAct && selected.can_act === true} canDelete={false}
+                        onClose={() => setSelected(null)} onChanged={refresh}
                     />
                 )}
             </div>

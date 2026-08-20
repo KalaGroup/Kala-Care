@@ -240,6 +240,20 @@ def add_sr_to_csp_campaign(
     user_data = get_user_from_request(request)
     return controller.add_sr_to_csp_campaign(campaign_id, sr_data, user_data)
 
+@router.post("/csp/sync-closed-srs")
+def sync_csp_closed_srs(
+    campaign_id: Optional[int] = Query(None, description="Only this drive; omit for every active CSP drive"),
+    db: Session = Depends(get_db)
+):
+    """Complete CSP drive assets whose SR is already closed in the
+    'MaxTTR - Oil Change SR Zero Labour Flag' file.
+
+    Runs automatically after that import and after a CSP Info upload — this
+    endpoint is the manual re-run, e.g. to settle drives loaded before the
+    auto-sync existed."""
+    controller = CampaignController(db)
+    return controller.auto_complete_csp_srs_closed_in_maxttr(campaign_id)
+
 @router.get("/csp/user-sr-count")
 def get_user_csp_sr_count(
     user_id: str = Query(...),

@@ -105,6 +105,8 @@ def login(user_login: UserLogin, db: Session = Depends(get_db)):
                     "can_access_part_detail": bool(user.can_access_part_detail),
                     "can_access_mom": bool(user.can_access_mom),
                     "can_access_approval": bool(user.can_access_approval),
+                    "can_access_pms": bool(user.can_access_pms),
+                    "aop_access": user.aop_access or "none",
                     "theme": user.theme or "light",
                     "session_id": session_id,
                     "branches": [
@@ -405,6 +407,8 @@ def get_all_employees(
                         "can_access_part_detail": bool(emp.can_access_part_detail),
                         "can_access_mom": bool(emp.can_access_mom),
                         "can_access_approval": bool(emp.can_access_approval),
+                        "can_access_pms": bool(emp.can_access_pms),
+                        "aop_access": emp.aop_access or "none",
                         "password": emp.password if is_master else None
                     }
                     for emp in employees
@@ -606,14 +610,16 @@ def toggle_page_access(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
-    """Grant/revoke a user's access to the Part Detail Info or MOM Tracking
-    pages (Master Admin only). Body: { page: 'part_detail'|'mom', allowed: bool }."""
+    """Grant/revoke a user's access to the Part Detail Info, MOM Tracking,
+    Approval or PMS pages (Master Admin only).
+    Body: { page: 'part_detail'|'mom'|'approval'|'pms', allowed: bool }."""
     try:
         page = body.get('page')
         allowed = bool(body.get('allowed', False))
         updated = UserController.toggle_page_access(db, employee_id, user_id, page, allowed)
 
-        page_label = {"part_detail": "Part Detail Info", "approval": "Approval Application"}.get(page, "MOM Tracking")
+        page_label = {"part_detail": "Part Detail Info", "approval": "Approval Application",
+                      "pms": "PMS"}.get(page, "MOM Tracking")
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
@@ -623,7 +629,9 @@ def toggle_page_access(
                     "id": updated.id,
                     "can_access_part_detail": bool(updated.can_access_part_detail),
                     "can_access_mom": bool(updated.can_access_mom),
-                    "can_access_approval": bool(updated.can_access_approval)
+                    "can_access_approval": bool(updated.can_access_approval),
+                    "can_access_pms": bool(updated.can_access_pms),
+                    "aop_access": updated.aop_access or "none"
                 }
             }
         )
@@ -634,6 +642,41 @@ def toggle_page_access(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error toggling page access: {str(e)}"
+        )
+
+@router.put("/employees/{employee_id}/aop-access")
+def set_aop_access(
+    employee_id: int,
+    body: dict,
+    user_id: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    """Set a user's AOP & Master rights. Body: { level: 'none'|'view'|'edit' }.
+    Only the AOP rights admins (AOP_RIGHTS_ADMIN_IDS) may call this."""
+    try:
+        level = (body.get('level') or 'none').strip().lower()
+        updated = UserController.set_aop_access(db, employee_id, user_id, level)
+
+        label = {"none": "hidden", "view": "view only", "edit": "view and edit"}[level]
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "success": True,
+                "message": f"AOP & Master rights set to {label}",
+                "employee": {
+                    "id": updated.id,
+                    "can_access_pms": bool(updated.can_access_pms),
+                    "aop_access": updated.aop_access or "none"
+                }
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error setting AOP access: {str(e)}"
         )
 
 @router.put("/profile")
@@ -709,6 +752,8 @@ def get_profile(
                     "can_access_part_detail": bool(user.can_access_part_detail),
                     "can_access_mom": bool(user.can_access_mom),
                     "can_access_approval": bool(user.can_access_approval),
+                    "can_access_pms": bool(user.can_access_pms),
+                    "aop_access": user.aop_access or "none",
                     "email": user.email or '',
                     "password": user.password
                 }

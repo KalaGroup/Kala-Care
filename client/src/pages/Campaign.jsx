@@ -1249,7 +1249,12 @@ const Campaign = () => {
 
       const result = await response.json();
       toast.dismiss(spToast);
-      toast.success(`SP Info saved (${result.inserted} added, ${result.updated} updated)`);
+      // Rows whose SR is already closed in the MaxTTR file are completed in the
+      // drive on the spot — say so, otherwise the asset count looks wrong.
+      const autoClosed = result.auto_completed
+        ? `, ${result.auto_completed} auto-completed (SR already closed)`
+        : '';
+      toast.success(`SP Info saved (${result.inserted} added, ${result.updated} updated${autoClosed})`);
       return result;
     } catch (err) {
       toast.dismiss(spToast);
@@ -4345,7 +4350,7 @@ const Campaign = () => {
                             <th className="px-3 py-2.5 text-center font-semibold text-black border-b border-gray-200">#</th>
                             <th className="px-3 py-2.5 text-left font-semibold text-black border-b border-gray-200">Branch Code</th>
                             <th className="px-3 py-2.5 text-left font-semibold text-black border-b border-gray-200">Branch Name</th>
-                            <th className="px-3 py-2.5 text-left font-semibold text-black border-b border-gray-200">Email Address</th>
+                            <th className="px-3 py-2.5 text-left font-semibold text-black border-b border-gray-200">Email Address (Default in CC)</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -5593,6 +5598,16 @@ const Campaign = () => {
                     {campaign.name}
                   </h3>
                   <div className="flex items-center gap-1 shrink-0">
+                    {/* Product name lives in the header now — the footer below the
+                        divider is fixed and reserved for the asset buttons. */}
+                    {campaign.service && (
+                      <span
+                        className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-white/25 text-white truncate max-w-[110px]"
+                        title={campaign.service}
+                      >
+                        {campaign.service}
+                      </span>
+                    )}
                     <span className={`px-2 py-0.5 rounded-full text-xs capitalize ${getStatusBadgeClass(campaign.status)}`}>
                       {campaign.status}
                     </span>
@@ -5615,7 +5630,9 @@ const Campaign = () => {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-3">
+                {/* Scrollable middle — only the description / scripts / meta
+                    block moves; header above and footer below stay put. */}
+                <div className="flex-1 min-h-0 overflow-y-auto p-3">
                   <div className="mb-3">
                     <p className="text-sm text-black break-words whitespace-pre-wrap">
                       {campaign.description || 'No description provided'}
@@ -5645,7 +5662,7 @@ const Campaign = () => {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-2 gap-3 mb-3 max-sm:grid-cols-1">
+                  <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
                     <div className="flex items-center gap-1.5 text-sm min-w-0">
                       <CalendarIcon className="h-3.5 w-3.5 shrink-0" style={{ color: themeColor }} />
                       <span className="text-black truncate">
@@ -5659,62 +5676,57 @@ const Campaign = () => {
                       </span>
                     </div>
                   </div>
+                </div>
 
-                  <div className="flex items-center justify-between pt-3 border-t mt-auto max-sm:flex-wrap max-sm:gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium px-2 py-1 bg-blue-100 text-blue-800 rounded-full truncate max-w-[120px]">
-                        {campaign.service}
+                {/* Fixed footer — sits below the divider and never scrolls. */}
+                <div className="shrink-0 border-t border-gray-200 px-3 py-2">
+                  <div className="flex items-center justify-end gap-3 max-sm:flex-wrap max-sm:gap-2">
+                    <button
+                      onClick={(e) => openFollowupModal(campaign, e)}
+                      className="px-2 py-1 text-xs font-medium text-white bg-[#2f3192] rounded-md hover:bg-[#2f3192]/90 transition-all whitespace-nowrap"
+                      title="View customer follow-ups"
+                    >
+                      View All
+                      <span className="ml-1 px-1 rounded bg-white/25 text-[10px] tabular-nums">
+                        {(campaign.asset_numbers?.length || 0) + (campaignCounts[campaign.id]?.completed || 0)}
                       </span>
-                    </div>
+                    </button>
 
-                    <div className="flex items-center gap-3 ml-auto max-sm:flex-wrap max-sm:gap-2">
-                      <button
-                        onClick={(e) => openFollowupModal(campaign, e)}
-                        className="px-2 py-1 text-xs font-medium text-white bg-[#2f3192] rounded-md hover:bg-[#2f3192]/90 transition-all whitespace-nowrap"
-                        title="View customer follow-ups"
-                      >
-                        View All
-                        <span className="ml-1 px-1 rounded bg-white/25 text-[10px] tabular-nums">
-                          {(campaign.asset_numbers?.length || 0) + (campaignCounts[campaign.id]?.completed || 0)}
+                    <button
+                      onClick={(e) => openFollowupModal(campaign, e, true)}
+                      className="px-2 py-1 text-xs font-medium text-white bg-[#2f3192] rounded-md hover:bg-[#2f3192]/90 transition-all whitespace-nowrap"
+                      title="View only assets added by admin via Drive Creation"
+                    >
+                      Admin Added
+                      <span className="ml-1 px-1 rounded bg-white/25 text-[10px] tabular-nums">
+                        {campaign.admin_asset_numbers?.length || 0}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={(e) => openFollowupModal(campaign, e, false, true)}
+                      className="px-2 py-1 text-xs font-medium text-white bg-[#2f3192] rounded-md hover:bg-[#2f3192]/90 transition-all whitespace-nowrap"
+                      title="View only user-added assets (View All minus Admin Added)"
+                    >
+                      User Added
+                      <span className="ml-1 px-1 rounded bg-white/25 text-[10px] tabular-nums">
+                        {userAddedCount(campaign)}
+                      </span>
+                    </button>
+
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-1 text-sm text-black" title="Pending Follow-ups">
+                        <UserGroupIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
+                        <span>
+                          {campaignCounts[campaign.id]?.pending !== undefined
+                            ? campaignCounts[campaign.id].pending
+                            : campaign.asset_numbers?.length || 0}
                         </span>
-                      </button>
+                      </div>
 
-                      <button
-                        onClick={(e) => openFollowupModal(campaign, e, true)}
-                        className="px-2 py-1 text-xs font-medium text-white bg-[#2f3192] rounded-md hover:bg-[#2f3192]/90 transition-all whitespace-nowrap"
-                        title="View only assets added by admin via Drive Creation"
-                      >
-                        Admin Added
-                        <span className="ml-1 px-1 rounded bg-white/25 text-[10px] tabular-nums">
-                          {campaign.admin_asset_numbers?.length || 0}
-                        </span>
-                      </button>
-
-                      <button
-                        onClick={(e) => openFollowupModal(campaign, e, false, true)}
-                        className="px-2 py-1 text-xs font-medium text-white bg-[#2f3192] rounded-md hover:bg-[#2f3192]/90 transition-all whitespace-nowrap"
-                        title="View only user-added assets (View All minus Admin Added)"
-                      >
-                        User Added
-                        <span className="ml-1 px-1 rounded bg-white/25 text-[10px] tabular-nums">
-                          {userAddedCount(campaign)}
-                        </span>
-                      </button>
-
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1 text-sm text-black" title="Pending Follow-ups">
-                          <UserGroupIcon className="h-3.5 w-3.5" style={{ color: themeColor }} />
-                          <span>
-                            {campaignCounts[campaign.id]?.pending !== undefined
-                              ? campaignCounts[campaign.id].pending
-                              : campaign.asset_numbers?.length || 0}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-1 text-sm text-green-600" title="Completed Follow-ups">
-                          <CheckCircleIcon className="h-3.5 w-3.5" />
-                          <span>{campaignCounts[campaign.id]?.completed || 0}</span>
-                        </div>
+                      <div className="flex items-center gap-1 text-sm text-green-600" title="Completed Follow-ups">
+                        <CheckCircleIcon className="h-3.5 w-3.5" />
+                        <span>{campaignCounts[campaign.id]?.completed || 0}</span>
                       </div>
                     </div>
                   </div>

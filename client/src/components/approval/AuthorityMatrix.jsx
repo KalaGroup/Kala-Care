@@ -14,7 +14,7 @@
       "Add employee" option.
    2. expenseOnly prop (Expense Master button, replaces My Approval Limits
       for the COO) — the expense-type dropdown master in a small box.      */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import Swal from 'sweetalert2';
 import {
@@ -36,6 +36,8 @@ const td = 'px-2.5 py-1.5 border-b border-r border-gray-200 text-center align-to
 
 const LEVELS = ['l1', 'l2', 'l3', 'l4', 'l5'];
 const ROW_LEVELS = ['l1', 'l2', 'l3', 'l4'];   // assignable per employee (L5 fixed)
+// Non-HO branch rows assign L1..L3 only — L4 (HOD) is Head-Office-only
+const BRANCH_ROW_LEVELS = ['l1', 'l2', 'l3'];
 // HO records skip L2/L3 (creator picks the HOD at submit) — the HO row only
 // assigns L1 (plain member) or L4 (HOD offered in the submit-time dropdown)
 const HO_ROW_LEVELS = ['l1', 'l4'];
@@ -75,8 +77,12 @@ export default function AuthorityMatrix({ onClose, expenseOnly = false }) {
     const [addPickerPos, setAddPickerPos] = useState(null);
     const [addPicks, setAddPicks] = useState([]);
 
+    // Full-screen spinner ONLY on the first load — refreshes after a save
+    // swap the data in place so the table stays mounted and the user's
+    // scroll position doesn't jump back to the top.
+    const firstLoadRef = useRef(true);
     const load = useCallback(async () => {
-        setLoading(true);
+        if (firstLoadRef.current) setLoading(true);
         try {
             const d = await getMatrix();
             setLevelNames(d.level_names);   // renamed levels show everywhere
@@ -92,7 +98,7 @@ export default function AuthorityMatrix({ onClose, expenseOnly = false }) {
             });
         } catch (err) {
             toast.error(errText(err, 'Failed to load authority matrix'));
-        } finally { setLoading(false); }
+        } finally { firstLoadRef.current = false; setLoading(false); }
     }, []);
 
     useEffect(() => { load(); }, [load]);
@@ -234,7 +240,7 @@ export default function AuthorityMatrix({ onClose, expenseOnly = false }) {
         } else if (res?.moved) {
             await Swal.fire({
                 title: 'Saved',
-                text: `${res.moved} pending record(s) were forwarded to the next authority.`,
+                text: `${res.moved} pending records were forwarded to the next authority.`,
                 icon: 'info', confirmButtonColor: BRAND,
             });
         } else if (fallbackMsg) {
@@ -246,7 +252,7 @@ export default function AuthorityMatrix({ onClose, expenseOnly = false }) {
         if (movedTotal) {
             await Swal.fire({
                 title: 'Saved', icon: 'info', confirmButtonColor: BRAND,
-                text: `${what} updated. ${movedTotal} pending record(s) were forwarded to the next authority.`,
+                text: `${what} updated. ${movedTotal} pending records were forwarded to the next authority.`,
             });
         } else {
             await Swal.fire({
@@ -264,7 +270,7 @@ export default function AuthorityMatrix({ onClose, expenseOnly = false }) {
         // every L4 must cover at least one category
         const noCat = members.find(m => effLevelInRow(code, m.user_id) === 'l4'
             && effCatsInRow(code, m.user_id).length === 0);
-        if (noCat) return toast.error(`Select at least one category for ${noCat.name} (L4)`);
+        if (noCat) return toast.error(`Select at least one category for ${noCat.name} - L4`);
         setSavingId(`row_${code}`);
         try {
             let moved = 0;
@@ -367,7 +373,7 @@ export default function AuthorityMatrix({ onClose, expenseOnly = false }) {
                 await setAuthority({ user_id: m.user_id, level: u?.level || 'l1' });
             }
             await load();
-            toast.success(`${fresh.length} employee(s) loaded into ${code}`);
+            toast.success(`${fresh.length} employees loaded into ${code}`);
         } catch (err) {
             toast.error(errText(err, 'Failed to load the branch employees'));
         } finally { setSavingId(null); }
@@ -519,8 +525,8 @@ export default function AuthorityMatrix({ onClose, expenseOnly = false }) {
             }
             await load();
             toast.success(picks.length > 1
-                ? `Merged row ${code} created (${picks.join(' + ')}) — ${fresh.length} employee(s) loaded`
-                : `${fresh.length} employee(s) loaded into ${code}`);
+                ? `Merged row ${code} created - ${picks.join(' + ')} — ${fresh.length} employees loaded`
+                : `${fresh.length} employees loaded into ${code}`);
         } catch (err) {
             toast.error(errText(err, 'Failed to add the hierarchy row'));
         } finally {
@@ -654,7 +660,7 @@ export default function AuthorityMatrix({ onClose, expenseOnly = false }) {
                                                                 return (
                                                                     <div key={m.user_id} className={`${LINE} justify-center`}>
                                                                         <span className={`text-xs ${indiv !== null ? 'font-bold text-indigo-700' : 'text-gray-800'}`}
-                                                                            title={indiv !== null ? 'Individual limit' : 'Level-wise (shared) limit'}>
+                                                                            title={indiv !== null ? 'Individual limit' : 'Level-wise - shared limit'}>
                                                                             {eff}{unit}
                                                                         </span>
                                                                     </div>
@@ -755,11 +761,11 @@ export default function AuthorityMatrix({ onClose, expenseOnly = false }) {
                                                                         <select className={`${input} max-w-[140px]`}
                                                                             value={lvl}
                                                                             onChange={e => setLevelInRow(code, m.user_id, e.target.value)}>
-                                                                            {(code === data.ho_branch ? HO_ROW_LEVELS : ROW_LEVELS).map(l => (
+                                                                            {(code === data.ho_branch ? HO_ROW_LEVELS : BRANCH_ROW_LEVELS).map(l => (
                                                                                 <option key={l} value={l}>{levelLabel(l)}</option>
                                                                             ))}
-                                                                            {/* legacy value outside the HO list stays visible until corrected */}
-                                                                            {code === data.ho_branch && !HO_ROW_LEVELS.includes(lvl) && (
+                                                                            {/* legacy value outside the row's list stays visible until corrected */}
+                                                                            {!(code === data.ho_branch ? HO_ROW_LEVELS : BRANCH_ROW_LEVELS).includes(lvl) && (
                                                                                 <option value={lvl}>{levelLabel(lvl)}</option>
                                                                             )}
                                                                         </select>
@@ -846,7 +852,7 @@ export default function AuthorityMatrix({ onClose, expenseOnly = false }) {
                                                                 onClick={async () => {
                                                                     const res = await Swal.fire({
                                                                         title: 'Delete this hierarchy row?',
-                                                                        text: `${groupOf(code).join(' + ')}: ALL its L2 / L3 / L4 assignments AND its limits will be removed (employees return to L1, limits reset to 0)${groupOf(code).length > 1 ? '; the merged branches split up again' : ''}. Pending records are re-routed to the next available authority.`,
+                                                                        text: `${groupOf(code).join(' + ')}: ALL its L2 / L3 / L4 assignments AND its limits will be removed - employees return to L1, limits reset to 0${groupOf(code).length > 1 ? '; the merged branches split up again' : ''}. Pending records are re-routed to the next available authority.`,
                                                                         icon: 'warning',
                                                                         showCancelButton: true,
                                                                         confirmButtonText: 'Delete Row',

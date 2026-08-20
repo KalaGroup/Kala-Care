@@ -130,14 +130,18 @@ async def edit_meeting(
     """Edit an already-finalized meeting from MOM History. Master Admin only —
     branch admins can create meetings but not rewrite history.
 
+    Returns the edited meeting plus `propagated` — the later meetings of the
+    same branch that received a point added by this edit, so the client can
+    refresh them without a full reload.
+
     Same flaky-link retry story as create_meeting: the transaction rolls back
     on failure, so retrying the whole update is safe."""
     _require_role(db, user_id, user_role, MASTER_ROLES,
                   "Only the Master Admin can edit meeting minutes")
     for attempt in range(3):
         try:
-            meeting = mc.update_meeting(db, meeting_id, payload.model_dump(exclude_unset=True))
-            return {"success": True, "meeting": meeting}
+            result = mc.update_meeting(db, meeting_id, payload.model_dump(exclude_unset=True))
+            return {"success": True, **result}
         except OperationalError:
             db.rollback()
             if attempt == 2:

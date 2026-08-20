@@ -3,6 +3,8 @@ import { Toaster } from 'react-hot-toast';
 import { useState, useEffect, lazy, Suspense } from 'react';
 
 import Navbar from './components/Navbar';
+// PMS route guards — module access + the AOP & Master view/edit right.
+import { canAccessPms, canViewAop } from './utils/pagePermission';
 // Follows the user across pages while a background upload is still running.
 import UploadGuard from './components/UploadGuard';
 // Login is eager: it is the first screen an unauthenticated user sees, so we
@@ -39,6 +41,13 @@ const MaintenanceReports = lazy(routeImporters['/maintenance-reports']);
 // PMS module pages — master admin only for now.
 const AOPMaster = lazy(routeImporters['/aop-master']);
 const SalesLabourReport = lazy(routeImporters['/sales-labour-report']);
+const EmployeeProductivity = lazy(routeImporters['/employee-productivity']);
+const SRAllocation = lazy(routeImporters['/sr-allocation']);
+// Annual Reports — the yearly sheets (Service Penetration, AMC & Bandhan
+// Projection, ...), one page with a report picker.
+const AnnualReports = lazy(routeImporters['/annual-reports']);
+// Welcome Letter — Open SR (CC) commissioning customers, letter dispatch & report.
+const WelcomeLetter = lazy(routeImporters['/welcome-letter']);
 
 // Route chunks to warm during idle time, most-visited first, so a later navbar
 // click finds the chunk already cached. Order roughly by how often pages are hit.
@@ -59,6 +68,10 @@ const ROUTE_PREFETCHERS = [
   routeImporters['/sales-finance'],
   routeImporters['/aop-master'],
   routeImporters['/sales-labour-report'],
+  routeImporters['/employee-productivity'],
+  routeImporters['/sr-allocation'],
+  routeImporters['/annual-reports'],
+  routeImporters['/welcome-letter'],
   routeImporters['/import'],
 ];
 
@@ -350,16 +363,43 @@ function Layout() {
         </ProtectedRoute>
       } />
 
-      {/* PMS Pages - ONLY master_admin for now (view opens to other roles later) */}
+      {/* PMS Pages — Master Admin, plus any user granted "PMS Access" from
+          Profile. AOP & Master additionally needs its own right (view/edit). */}
       <Route path="/aop-master" element={
-        <ProtectedRoute allowedRoles={['master_admin']}>
+        <ProtectedRoute customCheck={canViewAop}>
           <AOPMaster />
         </ProtectedRoute>
       } />
 
       <Route path="/sales-labour-report" element={
-        <ProtectedRoute allowedRoles={['master_admin']}>
+        <ProtectedRoute customCheck={canAccessPms}>
           <SalesLabourReport />
+        </ProtectedRoute>
+      } />
+
+      <Route path="/employee-productivity" element={
+        <ProtectedRoute customCheck={canAccessPms}>
+          <EmployeeProductivity />
+        </ProtectedRoute>
+      } />
+
+      <Route path="/sr-allocation" element={
+        <ProtectedRoute customCheck={canAccessPms}>
+          <SRAllocation />
+        </ProtectedRoute>
+      } />
+
+      <Route path="/annual-reports" element={
+        <ProtectedRoute customCheck={canAccessPms}>
+          <AnnualReports />
+        </ProtectedRoute>
+      } />
+
+      {/* Welcome Letter — Master Admin + Branch Admin (Master Setup inside is
+          master_admin only; a Branch Admin only sees their own branches) */}
+      <Route path="/welcome-letter" element={
+        <ProtectedRoute allowedRoles={['master_admin', 'branch_admin']}>
+          <WelcomeLetter />
         </ProtectedRoute>
       } />
 

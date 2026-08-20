@@ -8,11 +8,12 @@ import io
 import re
 import json
 
+from app.time_utils import now_ist
 from app.models.customer_model import (
     Customer, AMCAgreement, AssetDetailed, AssetService,
     AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
-    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, OpenSRData,
-    ResponseTimeMaxTTR
+    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, MaxTTROilChangeSRZeroLabourFlag,
+    ResponseTimeMaxTTR, CDIDetailReport, EFSRReport
 )
 
 # ==========================================================================
@@ -119,7 +120,8 @@ FILE_KNOWN_COLUMNS = {
         'Quotation Lead Assigned UID', 'Quotation Lead Assigned Job Title',
         'Enquiry Loss Reason', 'Service Engineer Name', 'Service Engineer UID',
         'Service Engineer Mobile Number', 'Order Number', 'SIC Code', 'SIC Code Type',
-        'Labour Invoice Number', 'Part Invoice Amount', 'Part Invoice Number',
+        'Labour Invoice Number', 'Labour Invoice Amount', 'Part Invoice Amount',
+        'Part Invoice Number',
         'Lead Source', 'Next Action Required', 'New Contact', 'Lead Contact Number',
         'Next Action Date', 'Lead Assign To SD'
     ],
@@ -151,7 +153,7 @@ FILE_KNOWN_COLUMNS = {
         'Dry CSP Approved by', 'Dry CSP Approved Date',
         'Contact Phone Number', 'Contact Email'
     ],
-    'Open SR Data': [
+    'MaxTTR - Oil Change SR Zero Labour Flag': [
         'INSTANCE ID', 'ZONE NAME', 'ASM NAME', 'SD ID', 'SD NAME', 'BRANCH ID',
         'BRANCH NAME', 'APPLICATION CODE', 'ENGINE SERIAL NO', 'ENGINE MODEL',
         'SEGMENT', 'PRODUCT SEGMENT', 'ACCOUNT NAME', 'SR NUMBER', 'SR TYPE',
@@ -167,6 +169,17 @@ FILE_KNOWN_COLUMNS = {
         'RESPONSE TIME RANGE IN HRS', 'Response Time',
         'MaxTTR on Task Closed in hrs', 'MaxTTR on SR Closed in hrs'
     ],
+    # CDI Detail Report / EFSR Report deliberately list ONLY their fixed
+    # columns: every other header in those files is dynamic (extra_data).
+    'CDI Detail Report': [
+        'SR NUMBER', 'BRANCH NAME', 'X TECHNICIAN ID', 'X TECHNICIAN NAME',
+        'CDI CATEGORY', 'Overall Experience', 'ACTIVITY END DATE'
+    ],
+    'EFSR Report': [
+        'SD Branch Code', 'Service Request No.', 'Appointment Number', 'SR Type',
+        'SR Closed Date', 'SR Status', 'Service Engineer Name',
+        'Service Engineer UID', 'Task Assigned Date & Time', 'Task End Date'
+    ],
 }
 
 # Known alternate spellings that flexible matching alone cannot bridge
@@ -177,8 +190,12 @@ FILE_COLUMN_ALIASES = {
         'Engine Serial#': ['Engine Serial No', 'Engine Serial Number'],
         'Service Request #': ['Service Request No', 'Service Request Number'],
         'Instance Id [Asset #]': ['Instance Id', 'Instance ID', 'Asset Number'],
+        # Engine App Code + Engine Series feed the Welcome Letter module —
+        # keep them landing in their fixed columns whatever the file calls them.
+        'Engine App Code': ['Engine Application Code', 'Engine Appcode', 'App Code'],
+        'Engine Series': ['Series'],
     },
-    'Open SR Data': {
+    'MaxTTR - Oil Change SR Zero Labour Flag': {
         'INSTANCE ID': ['Instance Id [Asset #]', 'Instance Id', 'Asset Number'],
         'SR SUBTYPE': ['SR SUB TYPE', 'SR SUB-TYPE'],
         'ZERO LABOUR FLAG': ['ZERO LABOR FLAG'],
@@ -189,6 +206,13 @@ FILE_COLUMN_ALIASES = {
         'SR NUMBER': ['SR NO', 'SR #', 'SERVICE REQUEST NUMBER'],
         'SR SUBTYPE': ['SR SUB TYPE', 'SR SUB-TYPE'],
         'SE TICKET NUM': ['SE TICKET NUMBER', 'SE TICKET NO'],
+        # SR TASK END DATE is a FIXED column: Employee Productivity counts
+        # 'Days present on Task end' on it, so it must never fall through to
+        # extra_data because the export spelled the header differently.
+        'SR TASK START DATE': ['TASK START DATE', 'SR TASK START DATE & TIME',
+                               'SR TASK START DATETIME'],
+        'SR TASK END DATE': ['TASK END DATE', 'SR TASK END DATE & TIME',
+                             'SR TASK END DATETIME', 'SR TASK CLOSED DATE'],
         'RESPONSE TIME RANGE IN HRS': ['RESPONSE TIME RANGE IN HOURS'],
         'MaxTTR on Task Closed in hrs': ['MAXTTR ON TASK CLOSED IN HOURS'],
         'MaxTTR on SR Closed in hrs': ['MAXTTR ON SR CLOSED IN HOURS'],
@@ -206,6 +230,29 @@ FILE_COLUMN_ALIASES = {
         'Tele-Caller Name': ['Tele Caller'],
         'Quotation Approved Date': ['Quotation Approval Date'],
     },
+    'CDI Detail Report': {
+        'ACTIVITY END DATE': ['ACTIVITY END DATE & TIME', 'ACTIVITY END DATETIME'],
+        'BRANCH NAME': ['SD BRANCH NAME', 'BRANCH'],
+        'SR NUMBER': ['SR NO', 'SR #', 'SERVICE REQUEST NUMBER', 'Service Request No.'],
+        'X TECHNICIAN ID': ['TECHNICIAN ID', 'X TECHNICIAN CODE'],
+        'X TECHNICIAN NAME': ['TECHNICIAN NAME'],
+        'Overall Experience': ['OVERALL EXPERIENCE RATING', 'OVERALL EXP'],
+    },
+    'EFSR Report': {
+        'Task Assigned Date & Time': ['Task Assigned Date', 'Task Assign Date',
+                                      'Task Assigned Date and Time'],
+        'Task End Date': ['Task End Date & Time', 'Task End Date and Time',
+                          'Task Ended Date', 'Task Completion Date'],
+        'Service Request No.': ['Service Request No', 'Service Request Number',
+                                'Service Request #', 'SR NUMBER', 'SR No.'],
+        'Appointment Number': ['Appointment No', 'Appointment No.', 'Appointment #',
+                               'Appointment Id', 'Appointment ID', 'Appt Number',
+                               'Appt No', 'Task Number', 'Task No'],
+        'SD Branch Code': ['SD Branch Id', 'BRANCH ID', 'Branch Code'],
+        'SR Closed Date': ['SR Close Date', 'SR Closed Date & Time', 'SR Closure Date'],
+        'Service Engineer Name': ['Service Engineer', 'SE Name'],
+        'Service Engineer UID': ['Service Engineer Uid', 'SE UID', 'SE Ticket Num'],
+    },
     'AMC Population Report': {
         'KVA RATING': ['kVA Rating'],
     },
@@ -220,6 +267,100 @@ FILE_COLUMN_ALIASES = {
         'Quotation Ref No': ['Quotation Ref No.', 'QuotationRefNo'],
     },
 }
+
+# Standalone files: imported into their OWN table only. They never write to the
+# customers table and never trigger the cross-table matching / branch backfill
+# that the other imports run afterwards.
+STANDALONE_FILE_TYPES = {'CDI Detail Report', 'EFSR Report'}
+
+
+# ==========================================================================
+# UPLOAD READER
+#
+# Not every ".xls" that lands here is really an Excel workbook. The KOEL /
+# eFSR web portals export their reports as an HTML <table> saved with an .xls
+# extension (and some exports are plain CSV/TSV renamed the same way). pandas
+# cannot sniff those and blows up with "Excel file format cannot be
+# determined, you must specify an engine manually", so the format is detected
+# from the file's own bytes here and handed to the right pandas reader.
+# ==========================================================================
+
+_ZIP_MAGIC = b'PK\x03\x04'          # .xlsx / .xlsm (zip container)
+_OLE2_MAGIC = b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'   # legacy binary .xls
+_HTML_SNIFF = re.compile(rb'<\s*(!doctype\s+html|html|head|meta|body|table|tr|th)\b', re.I)
+
+
+def read_upload_table(contents: bytes) -> pd.DataFrame:
+    """Read an uploaded report into a DataFrame, whatever it actually is.
+
+    Handles real .xlsx/.xlsm (zip), legacy binary .xls (OLE2), the HTML-table
+    exports the portals name ".xls", and CSV/TSV. Raises HTTPException(400)
+    with a readable message instead of leaking the pandas engine error."""
+    if not contents:
+        raise HTTPException(status_code=400, detail="The uploaded file is empty.")
+
+    head = contents.lstrip()[:2048]
+
+    if contents[:4] == _ZIP_MAGIC:
+        return pd.read_excel(io.BytesIO(contents), engine='openpyxl')
+
+    if contents[:8] == _OLE2_MAGIC:
+        return pd.read_excel(io.BytesIO(contents), engine='xlrd')
+
+    if _HTML_SNIFF.search(head):
+        return _read_html_table(contents)
+
+    # Unknown signature: let pandas try (covers .ods and anything with a
+    # future engine), then fall back to HTML and finally to CSV/TSV.
+    for reader in (_read_excel_any, _read_html_table, _read_delimited):
+        try:
+            return reader(contents)
+        except Exception:
+            continue
+
+    raise HTTPException(
+        status_code=400,
+        detail=("Unsupported file format. Save the report as .xlsx (Excel Workbook) "
+                "or .csv and upload it again.")
+    )
+
+
+def _read_excel_any(contents: bytes) -> pd.DataFrame:
+    return pd.read_excel(io.BytesIO(contents))
+
+
+def _read_html_table(contents: bytes) -> pd.DataFrame:
+    """Parse an HTML-table export. Keeps the largest table on the page and
+    strips the &nbsp; padding those exports are full of."""
+    try:
+        tables = pd.read_html(io.BytesIO(contents))
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The file looks like an HTML report but no data table could be read from it: {e}"
+        )
+    if not tables:
+        raise HTTPException(status_code=400, detail="No data table found in the uploaded file.")
+
+    df = max(tables, key=lambda t: t.shape[0] * max(t.shape[1], 1))
+    df.columns = [str(c).replace('\xa0', ' ').strip() for c in df.columns]
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].map(
+                lambda v: v.replace('\xa0', ' ').strip() if isinstance(v, str) else v
+            )
+    return df
+
+
+def _read_delimited(contents: bytes) -> pd.DataFrame:
+    """CSV / TSV renamed .xls — sniff the separator and the encoding."""
+    last_error = None
+    for encoding in ('utf-8-sig', 'latin-1'):
+        try:
+            return pd.read_csv(io.BytesIO(contents), sep=None, engine='python', encoding=encoding)
+        except Exception as e:
+            last_error = e
+    raise last_error
 
 
 class ImportController:
@@ -315,7 +456,15 @@ class ImportController:
             '%d-%m-%y %H:%M',
             '%d-%m-%y',
             '%d/%m/%y',
-            '%Y/%m/%d'
+            '%Y/%m/%d',
+            # eFSR export style: "7/22/2026, 4:57 PM" (with and without comma).
+            # Appended at the END so no format that already parsed changes.
+            '%m/%d/%Y, %I:%M %p',
+            '%m/%d/%Y %I:%M %p',
+            '%d/%m/%Y, %I:%M %p',
+            '%d/%m/%Y %I:%M %p',
+            '%m/%d/%Y, %I:%M:%S %p',
+            '%d/%m/%Y, %I:%M:%S %p'
         ]
         
         for fmt in date_formats:
@@ -1090,22 +1239,29 @@ class ImportController:
             ]
         }
         
-        expected = expected_columns.get(file_type, [])
-        if not expected:
+        # The gate is the CRITICAL list, not the legacy expected_columns map
+        # above: that map has no entry for several imports (MaxTTR among them),
+        # so keying off it returned "nothing to check" and skipped the critical
+        # columns entirely.
+        if not self.get_critical_columns(file_type):
             return True, "No validation required"
-        
-        actual_columns = set(str(col).strip() for col in df.columns if pd.notna(col))
+
+        # Match the way canonicalize_dataframe does — alphanumeric-only, plus
+        # the per-file aliases — so a header that differs only in case, spacing
+        # or punctuation still counts as present. (LMS used to be special-cased
+        # to two columns here; it now goes through the same critical list.)
+        actual_keys = {self._tight_header(col) for col in df.columns if pd.notna(col)}
+        aliases = FILE_COLUMN_ALIASES.get(file_type, {})
         critical_columns = self.get_critical_columns(file_type)
-        
-        if file_type == 'LMS Data for ERP':
-            required = ['Instance ID', 'Lead Number']
-            missing = [col for col in required if col not in actual_columns]
-            if missing:
-                return False, f"Missing required columns for LMS Data: {', '.join(missing)}"
-            return True, "Format valid"
-        
-        missing_critical = [col for col in critical_columns if col not in actual_columns]
-        
+
+        def _present(col):
+            for cand in [col, *aliases.get(col, [])]:
+                if self._tight_header(cand) in actual_keys:
+                    return True
+            return False
+
+        missing_critical = [col for col in critical_columns if not _present(col)]
+
         if missing_critical:
             return False, f"Missing critical columns: {', '.join(missing_critical)}"
         
@@ -1115,18 +1271,42 @@ class ImportController:
         """Get critical columns that must be present for each file type"""
         critical = {
             'AMC Population Report': ['INSTANCE ID', 'AGREEMENT NUMBER'],
-            'Asset Detailed Report': ['ASSET NUMBER', 'ENGINE SERIAL NO'],
+            # ASSET OPERATIONAL STATUS decides the Service Penetration report's
+            # population: an 'Inactive' asset is a retired machine and is left
+            # out of the installed base. Without the column every asset would
+            # silently count, inflating the population and deflating Pen %.
+            'Asset Detailed Report': ['ASSET NUMBER', 'ENGINE SERIAL NO',
+                                      'ASSET OPERATIONAL STATUS'],
             'Asset Details with Last Oil Service': ['ASSET NUMBER', 'ENGINE SERIAL NO'],
             'Anubandhan Plus Quotes Report': ['Pulse Instance ID', 'QuotationRefNo', 'EngineNo'],
             'Anubandhan Quotes Report': ['Pulse Instance ID', 'QuotationRefNo', 'EngineNo'],
             'BandhanPlus Quotes Report': ['Pulse Instance ID', 'QuotationRefNo', 'EngineNo'],
             'Pulse Quotation - Service Only': ['Instance Id', 'Quote ID'],
             'Regular Bandhan Customers Report': ['Pulse Instance ID', 'Quotation Ref No'],
-            'LMS Data for ERP': ['INSTANCE ID', 'LEAD NUMBER'],
+            # Every column the Employee Productivity report reads from LMS.
+            # Without them the report loses whole columns silently, so the
+            # upload is blocked instead. Names are the CANONICAL ones — the
+            # file is canonicalised first and matching below is flexible.
+            'LMS Data for ERP': [
+                'Instance ID', 'Lead Number', 'Lead Created Date',
+                'Lead Raised For', 'SD Branch Code', 'SD Branch Name',
+                'Service Engineer Name', 'Service Engineer UID',
+                'Part Invoice Amount', 'Labour Invoice Amount',
+            ],
             'Open SR Load Report': ['Service Request #', 'Instance Id [Asset #]', 'Engine Serial#'],
-            'Open SR Data': ['INSTANCE ID', 'SR NUMBER', 'SR TYPE', 'SR SUBTYPE'],
+            'MaxTTR - Oil Change SR Zero Labour Flag': ['INSTANCE ID', 'SR NUMBER', 'SR TYPE', 'SR SUBTYPE'],
+            # SR TYPE drives the report's SR Type split and BRANCH NAME is
+            # the branch label — both were previously unenforced. SEGMENT splits
+            # Service Penetration's serviced assets into IND / PG: without it
+            # every closed SR falls outside both columns and the report reads
+            # zero without saying why.
+            # SR TASK END DATE added 2026-08-19: Employee Productivity's
+            # 'Days present on Task end' counts distinct task-end dates, so a
+            # file without the column silently zeroes that column (and with it
+            # every Productivity figure) — block the upload instead.
             'Response Time & MaxTTR Details': [
-                'BRANCH ID', 'INSTANCE ID', 'SR NUMBER', 'SR OPEN DATE',
+                'BRANCH ID', 'BRANCH NAME', 'INSTANCE ID', 'SR NUMBER',
+                'SR TYPE', 'SEGMENT', 'SR OPEN DATE', 'SR TASK END DATE',
                 'SR CLOSE DATE', 'SE NAME', 'SE TICKET NUM'
             ]
         }
@@ -1193,7 +1373,7 @@ class ImportController:
     def import_amc_agreement(self, file: UploadFile):
         """Import AMC Population Report Report - Only take first ACTIVE record per instance_id"""
         contents = file.file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        df = read_upload_table(contents)
         
         # Flexible headers: map known columns to canonical names; the rest are dynamic
         df, extra_cols = self.canonicalize_dataframe(df, 'AMC Population Report')
@@ -1301,7 +1481,7 @@ class ImportController:
     def import_asset_detailed(self, file: UploadFile):
         """Import Asset Detailed Report - Override existing records"""
         contents = file.file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        df = read_upload_table(contents)
         
         # Flexible headers: map known columns to canonical names; the rest are dynamic
         df, extra_cols = self.canonicalize_dataframe(df, 'Asset Detailed Report')
@@ -1393,7 +1573,7 @@ class ImportController:
     def import_asset_service(self, file: UploadFile):
         """Import Asset Details with Last Oil Service - Override existing records"""
         contents = file.file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        df = read_upload_table(contents)
         
         # Flexible headers: map known columns to canonical names; the rest are dynamic
         df, extra_cols = self.canonicalize_dataframe(df, 'Asset Details with Last Oil Service')
@@ -1476,7 +1656,7 @@ class ImportController:
     def import_anubandhan_plus_quotes(self, file: UploadFile):
         """Import Anubandhan Plus Quotes Report - Only take first record per instance_id"""
         contents = file.file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        df = read_upload_table(contents)
         
         # Flexible headers: map known columns to canonical names; the rest are dynamic
         df, extra_cols = self.canonicalize_dataframe(df, 'Anubandhan Plus Quotes Report')
@@ -1611,7 +1791,7 @@ class ImportController:
     def import_anubandhan_quotes(self, file: UploadFile):
         """Import Anubandhan Quotes Report - Only take first record per instance_id"""
         contents = file.file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        df = read_upload_table(contents)
         
         # Flexible headers: map known columns to canonical names; the rest are dynamic
         df, extra_cols = self.canonicalize_dataframe(df, 'Anubandhan Quotes Report')
@@ -1726,7 +1906,7 @@ class ImportController:
     def import_bandhan_plus_quotes(self, file: UploadFile):
         """Import BandhanPlus Quotes Report - Only take first record per instance_id"""
         contents = file.file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        df = read_upload_table(contents)
         
         # Flexible headers: map known columns to canonical names; the rest are dynamic
         df, extra_cols = self.canonicalize_dataframe(df, 'BandhanPlus Quotes Report')
@@ -1841,7 +2021,7 @@ class ImportController:
     def import_pulse_quotation(self, file: UploadFile):
         """Import Pulse Quotation - Service Only - Only take first record per instance_id"""
         contents = file.file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        df = read_upload_table(contents)
         
         # Flexible headers: map known columns to canonical names; the rest are dynamic
         df, extra_cols = self.canonicalize_dataframe(df, 'Pulse Quotation - Service Only')
@@ -1943,7 +2123,7 @@ class ImportController:
     def import_lms_data(self, file: UploadFile):
         """Import LMS Data for ERP - Allow multiple records per instance_id (upsert by Lead Number)"""
         contents = file.file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        df = read_upload_table(contents)
 
         # Flexible headers: map known columns to canonical names; the rest are dynamic
         df, extra_cols = self.canonicalize_dataframe(df, 'LMS Data for ERP')
@@ -2045,6 +2225,7 @@ class ImportController:
                         'sic_code': self.truncate_string(row.get('SIC Code'), 200),
                         'sic_code_type': self.truncate_string(row.get('SIC Code Type'), 200),
                         'labour_invoice_number': self.truncate_string(row.get('Labour Invoice Number'), 200),
+                        'labour_invoice_amount': self.convert_to_float(row.get('Labour Invoice Amount')),
                         'part_invoice_amount': self.convert_to_float(row.get('Part Invoice Amount')),
                         'part_invoice_number': self.truncate_string(row.get('Part Invoice Number'), 200),
                         'lead_source': self.truncate_string(row.get('Lead Source'), 200),
@@ -2089,7 +2270,7 @@ class ImportController:
         - The file has no branch column — the customer's branch_id is never changed.
         """
         contents = file.file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        df = read_upload_table(contents)
 
         # Flexible headers: map known columns to canonical names; the rest are dynamic
         df, extra_cols = self.canonicalize_dataframe(df, 'Regular Bandhan Customers Report')
@@ -2210,12 +2391,17 @@ class ImportController:
         (Instance Id [Asset #], Service Request #); in-file duplicates of the
         combination keep the FIRST row only.
 
-        SNAPSHOT SEMANTICS: the uploaded file is the full current picture of
-        open SRs — combinations already in the DB are updated in place, new
-        ones are added, and any DB row whose combination is NOT in the file
-        is deleted (Open SR Load Report only)."""
+        ACCUMULATE: the file is imported as-is. Combinations already in the DB
+        are updated in place and new ones are added; last_seen_date records the
+        import they were last present in. Rows NOT in the file are left exactly
+        as they are — nothing is deleted and nothing is flagged.
+
+        There is no open/closed flag on this table. An SR is CLOSED when the
+        same (instance_id, sr_number) appears in the 'MaxTTR - Oil Change SR
+        Zero Labour Flag' file; until then it is open. See
+        CustomerController.get_open_sr_load_reports_by_instance."""
         contents = file.file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        df = read_upload_table(contents)
         
         # Flexible headers: map known columns to canonical names; the rest are dynamic
         df, extra_cols = self.canonicalize_dataframe(df, 'Open SR Load Report')
@@ -2261,7 +2447,8 @@ class ImportController:
         
         imported_count = 0
         updated_count = 0
-        
+        import_time = now_ist()
+
         with self.db.no_autoflush:
             for row in records:
                 try:
@@ -2359,6 +2546,7 @@ class ImportController:
                         'efsr_krm_number': self.truncate_string(row.get('eFSR KRM Number'), 200),
                         'dry_csp_approved_by': self.truncate_string(row.get('Dry CSP Approved by')),
                         'dry_csp_approved_date': self.parse_date(row.get('Dry CSP Approved Date')),
+                        'last_seen_date': import_time,
                         'extra_data': self.collect_extra_data(row, extra_cols),
                     }
                     
@@ -2390,29 +2578,24 @@ class ImportController:
                 except Exception:
                     continue
 
-        # SNAPSHOT: remove stale rows — any (instance_id, service_request_no)
-        # combination in the DB that is NOT in the uploaded file. seen_keys
-        # holds every combination present in the file (built during dedup).
-        # Guarded by `records` so an empty/unreadable file never wipes the
-        # table. Rows upserted above are flushed by the query below, so their
-        # keys are in seen_keys and they are never deleted.
-        if records:
-            existing_rows = self.db.query(
-                OpenSRLoadReport.id,
-                OpenSRLoadReport.instance_id,
-                OpenSRLoadReport.service_request_no,
-            ).all()
-            stale_ids = [
-                rid for rid, iid, sr_no in existing_rows
-                if (iid, sr_no) not in seen_keys
-            ]
-            for i in range(0, len(stale_ids), 1000):
-                chunk = stale_ids[i:i + 1000]
-                self.db.query(OpenSRLoadReport).filter(
-                    OpenSRLoadReport.id.in_(chunk)
-                ).delete(synchronize_session=False)
-
+        # No snapshot pass: rows absent from this upload keep their data as-is.
+        # Whether an SR is still open is answered against the MaxTTR file at
+        # read time, not by what the latest Open SR upload happened to contain.
         self.db.commit()
+
+        # Welcome Letter module: every unique CC (Commissioning) instance in
+        # the freshly imported Open SR data is upserted into the persistent
+        # welcome_letter_entries table (sent letters keep their state). Every CC
+        # row ever imported counts, so a commissioning SR that has since closed
+        # is never lost. Never lets a sync problem fail the import.
+        try:
+            from app.controllers.welcome_letter_controller import sync_from_open_sr
+            added = sync_from_open_sr(self.db)
+            if added:
+                print(f"[welcome-letter] {added} new CC customer(s) added from Open SR import")
+        except Exception as e:
+            print(f"[welcome-letter] sync skipped: {e}")
+
         return imported_count, updated_count
 
     def match_pending_regular_bandhan(self):
@@ -2463,18 +2646,18 @@ class ImportController:
         
         return matched
     
-    def import_open_sr_data(self, file):
-        """Import 'Open SR Data' (Close SR Report) — ONE row per unique
+    def import_maxttr_oil_change_sr(self, file):
+        """Import 'MaxTTR - Oil Change SR Zero Labour Flag' (Close SR Report) — ONE row per unique
         (instance_id, sr_number) combination, upserted on re-import. If the
         same combination appears multiple times in the file, the FIRST row
         wins. ONLY instance_ids that already exist in the customers table are
         stored; every other row is skipped (this file enriches known
         customers, it never creates new ones)."""
         contents = file.file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        df = read_upload_table(contents)
 
         # Flexible headers: map known columns to canonical names; the rest are dynamic
-        df, extra_cols = self.canonicalize_dataframe(df, 'Open SR Data')
+        df, extra_cols = self.canonicalize_dataframe(df, 'MaxTTR - Oil Change SR Zero Labour Flag')
 
         # Case/spacing-insensitive header lookup so small header variations
         # ("OIL CHANGE FLAG" / "Oil Change Flag") don't break the import.
@@ -2491,25 +2674,25 @@ class ImportController:
         if not iid_col:
             raise HTTPException(
                 status_code=400,
-                detail="Invalid file format for Open SR Data: missing 'INSTANCE ID' column"
+                detail="Invalid file format for MaxTTR - Oil Change SR Zero Labour Flag: missing 'INSTANCE ID' column"
             )
 
         sr_col = col('SR NUMBER', 'SR NO', 'SR #', 'SERVICE REQUEST NUMBER')
         if not sr_col:
             raise HTTPException(
                 status_code=400,
-                detail="Invalid file format for Open SR Data: missing 'SR NUMBER' column"
+                detail="Invalid file format for MaxTTR - Oil Change SR Zero Labour Flag: missing 'SR NUMBER' column"
             )
 
         if not col('SR TYPE'):
             raise HTTPException(
                 status_code=400,
-                detail="Invalid file format for Open SR Data: missing 'SR TYPE' column"
+                detail="Invalid file format for MaxTTR - Oil Change SR Zero Labour Flag: missing 'SR TYPE' column"
             )
         if not col('SR SUBTYPE', 'SR SUB TYPE', 'SR SUB-TYPE'):
             raise HTTPException(
                 status_code=400,
-                detail="Invalid file format for Open SR Data: missing 'SR SUBTYPE' column"
+                detail="Invalid file format for MaxTTR - Oil Change SR Zero Labour Flag: missing 'SR SUBTYPE' column"
             )
 
         # value getter for a header (returns None when the column is absent)
@@ -2546,12 +2729,12 @@ class ImportController:
         all_iids = list({norm_iid(r.get(iid_col)) for r in records} - {None})
         customer_cache = self._bulk_load_by_instance_id(Customer, all_iids)
 
-        # Existing open_sr_data rows for these instance_ids, keyed by the
+        # Existing MaxTTR - Oil Change SR rows for these instance_ids, keyed by the
         # upsert key (instance_id, sr_number)
         existing = {}
         for i in range(0, len(all_iids), 1000):
             chunk = all_iids[i:i + 1000]
-            for rec in self.db.query(OpenSRData).filter(OpenSRData.instance_id.in_(chunk)).all():
+            for rec in self.db.query(MaxTTROilChangeSRZeroLabourFlag).filter(MaxTTROilChangeSRZeroLabourFlag.instance_id.in_(chunk)).all():
                 existing[(rec.instance_id, (rec.sr_number or '').strip())] = rec
 
         imported_count = 0
@@ -2599,12 +2782,23 @@ class ImportController:
                     self.update_record(rec, data)
                     updated_count += 1
                 else:
-                    rec = OpenSRData(instance_id=iid, **data)
+                    rec = MaxTTROilChangeSRZeroLabourFlag(instance_id=iid, **data)
                     self.db.add(rec)
                     existing[key] = rec
                     imported_count += 1
 
         self.db.commit()
+
+        # This file IS the SR closure record, so any CSP drive asset whose SR
+        # just landed here is finished — complete it in its drive right away.
+        # Never let that sync fail the import itself.
+        try:
+            from app.controllers.campaign_controller import CampaignController
+            CampaignController(self.db).auto_complete_csp_srs_closed_in_maxttr()
+        except Exception as e:
+            self.db.rollback()
+            print(f"CSP auto-complete after MaxTTR import failed: {e}")
+
         return imported_count, updated_count
 
     def import_response_time_maxttr(self, file):
@@ -2616,10 +2810,17 @@ class ImportController:
         file (instance_id repeats across SRs) — same empty-safe rules as
         every other import."""
         contents = file.file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        df = read_upload_table(contents)
 
         # Flexible headers: map known columns to canonical names; the rest are dynamic
         df, extra_cols = self.canonicalize_dataframe(df, 'Response Time & MaxTTR Details')
+
+        # This import had NO column check at all, so a file missing SR TYPE or
+        # SE NAME uploaded happily and the Employee Productivity report just
+        # came back short. It is validated like every other import now.
+        is_valid, message = self.validate_file_format(df, 'Response Time & MaxTTR Details')
+        if not is_valid:
+            return {"success": False, "message": message}
 
         # Case/spacing-insensitive header lookup so small header variations
         # don't break the import.
@@ -2635,7 +2836,11 @@ class ImportController:
         # Fixed columns — the file must contain every one of them
         required = [
             ('BRANCH ID',), ('INSTANCE ID', 'Instance Id [Asset #]', 'Instance Id', 'Asset Number'),
-            ('SR NUMBER', 'SR NO', 'SR #'), ('SR OPEN DATE',), ('SR CLOSE DATE',),
+            ('SR NUMBER', 'SR NO', 'SR #'), ('SR OPEN DATE',),
+            # SR TASK END DATE is the attendance date: Employee Productivity's
+            # 'Days present on Task end' is the DISTINCT count of it per engineer.
+            ('SR TASK END DATE', 'TASK END DATE', 'SR TASK END DATE & TIME'),
+            ('SR CLOSE DATE',),
             ('SE NAME',), ('SE TICKET NUM', 'SE TICKET NUMBER', 'SE TICKET NO')
         ]
         for names in required:
@@ -2753,6 +2958,255 @@ class ImportController:
         self.db.commit()
         return imported_count, updated_count
 
+    def import_cdi_detail_report(self, file):
+        """Import 'CDI Detail Report' — STANDALONE: writes ONLY to
+        cdi_detail_report. The customers table and every other import table are
+        left untouched.
+
+        SR NUMBER is the primary key: ONE row per unique SR NUMBER, upserted on
+        re-import (blank cells never wipe existing data). If the same SR NUMBER
+        appears several times in the file, the FIRST row wins. Fixed columns:
+        SR NUMBER, BRANCH NAME, X TECHNICIAN ID, X TECHNICIAN NAME,
+        CDI CATEGORY, ACTIVITY END DATE, Overall Experience — every other
+        column is dynamic (extra_data). BRANCH NAME is the branch the Customer
+        Delight Index report (Annual Reports) groups the feedback by: this file
+        carries no BRANCH ID, so the name is the only branch it has."""
+        contents = file.file.read()
+        df = read_upload_table(contents)
+
+        # Flexible headers: map the fixed columns to canonical names; rest dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'CDI Detail Report')
+
+        norm = {str(c).strip().lower(): c for c in df.columns if pd.notna(c)}
+
+        def col(*names):
+            for n in names:
+                c = norm.get(n.lower())
+                if c is not None:
+                    return c
+            return None
+
+        sr_col = col('SR NUMBER', 'SR NO', 'SR #')
+        if not sr_col:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file format for CDI Detail Report: missing 'SR NUMBER' column"
+            )
+
+        def val(row, *names):
+            c = col(*names)
+            return row.get(c) if c else None
+
+        def norm_sr(v):
+            s = self.convert_to_string(v)
+            return s.strip() if s else None
+
+        # Unique key = SR NUMBER, FIRST occurrence in the file wins
+        unique_rows = {}
+        for row in df.to_dict('records'):
+            sr = norm_sr(row.get(sr_col))
+            if not sr:
+                continue
+            if sr not in unique_rows:
+                unique_rows[sr] = row
+
+        # Existing rows keyed by sr_number
+        all_srs = list(unique_rows.keys())
+        existing = {}
+        for i in range(0, len(all_srs), 1000):
+            chunk = all_srs[i:i + 1000]
+            for rec in self.db.query(CDIDetailReport).filter(CDIDetailReport.sr_number.in_(chunk)).all():
+                existing[(rec.sr_number or '').strip()] = rec
+
+        imported_count = 0
+        updated_count = 0
+
+        with self.db.no_autoflush:
+            for sr, row in unique_rows.items():
+                data = {
+                    'branch_name': self.truncate_string(val(row, 'BRANCH NAME'), 150),
+                    'x_technician_id': self.truncate_string(val(row, 'X TECHNICIAN ID'), 200),
+                    'x_technician_name': self.truncate_string(val(row, 'X TECHNICIAN NAME')),
+                    'cdi_category': self.truncate_string(val(row, 'CDI CATEGORY'), 200),
+                    'activity_end_date': self.parse_date(val(row, 'ACTIVITY END DATE')),
+                    'overall_experience': self.truncate_string(val(row, 'Overall Experience'), 50),
+                    'extra_data': self.collect_extra_data(row, extra_cols),
+                }
+
+                rec = existing.get(sr)
+                if rec:
+                    # Empty-safe update: blank cells keep the old value,
+                    # extra_data is merged.
+                    self.update_record(rec, data)
+                    updated_count += 1
+                else:
+                    rec = CDIDetailReport(sr_number=sr, **data)
+                    self.db.add(rec)
+                    existing[sr] = rec
+                    imported_count += 1
+
+        self.db.commit()
+        return imported_count, updated_count
+
+    def import_efsr_report(self, file):
+        """Import 'EFSR Report' — STANDALONE: writes ONLY to efsr_report. The
+        customers table and every other import table are left untouched.
+
+        The key is the COMBINATION Appointment Number + Service Engineer UID +
+        Task Assigned Date & Time: ONE row per unique triple, upserted on
+        re-import (blank cells never wipe existing data, extra_data is merged).
+
+        That triple is the file's real grain — one row per TASK ASSIGNMENT.
+        Measured on the two real exports (11,760 and 9,929 rows):
+          Service Request No. + UID   dropped 898 (7.6%) and 714 (7.2%) of rows,
+                                      and 'first wins' kept the CANCELLED
+                                      attempt while deleting the COMPLETED one.
+          Appointment Number alone    dropped 91 / 7  (appointment re-assigned
+                                      to another engineer).
+          + Service Engineer UID      dropped 26 / 4  (same engineer assigned
+                                      the same appointment twice).
+          + Task Assigned Date        0 dropped in BOTH files.
+        Service Request No. is NOT part of the key: the appointment number is
+        '<SR No.>_<n>' in 100% of rows, so the SR adds nothing to it.
+
+        Re-imports still land on the existing row because the assigned date
+        never moves: across the 9,499 (appointment, UID) pairs present in both
+        exports it changed 0 times, while 108 GAINED a Task End Date.
+
+        Fixed columns: SD Branch Code, Service Request No., Appointment Number,
+        SR Type, Task Assigned Date & Time, Task End Date, SR Closed Date,
+        SR Status, Service Engineer Name, Service Engineer UID — every other
+        column is dynamic (extra_data)."""
+        contents = file.file.read()
+        df = read_upload_table(contents)
+
+        # Flexible headers: map the fixed columns to canonical names; rest dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'EFSR Report')
+
+        norm = {str(c).strip().lower(): c for c in df.columns if pd.notna(c)}
+
+        def col(*names):
+            for n in names:
+                c = norm.get(n.lower())
+                if c is not None:
+                    return c
+            return None
+
+        sr_col = col('Service Request No.', 'Service Request No', 'Service Request Number', 'SR NUMBER')
+        if not sr_col:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file format for EFSR Report: missing 'Service Request No.' column"
+            )
+
+        # The record key's first column, so it is as mandatory as the SR number.
+        appt_col = col('Appointment Number')
+        if not appt_col:
+            raise HTTPException(
+                status_code=400,
+                detail=("Invalid file format for EFSR Report: missing 'Appointment Number' "
+                        "column - it is part of the record key (Appointment Number + "
+                        "Service Engineer UID + Task Assigned Date & Time)")
+            )
+
+        def val(row, *names):
+            c = col(*names)
+            return row.get(c) if c else None
+
+        def norm_sr(v):
+            s = self.convert_to_string(v)
+            return s.strip() if s else None
+
+        def norm_uid(v):
+            # Same normalization the column is stored with, so a key built from
+            # the file and one rebuilt from an existing DB row always agree.
+            return self.truncate_string(v, 100)
+
+        def norm_appt(v):
+            return self.truncate_string(v, 200)
+
+        def norm_dt(v):
+            # The stored column is DATETIME and the file carries minute
+            # precision, so dropping microseconds keeps a key built from the
+            # file identical to one rebuilt from the DB row.
+            return v.replace(microsecond=0) if isinstance(v, datetime) else v
+
+        uid_col = col('Service Engineer UID')
+
+        # Unique key = (Appointment Number, Service Engineer UID, Task Assigned
+        # Date). With the full triple the real files have NO in-file duplicates
+        # at all; the first-wins guard only ever fires on a row repeated
+        # verbatim, so nothing real is collapsed any more.
+        unique_rows = {}
+        for row in df.to_dict('records'):
+            sr = norm_sr(row.get(sr_col))
+            appt = norm_appt(row.get(appt_col))
+            if not appt:
+                # The portal always fills this in (0 blanks in either real
+                # file). If it ever does not, fall back to the SR number so the
+                # row is still stored under a deterministic key.
+                appt = self.truncate_string(sr, 200)
+            if not appt:
+                continue                 # no appointment AND no SR: nothing to key on
+            key = (appt,
+                   norm_uid(row.get(uid_col)) if uid_col else None,
+                   norm_dt(self.parse_date(
+                       val(row, 'Task Assigned Date & Time', 'Task Assigned Date'))))
+            if key not in unique_rows:
+                unique_rows[key] = (sr, row)
+
+        # Existing rows keyed by the same triple. Loaded by appointment number
+        # (indexed), then re-keyed so each assignment is matched separately.
+        all_appts = list({a for a, _u, _d in unique_rows})
+        existing = {}
+        for i in range(0, len(all_appts), 1000):
+            chunk = all_appts[i:i + 1000]
+            for rec in self.db.query(EFSRReport).filter(
+                    EFSRReport.appointment_number.in_(chunk)).all():
+                existing[(rec.appointment_number, rec.service_engineer_uid,
+                          norm_dt(rec.task_assigned_date))] = rec
+
+        imported_count = 0
+        updated_count = 0
+
+        with self.db.no_autoflush:
+            for (appt, uid, assigned), (sr, row) in unique_rows.items():
+                # service_request_no is NOT NULL. It is always in the file, but
+                # the appointment number is '<SR No.>_<n>', so a blank SR cell
+                # can be recovered from the key itself rather than dropping the
+                # row or inserting a null.
+                if not sr:
+                    sr = appt.split('_')[0] or appt
+                data = {
+                    'service_request_no': sr,
+                    'sd_branch_code': self.truncate_string(val(row, 'SD Branch Code'), 100),
+                    'sr_type': self.truncate_string(val(row, 'SR Type'), 200),
+                    'task_assigned_date': assigned,
+                    'task_end_date': self.parse_date(
+                        val(row, 'Task End Date', 'Task End Date & Time')),
+                    'sr_closed_date': self.parse_date(val(row, 'SR Closed Date')),
+                    'sr_status': self.truncate_string(val(row, 'SR Status'), 200),
+                    'service_engineer_name': self.truncate_string(val(row, 'Service Engineer Name')),
+                    'service_engineer_uid': uid,
+                    'extra_data': self.collect_extra_data(row, extra_cols),
+                }
+
+                rec = existing.get((appt, uid, assigned))
+                if rec:
+                    # Empty-safe update: blank cells keep the old value,
+                    # extra_data is merged.
+                    self.update_record(rec, data)
+                    updated_count += 1
+                else:
+                    rec = EFSRReport(appointment_number=appt, **data)
+                    self.db.add(rec)
+                    existing[(appt, uid, assigned)] = rec
+                    imported_count += 1
+
+        self.db.commit()
+        return imported_count, updated_count
+
+
     def process_file(self, file: UploadFile, file_type: str, column_mapping: dict = None):
         """Process uploaded file based on type"""
         try:
@@ -2768,15 +3222,34 @@ class ImportController:
                 'Regular Bandhan Customers Report': self.import_regular_bandhan,
                 'LMS Data for ERP': self.import_lms_data,
                 'Open SR Load Report': self.import_open_sr_load_report,
-                'Open SR Data': self.import_open_sr_data,
-                'Response Time & MaxTTR Details': self.import_response_time_maxttr
+                'MaxTTR - Oil Change SR Zero Labour Flag': self.import_maxttr_oil_change_sr,
+                'Response Time & MaxTTR Details': self.import_response_time_maxttr,
+                'CDI Detail Report': self.import_cdi_detail_report,
+                'EFSR Report': self.import_efsr_report
             }
-            
+
+            # Old file-type name still accepted (cached client bundles)
+            if file_type == 'Open SR Data':
+                file_type = 'MaxTTR - Oil Change SR Zero Labour Flag'
+
             if file_type not in import_functions:
                 raise HTTPException(status_code=400, detail=f"Unknown file type: {file_type}")
             
             imported_count, updated_count = import_functions[file_type](file)
-            
+
+            # STANDALONE files: their data lives in its own table only. Skip the
+            # cross-table matching and the customers branch backfill entirely so
+            # the upload cannot touch the customers table or any other table.
+            if file_type in STANDALONE_FILE_TYPES:
+                return {
+                    "imported": imported_count,
+                    "updated": updated_count,
+                    "total_processed": imported_count + updated_count,
+                    "matched_regular_bandhan": 0,
+                    "matched_open_sr": 0,
+                    "branch_updated": 0
+                }
+
             # Match pending records
             matched_regular = self.match_pending_regular_bandhan()
             matched_open_sr = self.match_pending_open_sr_records()
@@ -2815,3 +3288,157 @@ class ImportController:
             raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
         finally:
             file.file.close()
+
+
+def backfill_cdi_activity_end(db: Session, chunk: int = 2000) -> int:
+    """Fill cdi_detail_report.activity_end_date for rows imported before the
+    column existed, from 'ACTIVITY END DATE' in their extra_data JSON.
+    Idempotent — a no-op once every row has a date."""
+    def _batch():
+        return (db.query(CDIDetailReport)
+                .filter(CDIDetailReport.activity_end_date.is_(None),
+                        CDIDetailReport.extra_data.isnot(None))
+                .limit(chunk).all())
+
+    rows, done = _batch(), 0
+    while rows:
+        moved = 0
+        for rec in rows:
+            try:
+                blob = json.loads(rec.extra_data or "{}")
+            except Exception:
+                blob = {}
+            raw = blob.get("ACTIVITY END DATE")
+            if raw in (None, ""):
+                continue
+            ts = pd.to_datetime(str(raw), errors="coerce")
+            if pd.isna(ts):
+                continue
+            rec.activity_end_date = ts.to_pydatetime()
+            moved += 1
+        db.commit()
+        done += moved
+        if not moved or len(rows) < chunk:
+            break
+        rows = _batch()
+    return done
+
+
+def backfill_cdi_branch_name(db: Session, chunk: int = 2000) -> int:
+    """Move 'BRANCH NAME' out of cdi_detail_report.extra_data and into the real
+    column, for rows imported before that column existed.
+
+    Also DELETES the key from the JSON once it has been moved. Both matter: the
+    Customer page renders every extra_data key as its own column, so a row that
+    kept the raw header as well as the field would show the branch twice.
+
+    Idempotent — the scan is driven by rows whose JSON still carries the key, so
+    it finds nothing on later startups. (The SQL top-up in
+    performance_indexes.py fills the column the moment it is added; this is what
+    tidies the JSON up afterwards, and the safety net for any row that top-up
+    could not read as JSON.)"""
+    def _batch():
+        return (db.query(CDIDetailReport)
+                .filter(CDIDetailReport.extra_data.like('%BRANCH NAME%'))
+                .limit(chunk).all())
+
+    rows, done = _batch(), 0
+    while rows:
+        moved = 0
+        for rec in rows:
+            try:
+                blob = json.loads(rec.extra_data or "{}")
+            except Exception:
+                blob = {}
+            if "BRANCH NAME" not in blob:
+                continue
+            raw = blob.pop("BRANCH NAME")
+            if not rec.branch_name and raw not in (None, ""):
+                rec.branch_name = str(raw).strip()[:150]
+            rec.extra_data = json.dumps(blob) if blob else None
+            moved += 1
+        db.commit()
+        done += moved
+        if not moved or len(rows) < chunk:
+            break
+        rows = _batch()
+    return done
+
+
+def backfill_efsr_task_end(db: Session, chunk: int = 2000) -> int:
+    """Fill efsr_report.task_end_date for rows imported before the column
+    existed, reading 'Task End Date' out of their extra_data JSON.
+
+    Parsed in Python, not SQL: the file writes 'M/D/YYYY, h:mm AM' text, which
+    T-SQL's TRY_CONVERT cannot read. Paged by PRIMARY KEY, not by re-running the
+    same "IS NULL" query: thousands of EFSR rows carry no Task End Date at all
+    and would be re-fetched forever otherwise. Idempotent — a row with a date is
+    never looked at again, so later startups are a no-op.
+    """
+    last_id, done = 0, 0
+    while True:
+        rows = (db.query(EFSRReport)
+                .filter(EFSRReport.task_end_date.is_(None),
+                        EFSRReport.extra_data.isnot(None),
+                        EFSRReport.id > last_id)
+                .order_by(EFSRReport.id)
+                .limit(chunk).all())
+        if not rows:
+            break
+        last_id = rows[-1].id
+        for rec in rows:
+            try:
+                blob = json.loads(rec.extra_data or "{}")
+            except Exception:
+                continue
+            raw = (blob.get("Task End Date")
+                   or blob.get("Task End Date & Time"))
+            if raw in (None, ""):
+                continue
+            ts = pd.to_datetime(str(raw), errors="coerce")
+            if pd.isna(ts):
+                continue
+            rec.task_end_date = ts.to_pydatetime()
+            done += 1
+        db.commit()
+    return done
+
+
+def backfill_efsr_task_assigned(db: Session, chunk: int = 2000) -> int:
+    """Fill efsr_report.task_assigned_date for rows imported before the column
+    existed, reading 'Task Assigned Date & Time' out of their extra_data JSON.
+
+    Parsed in Python, not SQL: the file writes the value as 'M/D/YYYY, h:mm AM'
+    text, which T-SQL's TRY_CONVERT cannot read. Idempotent — once a row has a
+    date it is never looked at again, so this is a no-op on later startups.
+    """
+    rows = (db.query(EFSRReport)
+            .filter(EFSRReport.task_assigned_date.is_(None),
+                    EFSRReport.extra_data.isnot(None))
+            .limit(chunk).all())
+    done = 0
+    while rows:
+        for rec in rows:
+            try:
+                blob = json.loads(rec.extra_data or "{}")
+            except Exception:
+                blob = {}
+            raw = (blob.get("Task Assigned Date & Time")
+                   or blob.get("Task Assigned Date"))
+            if raw in (None, ""):
+                continue
+            ts = pd.to_datetime(str(raw), errors="coerce")
+            if pd.isna(ts):
+                continue
+            rec.task_assigned_date = ts.to_pydatetime()
+            done += 1
+        db.commit()
+        if len(rows) < chunk:
+            break
+        rows = (db.query(EFSRReport)
+                .filter(EFSRReport.task_assigned_date.is_(None),
+                        EFSRReport.extra_data.isnot(None))
+                .limit(chunk).all())
+        if not any(r.task_assigned_date is None for r in rows):
+            break
+    return done

@@ -824,6 +824,10 @@ class CampaignController:
                 results["inserted"] += 1
 
         self.db.commit()
+
+        # Some of these SRs may already be closed in the MaxTTR file (it can be
+        # uploaded before the CSP Info file) — settle those straight away.
+        results["auto_completed"] = self.auto_complete_csp_srs_closed_in_maxttr(campaign_id)["completed"]
         return results
 
     def get_campaign_customers_with_followups(self, campaign_id: int, admin_only: bool = False) -> Dict[str, Any]:
@@ -1036,6 +1040,10 @@ class CampaignController:
 
         self.db.commit()
 
+        # The SR may already be closed in the MaxTTR file — complete it now
+        # instead of leaving it sitting open in the drive.
+        auto_completed = self.auto_complete_csp_srs_closed_in_maxttr(campaign_id)["completed"]
+
         user_id = (user_data or {}).get('user_id') or (user_data or {}).get('id')
         user_count = self.db.query(CampaignCSPInfo).filter(
             CampaignCSPInfo.created_by_id == str(user_id) if user_id else False
@@ -1045,7 +1053,8 @@ class CampaignController:
             "action": action,
             "instance_id": instance_id,
             "campaign_id": campaign_id,
-            "user_added_count": user_count
+            "user_added_count": user_count,
+            "auto_completed": auto_completed
         }
 
     def get_user_csp_sr_count(self, user_id: str) -> int:
@@ -1055,7 +1064,187 @@ class CampaignController:
             return 0
         return self.db.query(CampaignCSPInfo).filter(
             CampaignCSPInfo.created_by_id == str(user_id)
-        ).count()        
+        ).count()
+
+# ==================== CSP auto-completion (SR already closed in MaxTTR) ====================
+
+    # Stamped on every system-generated CSP completion follow-up.
+    CSP_AUTO_COMPLETE_REMARK = 'SR Closed- System auto completed.'
+    CSP_AUTO_COMPLETE_USER_ID = 'system'
+    CSP_AUTO_COMPLETE_USER_NAME = 'System'
+
+    @staticmethod
+    def _norm_instance(value) -> Optional[str]:
+        """'100746690.0' -> '100746690'. Same rule as EngagementController._normalize_id
+        so asset numbers, CSP Info rows and MaxTTR rows all compare equal."""
+        if value is None:
+            return None
+        s = str(value).strip()
+        if s.endswith('.0'):
+            s = s[:-2]
+        s = s.strip()
+        return s or None
+
+    def auto_complete_csp_srs_closed_in_maxttr(self, campaign_id: Optional[int] = None) -> Dict[str, Any]:
+        """Complete CSP drive assets whose SR is already closed.
+
+        A CSP drive is fed by two uploads: the asset list and the CSP Info file
+        (campaign_csp_info). The 'MaxTTR - Oil Change SR Zero Labour Flag' file
+        is the SR CLOSURE record — same rule as CustomerController._sr_closed_in_maxttr,
+        matched on BOTH (INSTANCE ID, SR NUMBER) because that pair is the upsert
+        key of both tables. When a drive's CSP Info row turns up there the SR is
+        done, so nobody should still be following it up: the asset is completed
+        in that drive by a system follow-up carrying ONLY the completed status
+        and CSP_AUTO_COMPLETE_REMARK — every other field stays NULL.
+
+        Completing removes the asset from the drive's asset_numbers exactly like
+        a manual completion does, and that is what drops the instance out of the
+        Total CSP and Open CSP boxes on My Performance.
+
+        Runs after the MaxTTR import (every CSP drive) and after a CSP Info
+        upload / manual SR add (that one drive), since either file can land first.
+        """
+        from app.models.campaign_model import CampaignCSPInfo
+        from app.models.customer_model import MaxTTROilChangeSRZeroLabourFlag
+        from app.models.engagement_model import FollowUp
+        from app.controllers.engagement_controller import invalidate_non_campaign_cache
+
+        CHUNK = 1000  # SQL Server 2100-parameter IN() limit
+        result = {"completed": 0, "campaigns": 0, "instances": []}
+
+        camp_q = self.db.query(Campaign).filter(Campaign.status == 'active')
+        if campaign_id is not None:
+            camp_q = camp_q.filter(Campaign.id == campaign_id)
+        campaigns = [c for c in camp_q.all() if self._is_csp_service(c.service)]
+
+        # Assets still enrolled in each CSP drive — an already-completed one is gone
+        enrolled: Dict[int, set] = {}
+        for c in campaigns:
+            enrolled[c.id] = {n for n in (self._norm_instance(a) for a in (c.asset_numbers or [])) if n}
+        campaigns = [c for c in campaigns if enrolled[c.id]]
+        if not campaigns:
+            return result
+
+        # CSP Info rows of those drives, restricted to still-enrolled assets
+        csp_rows = []            # (campaign_id, normalized instance_id, sr_number)
+        candidates = set()       # raw + normalized instance forms, for the id lookups
+        raw_by_norm: Dict[str, set] = {}
+        for camp, inst, sr in self.db.query(
+            CampaignCSPInfo.campaign_id,
+            CampaignCSPInfo.instance_id,
+            CampaignCSPInfo.sr_number,
+        ).filter(CampaignCSPInfo.campaign_id.in_([c.id for c in campaigns])).all():
+            norm = self._norm_instance(inst)
+            sr = (sr or '').strip()
+            if not norm or not sr or norm not in enrolled.get(camp, set()):
+                continue
+            csp_rows.append((camp, norm, sr))
+            candidates.add(norm)
+            candidates.add(str(inst).strip())
+            raw_by_norm.setdefault(norm, set()).update({norm, str(inst).strip()})
+        if not csp_rows:
+            return result
+
+        # (instance_id, sr_number) pairs the MaxTTR file has already closed
+        cand_list = [c for c in candidates if c]
+        closed_pairs = set()
+        for i in range(0, len(cand_list), CHUNK):
+            for inst, sr in self.db.query(
+                MaxTTROilChangeSRZeroLabourFlag.instance_id,
+                MaxTTROilChangeSRZeroLabourFlag.sr_number,
+            ).filter(MaxTTROilChangeSRZeroLabourFlag.instance_id.in_(cand_list[i:i + CHUNK])).all():
+                norm = self._norm_instance(inst)
+                if norm:
+                    closed_pairs.add((norm, (sr or '').strip()))
+        if not closed_pairs:
+            return result
+
+        to_close: Dict[int, set] = {}
+        for camp, norm, sr in csp_rows:
+            if (norm, sr) in closed_pairs:
+                to_close.setdefault(camp, set()).add(norm)
+        if not to_close:
+            return result
+
+        # Never complete the same asset twice in one drive
+        already: Dict[int, set] = {}
+        for camp, inst in self.db.query(
+            FollowUp.campaign_id, FollowUp.customer_instance_id
+        ).filter(
+            FollowUp.campaign_id.in_(list(to_close.keys())),
+            FollowUp.status == 'completed',
+        ).all():
+            norm = self._norm_instance(inst)
+            if norm:
+                already.setdefault(camp, set()).add(norm)
+
+        # instance -> customer (a follow-up needs a customer row)
+        need = set()
+        for insts in to_close.values():
+            for norm in insts:
+                need.update(raw_by_norm.get(norm, {norm}))
+        need_list = [n for n in need if n]
+        cust_by_norm: Dict[str, Any] = {}
+        for i in range(0, len(need_list), CHUNK):
+            for cust in self.db.query(Customer).filter(
+                    Customer.instance_id.in_(need_list[i:i + CHUNK])).all():
+                norm = self._norm_instance(cust.instance_id)
+                if norm and norm not in cust_by_norm:
+                    cust_by_norm[norm] = cust
+
+        campaign_by_id = {c.id: c for c in campaigns}
+        now = now_ist()
+        for camp_id, insts in to_close.items():
+            campaign = campaign_by_id[camp_id]
+            assets = list(campaign.asset_numbers or [])
+            changed = False
+            for norm in sorted(insts):
+                if norm in already.get(camp_id, set()):
+                    continue
+                customer = cust_by_norm.get(norm)
+                if not customer:
+                    continue  # asset has no customer row — nothing to complete against
+
+                # user_id / user_name / followup_date are NOT NULL, so they carry
+                # the system marker and the run time; everything else stays NULL.
+                self.db.add(FollowUp(
+                    customer_id=customer.id,
+                    customer_instance_id=norm,
+                    campaign_id=camp_id,
+                    user_id=self.CSP_AUTO_COMPLETE_USER_ID,
+                    user_name=self.CSP_AUTO_COMPLETE_USER_NAME,
+                    followup_date=now,
+                    followup_by=None,
+                    followup_flag=None,
+                    followup_remark=self.CSP_AUTO_COMPLETE_REMARK,
+                    status='completed',
+                    next_followup_date=None,
+                    quotation_sent=None,
+                    quotation_no=None,
+                    quotation_value=None,
+                    csp_subtype=None,
+                    activity_id=None,
+                    rr_id=None,
+                ))
+
+                # Completed -> out of the drive, same as a manual completion
+                kept = [a for a in assets if self._norm_instance(a) != norm]
+                if len(kept) != len(assets):
+                    assets = kept
+                    changed = True
+
+                result["completed"] += 1
+                result["instances"].append({"campaign_id": camp_id, "instance_id": norm})
+
+            if changed:
+                campaign.asset_numbers = assets
+                campaign.updated_at = now
+                result["campaigns"] += 1
+
+        if result["completed"]:
+            self.db.commit()
+            invalidate_non_campaign_cache()
+        return result
 
 # ==================== Letter Master (Letter Format) ====================
 

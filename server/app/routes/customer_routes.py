@@ -465,17 +465,22 @@ async def export_open_sr_load_reports(
     writer = csv.writer(output)
     
     if reports and len(reports) > 0:
-        # Write header
-        headers = [column for column in reports[0].__dict__.keys() if not column.startswith('_')]
+        # Write header — the internal soft-delete bookkeeping columns are not
+        # part of the exported data
+        internal = {'is_active', 'last_seen_date'}
+        headers = [
+            column for column in reports[0].__dict__.keys()
+            if not column.startswith('_') and column not in internal
+        ]
         writer.writerow(headers)
-        
+
         # Write data
         for report in reports:
             row = [getattr(report, header) for header in headers]
             writer.writerow(row)
-    
+
     output.seek(0)
-    
+
     return Response(
         content=output.getvalue(),
         media_type="text/csv",
@@ -532,11 +537,12 @@ async def get_customers_with_summary(
 @router.get("/instance/{instance_id}/complete-data", response_model=dict)
 async def get_customer_complete_data(
     instance_id: str,
+    include_closed: bool = Query(False, description="Also return Open SRs that are already closed in the MaxTTR file. Customers Data Hub only — Drive / Non-Drive pages use the default."),
     db: Session = Depends(get_db)
 ):
     """Get customer by instance ID with ALL data from all tables"""
     controller = CustomerController(db)
-    result = controller.get_customer_complete_data(instance_id)
+    result = controller.get_customer_complete_data(instance_id, include_closed)
     if not result:
         raise HTTPException(status_code=404, detail="Customer not found")
     return result
@@ -1251,14 +1257,14 @@ async def bulk_delete_open_sr_load_reports(
     return controller.bulk_delete_open_sr_load_reports(request.ids)
 
 
-# ==================== Open SR Data Endpoints ====================
+# ==================== MaxTTR - Oil Change SR Zero Labour Flag Endpoints (legacy /open-sr-data paths) ====================
 
 @router.get("/open-sr-data/export")
 async def export_open_sr_data(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
-    """Export Open SR Data to CSV - checks if user has export permission"""
+    """Export MaxTTR - Oil Change SR to CSV - checks if user has export permission"""
     check_export_permission(user_id, db)
 
     controller = CustomerController(db)
@@ -1276,7 +1282,7 @@ async def export_open_sr_data(
     return Response(
         content=output.getvalue(),
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=open_sr_data_export.csv"}
+        headers={"Content-Disposition": "attachment; filename=maxttr_oil_change_sr_zero_labour_flag_export.csv"}
     )
 
 
@@ -1288,7 +1294,7 @@ async def get_open_sr_data(
     search: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """Get all Open SR Data rows with pagination (use limit=-1 for all records)"""
+    """Get all MaxTTR - Oil Change SR rows with pagination (use limit=-1 for all records)"""
     controller = CustomerController(db)
 
     total_count = controller.get_open_sr_data_count(search)
@@ -1300,7 +1306,7 @@ async def get_open_sr_data(
 
 @router.delete("/open-sr-data/{record_id}", response_model=MessageResponse)
 async def delete_open_sr_data(record_id: int, db: Session = Depends(get_db)):
-    """Delete one Open SR Data row"""
+    """Delete one MaxTTR - Oil Change SR row"""
     controller = CustomerController(db)
     return controller.delete_open_sr_data(record_id)
 
@@ -1310,7 +1316,7 @@ async def bulk_delete_open_sr_data(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
-    """Delete multiple Open SR Data rows"""
+    """Delete multiple MaxTTR - Oil Change SR rows"""
     controller = CustomerController(db)
     return controller.bulk_delete_open_sr_data(request.ids)
 
@@ -1379,6 +1385,136 @@ async def bulk_delete_response_time_maxttr(
     return controller.bulk_delete_response_time_maxttr(request.ids)
 
 
+# ==================== CDI Detail Report Endpoints ====================
+# Standalone report table — no instance_id link, no writes to customers.
+
+@router.get("/cdi-detail-report/export")
+async def export_cdi_detail_report(
+    user_id: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    """Export CDI Detail Report to CSV - checks if user has export permission"""
+    check_export_permission(user_id, db)
+
+    controller = CustomerController(db)
+    rows = controller.get_cdi_detail_report(skip=0, limit=None)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    if rows:
+        headers = list(rows[0].keys())
+        writer.writerow(headers)
+        for r in rows:
+            writer.writerow([r.get(h) for h in headers])
+    output.seek(0)
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=cdi_detail_report_export.csv"}
+    )
+
+
+@router.get("/cdi-detail-report/")
+async def get_cdi_detail_report(
+    response: Response,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=-1),  # Allow -1 for all records
+    search: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get all CDI Detail Report rows with pagination (use limit=-1 for all records)"""
+    controller = CustomerController(db)
+
+    total_count = controller.get_cdi_detail_report_count(search)
+    response.headers["X-Total-Count"] = str(total_count)
+
+    actual_limit = None if limit == -1 else limit
+    return controller.get_cdi_detail_report(skip, actual_limit, search)
+
+
+@router.delete("/cdi-detail-report/{record_id}", response_model=MessageResponse)
+async def delete_cdi_detail_report(record_id: int, db: Session = Depends(get_db)):
+    """Delete one CDI Detail Report row"""
+    controller = CustomerController(db)
+    return controller.delete_cdi_detail_report(record_id)
+
+
+@router.post("/cdi-detail-report/bulk-delete", response_model=MessageResponse)
+async def bulk_delete_cdi_detail_report(
+    request: BulkDeleteRequest,
+    db: Session = Depends(get_db)
+):
+    """Delete multiple CDI Detail Report rows"""
+    controller = CustomerController(db)
+    return controller.bulk_delete_cdi_detail_report(request.ids)
+
+
+# ==================== EFSR Report Endpoints ====================
+# Standalone report table — no instance_id link, no writes to customers.
+
+@router.get("/efsr-report/export")
+async def export_efsr_report(
+    user_id: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    """Export EFSR Report to CSV - checks if user has export permission"""
+    check_export_permission(user_id, db)
+
+    controller = CustomerController(db)
+    rows = controller.get_efsr_report(skip=0, limit=None)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    if rows:
+        headers = list(rows[0].keys())
+        writer.writerow(headers)
+        for r in rows:
+            writer.writerow([r.get(h) for h in headers])
+    output.seek(0)
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=efsr_report_export.csv"}
+    )
+
+
+@router.get("/efsr-report/")
+async def get_efsr_report(
+    response: Response,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=-1),  # Allow -1 for all records
+    search: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get all EFSR Report rows with pagination (use limit=-1 for all records)"""
+    controller = CustomerController(db)
+
+    total_count = controller.get_efsr_report_count(search)
+    response.headers["X-Total-Count"] = str(total_count)
+
+    actual_limit = None if limit == -1 else limit
+    return controller.get_efsr_report(skip, actual_limit, search)
+
+
+@router.delete("/efsr-report/{record_id}", response_model=MessageResponse)
+async def delete_efsr_report(record_id: int, db: Session = Depends(get_db)):
+    """Delete one EFSR Report row"""
+    controller = CustomerController(db)
+    return controller.delete_efsr_report(record_id)
+
+
+@router.post("/efsr-report/bulk-delete", response_model=MessageResponse)
+async def bulk_delete_efsr_report(
+    request: BulkDeleteRequest,
+    db: Session = Depends(get_db)
+):
+    """Delete multiple EFSR Report rows"""
+    controller = CustomerController(db)
+    return controller.bulk_delete_efsr_report(request.ids)
+
+
 # ==================== Data Retrieval by Instance ID ====================
 
 @router.get("/instance/{instance_id}/amc-agreements", response_model=List[AMCAgreement])
@@ -1445,10 +1581,15 @@ async def get_lms_data_by_instance(instance_id: str, db: Session = Depends(get_d
 
 
 @router.get("/instance/{instance_id}/open-sr-load-reports", response_model=List[OpenSRLoadReport])
-async def get_open_sr_load_reports_by_instance(instance_id: str, db: Session = Depends(get_db)):
-    """Get all Open SR Load Reports for an instance"""
+async def get_open_sr_load_reports_by_instance(
+    instance_id: str,
+    include_closed: bool = Query(False, description="Also return Open SRs that are already closed in the MaxTTR file"),
+    db: Session = Depends(get_db)
+):
+    """Get the Open SR Load Reports of an instance — by default only the SRs
+    from the latest uploaded file (same as before the soft delete)."""
     controller = CustomerController(db)
-    return controller.get_open_sr_load_reports_by_instance(instance_id)
+    return controller.get_open_sr_load_reports_by_instance(instance_id, include_closed)
 
 
 @router.get("/export/selected")
@@ -1525,7 +1666,9 @@ async def get_all_table_counts(
         "lms_data": controller.get_lms_data_count(),
         "open_sr_load_reports": controller.get_open_sr_load_reports_count(),
         "open_sr_data": controller.get_open_sr_data_count(),
-        "response_time_maxttr": controller.get_response_time_maxttr_count()
+        "response_time_maxttr": controller.get_response_time_maxttr_count(),
+        "cdi_detail_report": controller.get_cdi_detail_report_count(),
+        "efsr_report": controller.get_efsr_report_count()
     }
     
     return counts    

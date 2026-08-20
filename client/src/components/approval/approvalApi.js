@@ -87,6 +87,12 @@ export const rejectApplication = (id, remark) =>
 export const deleteApplication = (id) =>
     axios.delete(`${BASE}/applications/${id}`, { headers: authHeaders() }).then(r => r.data);
 
+// Creator-only, pending records: change the level-wise chosen approvers.
+// picks = { l2_approver_id: "id1,id2", ... } — empty string = all approvers
+// may act (HO L4: empty = skip straight to COO).
+export const updateChosenApprovers = (id, picks) =>
+    axios.put(`${BASE}/applications/${id}/approvers`, picks, { headers: authHeaders() }).then(r => r.data);
+
 export const sendResultEmail = (id, emails, toEmails) =>
     axios.post(`${BASE}/applications/${id}/send-email`, { emails, to_emails: toEmails }, { headers: authHeaders() }).then(r => r.data);
 

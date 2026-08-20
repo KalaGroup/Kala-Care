@@ -240,6 +240,35 @@ const TABLES = [
     bulkDeleteEndpoint: '/customers/response-time-maxttr/bulk-delete',
     exportEndpoint: '/customers/response-time-maxttr/export',
     supportsPagination: true
+  },
+  // Standalone uploads: their own tables, not linked to a customer/instance.
+  {
+    id: 'cdi_detail_report',
+    name: 'CDI Detail Report',
+    icon: ChartBarIcon,
+    color: '#EC4899',
+    bgColor: '#FDF2F8',
+    endpoint: '/customers/cdi-detail-report/',
+    singleEndpoint: (id) => `/customers/cdi-detail-report/${id}`,
+    updateEndpoint: (id) => `/customers/cdi-detail-report/${id}`,
+    deleteEndpoint: (id) => `/customers/cdi-detail-report/${id}`,
+    bulkDeleteEndpoint: '/customers/cdi-detail-report/bulk-delete',
+    exportEndpoint: '/customers/cdi-detail-report/export',
+    supportsPagination: true
+  },
+  {
+    id: 'efsr_report',
+    name: 'EFSR Report',
+    icon: DocumentCheckIcon,
+    color: '#0EA5E9',
+    bgColor: '#F0F9FF',
+    endpoint: '/customers/efsr-report/',
+    singleEndpoint: (id) => `/customers/efsr-report/${id}`,
+    updateEndpoint: (id) => `/customers/efsr-report/${id}`,
+    deleteEndpoint: (id) => `/customers/efsr-report/${id}`,
+    bulkDeleteEndpoint: '/customers/efsr-report/bulk-delete',
+    exportEndpoint: '/customers/efsr-report/export',
+    supportsPagination: true
   }
 ];
 
@@ -814,7 +843,9 @@ const Customer = () => {
     'lms_data': SYSTEM_FIELDS,
     'open_sr_load_reports': SYSTEM_FIELDS,
     'open_sr_data': SYSTEM_FIELDS,
-    'response_time_maxttr': SYSTEM_FIELDS
+    'response_time_maxttr': SYSTEM_FIELDS,
+    'cdi_detail_report': SYSTEM_FIELDS,
+    'efsr_report': SYSTEM_FIELDS
   };
 
   // IMPORTANT columns per table (★ in the header): the fields the app actually
@@ -834,7 +865,9 @@ const Customer = () => {
     'lms_data': ['instance_id', 'lead_number', 'branch_id', 'account_name', 'account_contact_number', 'account_contact_email_id', 'installation_site_address', 'lead_created_date', 'lead_status', 'lead_raised_by', 'sr_type', 'sr_sub_type', 'kva_rating', 'service_engineer_name', 'tele_caller_name', 'quotation_number', 'quotation_submit_date', 'quotation_approval_date', 'order_number'],
     'open_sr_load_reports': ['instance_id', 'service_request_no', 'engine_serial_no', 'sr_due_date', 'sr_type', 'sr_sub_type', 'status', 'account', 'customer_name', 'customer_mobile_no', 'primary_phone_no', 'installation_site_address', 'oil_change_flg', 'segment', 'engine_model'],
     'open_sr_data': ['instance_id', 'branch_id', 'engine_serial_no', 'account_name', 'sr_number', 'sr_type', 'sr_subtype', 'sr_open_date', 'sr_close_date', 'oil_change_flag', 'zero_labour_flag'],
-    'response_time_maxttr': ['instance_id', 'branch_id', 'sr_number', 'sr_open_date', 'sr_close_date', 'se_name', 'se_ticket_num']
+    'response_time_maxttr': ['instance_id', 'branch_id', 'sr_number', 'sr_open_date', 'sr_close_date', 'se_name', 'se_ticket_num'],
+    'cdi_detail_report': ['sr_number', 'x_technician_id', 'x_technician_name', 'cdi_category', 'overall_experience', 'activity_end_date'],
+    'efsr_report': ['service_request_no', 'appointment_number', 'sd_branch_code', 'sr_type', 'task_assigned_date', 'task_end_date', 'sr_closed_date', 'sr_status', 'service_engineer_name', 'service_engineer_uid']
   };
 
   // Dynamic columns: each imported row may carry an `extra_data` JSON object with
@@ -1081,21 +1114,17 @@ const Customer = () => {
     fetchData(1, '');
   };
 
-  // Clear all selected rows
-  const handleClearSelection = () => {
-    setSelectedRows([]);
-    setTablesSelectedRowsCache(prev => ({
-      ...prev,
-      [currentTable.id]: []
-    }));
-    toast.success('All selections cleared');
-  };
-
-  // Fetch customer complete data by instance_id
+  // Fetch customer complete data by instance_id.
+  // include_closed: this hub shows the FULL Open SR record of a customer,
+  // including the SRs already closed in the MaxTTR file. The Drive / Non-Drive
+  // pages call the same endpoint without the flag and so see only the SRs that
+  // are still open.
   const fetchCustomerCompleteData = async (instanceId) => {
     setLoadingCompleteData(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/customers/instance/${instanceId}/complete-data`);
+      const response = await axios.get(`${API_BASE_URL}/customers/instance/${instanceId}/complete-data`, {
+        params: { include_closed: true }
+      });
       setCustomerCompleteData(response.data);
     } catch (error) {
       console.error('Error fetching customer complete data:', error);
@@ -1105,7 +1134,7 @@ const Customer = () => {
     }
   };
 
-  // Handle export with permission check
+  // Handle export with permission check — selected records only
   const handleExport = async () => {
     if (!canExport) {
       toast.error("You don't have permission to export data");
@@ -1117,28 +1146,22 @@ const Customer = () => {
       return;
     }
 
+    if (selectedRows.length === 0) {
+      toast.error('Please select the records you want to export');
+      return;
+    }
+
     const toastId = toast.loading('Preparing export...');
 
     try {
-      let exportData = [];
-      let filename = '';
-
-      if (selectedRows.length > 0) {
-        const fetchPromises = selectedRows.map(id =>
-          axios.get(`${API_BASE_URL}${currentTable.singleEndpoint(id)}`, {
-            headers: { 'user-id': currentUser.user_id }
-          })
-        );
-        const responses = await Promise.all(fetchPromises);
-        exportData = responses.map(res => res.data);
-        filename = `${currentTable.id}_selected_${selectedRows.length}_records_${new Date().toISOString().split('T')[0]}.xlsx`;
-      } else {
-        const response = await axios.get(`${API_BASE_URL}${currentTable.exportEndpoint}`, {
+      const fetchPromises = selectedRows.map(id =>
+        axios.get(`${API_BASE_URL}${currentTable.singleEndpoint(id)}`, {
           headers: { 'user-id': currentUser.user_id }
-        });
-        exportData = Array.isArray(response.data) ? response.data : [response.data];
-        filename = `${currentTable.id}_export_${new Date().toISOString().split('T')[0]}.xlsx`;
-      }
+        })
+      );
+      const responses = await Promise.all(fetchPromises);
+      let exportData = responses.map(res => res.data);
+      const filename = `${currentTable.id}_selected_${selectedRows.length}_records_${new Date().toISOString().split('T')[0]}.xlsx`;
 
       if (!exportData || exportData.length === 0) {
         toast.dismiss(toastId);
@@ -1202,10 +1225,7 @@ const Customer = () => {
       window.URL.revokeObjectURL(url);
 
       toast.dismiss(toastId);
-      toast.success(selectedRows.length > 0
-        ? `Exported ${selectedRows.length} selected records as Excel file`
-        : 'Export completed successfully as Excel file'
-      );
+      toast.success(`Exported ${selectedRows.length} selected records as Excel file`);
     } catch (error) {
       toast.dismiss(toastId);
       console.error('Export error:', error);
@@ -1377,7 +1397,7 @@ const Customer = () => {
   const totalPages = Math.ceil(totalCount / pageSize);
 
   return (
-    <div className="min-h-screen py-0">
+    <div className="min-h-screen py-0 tbl-grid-dark">
       <div className="max-w-7xl mx-auto px-2 sm:px-3 lg:px-4">
         {/* Header Section with Title and Actions */}
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2 sm:gap-3 mb-1 sm:mb-2">
@@ -1406,19 +1426,15 @@ const Customer = () => {
               )}
             </div>
 
-            {selectedRows.length > 0 && (
-              <div className="flex items-center gap-1.5 bg-blue-100 px-2.5 py-1.5 rounded-lg">
-                <span className="text-xs text-blue-700 font-medium">{selectedRows.length} selected</span>
-                <button onClick={handleClearSelection} className="p-0.5 hover:bg-blue-100 rounded">
-                  <XMarkIcon className="h-3.5 w-3.5 text-blue-700" />
-                </button>
-              </div>
-            )}
-
             {canExport && (
-              <button onClick={handleExport} className="export-btn flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-all whitespace-nowrap">
+              <button
+                onClick={handleExport}
+                disabled={selectedRows.length === 0}
+                title={selectedRows.length === 0 ? 'Select records to export' : ''}
+                className="export-btn flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-all whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+              >
                 <svg className="h-3.5 w-3.5" style={{ color: themeColor }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg>
-                <span className="text-xs text-white">Export {selectedRows.length > 0 ? `Selected (${selectedRows.length})` : 'All'}</span>
+                <span className="text-xs text-white">Export Selected{selectedRows.length > 0 ? ` (${selectedRows.length})` : ''}</span>
               </button>
             )}
           </div>
@@ -1459,18 +1475,14 @@ const Customer = () => {
         {/* Mobile Menu */}
         {isMobileMenuOpen && (
           <div className="lg:hidden mb-3 space-y-1.5 p-3 bg-white rounded-lg shadow-lg border border-gray-200 animate-slideDown">
-            {selectedRows.length > 0 && (
-              <div className="flex items-center justify-between bg-blue-50 px-2.5 py-1.5 rounded-lg">
-                <span className="text-xs text-blue-700 font-medium">{selectedRows.length} selected</span>
-                <button onClick={handleClearSelection} className="p-0.5 hover:bg-blue-100 rounded">
-                  <XMarkIcon className="h-3.5 w-3.5 text-blue-700" />
-                </button>
-              </div>
-            )}
             {canExport && (
-              <button onClick={handleExport} className="export-btn w-full flex items-center justify-center gap-1.5 px-2.5 py-2 bg-white border border-gray-300 rounded-lg text-xs text-black">
+              <button
+                onClick={handleExport}
+                disabled={selectedRows.length === 0}
+                className="export-btn w-full flex items-center justify-center gap-1.5 px-2.5 py-2 bg-white border border-gray-300 rounded-lg text-xs text-black disabled:opacity-50 disabled:cursor-not-allowed"
+              >
                 <svg className="h-3.5 w-3.5" style={{ color: themeColor }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l-4-4m0 0L8 8m4-4v12M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg>
-                <span>Export {selectedRows.length > 0 ? `Selected (${selectedRows.length})` : 'All'}</span>
+                <span>Export Selected{selectedRows.length > 0 ? ` (${selectedRows.length})` : ''}</span>
               </button>
             )}
           </div>

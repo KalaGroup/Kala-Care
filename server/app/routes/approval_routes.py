@@ -120,6 +120,12 @@ async def create_application(
     l4_approver_id: Optional[str] = Form(None),
     l5_approver_id: Optional[str] = Form(None),
     cc_emails: Optional[str] = Form(None),
+    to_emails: Optional[str] = Form(None),
+    paid_by_name: Optional[str] = Form(None),
+    paid_by_mode: Optional[str] = Form(None),
+    reimburse_to: Optional[str] = Form(None),
+    reimburse_mode: Optional[str] = Form(None),
+    reimburse_bank_details: Optional[str] = Form(None),
     save_as_draft: Optional[str] = Form(None),
     files: List[UploadFile] = File(default=[]),
     user_id: str = Header(...),
@@ -149,6 +155,12 @@ async def create_application(
         "l4_approver_id": l4_approver_id,
         "l5_approver_id": l5_approver_id,
         "cc_emails": cc_emails,
+        "to_emails": to_emails,
+        "paid_by_name": paid_by_name,
+        "paid_by_mode": paid_by_mode,
+        "reimburse_to": reimburse_to,
+        "reimburse_mode": reimburse_mode,
+        "reimburse_bank_details": reimburse_bank_details,
     }, files, as_draft=as_draft)
     msg = "Draft saved" if as_draft else "Application submitted successfully"
     return {"success": True, "message": msg, "application": application}
@@ -179,6 +191,12 @@ async def update_application(
     l4_approver_id: Optional[str] = Form(None),
     l5_approver_id: Optional[str] = Form(None),
     cc_emails: Optional[str] = Form(None),
+    to_emails: Optional[str] = Form(None),
+    paid_by_name: Optional[str] = Form(None),
+    paid_by_mode: Optional[str] = Form(None),
+    reimburse_to: Optional[str] = Form(None),
+    reimburse_mode: Optional[str] = Form(None),
+    reimburse_bank_details: Optional[str] = Form(None),
     submit: Optional[str] = Form(None),
     files: List[UploadFile] = File(default=[]),
     user_id: str = Header(...),
@@ -209,6 +227,12 @@ async def update_application(
         "l4_approver_id": l4_approver_id,
         "l5_approver_id": l5_approver_id,
         "cc_emails": cc_emails,
+        "to_emails": to_emails,
+        "paid_by_name": paid_by_name,
+        "paid_by_mode": paid_by_mode,
+        "reimburse_to": reimburse_to,
+        "reimburse_mode": reimburse_mode,
+        "reimburse_bank_details": reimburse_bank_details,
     }, files, submit=do_submit)
     msg = "Application submitted successfully" if do_submit else "Draft saved"
     return {"success": True, "message": msg, "application": application}
@@ -242,6 +266,22 @@ def reject_application(
 def delete_application(app_id: int, user_id: str = Header(...), db: Session = Depends(get_db)):
     ac.delete_application(db, user_id, app_id)
     return {"success": True, "message": "Application deleted"}
+
+
+@router.put("/applications/{app_id}/approvers")
+def update_chosen_approvers(
+    app_id: int,
+    body: Optional[dict] = None,
+    user_id: str = Header(...),
+    db: Session = Depends(get_db),
+):
+    """Creator-only, pending records: change the level-wise chosen approvers
+    (a chosen person is on leave / busy). Body: { l2_approver_id, ...,
+    l5_approver_id } — each ONE id or a CSV list; empty = all approvers may
+    act (HO L4: empty = skip straight to COO). Only the current and future
+    levels are applied."""
+    application = ac.update_chosen_approvers(db, user_id, app_id, body or {})
+    return {"success": True, "message": "Approvers updated", "application": application}
 
 
 @router.post("/applications/{app_id}/send-email")

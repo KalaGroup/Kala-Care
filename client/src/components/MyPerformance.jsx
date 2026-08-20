@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import ReactDOM from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Bar, Pie, Line } from 'react-chartjs-2';
+import ChartDataLabels from 'chartjs-plugin-datalabels';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
@@ -1405,7 +1406,7 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
         if (!autoOpenBox || !onAutoOpenBoxClose) return;
         const open = autoOpenBox === 'csp' ? showCspModal
             : autoOpenBox === 'openCsp' ? showOpenCspModal
-            : showAllFollowupsModal;
+                : showAllFollowupsModal;
         if (open) {
             autoBoxWasOpen.current = true;
         } else if (autoBoxWasOpen.current) {
@@ -2561,6 +2562,13 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 usePointStyle: true,
                 titleFont: { size: 12 },
                 bodyFont: { size: 11 }
+            },
+            datalabels: {
+                color: '#ffffff',
+                font: { weight: 'bold', size: 11 },
+                textStrokeColor: 'rgba(0, 0, 0, 0.35)',
+                textStrokeWidth: 2,
+                formatter: (value) => (value === 0 ? '' : value)
             }
         },
         scales: {
@@ -2967,8 +2975,9 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                     {/* Header with stats summary */}
                     <div className="flex justify-between items-start mb-4">
                         <div>
-                            <h3 className="text-base font-bold text-gray-800">Status Comparison</h3>
-                            <p className="text-xs text-gray-500 mt-0.5">Distribution of all follow-up statuses</p>
+                            <h3 className={`text-base font-bold ${isTimeFiltered ? 'text-yellow-600' : 'text-gray-800'}`}>
+                                Status Comparison
+                            </h3>                            <p className="text-xs text-gray-500 mt-0.5">Distribution of all follow-up statuses</p>
                         </div>
                         <div className="rounded-lg px-3 py-1.5">
                             <span className="text-xs font-semibold text-black">
@@ -2986,11 +2995,12 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                 </div>
 
                 <div className="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
-                    <h3 className="text-sm font-bold text-black mb-3">Follow-up Type Distribution</h3>
-                    <div className="h-56 w-full flex items-center justify-center">
+                    <h3 className={`text-sm font-bold mb-3 ${isTimeFiltered ? 'text-yellow-600' : 'text-black'}`}>
+                        Follow-up Type Distribution
+                    </h3>                    <div className="h-56 w-full flex items-center justify-center">
                         <div className="w-full h-full max-w-[260px] mx-auto">
                             {performance.total_followups > 0 ? (
-                                <Pie data={followupTypeChartData} options={chartOptions} />
+                                <Pie data={followupTypeChartData} options={chartOptions} plugins={[ChartDataLabels]} />
                             ) : (
                                 <div className="flex items-center justify-center h-full text-xs text-gray-400">
                                     No data to display
@@ -3536,14 +3546,14 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                             >
                                 {/* Row 1 — title + close */}
                                 <div className="flex justify-between items-center gap-2">
-                                <div>
-                                    <h3 className="text-base font-semibold text-white">
-                                        CSP Status {userData?.branch ? `— ${userData.branch}` : ''}
-                                    </h3>
-                                    <p className="text-[11px] text-white/80 mt-0.5">
-                                        {cspData.total_instances} instance(s) • Showing {filteredCspRows.length} of {uniqueCspRows.length} row(s) • One row per instance (latest SR)
-                                    </p>
-                                </div>
+                                    <div>
+                                        <h3 className="text-base font-semibold text-white">
+                                            CSP Status {userData?.branch ? `— ${userData.branch}` : ''}
+                                        </h3>
+                                        <p className="text-[11px] text-white/80 mt-0.5">
+                                            {cspData.total_instances} instance(s) • Showing {filteredCspRows.length} of {uniqueCspRows.length} row(s) • One row per instance (latest SR)
+                                        </p>
+                                    </div>
                                     <button
                                         onClick={() => setShowCspModal(false)}
                                         className="w-7 h-7 sm:w-8 sm:h-8 bg-white rounded-lg flex items-center justify-center transition-all duration-200 group flex-shrink-0"
@@ -3821,14 +3831,14 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                             >
                                 {/* Row 1 — title + close */}
                                 <div className="flex justify-between items-center gap-2">
-                                <div>
-                                    <h3 className="text-base font-semibold text-white">
-                                        Open CSP Status {userData?.branch ? `— ${userData.branch}` : ''}
-                                    </h3>
-                                    <p className="text-[11px] text-white/80 mt-0.5">
-                                        {openCspInstanceCount} open instance(s) • Showing {filteredOpenCspRows.length} of {openCspRows.length} open row(s)
-                                    </p>
-                                </div>
+                                    <div>
+                                        <h3 className="text-base font-semibold text-white">
+                                            Open CSP Status {userData?.branch ? `— ${userData.branch}` : ''}
+                                        </h3>
+                                        <p className="text-[11px] text-white/80 mt-0.5">
+                                            {openCspInstanceCount} open instance(s) • Showing {filteredOpenCspRows.length} of {openCspRows.length} open row(s)
+                                        </p>
+                                    </div>
                                     <button
                                         onClick={() => setShowOpenCspModal(false)}
                                         className="w-7 h-7 sm:w-8 sm:h-8 bg-white rounded-lg flex items-center justify-center transition-all duration-200 group flex-shrink-0"
@@ -4108,26 +4118,26 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                             >
                                 {/* Row 1 — title + close */}
                                 <div className="flex justify-between items-center gap-2">
-                                <div>
-                                    <h3 className="text-base font-semibold text-white">
-                                        {statusLocked
-                                            ? `${activeComboView ? 'Your Active ' : ''}${lockedStatusLabel} Follow-ups`
-                                            : dateViewActive
-                                            ? `Daily Follow-ups (Drive + Non-Drive) — ${createdFromDate ? new Date(createdFromDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}`
-                                            : quotationFilterActive
-                                                ? 'Quotation Follow-ups'
-                                                : quotationSentFilterActive
-                                                    ? 'Quotation Sent Customers'
-                                                    : cspQuotationFilterActive
-                                                        ? 'CSP Quotation Follow-ups'
-                                                        : cspQuotationSentFilterActive
-                                                            ? 'CSP Quotation Sent Customers'
-                                                            : 'All Follow-ups'} by {userData?.name || 'User'}
-                                    </h3>
-                                    <p className="text-[11px] text-white/80 mt-0.5">
-                                        {getDateRangeText()} • Total: {displayedFollowups.length} {followupView === 'unique' ? 'unique ' : followupView === 'unique_drive' ? 'unique drive ' : ''}follow-up(s)
-                                    </p>
-                                </div>
+                                    <div>
+                                        <h3 className="text-base font-semibold text-white">
+                                            {statusLocked
+                                                ? `${activeComboView ? 'Your Active ' : ''}${lockedStatusLabel} Follow-ups`
+                                                : dateViewActive
+                                                    ? `Daily Follow-ups (Drive + Non-Drive) — ${createdFromDate ? new Date(createdFromDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}`
+                                                    : quotationFilterActive
+                                                        ? 'Quotation Follow-ups'
+                                                        : quotationSentFilterActive
+                                                            ? 'Quotation Sent Customers'
+                                                            : cspQuotationFilterActive
+                                                                ? 'CSP Quotation Follow-ups'
+                                                                : cspQuotationSentFilterActive
+                                                                    ? 'CSP Quotation Sent Customers'
+                                                                    : 'All Follow-ups'} by {userData?.name || 'User'}
+                                        </h3>
+                                        <p className="text-[11px] text-white/80 mt-0.5">
+                                            {getDateRangeText()} • Total: {displayedFollowups.length} {followupView === 'unique' ? 'unique ' : followupView === 'unique_drive' ? 'unique drive ' : ''}follow-up(s)
+                                        </p>
+                                    </div>
                                     {/* Close button — white square like BranchCustomersModal */}
                                     <button
                                         onClick={() => setShowAllFollowupsModal(false)}
@@ -4295,27 +4305,27 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                                     {(followupSearchTerm || serviceFilter !== 'all'
                                         || (!dateViewActive && (createdFromDate || createdToDate))
                                         || (!quotationSentFilterActive && !statusLocked && statusFilter.length > 0)) && (
-                                        <button
-                                            onClick={() => {
-                                                setFollowupSearchTerm('');
-                                                setServiceFilter('all');
-                                                // per-date view: the clicked day stays locked — Clear
-                                                // only resets search / status there
-                                                if (!dateViewActive) {
-                                                    setCreatedFromDate('');
-                                                    setCreatedToDate('');
-                                                }
-                                                if (!quotationSentFilterActive && !statusLocked) setStatusFilter([]);
-                                            }}
-                                            className="px-2 py-1 text-[11px] text-white border border-white/40 rounded-md bg-white/10 hover:bg-white/20 flex items-center gap-1"
-                                            title="Clear filters"
-                                        >
-                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                            </svg>
-                                            Clear
-                                        </button>
-                                    )}
+                                            <button
+                                                onClick={() => {
+                                                    setFollowupSearchTerm('');
+                                                    setServiceFilter('all');
+                                                    // per-date view: the clicked day stays locked — Clear
+                                                    // only resets search / status there
+                                                    if (!dateViewActive) {
+                                                        setCreatedFromDate('');
+                                                        setCreatedToDate('');
+                                                    }
+                                                    if (!quotationSentFilterActive && !statusLocked) setStatusFilter([]);
+                                                }}
+                                                className="px-2 py-1 text-[11px] text-white border border-white/40 rounded-md bg-white/10 hover:bg-white/20 flex items-center gap-1"
+                                                title="Clear filters"
+                                            >
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                </svg>
+                                                Clear
+                                            </button>
+                                        )}
 
                                     {/* Export — permission-gated, exports only the filtered rows */}
                                     {canExport && (
@@ -4629,15 +4639,15 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                             >
                                 {/* Row 1 — title + close */}
                                 <div className="flex justify-between items-center gap-2">
-                                <div>
-                                    <h3 className="text-base font-semibold text-white">
-                                        {letterCspOnly ? 'CSP Letters' : 'Letter Report'} — {userData?.name || 'User'}
-                                    </h3>
-                                    <p className="text-[11px] text-white/80 mt-0.5">
-                                        Showing {Math.min(letterVisibleCount, filteredLetters.length)} of {filteredLetters.length} letter(s)
-                                        {!letterCspOnly && letterData.total ? ` • ${letterData.total} total sent` : ''}
-                                    </p>
-                                </div>
+                                    <div>
+                                        <h3 className="text-base font-semibold text-white">
+                                            {letterCspOnly ? 'CSP Letters' : 'Letter Report'} — {userData?.name || 'User'}
+                                        </h3>
+                                        <p className="text-[11px] text-white/80 mt-0.5">
+                                            Showing {Math.min(letterVisibleCount, filteredLetters.length)} of {filteredLetters.length} letter(s)
+                                            {!letterCspOnly && letterData.total ? ` • ${letterData.total} total sent` : ''}
+                                        </p>
+                                    </div>
                                     <button
                                         onClick={() => setShowLetterModal(false)}
                                         className="w-7 h-7 sm:w-8 sm:h-8 bg-white rounded-lg flex items-center justify-center transition-all duration-200 group flex-shrink-0"
@@ -4978,14 +4988,14 @@ const MyPerformance = ({ userData, timePeriod, customStartDate, customEndDate, i
                             >
                                 {/* Row 1 — title + close */}
                                 <div className="flex justify-between items-center gap-2">
-                                <div>
-                                    <h3 className="text-base font-semibold text-white">
-                                        Non-Drive Customers by {userData?.name || 'User'}
-                                    </h3>
-                                    <p className="text-[11px] text-white/80 mt-0.5">
-                                        Showing {filteredNonCampaignCustomers.length} of {nonCampaignBase.length} {nonCampaignViewMode === 'all' ? 'record(s)' : 'customer(s)'}
-                                    </p>
-                                </div>
+                                    <div>
+                                        <h3 className="text-base font-semibold text-white">
+                                            Non-Drive Customers by {userData?.name || 'User'}
+                                        </h3>
+                                        <p className="text-[11px] text-white/80 mt-0.5">
+                                            Showing {filteredNonCampaignCustomers.length} of {nonCampaignBase.length} {nonCampaignViewMode === 'all' ? 'record(s)' : 'customer(s)'}
+                                        </p>
+                                    </div>
                                     <button
                                         onClick={() => setShowNonCampaignModal(false)}
                                         className="w-7 h-7 sm:w-8 sm:h-8 bg-white rounded-lg flex items-center justify-center transition-all duration-200 group flex-shrink-0"

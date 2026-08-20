@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kala Care — SR Allocation Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#EAEBE5; --panel:#FFFFFF; --ink:#15211D; --muted:#5C665F;
+  --line:#9AA192; --line-soft:#B7BCAE;
+  --teal:#0E7C6B; --teal-d:#0A5A4E; --teal-ink:#083b33;
+  --amber:#E0850F;
+  --shadow:0 1px 2px rgba(20,32,28,.05), 0 6px 22px rgba(20,32,28,.06);
+  /* One app-wide font — the same stack the application uses
+     (client/src/index.css → --font-sans). Display and "mono" roles are kept as
+     names so the rules below need no edit, but they all resolve to Inter now;
+     numeric columns get font-variant-numeric:tabular-nums to stay aligned. */
+  --body:'Inter','Segoe UI',Arial,sans-serif;
+  --disp:var(--body);
+  --mono:var(--body);
+
+  /* One hue per METRIC, held constant across every chart and tile in the SE popup.
+     Validated (light, surface #FFFFFF): allocated/closed/leads all-pairs CVD ΔE 9.2,
+     normal-vision 24.0; spare/labour CVD ΔE 17.6, normal-vision 35.9. The sub-3:1
+     marks carry direct end-labels + a table view as their relief. */
+  --m-alloc:#2a78d6; --m-closed:#eb6834; --m-leads:#1baf7a;
+  --m-att:#4a3aa7;   --m-prod:#eda100;
+  --m-spare:#e87ba4; --m-labour:#008300;
+  --grid:#E4E6DE; --axis:#C3C2B7; --lbl:#7E877C;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--body);font-size:13px;line-height:1.4;-webkit-font-smoothing:antialiased}
+.wrap{width:100%;max-width:1680px;margin:0 auto;padding:24px 20px 56px}
+
+.mast{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px;padding-bottom:16px;border-bottom:2px solid var(--ink)}
+.brand{display:flex;align-items:center;gap:12px}
+.mark{width:38px;height:38px;border-radius:9px;background:var(--teal);position:relative;flex:none;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.18)}
+.mark:before,.mark:after{content:"";position:absolute;background:#fff;border-radius:2px}
+.mark:before{left:8px;right:8px;bottom:8px;height:4px;opacity:.55}
+.mark:after{left:8px;bottom:12px;width:4px;height:14px;box-shadow:7px -4px 0 #fff,14px -8px 0 #fff;opacity:.95}
+.brand h1{font-family:var(--disp);font-weight:600;font-size:17.5px;letter-spacing:-.01em;margin:0;line-height:1.15}
+.brand .sub{font-size:11.5px;color:var(--muted);letter-spacing:.02em;margin-top:2px}
+.tag-temp{font-family:var(--mono);font-size:9.5px;color:var(--amber);border:1px solid var(--amber);border-radius:5px;padding:2px 6px;margin-left:7px;letter-spacing:.06em;vertical-align:1px}
+.periodnote{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right}
+.periodnote b{color:var(--ink);font-weight:600}
+
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin:16px 0 8px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:7px 12px;font-size:12px;font-weight:500;cursor:pointer;font-family:var(--body);color:var(--ink);display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--teal);color:var(--teal-d)}
+.btn.primary{background:var(--teal);border-color:var(--teal);color:#fff}
+.btn.primary:hover{background:var(--teal-d);border-color:var(--teal-d);color:#fff}
+.btn .ico{font-size:10px;transition:transform .15s}
+.rightgroup{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:9px}
+.search{position:relative}
+.search input{font-family:var(--body);font-size:13px;padding:8px 12px 8px 32px;border:1px solid var(--line);border-radius:9px;background:var(--panel);width:200px;color:var(--ink)}
+.search svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:.5}
+.daterow{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.daterow input[type=date]{font-family:var(--body);font-size:12px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)}
+.daterow .btn{padding:7px 10px}
+
+.ms{position:relative}
+.ms-btn{white-space:nowrap}
+.ms-btn .cnt{font-family:var(--mono);font-size:11px;color:var(--teal-d);font-weight:600}
+.ms.open .ms-btn{border-color:var(--teal);color:var(--teal-d)}
+.ms.open .ms-btn .ico{transform:rotate(180deg)}
+.ms-pop{display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:40;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);min-width:252px;max-width:330px;padding:8px}
+.ms.open .ms-pop{display:block}
+.ms-head{display:flex;align-items:center;gap:6px;padding:0 2px 7px;border-bottom:1px solid var(--line-soft);margin-bottom:5px}
+.ms-head input{flex:1;min-width:0;font-family:var(--body);font-size:12px;padding:5px 8px;border:1px solid var(--line-soft);border-radius:7px;color:var(--ink)}
+.ms-head button{border:1px solid var(--line-soft);background:#FBFBF9;border-radius:6px;font-size:10.5px;font-family:var(--body);padding:4px 7px;cursor:pointer;color:var(--muted)}
+.ms-head button:hover{border-color:var(--teal);color:var(--teal-d)}
+.ms-list{max-height:280px;overflow-y:auto;scrollbar-width:thin}
+.ms-item{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:12px}
+.ms-item:hover{background:#F3F4EF}
+.ms-item input{accent-color:var(--teal);width:14px;height:14px;flex:none;cursor:pointer}
+.ms-item span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ms-item em{font-family:var(--mono);font-size:9.5px;color:var(--muted);font-style:normal;flex:none}
+.ms-empty{font-size:11.5px;color:var(--muted);padding:8px 6px}
+
+/* ================= table (same shell as the EPR report) ================= */
+.tablecard{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+.tbl-scroll-top{overflow-x:auto;overflow-y:hidden;height:13px;background:#F3F4EF;border-bottom:1px solid var(--line-soft)}
+.tbl-scroll-top.hide{display:none}
+.tbl-scroll-top #scrollTopInner{height:1px}
+.tbl-scroll{overflow-x:auto;overflow-y:visible}
+.tbl-scroll-top,.tbl-scroll{scrollbar-width:thin;scrollbar-color:var(--line) var(--paper)}
+.tbl-scroll-top::-webkit-scrollbar,.tbl-scroll::-webkit-scrollbar{height:8px}
+.tbl-scroll-top::-webkit-scrollbar-track,.tbl-scroll::-webkit-scrollbar-track{background:var(--paper)}
+.tbl-scroll-top::-webkit-scrollbar-thumb,.tbl-scroll::-webkit-scrollbar-thumb{background:var(--line-soft);border-radius:8px}
+
+table#tbl{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;isolation:isolate}
+#tbl thead th{font-family:var(--body);font-weight:600;font-size:9.5px;letter-spacing:.01em;color:var(--muted);text-align:center;padding:6px 6px;border-bottom:1px solid var(--line);border-left:1px solid var(--line-soft);white-space:nowrap;background:#FBFBF9;position:sticky;top:0;z-index:2}
+#tbl thead tr.grp th{font-size:9px;text-transform:uppercase;letter-spacing:.05em;background:#F3F4EF;color:#838d80}
+#tbl thead th.gh{color:#3d463f}
+#tbl thead th.gh-1{background:#E9F0FA}
+#tbl thead th.gh-2{background:#FBEDE6}
+#tbl thead th.gh-3{background:#E6F5EE}
+#tbl thead tr.sub th{font-size:8.5px;background:#F8F9F6;padding-top:4px;padding-bottom:4px}
+#tbl thead th.grp-col{position:sticky;left:0;z-index:6;background:#FBFBF9;width:28px;min-width:28px}
+#tbl thead th.branch-col{text-align:center;position:sticky;left:28px;z-index:8;background:#FBFBF9;width:150px;min-width:150px;max-width:150px;white-space:normal;box-shadow:inset -1px 0 0 var(--line)}
+#tbl thead th.se-uid-col{text-align:center;position:sticky;left:178px;z-index:8;background:#FBFBF9;width:82px;min-width:82px;max-width:82px;box-shadow:inset -1px 0 0 var(--line-soft)}
+#tbl thead th.se-name-col{text-align:center;position:sticky;left:260px;z-index:8;background:#FBFBF9;width:186px;min-width:186px;max-width:186px;box-shadow:inset -1px 0 0 var(--line),2px 0 5px -2px rgba(20,32,28,.28)}
+#tbl thead th.dt-col{text-align:center;position:sticky;left:446px;z-index:8;background:#FBFBF9;width:104px;min-width:104px;max-width:104px;box-shadow:inset -1px 0 0 var(--line)}
+.se-uid-col{display:none}
+.se-name-col{display:none}
+.dt-col{display:none}
+#tbl.se-open .se-uid-col{display:table-cell}
+#tbl.se-open .se-name-col{display:table-cell}
+#tbl.dt-open .dt-col{display:table-cell}
+/* the date column, once open, owns the separator before the data columns */
+#tbl.dt-open .se-name-col{box-shadow:inset -1px 0 0 var(--line-soft)}
+#tbl td.dt-col{position:sticky;left:446px;width:104px;min-width:104px;max-width:104px;background:#FFFFFF;z-index:7;font-family:var(--mono);font-size:10px;font-variant-numeric:tabular-nums;text-align:center;color:var(--muted);box-shadow:inset -1px 0 0 var(--line),2px 0 5px -2px rgba(20,32,28,.28)}
+#tbl td.dt-col .dow{color:#A3ABA1}
+#tbl tr.se-line td.dt-col{font-size:10.5px;color:var(--ink);font-weight:600}
+/* the sticky date cell needs the same fill as the row it sits in, or it punches a
+   white hole through the shaded / dark summary rows */
+#tbl tr.se-line td.dt-col{background:#F7F8F5}
+#tbl tr.se-line.alt td.dt-col{background:#F1F3EE}
+#tbl tr.branch-total td.dt-col{background:#EDEFE9}
+#tbl tr.cat-total td.dt-col{background:#EFF1EA}
+#tbl tr.grand-total td.dt-col{background:var(--ink);color:#fff}
+#tbl tr.date-line td{background:#FDFDFC;font-size:10px;padding:3px 6px}
+#tbl tr.date-line td.dt-col{background:#FDFDFC}
+#tbl tr.date-line:hover td{background:#F4F6F1}
+#tbl tr.date-line:hover td.dt-col{background:#F4F6F1}
+#tbl tr.date-line.nil td{color:#BDC4B9}
+/* breathing room between the drill-down arrow and the engineer's name */
+.sechev{cursor:pointer;padding:0 3px;margin-left:-3px;margin-right:7px}
+.sechev:hover{color:var(--teal-d)}
+#tbl:not(.se-open) .branch-col{box-shadow:inset -1px 0 0 var(--line)}
+#tbl thead th.first-data, #tbl tbody td.first-data{border-left:0 !important}
+#tbl tbody td{padding:5px 6px;border-bottom:1px solid var(--line-soft);border-left:1px solid var(--line-soft);text-align:right;font-family:var(--mono);font-size:10.5px;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:middle}
+#tbl td.grp-col{position:sticky;left:0;background:inherit;z-index:3;width:28px;min-width:28px;text-align:center;padding:5px 3px}
+#tbl td.branch-col{text-align:center;font-family:var(--body);position:sticky;left:28px;width:150px;min-width:150px;max-width:150px;white-space:normal;background:#FFFFFF;z-index:7;font-size:11.5px;font-weight:600;cursor:pointer;box-shadow:inset -1px 0 0 var(--line)}
+#tbl td.branch-col:hover{color:var(--teal-d)}
+#tbl td.se-uid-col{text-align:center;font-family:var(--mono);position:sticky;left:178px;width:82px;min-width:82px;max-width:82px;background:#FFFFFF;z-index:7;font-size:10.5px;color:var(--muted);box-shadow:inset -1px 0 0 var(--line-soft)}
+#tbl td.se-name-col{text-align:left;font-family:var(--body);position:sticky;left:260px;width:186px;min-width:186px;max-width:186px;background:#FFFFFF;z-index:7;font-size:11.5px;box-shadow:inset -1px 0 0 var(--line),2px 0 5px -2px rgba(20,32,28,.28);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tbl td.ttl{font-weight:600;background:#F7F8F5}
+#tbl tr.grand-total td.ttl{background:#22322C}
+.zero{color:#c5cbc4}
+.bmeta{display:flex;align-items:center;justify-content:center;gap:5px;margin-top:2px;white-space:nowrap}
+.bid{font-family:var(--mono);font-size:9px;color:var(--muted);font-weight:400}
+.tagpill{font-family:var(--mono);font-size:8.5px;color:#5c6659;font-weight:400;letter-spacing:.03em;text-transform:uppercase;background:rgba(0,0,0,.045);border-radius:4px;padding:1px 5px}
+.chev{display:inline-block;width:11px;color:var(--muted);transition:transform .18s;font-size:9px}
+.gchev{display:inline-block;color:var(--ink);font-weight:700;transition:transform .18s;font-size:11px}
+#tbl td.grp-col:has(.gchev){cursor:pointer}
+#tbl td.grp-col:has(.gchev):hover{background:#E7EBE3}
+.gchev.open,.chev.open{transform:rotate(90deg)}
+.chev.open{color:var(--teal-d)}
+#tbl tr.branch-row td.branch-col{background:#FFFFFF}
+#tbl tr.branch-row td.grp-col{background:#F3F4EF}
+#tbl tr.se-line td{background:#F7F8F5}
+#tbl tr.se-line.alt td{background:#F1F3EE}
+#tbl tr.se-line td.branch-col,#tbl tr.se-line td.grp-col{background:#FFFFFF}
+#tbl tr.se-line td.se-name-col{padding-left:12px;cursor:pointer;color:var(--teal-ink);text-decoration:underline;text-decoration-color:rgba(14,124,107,.3);text-underline-offset:2px}
+#tbl tr.se-line td.se-name-col:hover{color:var(--teal-d);text-decoration-color:var(--teal)}
+#tbl tr.se-line.flash td{background:#DDF0EA}
+#tbl tr.branch-total td{border-top:1px solid #b9c0b3;font-weight:700;background:#EDEFE9}
+#tbl tr.branch-total td.se-name-col,#tbl tr.branch-total td.se-uid-col{background:#EDEFE9;font-family:var(--disp);font-size:10.5px}
+#tbl tr.cat-total td{border-top:1px solid var(--ink);border-bottom:2px solid var(--ink);font-weight:700;background:#EFF1EA}
+#tbl tr.cat-total td.branch-col,#tbl tr.cat-total td.se-name-col,#tbl tr.cat-total td.se-uid-col{background:#EFF1EA;font-family:var(--disp);font-size:11.5px;cursor:default}
+#tbl tr.grand-total td{border-top:2px solid var(--ink);font-weight:700;background:var(--ink);color:#fff}
+#tbl tr.grand-total td.branch-col,#tbl tr.grand-total td.se-name-col,#tbl tr.grand-total td.se-uid-col{background:var(--ink);color:#fff;font-family:var(--disp);font-size:12px;cursor:default}
+#tbl tr.cat-total td.branch-col:hover,#tbl tr.grand-total td.branch-col:hover,#tbl tr.branch-total td.branch-col:hover{color:inherit}
+
+/* ================= modal ================= */
+.ovl{position:fixed;inset:0;background:rgba(20,32,28,.45);display:none;align-items:flex-start;justify-content:center;z-index:100;padding:28px 16px;overflow-y:auto}
+.ovl.on{display:flex}
+.modal{background:var(--panel);border-radius:14px;box-shadow:0 18px 60px rgba(20,32,28,.35);width:100%;max-width:560px;overflow:hidden}
+.modal.wide{max-width:1340px}
+.mhead{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:15px 18px;border-bottom:1px solid var(--line-soft);background:#FBFBF9}
+.mhead h2{font-family:var(--disp);font-size:15px;font-weight:600;margin:0;letter-spacing:-.01em}
+.mhead .msub{font-size:11.5px;color:var(--muted);margin-top:3px}
+.mhead .msub b{color:var(--ink);font-weight:500}
+.xbtn{border:1px solid var(--line-soft);background:var(--panel);border-radius:8px;width:30px;height:30px;font-size:15px;line-height:1;cursor:pointer;color:var(--muted);flex:none}
+.xbtn:hover{border-color:var(--teal);color:var(--teal-d)}
+.mbody{padding:16px 18px}
+.mfoot{display:flex;align-items:center;justify-content:flex-end;gap:9px;padding:13px 18px;border-top:1px solid var(--line-soft);background:#FBFBF9}
+.mfoot .hint{margin-right:auto;font-size:11px;color:var(--muted)}
+
+.field{margin-bottom:13px}
+.field label{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--lbl);margin-bottom:5px}
+.field select,.field input[type=date]{width:100%;font-family:var(--body);font-size:13px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)}
+.field select:disabled{background:#F3F4EF;color:#A3ABA1;cursor:not-allowed}
+.step{display:flex;align-items:center;gap:7px;margin:0 0 5px}
+.step i{width:17px;height:17px;border-radius:50%;background:var(--teal);color:#fff;font-family:var(--mono);font-size:9.5px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.step.off i{background:#C5CCC3}
+.step b{font-size:11.5px;font-weight:600}
+.wd{display:grid;grid-template-columns:1.2fr 1fr 1fr 62px;gap:8px;align-items:center;margin-bottom:7px}
+.wd .wdl{font-size:12px;display:flex;align-items:center;gap:7px}
+.wd .wdl i{width:9px;height:9px;border-radius:2px;flex:none}
+.wd input[type=number]{width:100%;font-family:var(--mono);font-size:12.5px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;text-align:right;color:var(--ink)}
+.wd .rowtot{font-family:var(--mono);font-size:12px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+.wdhead{display:grid;grid-template-columns:1.2fr 1fr 1fr 62px;gap:8px;font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--lbl);margin-bottom:5px}
+.wdhead span:nth-child(n+2){text-align:right}
+.err{background:#FCEEE9;border:1px solid #E9B49E;color:#8a3b16;border-radius:8px;padding:8px 10px;font-size:11.5px;margin-bottom:11px;display:none}
+.err.on{display:block}
+
+/* ================= SE popup: tiles + charts ================= */
+/* all seven metrics on one row — the popup is sized so they fit without wrapping */
+.tiles{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin-bottom:16px}
+@media (max-width:1180px){ .tiles{grid-template-columns:repeat(4,minmax(0,1fr))} }
+@media (max-width:760px){ .tiles{grid-template-columns:repeat(2,minmax(0,1fr))} }
+.tile{border:1px solid var(--line-soft);border-radius:10px;padding:9px 10px;position:relative;overflow:hidden;background:#FBFBF9;min-width:0}
+.tile:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--tint)}
+.tile .tl{font-family:var(--mono);font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--lbl);display:flex;align-items:center;gap:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .tl i{width:8px;height:8px;border-radius:2px;background:var(--tint);flex:none}
+.tile .tv{font-size:20px;font-weight:600;letter-spacing:-.025em;line-height:1.1;margin:5px 0 1px;white-space:nowrap}
+.tile .tu{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chartgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px}
+@media (max-width:860px){ .chartgrid{grid-template-columns:minmax(0,1fr)} }
+.cbox{border:1px solid var(--line-soft);border-radius:10px;padding:11px 12px 12px;min-width:0}
+.cbox h3{font-family:var(--disp);font-size:11.5px;font-weight:600;margin:0 0 2px}
+.cbox .csub{font-size:10.5px;color:var(--muted);margin-bottom:7px}
+.legend{display:flex;flex-wrap:wrap;gap:11px;margin:0 0 6px}
+.legend .li{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.legend .li i{width:12px;height:3px;border-radius:2px;flex:none}
+.legend .li b{color:var(--ink);font-weight:500}
+.chartbox{position:relative}
+.chartbox svg{display:block;width:100%;overflow:visible;font-family:var(--body)}
+.chartbox svg text{font-variant-numeric:tabular-nums}
+.tip{position:absolute;pointer-events:none;opacity:0;transition:opacity .1s;background:var(--ink);color:#fff;border-radius:8px;padding:7px 9px;font-size:11px;line-height:1.5;box-shadow:0 6px 18px rgba(20,32,28,.25);white-space:nowrap;z-index:9}
+.tip .th{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:#9FB0A8;margin-bottom:3px}
+.tip .tr{display:flex;align-items:center;gap:7px}
+.tip .tr i{width:8px;height:8px;border-radius:2px;flex:none}
+.tip .tr em{font-style:normal;color:#C6D2CB;flex:1}
+.tip .tr b{font-family:var(--mono);font-weight:600}
+.tabs{display:flex;border:1px solid var(--line-soft);border-radius:7px;overflow:hidden;flex:none}
+.tabs button{border:0;background:var(--panel);font-family:var(--body);font-size:10.5px;padding:5px 9px;cursor:pointer;color:var(--muted)}
+.tabs button+button{border-left:1px solid var(--line-soft)}
+.tabs button.on{background:var(--teal);color:#fff;font-weight:600}
+table.dt{border-collapse:separate;border-spacing:0;width:100%;font-size:11.5px}
+table.dt th{font-weight:600;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--lbl);text-align:right;padding:6px 7px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.dt th:first-child{text-align:left}
+table.dt td{padding:6px 7px;border-bottom:1px solid var(--grid);text-align:right;font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.dt td:first-child{text-align:left;font-family:var(--body);font-size:12px}
+.scrollx{overflow-x:auto;scrollbar-width:thin}
+
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(10px);background:var(--ink);color:#fff;border-radius:10px;padding:11px 16px;font-size:12.5px;box-shadow:0 10px 30px rgba(20,32,28,.3);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:200;max-width:min(560px,92vw)}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+.note{margin-top:14px;font-size:11.5px;color:var(--muted);line-height:1.6;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+.note b{color:var(--ink)}
+footer{margin-top:14px;font-size:10.5px;color:var(--muted);text-align:center;font-family:var(--mono)}
+:focus-visible{outline:2px solid var(--teal);outline-offset:2px;border-radius:4px}
+@media (max-width:820px){ .rightgroup{margin-left:0} .search input{width:100%} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="mast">
+    <div class="brand">
+      <div class="mark" aria-hidden="true"></div>
+      <div>
+        <h1>SR Allocation Report <span class="tag-temp">TEMP DATA</span></h1>
+        <div class="sub">Kala Care Global · engineer-wise SR allocation, task closure &amp; completion — wet / dry split</div>
+      </div>
+    </div>
+    <div class="periodnote" id="periodNote"></div>
+  </header>
+
+  <div class="controls">
+    <button class="btn primary" id="allocBtn">＋ SR Allocation</button>
+
+    <div class="ms" id="msWeek">
+      <button class="btn ms-btn" type="button">Weeks: <span class="cnt ms-lbl">All</span> <span class="ico">▾</span></button>
+      <div class="ms-pop">
+        <div class="ms-head"><button type="button" data-act="all">Tick all</button><button type="button" data-act="none">Clear</button></div>
+        <div class="ms-list"></div>
+      </div>
+    </div>
+    <div class="ms" id="msBranch">
+      <button class="btn ms-btn" type="button">Branch: <span class="cnt ms-lbl">All</span> <span class="ico">▾</span></button>
+      <div class="ms-pop">
+        <div class="ms-head"><input type="text" class="ms-search" placeholder="Search branch"><button type="button" data-act="all">Tick all</button><button type="button" data-act="none">Clear</button></div>
+        <div class="ms-list"></div>
+      </div>
+    </div>
+    <div class="ms" id="msSE">
+      <button class="btn ms-btn" type="button">SE: <span class="cnt ms-lbl">All</span> <span class="ico">▾</span></button>
+      <div class="ms-pop">
+        <div class="ms-head"><input type="text" class="ms-search" placeholder="Search SE"><button type="button" data-act="all">Tick all</button><button type="button" data-act="none">Clear</button></div>
+        <div class="ms-list"></div>
+      </div>
+    </div>
+
+    <div class="rightgroup">
+      <div class="daterow">
+        <input type="date" id="dfStart" title="From">
+        <span style="color:var(--muted);font-size:11px">–</span>
+        <input type="date" id="dfEnd" title="To">
+        <button class="btn" id="dfApply">Apply</button>
+        <button class="btn" id="dfClear">Reset all</button>
+      </div>
+      <div class="search">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input type="text" id="searchI" placeholder="Filter branch or SE name">
+      </div>
+    </div>
+  </div>
+
+  <div class="tablecard">
+    <div class="tbl-scroll-top" id="scrollTop"><div id="scrollTopInner"></div></div>
+    <div class="tbl-scroll" id="scrollMain">
+      <table id="tbl">
+        <thead>
+          <tr class="grp">
+            <th class="grp-col" rowspan="2"></th>
+            <th class="branch-col" rowspan="2">Branch Name</th>
+            <th class="se-uid-col" rowspan="2">SE UID</th>
+            <th class="se-name-col" rowspan="2">SE Name</th>
+            <th class="dt-col" rowspan="2">Date</th>
+            <th colspan="3" class="gh gh-1 first-data">SR Allocation</th>
+            <th colspan="3" class="gh gh-2">Task Closed</th>
+            <th colspan="3" class="gh gh-3">Completed</th>
+          </tr>
+          <tr class="grp sub">
+            <th class="first-data">Wet</th><th>Dry</th><th>Total</th>
+            <th>Wet</th><th>Dry</th><th>Total</th>
+            <th>Wet</th><th>Dry</th><th>Total</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="note">
+    Click a <b>branch name</b> to open its engineers (this also reveals the SE UID and SE Name columns) · the ▶ in column 1 toggles a whole branch group · the <b>▶ beside an engineer's name</b> opens a <b>Date</b> column listing every working day in the selected range (Sundays excluded) with that day's counts · click an <b>engineer's name</b> to open their period card — allocated, closed, attendance, productivity, LMS leads and conversion amounts, with week-by-week graphs · <b>＋ SR Allocation</b> books a new allocation against a branch, engineer and date, and the row above updates immediately · every figure respects the week / date-range, branch and SE filters. TEMP DATA.
+  </div>
+
+  <footer id="footer"></footer>
+</div>
+
+<!-- ============ allocation entry modal ============ -->
+<div class="ovl" id="allocOvl">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="allocTitle">
+    <div class="mhead">
+      <div>
+        <h2 id="allocTitle">New SR Allocation</h2>
+        <div class="msub">Book allocation, closure and completion against one engineer for one date.</div>
+      </div>
+      <button class="xbtn" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="mbody">
+      <div class="err" id="allocErr"></div>
+
+      <div class="step"><i>1</i><b>Branch</b></div>
+      <div class="field"><select id="fBranch"><option value="">— Select branch —</option></select></div>
+
+      <div class="step" id="stepEmp"><i>2</i><b>Engineer</b></div>
+      <div class="field"><select id="fEmp" disabled><option value="">— Select branch first —</option></select></div>
+
+      <div class="step" id="stepDate"><i>3</i><b>Date</b></div>
+      <div class="field"><input type="date" id="fDate" disabled></div>
+
+      <div class="step" id="stepCnt"><i>4</i><b>Counts — wet / dry</b></div>
+      <div class="wdhead"><span></span><span>Wet</span><span>Dry</span><span>Total</span></div>
+      <div class="wd"><div class="wdl"><i style="background:var(--m-alloc)"></i>SR Allocation</div><input type="number" id="aW" min="0" value="0" disabled><input type="number" id="aD" min="0" value="0" disabled><div class="rowtot" id="aT">0</div></div>
+      <div class="wd"><div class="wdl"><i style="background:var(--m-closed)"></i>Task Closed</div><input type="number" id="cW" min="0" value="0" disabled><input type="number" id="cD" min="0" value="0" disabled><div class="rowtot" id="cT">0</div></div>
+      <div class="wd"><div class="wdl"><i style="background:var(--m-leads)"></i>Completed</div><input type="number" id="pW" min="0" value="0" disabled><input type="number" id="pD" min="0" value="0" disabled><div class="rowtot" id="pT">0</div></div>
+    </div>
+    <div class="mfoot">
+      <div class="hint">Closed can't exceed allocated; completed can't exceed closed.</div>
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn primary" id="allocSave">Save allocation</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ engineer detail modal ============ -->
+<div class="ovl" id="seOvl">
+  <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="seTitle">
+    <div class="mhead">
+      <div>
+        <h2 id="seTitle"></h2>
+        <div class="msub" id="seSub"></div>
+      </div>
+      <div style="display:flex;gap:9px;align-items:center">
+        <div class="tabs" id="seTabs"><button class="on" data-v="chart">Graphs</button><button data-v="table">Table</button></div>
+        <button class="xbtn" data-close aria-label="Close">✕</button>
+      </div>
+    </div>
+    <div class="mbody" id="seBody"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $=s=>document.getElementById(s);
+const fmt=v=>v.toLocaleString('en-IN');
+const fmtAmt=v=>v?('₹'+v.toLocaleString('en-IN')):'—';
+
+/* ===================== real workbook data (same source as the EPR report) ===================== */
+const DATA = {"branches": [{"id": "420435_1", "name": "Aurangabad", "ses": [{"name": "Karan Ganesh Sonare", "sr": 28, "workDays": 26, "daysPresent": 22, "oil": {"warranty": [10, 5], "pw": [5, 0], "amc": [0, 3], "koelAmc": [5, 0]}, "nosLead": 5, "spareConvAmt": 100000, "labourConvAmt": 100000, "uid": "100001"}, {"name": "Hanumant Nagorao Nelge", "sr": 30, "workDays": 27, "daysPresent": 20, "oil": {"warranty": [2, 5], "pw": [2, 1], "amc": [1, 1], "koelAmc": [5, 0]}, "nosLead": 2, "spareConvAmt": 75000, "labourConvAmt": 40000, "uid": "100002"}, {"name": "Rahul Vishnupant Kulkarni", "sr": 60, "workDays": 24, "daysPresent": 18, "oil": {"warranty": [5, 6], "pw": [2, 0], "amc": [0, 3], "koelAmc": [0, 2]}, "nosLead": 6, "spareConvAmt": 0, "labourConvAmt": 20000, "uid": "100003"}, {"name": "Sagar Ajinath Sonavne", "sr": 100, "workDays": 22, "daysPresent": 21, "oil": {"warranty": [6, 3], "pw": [5, 2], "amc": [1, 2], "koelAmc": [2, 1]}, "nosLead": 5, "spareConvAmt": 50000, "labourConvAmt": 0, "uid": "100004"}]}, {"id": "420435_4", "name": "Nanded", "ses": [{"name": "Atmaram Govindrao Rajegore", "sr": 87, "workDays": 27, "daysPresent": 24, "oil": {"warranty": [5, 5], "pw": [3, 3], "amc": [3, 1], "koelAmc": [2, 1]}, "nosLead": 4, "spareConvAmt": 0, "labourConvAmt": 60000, "uid": "100005"}]}, {"id": "420435_7", "name": "Parbhani", "ses": [{"name": "Swapnil Bhushan Kale", "sr": 74, "workDays": 26, "daysPresent": 22, "oil": {"warranty": [10, 6], "pw": [0, 0], "amc": [4, 2], "koelAmc": [5, 2]}, "nosLead": 2, "spareConvAmt": 100000, "labourConvAmt": 80000, "uid": "100006"}, {"name": "Hanumant Nagorao Nelge", "sr": 56, "workDays": 25, "daysPresent": 17, "oil": {"warranty": [3, 2], "pw": [6, 2], "amc": [1, 0], "koelAmc": [1, 0]}, "nosLead": 2, "spareConvAmt": 25000, "labourConvAmt": 20000, "uid": "100007"}]}, {"id": "420435_2", "name": "Ahmednagar", "ses": [{"name": "Vikas Changdev Antre", "sr": 58, "workDays": 22, "daysPresent": 18, "oil": {"warranty": [11, 1], "pw": [0, 0], "amc": [0, 1], "koelAmc": [0, 0]}, "nosLead": 6, "spareConvAmt": 75000, "labourConvAmt": 60000, "uid": "100008"}, {"name": "Pragati", "sr": 21, "workDays": 27, "daysPresent": 20, "oil": {"warranty": [2, 3], "pw": [5, 2], "amc": [0, 1], "koelAmc": [1, 1]}, "nosLead": 8, "spareConvAmt": 150000, "labourConvAmt": 60000, "uid": "100009"}]}, {"id": "420435_3", "name": "Beed", "ses": [{"name": "Rajaram Ramrao Rathod", "sr": 36, "workDays": 25, "daysPresent": 17, "oil": {"warranty": [8, 2], "pw": [6, 3], "amc": [2, 3], "koelAmc": [5, 3]}, "nosLead": 3, "spareConvAmt": 0, "labourConvAmt": 100000, "uid": "100010"}]}, {"id": "420435_5", "name": "Babhleshwar", "ses": [{"name": "Sagar Ajinath Sonavne", "sr": 66, "workDays": 22, "daysPresent": 18, "oil": {"warranty": [11, 4], "pw": [0, 4], "amc": [0, 3], "koelAmc": [5, 2]}, "nosLead": 5, "spareConvAmt": 50000, "labourConvAmt": 20000, "uid": "100011"}, {"name": "Prashant Bharamanna Kakatikar", "sr": 23, "workDays": 23, "daysPresent": 20, "oil": {"warranty": [6, 1], "pw": [3, 4], "amc": [2, 4], "koelAmc": [5, 0]}, "nosLead": 5, "spareConvAmt": 150000, "labourConvAmt": 0, "uid": "100012"}, {"name": "Arun Fakkirappa Matti", "sr": 69, "workDays": 24, "daysPresent": 16, "oil": {"warranty": [2, 2], "pw": [6, 1], "amc": [2, 1], "koelAmc": [5, 3]}, "nosLead": 7, "spareConvAmt": 25000, "labourConvAmt": 100000, "uid": "100013"}]}, {"id": "420435_6", "name": "Latur", "ses": [{"name": "Suraj Ghangaokar", "sr": 60, "workDays": 26, "daysPresent": 24, "oil": {"warranty": [11, 5], "pw": [1, 1], "amc": [1, 1], "koelAmc": [3, 0]}, "nosLead": 3, "spareConvAmt": 125000, "labourConvAmt": 20000, "uid": "100014"}]}, {"id": "420435_8", "name": "Hubli", "ses": [{"name": "Nikita P Hiremath", "sr": 50, "workDays": 22, "daysPresent": 19, "oil": {"warranty": [7, 5], "pw": [4, 3], "amc": [4, 2], "koelAmc": [0, 0]}, "nosLead": 5, "spareConvAmt": 100000, "labourConvAmt": 80000, "uid": "100015"}, {"name": "Manjula K Nandalli", "sr": 40, "workDays": 24, "daysPresent": 22, "oil": {"warranty": [3, 5], "pw": [2, 4], "amc": [2, 0], "koelAmc": [5, 2]}, "nosLead": 5, "spareConvAmt": 50000, "labourConvAmt": 20000, "uid": "100016"}]}, {"id": "420435_9", "name": "Belagavi", "ses": [{"name": "Anita Sachin Ajarekar", "sr": 89, "workDays": 26, "daysPresent": 23, "oil": {"warranty": [9, 3], "pw": [3, 1], "amc": [4, 3], "koelAmc": [5, 1]}, "nosLead": 2, "spareConvAmt": 100000, "labourConvAmt": 20000, "uid": "100017"}]}, {"id": "420435_10", "name": "Hospet", "ses": [{"name": "Sneha B", "sr": 64, "workDays": 25, "daysPresent": 23, "oil": {"warranty": [5, 1], "pw": [5, 0], "amc": [0, 3], "koelAmc": [1, 1]}, "nosLead": 8, "spareConvAmt": 150000, "labourConvAmt": 100000, "uid": "100018"}, {"name": "Naveena Kumara E", "sr": 81, "workDays": 25, "daysPresent": 20, "oil": {"warranty": [6, 3], "pw": [0, 2], "amc": [1, 2], "koelAmc": [2, 2]}, "nosLead": 2, "spareConvAmt": 150000, "labourConvAmt": 80000, "uid": "100019"}]}, {"id": "420435_11", "name": "Ballari", "ses": [{"name": "Javid Mahmadrafik Shaikh", "sr": 88, "workDays": 25, "daysPresent": 24, "oil": {"warranty": [2, 2], "pw": [2, 3], "amc": [3, 4], "koelAmc": [5, 1]}, "nosLead": 8, "spareConvAmt": 125000, "labourConvAmt": 60000, "uid": "100020"}, {"name": "Rajaram Ramrao Rathod", "sr": 74, "workDays": 23, "daysPresent": 15, "oil": {"warranty": [6, 3], "pw": [2, 1], "amc": [3, 2], "koelAmc": [2, 3]}, "nosLead": 5, "spareConvAmt": 25000, "labourConvAmt": 20000, "uid": "100021"}, {"name": "Rahul Balasaheb Bhor", "sr": 29, "workDays": 26, "daysPresent": 21, "oil": {"warranty": [9, 5], "pw": [2, 2], "amc": [1, 4], "koelAmc": [4, 0]}, "nosLead": 3, "spareConvAmt": 50000, "labourConvAmt": 0, "uid": "100022"}]}, {"id": "420435_12", "name": "Bagalkote", "ses": [{"name": "Khajisab Babusab Sandimani", "sr": 58, "workDays": 22, "daysPresent": 21, "oil": {"warranty": [9, 0], "pw": [3, 2], "amc": [3, 1], "koelAmc": [3, 1]}, "nosLead": 5, "spareConvAmt": 75000, "labourConvAmt": 20000, "uid": "100023"}]}, {"id": "420435_13", "name": "Kalaburagi", "ses": [{"name": "Nagesh Shivaputra Dhuttargi", "sr": 48, "workDays": 24, "daysPresent": 20, "oil": {"warranty": [11, 5], "pw": [2, 4], "amc": [0, 4], "koelAmc": [1, 0]}, "nosLead": 4, "spareConvAmt": 100000, "labourConvAmt": 80000, "uid": "100024"}, {"name": "Shrikanth S Astagi", "sr": 85, "workDays": 24, "daysPresent": 21, "oil": {"warranty": [9, 2], "pw": [2, 2], "amc": [1, 0], "koelAmc": [5, 1]}, "nosLead": 6, "spareConvAmt": 100000, "labourConvAmt": 20000, "uid": "100025"}]}, {"id": "420435_14", "name": "Vijayapura", "ses": [{"name": "Sudha Krishna Murthy", "sr": 52, "workDays": 27, "daysPresent": 21, "oil": {"warranty": [12, 6], "pw": [6, 3], "amc": [0, 0], "koelAmc": [4, 2]}, "nosLead": 8, "spareConvAmt": 25000, "labourConvAmt": 0, "uid": "100026"}]}], "categories": [{"type":"group","branches":["420435_1","420435_4","420435_7"]},{"type":"group","branches":["420435_2","420435_3","420435_5","420435_6"]},{"type":"standalone","branchId":"420435_8"},{"type":"standalone","branchId":"420435_9"},{"type":"group","branches":["420435_10","420435_11","420435_12"]},{"type":"group","branches":["420435_13","420435_14"]}]};
+const byId=id=>DATA.branches.find(b=>b.id===id);
+const ALL_SES=[]; DATA.branches.forEach(b=>b.ses.forEach(se=>{ se.bid=b.id; se.bname=b.name; ALL_SES.push(se); }));
+const seByUid=uid=>ALL_SES.find(s=>s.uid===uid);
+
+/* ===================== period → weeks → working dates ===================== */
+const PERIOD_START='2026-07-01', PERIOD_END='2026-07-31';
+const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const shortD=d=>d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
+const fmtFull=s=>new Date(s+'T00:00:00').toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+function buildWeeks(a,b){
+  const out=[]; const end=new Date(b+'T00:00:00');
+  let cur=new Date(a+'T00:00:00'), n=1;
+  while(cur<=end){
+    const dowMon=(cur.getDay()+6)%7;
+    let we=new Date(cur); we.setDate(we.getDate()+(6-dowMon));
+    if(we>end) we=new Date(end);
+    out.push({n,label:'W'+n,start:iso(cur),end:iso(we),range:`${shortD(cur)} – ${shortD(we)}`});
+    cur=new Date(we); cur.setDate(cur.getDate()+1); n++;
+  }
+  return out;
+}
+const WEEKS=buildWeeks(PERIOD_START,PERIOD_END);
+const weekOf=dstr=>WEEKS.find(w=>dstr>=w.start&&dstr<=w.end);
+
+// Working dates in the period: every day except Sunday.
+const DATES=(()=>{ const out=[]; let c=new Date(PERIOD_START+'T00:00:00'); const e=new Date(PERIOD_END+'T00:00:00');
+  while(c<=e){ if(c.getDay()!==0) out.push(iso(c)); c=new Date(c); c.setDate(c.getDate()+1); } return out; })();
+
+/* ===================== ledger =====================
+   One row per engineer per working date. Each engineer's allocation over the whole
+   period adds up to their real SR count from the workbook; the wet/dry split is their
+   real oil-change wet/dry mix; closure is 78% of allocation and completion 80% of
+   closure, both rounded so no cell can exceed the stage above it. */
+function rng(seed){ let s=seed>>>0; return ()=>{ s=(s*1103515245+12345)>>>0; return (s>>>8)/0xFFFFFF; }; }
+function largestRemainder(weights,total){
+  const sum=weights.reduce((a,b)=>a+b,0);
+  if(!sum||!total) return weights.map(()=>0);
+  const raw=weights.map(w=>w*total/sum);
+  const out=raw.map(Math.floor);
+  const rem=total-out.reduce((a,b)=>a+b,0);
+  const order=raw.map((v,i)=>[v-Math.floor(v),i]).sort((a,b)=>b[0]-a[0]||a[1]-b[1]);
+  for(let i=0;i<rem;i++) out[order[i%order.length][1]]++;
+  return out;
+}
+const LEDGER=[];
+ALL_SES.forEach(se=>{
+  const r=rng(+se.uid);
+  const dates=DATES.map(d=>({d,k:r()})).sort((a,b)=>a.k-b.k).slice(0,se.daysPresent).map(o=>o.d).sort();
+  const wetMix=['warranty','pw','amc','koelAmc'].reduce((a,k)=>a+se.oil[k][0],0);
+  const dryMix=['warranty','pw','amc','koelAmc'].reduce((a,k)=>a+se.oil[k][1],0);
+  const wetShare=(wetMix+dryMix)? wetMix/(wetMix+dryMix) : .5;
+
+  const dayW=dates.map(()=>0.55+r()*0.9);
+  const perDay=largestRemainder(dayW, se.sr);
+  const totWet=Math.round(se.sr*wetShare);
+  const aW=largestRemainder(perDay, totWet);
+  const aD=perDay.map((v,i)=>v-aW[i]);
+  const cW=largestRemainder(aW, Math.round(totWet*0.78));
+  const cD=largestRemainder(aD, Math.round((se.sr-totWet)*0.78));
+  const pW=largestRemainder(cW, Math.round(cW.reduce((a,b)=>a+b,0)*0.80));
+  const pD=largestRemainder(cD, Math.round(cD.reduce((a,b)=>a+b,0)*0.80));
+
+  dates.forEach((d,i)=>LEDGER.push({uid:se.uid,bid:se.bid,date:d,aW:aW[i],aD:aD[i],cW:cW[i],cD:cD[i],pW:pW[i],pD:pD[i]}));
+});
+
+/* per-week LMS leads & conversion amounts, weighted by that week's closures */
+function weeklySplit(se, total){
+  const w=WEEKS.map(wk=>LEDGER.filter(e=>e.uid===se.uid&&e.date>=wk.start&&e.date<=wk.end).reduce((a,e)=>a+e.cW+e.cD,0)+0.001);
+  return largestRemainder(w,total);
+}
+const EXTRA={};
+ALL_SES.forEach(se=>{
+  EXTRA[se.uid]={
+    leads: weeklySplit(se, se.nosLead),
+    spare: weeklySplit(se, Math.round(se.spareConvAmt/1000)).map(v=>v*1000),
+    labour:weeklySplit(se, Math.round(se.labourConvAmt/1000)).map(v=>v*1000)
+  };
+});
+
+/* ===================== filter state ===================== */
+const state={
+  weekSel:new Set(), brSel:new Set(), seSel:new Set(), query:'',
+  catExpanded:new Set(DATA.categories.map((c,i)=>i).filter(i=>DATA.categories[i].type==='group')),
+  branchExpanded:new Set(), seExpanded:new Set(), seView:'chart', openSE:null, flash:null
+};
+const activeWeeks=()=>WEEKS.filter(w=>!state.weekSel.size||state.weekSel.has(w.n));
+const inPeriod=dstr=>activeWeeks().some(w=>dstr>=w.start&&dstr<=w.end);
+
+function visibleSEs(b){
+  const q=state.query.trim().toLowerCase();
+  let ses=b.ses;
+  if(state.seSel.size) ses=ses.filter(se=>state.seSel.has(se.uid));
+  if(q){
+    const bm=b.name.toLowerCase().includes(q)||b.id.toLowerCase().includes(q);
+    if(!bm) ses=ses.filter(se=>se.name.toLowerCase().includes(q));
+  }
+  return ses;
+}
+function branchVisible(b){
+  if(state.brSel.size&&!state.brSel.has(b.id)) return false;
+  return visibleSEs(b).length>0;
+}
+
+/* ===================== aggregation ===================== */
+const empty=()=>({aW:0,aD:0,cW:0,cD:0,pW:0,pD:0});
+function addRow(t,e){ t.aW+=e.aW; t.aD+=e.aD; t.cW+=e.cW; t.cD+=e.cD; t.pW+=e.pW; t.pD+=e.pD; }
+function seTotals(uid){
+  const t=empty();
+  LEDGER.forEach(e=>{ if(e.uid===uid&&inPeriod(e.date)) addRow(t,e); });
+  return t;
+}
+// Every working date the selected range covers — Sundays are never listed.
+const activeDates=()=>DATES.filter(inPeriod);
+function seDateTotals(uid,date){
+  const t=empty();
+  LEDGER.forEach(e=>{ if(e.uid===uid&&e.date===date) addRow(t,e); });
+  return t;
+}
+const dLabel=d=>{
+  const dt=new Date(d+'T00:00:00');
+  return `${shortD(dt)} <span class="dow">${dt.toLocaleDateString('en-GB',{weekday:'short'})}</span>`;
+};
+function sumSEs(ses){ const t=empty(); ses.forEach(se=>addRow(t,seTotals(se.uid))); return t; }
+function sumBranch(b){ return sumSEs(visibleSEs(b)); }
+function sumBranches(ids){ return sumSEs(ids.map(byId).filter(branchVisible).flatMap(visibleSEs)); }
+
+const z=v=>v?v:'<span class="zero">·</span>';
+function dataCells(t){
+  return `<td class="first-data">${z(t.aW)}</td><td>${z(t.aD)}</td><td class="ttl">${z(t.aW+t.aD)}</td>
+    <td>${z(t.cW)}</td><td>${z(t.cD)}</td><td class="ttl">${z(t.cW+t.cD)}</td>
+    <td>${z(t.pW)}</td><td>${z(t.pD)}</td><td class="ttl">${z(t.pW+t.pD)}</td>`;
+}
+
+/* ===================== table render ===================== */
+function grpCell(standalone,opts,first){
+  if(standalone) return '<td class="grp-col"></td>';
+  if(opts.mode==='first'&&first) return `<td class="grp-col" rowspan="${opts.rowspan}" data-cat="${opts.ci}"><span class="gchev open" data-cat="${opts.ci}">▶</span></td>`;
+  return '';
+}
+// An expanded engineer occupies 1 summary row + one row per working date in range.
+const seRowSpan=uid=>1+(state.seExpanded.has(uid)?activeDates().length:0);
+
+function branchHTML(b,opts){
+  const open=state.branchExpanded.has(b.id);
+  const t=sumBranch(b), ses=visibleSEs(b), standalone=!opts;
+  let html='';
+  if(!open){
+    html+=`<tr class="branch-row" data-bid="${b.id}">
+      ${grpCell(standalone,opts,true)}
+      <td class="branch-col" data-bid="${b.id}"><span class="chev">▶</span>${b.name}<span class="bmeta"><span class="bid">${b.id}</span><span class="tagpill">${ses.length} SE${ses.length>1?'s':''}</span></span></td>
+      <td class="se-uid-col">&nbsp;</td><td class="se-name-col">&nbsp;</td><td class="dt-col">&nbsp;</td>
+      ${dataCells(t)}
+    </tr>`;
+  }else{
+    const rc=ses.reduce((a,se)=>a+seRowSpan(se.uid),0)+1;
+    ses.forEach((se,i)=>{
+      const dOpen=state.seExpanded.has(se.uid);
+      const span=seRowSpan(se.uid);
+      html+=`<tr class="branch-row se-line ${i%2?'alt':''} ${state.flash===se.uid?'flash':''}" data-bid="${b.id}">
+        ${grpCell(standalone,opts,i===0)}
+        ${i===0?`<td class="branch-col" rowspan="${rc}" data-bid="${b.id}"><span class="chev open">▶</span>${b.name}<span class="bmeta"><span class="bid">${b.id}</span><span class="tagpill">${ses.length} SE${ses.length>1?'s':''}</span></span></td>`:''}
+        <td class="se-uid-col"${dOpen?` rowspan="${span}"`:''}>${se.uid}</td>
+        <td class="se-name-col"${dOpen?` rowspan="${span}"`:''} data-uid="${se.uid}" title="Open ${se.name}'s period card"><span class="chev sechev ${dOpen?'open':''}" data-sechev="${se.uid}" title="Show date-wise counts">▶</span>${se.name}</td>
+        <td class="dt-col">${dOpen?'All dates':'&nbsp;'}</td>
+        ${dataCells(seTotals(se.uid))}
+      </tr>`;
+      if(dOpen) activeDates().forEach(d=>{
+        const dt=seDateTotals(se.uid,d);
+        const nil=!(dt.aW+dt.aD);
+        html+=`<tr class="date-line ${nil?'nil':''}">
+          ${standalone?'<td class="grp-col"></td>':''}
+          <td class="dt-col">${dLabel(d)}</td>
+          ${dataCells(dt)}
+        </tr>`;
+      });
+    });
+    html+=`<tr class="branch-total">
+      ${grpCell(standalone,opts,false)}
+      <td class="se-uid-col">&nbsp;</td><td class="se-name-col">${b.name} — branch total</td><td class="dt-col">&nbsp;</td>
+      ${dataCells(t)}
+    </tr>`;
+  }
+  return html;
+}
+function branchRowCount(b,open){ return open? visibleSEs(b).reduce((a,se)=>a+seRowSpan(se.uid),0)+1 : 1; }
+
+function render(){
+  let html='';
+  DATA.categories.forEach((cat,ci)=>{
+    if(cat.type==='standalone'){
+      const b=byId(cat.branchId);
+      if(!branchVisible(b)) return;
+      html+=branchHTML(b); return;
+    }
+    const bs=cat.branches.map(byId).filter(branchVisible);
+    if(!bs.length) return;
+    const ids=bs.map(b=>b.id);
+    if(!state.catExpanded.has(ci)){
+      const t=sumBranches(ids), first=bs[0];
+      html+=`<tr class="branch-row" data-cat="${ci}">
+        <td class="grp-col" data-cat="${ci}"><span class="gchev" data-cat="${ci}">▶</span></td>
+        <td class="branch-col" data-cat="${ci}">${first.name}<span class="bmeta"><span class="bid">${first.id}</span><span class="tagpill">+${bs.length-1} BR</span></span></td>
+        <td class="se-uid-col">&nbsp;</td><td class="se-name-col">&nbsp;</td><td class="dt-col">&nbsp;</td>
+        ${dataCells(t)}
+      </tr>`;
+    }else{
+      let rowspan=1; bs.forEach(b=>{ rowspan+=branchRowCount(b,state.branchExpanded.has(b.id)); });
+      html+=branchHTML(bs[0],{mode:'first',ci,rowspan});
+      bs.slice(1).forEach(b=>{ html+=branchHTML(b,{mode:'rest'}); });
+      html+=`<tr class="cat-total"><td class="branch-col">Total</td><td class="se-uid-col">&nbsp;</td><td class="se-name-col">Total</td><td class="dt-col">&nbsp;</td>${dataCells(sumBranches(ids))}</tr>`;
+    }
+  });
+  const grand=sumBranches(DATA.branches.map(b=>b.id));
+  html+=`<tr class="grand-total"><td class="grp-col"></td><td class="branch-col">Grand Total</td><td class="se-uid-col">&nbsp;</td><td class="se-name-col">All branches</td><td class="dt-col">&nbsp;</td>${dataCells(grand)}</tr>`;
+
+  $('tbody').innerHTML=html;
+  $('tbl').classList.toggle('se-open',state.branchExpanded.size>0);
+  $('tbl').classList.toggle('dt-open',state.seExpanded.size>0);
+
+  const ws=activeWeeks(), vis=DATA.branches.filter(branchVisible);
+  $('periodNote').innerHTML=`Period <b>${shortD(new Date(PERIOD_START))} – ${shortD(new Date(PERIOD_END))} 2026</b><br>${ws.length===WEEKS.length?`all ${WEEKS.length} weeks`:ws.map(w=>w.label).join(', ')} · ${vis.length} of ${DATA.branches.length} branches`;
+  $('footer').textContent=`Kala Care · SR Allocation Report · ${LEDGER.length} allocation rows on file · TEMP DATA for layout review`;
+  syncScrollWidth();
+}
+
+$('tbody').addEventListener('click',e=>{
+  // the arrow opens the date-wise rows; the name itself opens the engineer's card
+  const arrow=e.target.closest('[data-sechev]');
+  if(arrow){
+    const uid=arrow.dataset.sechev;
+    if(state.seExpanded.has(uid)) state.seExpanded.delete(uid); else state.seExpanded.add(uid);
+    render(); return;
+  }
+  const nameCell=e.target.closest('td.se-name-col');
+  if(nameCell&&nameCell.dataset.uid){ openSE(nameCell.dataset.uid); return; }
+  const g=e.target.closest('.grp-col');
+  if(g&&g.dataset.cat!==undefined&&g.dataset.cat!==''){
+    const ci=+g.dataset.cat;
+    if(state.catExpanded.has(ci)) state.catExpanded.delete(ci); else state.catExpanded.add(ci);
+    render(); return;
+  }
+  const bc=e.target.closest('.branch-col');
+  if(!bc) return;
+  if(bc.dataset.bid){
+    const id=bc.dataset.bid;
+    if(state.branchExpanded.has(id)) state.branchExpanded.delete(id); else state.branchExpanded.add(id);
+    render();
+  }else if(bc.dataset.cat!==undefined&&bc.dataset.cat!==''){
+    state.catExpanded.add(+bc.dataset.cat); render();
+  }
+});
+
+/* ===================== multi-select ===================== */
+function multiSelect(rootId,cfg){
+  const root=$(rootId), btn=root.querySelector('.ms-btn'), lbl=root.querySelector('.ms-lbl');
+  const list=root.querySelector('.ms-list'), searchI=root.querySelector('.ms-search');
+  const sel=cfg.sel;
+  function paint(){
+    const q=(searchI&&searchI.value.trim().toLowerCase())||'';
+    const items=cfg.items().filter(it=>!q||it.t.toLowerCase().includes(q)||(it.sub||'').toLowerCase().includes(q));
+    list.innerHTML=items.length
+      ? items.map(it=>`<label class="ms-item"><input type="checkbox" value="${it.v}" ${sel.has(it.v)?'checked':''}><span title="${it.t}">${it.t}</span>${it.sub?`<em>${it.sub}</em>`:''}</label>`).join('')
+      : '<div class="ms-empty">No match</div>';
+    lbl.textContent=sel.size?`${sel.size}`:'All';
+  }
+  btn.addEventListener('click',()=>{
+    const was=root.classList.contains('open');
+    document.querySelectorAll('.ms.open').forEach(m=>m.classList.remove('open'));
+    if(!was){ root.classList.add('open'); paint(); if(searchI) searchI.focus(); }
+  });
+  list.addEventListener('change',e=>{
+    const cb=e.target; if(cb.type!=='checkbox') return;
+    const v=cfg.cast?cfg.cast(cb.value):cb.value;
+    if(cb.checked) sel.add(v); else sel.delete(v);
+    lbl.textContent=sel.size?`${sel.size}`:'All';
+    cfg.onChange();
+  });
+  root.querySelectorAll('[data-act]').forEach(b=>b.addEventListener('click',()=>{
+    sel.clear(); if(b.dataset.act==='all') cfg.items().forEach(it=>sel.add(it.v));
+    paint(); cfg.onChange();
+  }));
+  if(searchI) searchI.addEventListener('input',paint);
+  return {paint,repaintIfOpen(){ if(root.classList.contains('open')) paint(); }};
+}
+document.addEventListener('click',e=>{ if(!e.target.closest('.ms')) document.querySelectorAll('.ms.open').forEach(m=>m.classList.remove('open')); });
+
+const msWeek=multiSelect('msWeek',{sel:state.weekSel,cast:v=>+v,
+  items:()=>WEEKS.map(w=>({v:w.n,t:w.label,sub:w.range})),
+  onChange:()=>{ syncDates(); render(); if(state.openSE) paintSE(); }});
+const msBranch=multiSelect('msBranch',{sel:state.brSel,
+  items:()=>DATA.branches.map(b=>({v:b.id,t:b.name,sub:b.id})),
+  onChange:()=>{ msSE.repaintIfOpen(); render(); }});
+const msSE=multiSelect('msSE',{sel:state.seSel,
+  items:()=>{ const out=[]; DATA.branches.forEach(b=>{ if(state.brSel.size&&!state.brSel.has(b.id)) return;
+      b.ses.forEach(se=>out.push({v:se.uid,t:se.name,sub:b.name})); }); return out.sort((a,b)=>a.t.localeCompare(b.t)); },
+  onChange:()=>render()});
+
+/* ===================== date range ⇄ weeks ===================== */
+$('dfStart').min=PERIOD_START; $('dfStart').max=PERIOD_END;
+$('dfEnd').min=PERIOD_START;   $('dfEnd').max=PERIOD_END;
+function syncDates(){
+  const ws=activeWeeks();
+  if(!state.weekSel.size){ $('dfStart').value=''; $('dfEnd').value=''; return; }
+  $('dfStart').value=ws[0].start; $('dfEnd').value=ws[ws.length-1].end;
+}
+$('dfApply').onclick=()=>{
+  const s=$('dfStart').value,e=$('dfEnd').value;
+  if(!s||!e){ alert('Pick both a From and a To date.'); return; }
+  if(s>e){ alert('From is after To.'); return; }
+  const hit=WEEKS.filter(w=>w.start<=e&&w.end>=s).map(w=>w.n);
+  if(!hit.length){ alert('That range falls outside the report period.'); return; }
+  state.weekSel.clear(); hit.forEach(n=>state.weekSel.add(n));
+  msWeek.paint(); render(); if(state.openSE) paintSE();
+};
+$('dfClear').onclick=()=>{
+  state.weekSel.clear(); state.brSel.clear(); state.seSel.clear(); state.query='';
+  $('dfStart').value=''; $('dfEnd').value=''; $('searchI').value='';
+  msWeek.paint(); msBranch.paint(); msSE.paint(); render();
+};
+$('searchI').oninput=e=>{ state.query=e.target.value; render(); };
+
+/* ===================== allocation entry modal ===================== */
+function openOvl(id){ $(id).classList.add('on'); }
+function closeOvl(id){ $(id).classList.remove('on'); if(id==='seOvl') state.openSE=null; }
+document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>closeOvl(b.closest('.ovl').id)));
+document.querySelectorAll('.ovl').forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) closeOvl(o.id); }));
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') document.querySelectorAll('.ovl.on').forEach(o=>closeOvl(o.id)); });
+
+const CNT=['aW','aD','cW','cD','pW','pD'];
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('on'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('on'),4200); }
+
+$('fBranch').innerHTML='<option value="">— Select branch —</option>'+DATA.branches.map(b=>`<option value="${b.id}">${b.name} · ${b.id}</option>`).join('');
+$('fBranch').onchange=()=>{
+  const bid=$('fBranch').value;
+  const emp=$('fEmp');
+  if(!bid){ emp.disabled=true; emp.innerHTML='<option value="">— Select branch first —</option>'; $('fDate').disabled=true; setCountsEnabled(false); return; }
+  emp.disabled=false;
+  emp.innerHTML='<option value="">— Select engineer —</option>'+byId(bid).ses.map(se=>`<option value="${se.uid}">${se.name} · ${se.uid}</option>`).join('');
+  $('fDate').disabled=true; setCountsEnabled(false);
+};
+$('fEmp').onchange=()=>{
+  const on=!!$('fEmp').value;
+  $('fDate').disabled=!on;
+  if(!on) setCountsEnabled(false);
+  $('stepDate').classList.toggle('off',!on);
+};
+$('fDate').onchange=()=>setCountsEnabled(!!$('fDate').value);
+function setCountsEnabled(on){
+  CNT.forEach(id=>{ $(id).disabled=!on; });
+  $('stepCnt').classList.toggle('off',!on);
+}
+CNT.forEach(id=>$(id).addEventListener('input',()=>{
+  const g=k=>Math.max(0,+$(k).value||0);
+  $('aT').textContent=g('aW')+g('aD');
+  $('cT').textContent=g('cW')+g('cD');
+  $('pT').textContent=g('pW')+g('pD');
+}));
+$('allocBtn').onclick=()=>{
+  $('allocErr').classList.remove('on');
+  $('fBranch').value=''; $('fBranch').onchange();
+  $('fDate').min=PERIOD_START; $('fDate').max=PERIOD_END; $('fDate').value='';
+  CNT.forEach(id=>$(id).value=0);
+  ['aT','cT','pT'].forEach(id=>$(id).textContent='0');
+  ['stepEmp','stepDate','stepCnt'].forEach(id=>$(id).classList.add('off'));
+  openOvl('allocOvl');
+};
+$('fBranch').addEventListener('change',()=>$('stepEmp').classList.toggle('off',!$('fBranch').value));
+
+$('allocSave').onclick=()=>{
+  const err=$('allocErr');
+  const bid=$('fBranch').value, uid=$('fEmp').value, date=$('fDate').value;
+  const g=k=>Math.max(0,Math.round(+$(k).value||0));
+  const v={aW:g('aW'),aD:g('aD'),cW:g('cW'),cD:g('cD'),pW:g('pW'),pD:g('pD')};
+  const problems=[];
+  if(!bid) problems.push('pick a branch');
+  if(!uid) problems.push('pick an engineer');
+  if(!date) problems.push('pick a date');
+  else if(date<PERIOD_START||date>PERIOD_END) problems.push(`the date must fall inside ${fmtFull(PERIOD_START)} – ${fmtFull(PERIOD_END)}`);
+  if(v.aW+v.aD===0) problems.push('allocate at least one SR');
+  if(v.cW>v.aW||v.cD>v.aD) problems.push('closed cannot exceed allocated (per wet / dry)');
+  if(v.pW>v.cW||v.pD>v.cD) problems.push('completed cannot exceed closed (per wet / dry)');
+  if(problems.length){ err.textContent='Please '+problems.join(', ')+'.'; err.classList.add('on'); return; }
+
+  LEDGER.push(Object.assign({uid,bid,date},v));
+  const wk=weekOf(date);
+  let extra='';
+  if(state.weekSel.size&&!state.weekSel.has(wk.n)){ state.weekSel.clear(); msWeek.paint(); syncDates(); extra=` Week filter cleared so ${wk.label} is visible.`; }
+  state.branchExpanded.add(bid);
+  state.flash=uid;
+  closeOvl('allocOvl');
+  render();
+  setTimeout(()=>{ state.flash=null; render(); },2200);
+  const se=seByUid(uid);
+  toast(`Saved ${v.aW+v.aD} SR for ${se.name} on ${fmtFull(date)} (${wk.label}).${extra}`);
+};
+
+/* ===================== engineer detail ===================== */
+function seWeekly(uid){
+  const se=seByUid(uid);
+  const rows=WEEKS.map(w=>{
+    const es=LEDGER.filter(e=>e.uid===uid&&e.date>=w.start&&e.date<=w.end);
+    const alloc=es.reduce((a,e)=>a+e.aW+e.aD,0);
+    const closed=es.reduce((a,e)=>a+e.cW+e.cD,0);
+    const att=new Set(es.map(e=>e.date)).size;
+    return {w, alloc, closed, att, prod: att? +(closed/att).toFixed(2) : 0};
+  });
+  const x=EXTRA[uid];
+  rows.forEach((r,i)=>{ r.leads=x.leads[i]; r.spare=x.spare[i]; r.labour=x.labour[i]; });
+  return rows;
+}
+function openSE(uid){ state.openSE=uid; state.seView='chart';
+  $('seTabs').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v==='chart'));
+  openOvl('seOvl'); paintSE(); }
+$('seTabs').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  state.seView=b.dataset.v;
+  $('seTabs').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+  paintSE();
+});
+
+const METRIC={
+  alloc :{n:'SR Allocated',   c:'var(--m-alloc)',  hex:'#2a78d6'},
+  closed:{n:'Closed SR',      c:'var(--m-closed)', hex:'#eb6834'},
+  leads :{n:'LMS Leads',      c:'var(--m-leads)',  hex:'#1baf7a'},
+  att   :{n:'Attendance',     c:'var(--m-att)',    hex:'#4a3aa7'},
+  prod  :{n:'Productivity',   c:'var(--m-prod)',   hex:'#eda100'},
+  spare :{n:'Spare Amount',   c:'var(--m-spare)',  hex:'#e87ba4'},
+  labour:{n:'Labour Amount',  c:'var(--m-labour)', hex:'#008300'}
+};
+function paintSE(){
+  const uid=state.openSE; if(!uid) return;
+  const se=seByUid(uid);
+  const rows=seWeekly(uid);
+  const ws=activeWeeks();
+  const on=r=>ws.some(w=>w.n===r.w.n);
+  const sel=rows.filter(on);
+
+  const T={
+    alloc: sel.reduce((a,r)=>a+r.alloc,0),
+    closed:sel.reduce((a,r)=>a+r.closed,0),
+    att:   sel.reduce((a,r)=>a+r.att,0),
+    leads: sel.reduce((a,r)=>a+r.leads,0),
+    spare: sel.reduce((a,r)=>a+r.spare,0),
+    labour:sel.reduce((a,r)=>a+r.labour,0)
+  };
+  T.prod = T.att ? +(T.closed/T.att).toFixed(2) : 0;
+
+  $('seTitle').textContent=se.name;
+  $('seSub').innerHTML=`UID <b>${se.uid}</b> · <b>${se.bname}</b> ${se.bid} · ${ws.length===WEEKS.length?`whole period (${shortD(new Date(PERIOD_START))} – ${shortD(new Date(PERIOD_END))} 2026)`:`${ws.map(w=>w.label).join(', ')} (${ws[0].range.split(' – ')[0]} – ${ws[ws.length-1].range.split(' – ')[1]})`}`;
+
+  const tiles=[
+    ['alloc', fmt(T.alloc), 'service requests'],
+    ['closed',fmt(T.closed), T.alloc?`${(T.closed/T.alloc*100).toFixed(0)}% of allocated`:'—'],
+    ['att',   fmt(T.att), 'days present'],
+    ['prod',  T.prod.toFixed(2), 'SR closed per day'],
+    ['leads', fmt(T.leads), 'leads logged'],
+    ['spare', fmtAmt(T.spare), 'spare conversion'],
+    ['labour',fmtAmt(T.labour),'labour conversion']
+  ].map(([k,v,u])=>`<div class="tile" style="--tint:${METRIC[k].hex}">
+      <div class="tl"><i></i>${METRIC[k].n}</div><div class="tv">${v}</div><div class="tu">${u}</div></div>`).join('');
+
+  if(state.seView==='table'){
+    $('seBody').innerHTML=`<div class="tiles">${tiles}</div>
+      <div class="scrollx"><table class="dt"><thead><tr><th>Metric</th>${rows.map(r=>`<th${on(r)?'':' style="opacity:.4"'}>${r.w.label}<br><span style="font-weight:400;text-transform:none;letter-spacing:0">${r.w.range}</span></th>`).join('')}<th>Selected total</th></tr></thead><tbody>
+      ${[['alloc',r=>r.alloc,fmt],['closed',r=>r.closed,fmt],['att',r=>r.att,fmt],['prod',r=>r.prod,v=>v.toFixed(2)],['leads',r=>r.leads,fmt],['spare',r=>r.spare,fmtAmt],['labour',r=>r.labour,fmtAmt]]
+        .map(([k,get,f])=>`<tr><td><span style="display:inline-block;width:10px;height:3px;border-radius:2px;background:${METRIC[k].hex};vertical-align:middle;margin-right:7px"></span>${METRIC[k].n}</td>${rows.map(r=>`<td${on(r)?'':' style="opacity:.4"'}>${f(get(r))}</td>`).join('')}<td><b>${k==='prod'?T.prod.toFixed(2):f(T[k])}</b></td></tr>`).join('')}
+      </tbody></table></div>`;
+    return;
+  }
+
+  $('seBody').innerHTML=`<div class="tiles">${tiles}</div>
+    <div class="cbox">
+      <h3>Volume by week</h3>
+      <div class="csub">Allocated vs closed vs leads logged — weeks outside the current filter are shaded.</div>
+      <div class="legend" id="lgVol"></div>
+      <div class="chartbox" id="chVol"></div>
+    </div>
+    <div class="chartgrid">
+      <div class="cbox"><h3>Attendance</h3><div class="csub">Days present per week</div><div class="chartbox" id="chAtt"></div></div>
+      <div class="cbox"><h3>Productivity</h3><div class="csub">SR closed per day present</div><div class="chartbox" id="chProd"></div></div>
+      <div class="cbox"><h3>Conversion amount</h3><div class="csub">Spare vs labour, ₹</div><div class="legend" id="lgAmt"></div><div class="chartbox" id="chAmt"></div></div>
+    </div>`;
+
+  const labels=rows.map(r=>r.w.label), ranges=rows.map(r=>r.w.range), dim=rows.map(r=>!on(r));
+  legend('lgVol',[METRIC.alloc,METRIC.closed,METRIC.leads]);
+  legend('lgAmt',[METRIC.spare,METRIC.labour]);
+  lineChart('chVol',{labels,ranges,dim,height:230,
+    series:[{name:METRIC.alloc.n,hex:METRIC.alloc.hex,vals:rows.map(r=>r.alloc)},
+            {name:METRIC.closed.n,hex:METRIC.closed.hex,vals:rows.map(r=>r.closed)},
+            {name:METRIC.leads.n,hex:METRIC.leads.hex,vals:rows.map(r=>r.leads)}]});
+  lineChart('chAtt',{labels,ranges,dim,height:150,fmt:v=>v+' d',
+    series:[{name:METRIC.att.n,hex:METRIC.att.hex,vals:rows.map(r=>r.att)}]});
+  lineChart('chProd',{labels,ranges,dim,height:150,dec:2,
+    series:[{name:METRIC.prod.n,hex:METRIC.prod.hex,vals:rows.map(r=>r.prod)}]});
+  lineChart('chAmt',{labels,ranges,dim,height:150,zeroMax:4000,fmt:v=>v?'₹'+fmt(v):'₹0',tick:v=>Math.round(v/1000)+'k',
+    series:[{name:METRIC.spare.n,hex:METRIC.spare.hex,vals:rows.map(r=>r.spare)},
+            {name:METRIC.labour.n,hex:METRIC.labour.hex,vals:rows.map(r=>r.labour)}]});
+}
+function legend(id,ms){ $(id).innerHTML=ms.map(m=>`<span class="li"><i style="background:${m.hex}"></i><b>${m.n}</b></span>`).join(''); }
+
+/* One line-chart routine for every graph on the page: single-series charts drop the
+   legend (the heading names them) and keep a direct end-label; multi-series charts get
+   both. Weeks outside the filter are shaded, never removed. */
+function lineChart(boxId,cfg){
+  const box=$(boxId);
+  const n=cfg.labels.length;
+  const single=cfg.series.length===1;
+  const W=Math.max(280,box.clientWidth||420), H=cfg.height||190;
+  const mL=cfg.tick?38:30, mR=single?58:96, mT=10, mB=24;
+  const pw=W-mL-mR, ph=H-mT-mB;
+  const dec=cfg.dec||0;
+  const maxV=Math.max(...cfg.series.flatMap(s=>s.vals),0);
+  const niceMax=maxV<=0?(cfg.zeroMax||1):(dec? Math.ceil(maxV*1.15*100)/100 : Math.max(1,Math.ceil(maxV*1.12)));
+  const x=i=>mL+(n===1?pw/2:pw*i/(n-1));
+  const y=v=>mT+ph-ph*(v/niceMax);
+  const tickTxt=cfg.tick||(v=>dec?v.toFixed(dec):Math.round(v));
+
+  let grid='',ticks='';
+  for(let i=0;i<=3;i++){
+    const v=niceMax*i/3, yy=y(v);
+    grid+=`<line x1="${mL}" y1="${yy}" x2="${mL+pw}" y2="${yy}" stroke="var(--grid)" stroke-width="1"/>`;
+    ticks+=`<text x="${mL-7}" y="${yy+3.5}" text-anchor="end" font-size="9" fill="var(--lbl)">${tickTxt(v)}</text>`;
+  }
+  let shade='',xlab='';
+  cfg.labels.forEach((l,i)=>{
+    xlab+=`<text x="${x(i)}" y="${H-7}" text-anchor="middle" font-size="9.5" fill="${cfg.dim[i]?'var(--lbl)':'var(--ink)'}" opacity="${cfg.dim[i]?.5:1}">${l}</text>`;
+    if(cfg.dim[i]){
+      const half=n>1?pw/(n-1)/2:pw/2;
+      shade+=`<rect x="${Math.max(mL,x(i)-half)}" y="${mT}" width="${Math.min(pw,half*2)}" height="${ph}" fill="#EEF0EA" opacity=".6"/>`;
+    }
+  });
+  let lines='',dots='';
+  cfg.series.forEach(s=>{
+    lines+=`<path d="${s.vals.map((v,i)=>`${i?'L':'M'}${x(i)},${y(v)}`).join(' ')}" fill="none" stroke="${s.hex}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    s.vals.forEach((v,i)=>{ dots+=`<circle cx="${x(i)}" cy="${y(v)}" r="4" fill="${s.hex}" stroke="#fff" stroke-width="2"/>`; });
+  });
+  // direct end-labels, merged when series coincide and nudged apart when they crowd
+  const merged=[];
+  cfg.series.forEach(s=>{
+    const last=s.vals[n-1], same=merged.find(m=>m.v===last);
+    if(same) same.names.push(s.name); else merged.push({v:last,names:[s.name]});
+  });
+  merged.sort((a,b)=>b.v-a.v);
+  let prevY=-1e9, ends='';
+  merged.forEach(m=>{
+    let yy=y(m.v); if(yy-prevY<11.5) yy=prevY+11.5; prevY=yy;
+    ends+=`<text x="${x(n-1)+9}" y="${yy+3.5}" font-size="9.5" fill="var(--ink)">${m.names.join(' / ')}</text>`;
+  });
+
+  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${cfg.series.map(s=>s.name).join(', ')} by week">
+    ${shade}${grid}
+    <line x1="${mL}" y1="${mT+ph}" x2="${mL+pw}" y2="${mT+ph}" stroke="var(--axis)" stroke-width="1"/>
+    ${ticks}${xlab}
+    <line class="cross" x1="0" y1="${mT}" x2="0" y2="${mT+ph}" stroke="var(--axis)" stroke-width="1" opacity="0"/>
+    ${lines}${dots}${ends}
+    <rect class="hit" x="${mL}" y="${mT}" width="${pw}" height="${ph}" fill="transparent"/>
+  </svg><div class="tip"></div>`;
+
+  const tip=box.querySelector('.tip'), cross=box.querySelector('.cross'), hit=box.querySelector('.hit');
+  const f=cfg.fmt||(v=>dec?v.toFixed(dec):fmt(v));
+  hit.addEventListener('mousemove',e=>{
+    const r=box.getBoundingClientRect(), scale=W/r.width, px=(e.clientX-r.left)*scale;
+    let i=0,best=1e9;
+    for(let k=0;k<n;k++){ const d=Math.abs(x(k)-px); if(d<best){best=d;i=k;} }
+    cross.setAttribute('x1',x(i)); cross.setAttribute('x2',x(i)); cross.setAttribute('opacity','1');
+    tip.innerHTML=`<div class="th">${cfg.labels[i]} · ${cfg.ranges[i]}${cfg.dim[i]?' · outside filter':''}</div>`+
+      cfg.series.map(s=>`<div class="tr"><i style="background:${s.hex}"></i><em>${s.name}</em><b>${f(s.vals[i])}</b></div>`).join('');
+    tip.style.opacity=1;
+    tip.style.left=Math.min(r.width-tip.offsetWidth-4,Math.max(0,x(i)/scale+12))+'px';
+    tip.style.top='6px';
+  });
+  hit.addEventListener('mouseleave',()=>{ tip.style.opacity=0; cross.setAttribute('opacity','0'); });
+}
+
+/* ===================== boot ===================== */
+function syncScrollWidth(){
+  const m=$('scrollMain');
+  $('scrollTopInner').style.width=$('tbl').scrollWidth+'px';
+  $('scrollTop').classList.toggle('hide', m.scrollWidth<=m.clientWidth+1);
+}
+let syncing=false;
+$('scrollTop').addEventListener('scroll',()=>{ if(syncing) return; syncing=true; $('scrollMain').scrollLeft=$('scrollTop').scrollLeft; syncing=false; });
+$('scrollMain').addEventListener('scroll',()=>{ if(syncing) return; syncing=true; $('scrollTop').scrollLeft=$('scrollMain').scrollLeft; syncing=false; });
+window.addEventListener('resize',()=>{ syncScrollWidth(); if(state.openSE&&state.seView==='chart') paintSE(); });
+
+msWeek.paint(); msBranch.paint(); msSE.paint();
+render();
+</script>
+</body>
+</html>

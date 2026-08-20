@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kala Care — Service Engineer Productivity</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#EAEBE5; --panel:#FFFFFF; --ink:#15211D; --muted:#5C665F;
+  --line:#9AA192; --line-soft:#B7BCAE;
+  --teal:#0E7C6B; --teal-d:#0A5A4E; --teal-ink:#083b33;
+  --amber:#E0850F;
+  --shadow:0 1px 2px rgba(20,32,28,.05), 0 6px 22px rgba(20,32,28,.06);
+  /* One app-wide font — the same stack the application uses
+     (client/src/index.css → --font-sans). Display and "mono" roles are kept as
+     names so the rules below need no edit, but they all resolve to Inter now;
+     numeric columns get font-variant-numeric:tabular-nums to stay aligned. */
+  --body:'Inter','Segoe UI',Arial,sans-serif;
+  --disp:var(--body);
+  --mono:var(--body);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--body);font-size:13px;line-height:1.4;-webkit-font-smoothing:antialiased}
+.wrap{width:100%;max-width:1680px;margin:0 auto;padding:24px 20px 56px}
+
+.mast{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px;padding-bottom:16px;border-bottom:2px solid var(--ink)}
+.brand{display:flex;align-items:center;gap:12px}
+.mark{width:38px;height:38px;border-radius:9px;background:var(--teal);position:relative;flex:none;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.18)}
+.mark:before,.mark:after{content:"";position:absolute;background:#fff;border-radius:2px}
+.mark:before{left:8px;right:8px;bottom:8px;height:4px;opacity:.55}
+.mark:after{left:8px;bottom:12px;width:4px;height:14px;box-shadow:7px -4px 0 #fff,14px -8px 0 #fff;opacity:.95}
+.brand h1{font-family:var(--disp);font-weight:600;font-size:17.5px;letter-spacing:-.01em;margin:0;line-height:1.15}
+.brand .sub{font-size:11.5px;color:var(--muted);letter-spacing:.02em;margin-top:2px}
+.tag-temp{font-family:var(--mono);font-size:9.5px;color:var(--amber);border:1px solid var(--amber);border-radius:5px;padding:2px 6px;margin-left:7px;letter-spacing:.06em;vertical-align:1px}
+
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin:16px 0 6px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:7px 12px;font-size:12px;font-weight:500;cursor:pointer;font-family:var(--body);color:var(--ink);display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--teal);color:var(--teal-d)}
+.btn.on{background:var(--teal);border-color:var(--teal);color:#fff}
+.btn .ico{font-size:10px;transition:transform .15s}
+#weekBtn.on .ico{transform:rotate(90deg)}
+.rightgroup{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:9px}
+.search{position:relative}
+.search input{font-family:var(--body);font-size:13px;padding:8px 12px 8px 32px;border:1px solid var(--line);border-radius:9px;background:var(--panel);width:200px;color:var(--ink)}
+.search svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:.5}
+
+.daterow{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.daterow input[type=date]{font-family:var(--body);font-size:12px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)}
+.daterow .btn{padding:7px 10px}
+
+/* ---- multi-select dropdown (branch / SE / week) ---- */
+.ms{position:relative}
+.ms-btn{white-space:nowrap}
+.ms-btn .cnt{font-family:var(--mono);font-size:11px;color:var(--teal-d);font-weight:600}
+.ms.open .ms-btn{border-color:var(--teal);color:var(--teal-d)}
+.ms.open .ms-btn .ico{transform:rotate(180deg)}
+.ms-pop{display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:40;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);min-width:250px;max-width:330px;padding:8px}
+.ms.open .ms-pop{display:block}
+.ms-pop.right{left:auto;right:0}
+.ms-head{display:flex;align-items:center;gap:6px;padding:0 2px 7px;border-bottom:1px solid var(--line-soft);margin-bottom:5px}
+.ms-head input{flex:1;min-width:0;font-family:var(--body);font-size:12px;padding:5px 8px;border:1px solid var(--line-soft);border-radius:7px;color:var(--ink)}
+.ms-head button{border:1px solid var(--line-soft);background:#FBFBF9;border-radius:6px;font-size:10.5px;font-family:var(--body);padding:4px 7px;cursor:pointer;color:var(--muted)}
+.ms-head button:hover{border-color:var(--teal);color:var(--teal-d)}
+.ms-list{max-height:270px;overflow-y:auto;scrollbar-width:thin}
+.ms-item{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:12px}
+.ms-item:hover{background:#F3F4EF}
+.ms-item input{accent-color:var(--teal);width:14px;height:14px;flex:none;cursor:pointer}
+.ms-item span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ms-item em{font-family:var(--mono);font-size:9.5px;color:var(--muted);font-style:normal;flex:none}
+.ms-empty{font-size:11.5px;color:var(--muted);padding:8px 6px}
+
+.tablecard{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+
+/* Mirror of the table's horizontal scrollbar. Hidden entirely when the table already
+   fits, so it never shows up as an empty white band above the header. */
+.tbl-scroll-top{overflow-x:auto;overflow-y:hidden;height:13px;background:#F3F4EF;border-bottom:1px solid var(--line-soft)}
+.tbl-scroll-top.hide{display:none}
+.tbl-scroll-top #scrollTopInner{height:1px}
+
+.tbl-scroll{overflow-x:auto;overflow-y:visible}
+
+.tbl-scroll-top, .tbl-scroll{scrollbar-width:thin;scrollbar-color:var(--line) var(--paper)}
+.tbl-scroll-top::-webkit-scrollbar, .tbl-scroll::-webkit-scrollbar{height:8px}
+.tbl-scroll-top::-webkit-scrollbar-track, .tbl-scroll::-webkit-scrollbar-track{background:var(--paper)}
+.tbl-scroll-top::-webkit-scrollbar-thumb, .tbl-scroll::-webkit-scrollbar-thumb{background:var(--line-soft);border-radius:8px}
+.tbl-scroll-top::-webkit-scrollbar-thumb:hover, .tbl-scroll::-webkit-scrollbar-thumb:hover{background:var(--line)}
+
+/* Columns size to their own heading — no forced table width stretching the data columns. */
+table{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;isolation:isolate;table-layout:auto}
+thead th{font-family:var(--body);font-weight:600;font-size:9.5px;letter-spacing:.01em;color:var(--muted);text-align:center;padding:6px 4px;border-bottom:1px solid var(--line);border-left:1px solid var(--line-soft);white-space:nowrap;background:#FBFBF9;position:sticky;top:0;z-index:2}
+thead tr.grp th{font-size:9px;text-transform:uppercase;letter-spacing:.05em;background:#F3F4EF;color:#838d80;font-weight:600}
+thead th.oil-group{text-align:center}
+thead th.oil-sub{text-align:center;background:#EEF2EE}
+thead tr.oil-detail-row th{font-size:8.5px;background:#F8F9F6;padding-top:4px;padding-bottom:4px}
+thead th.grp-col{position:sticky;left:0;z-index:6;background:#FBFBF9;width:28px;min-width:28px}
+thead th.branch-col{text-align:center;position:sticky;left:28px;z-index:8;background:#FBFBF9;width:148px;min-width:148px;max-width:148px;white-space:normal;box-shadow:inset -1px 0 0 var(--line)}
+thead th.se-uid-col{text-align:center;position:sticky;left:176px;z-index:8;background:#FBFBF9;min-width:82px;width:82px;max-width:82px;box-shadow:inset -1px 0 0 var(--line-soft)}
+thead th.se-name-col{text-align:left;position:sticky;left:258px;z-index:8;background:#FBFBF9;min-width:162px;width:162px;max-width:162px;box-shadow:inset -1px 0 0 var(--line),2px 0 5px -2px rgba(20,32,28,.28)}
+.se-uid-col{display:none}
+.se-name-col{display:none}
+#tbl.se-open .se-uid-col{display:table-cell}
+#tbl.se-open .se-name-col{display:table-cell}
+
+/* Keep the separator before Total SR consistently visible while horizontally scrolling. */
+#tbl:not(.se-open) .branch-col{box-shadow:inset -1px 0 0 var(--line)}
+#tbl.se-open .se-name-col{box-shadow:inset -1px 0 0 var(--line),2px 0 5px -2px rgba(20,32,28,.28)}
+thead th.total-sr-col, tbody td.total-sr-col{border-left:0 !important;position:relative;z-index:1}
+thead th.wk-col{background:#EFF6F4}
+tbody td{padding:5px 5px;border-bottom:1px solid var(--line-soft);border-left:1px solid var(--line-soft);text-align:right;font-family:var(--mono);font-size:10.5px;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:middle}
+td.grp-col{position:sticky;left:0;background:inherit;z-index:3;width:28px;min-width:28px;text-align:center;padding:5px 3px}
+td.branch-col{text-align:center;font-family:var(--body);position:sticky;left:28px;width:148px;min-width:148px;max-width:148px;white-space:normal;background:#FFFFFF;z-index:7;font-size:11.5px;font-weight:600;vertical-align:middle;cursor:pointer;box-shadow:inset -1px 0 0 var(--line)}
+td.branch-col:hover{color:var(--teal-d)}
+td.se-uid-col{text-align:center;font-family:var(--mono);position:sticky;left:176px;width:82px;min-width:82px;max-width:82px;background:#FFFFFF;z-index:7;font-size:10.5px;color:var(--muted);letter-spacing:.02em;box-shadow:inset -1px 0 0 var(--line-soft)}
+td.se-name-col{text-align:left;font-family:var(--body);position:sticky;left:258px;width:162px;min-width:162px;max-width:162px;background:#FFFFFF;z-index:7;font-size:11.5px;box-shadow:inset -1px 0 0 var(--line),2px 0 5px -2px rgba(20,32,28,.28);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.zero{color:#c5cbc4}
+.wk-col{display:none}
+.show-weeks .wk-col{display:table-cell}
+td.wk-col{background:#F7FBFA}
+td.wk-excluded{opacity:.32;background:repeating-linear-gradient(135deg,#F7FBFA,#F7FBFA 4px,#EEF0EA 4px,#EEF0EA 8px)}
+
+tr.branch-row td.branch-col{background:#FFFFFF}
+tr.branch-row td.grp-col{background:#F3F4EF}
+.chev{display:inline-block;width:11px;color:var(--muted);transition:transform .18s;font-size:9px}
+.gchev{display:inline-block;color:var(--ink);font-weight:700;transition:transform .18s;font-size:11px}
+td.grp-col:has(.gchev){cursor:pointer}
+td.grp-col:has(.gchev):hover{background:#E7EBE3}
+td.grp-col:has(.gchev):hover .gchev{color:var(--teal-d)}
+.gchev.open{transform:rotate(90deg)}
+.chev.open{transform:rotate(90deg);color:var(--teal-d)}
+/* branch code + SE/branch count sit together on one line under the branch name */
+.bmeta{display:flex;align-items:center;justify-content:center;gap:5px;margin-top:2px;white-space:nowrap}
+.bid{font-family:var(--mono);font-size:9px;color:var(--muted);font-weight:400}
+.tagpill{font-family:var(--mono);font-size:8.5px;color:#5c6659;font-weight:400;letter-spacing:.03em;text-transform:uppercase;background:rgba(0,0,0,.045);border-radius:4px;padding:1px 5px;display:inline-block}
+
+/* individual SE detail rows inside an expanded branch */
+tr.se-line td{background:#F7F8F5}
+tr.se-line.alt td{background:#F1F3EE}
+tr.se-line td.branch-col, tr.se-line td.grp-col{background:#FFFFFF}
+tr.se-line td.se-name-col{padding-left:12px}
+
+tr.branch-total td{border-top:1px solid #b9c0b3;font-weight:700;background:#EDEFE9}
+tr.branch-total td.se-name-col{font-family:var(--disp);font-size:10.5px;cursor:default;background:#EDEFE9}
+tr.branch-total td.se-uid-col{background:#EDEFE9}
+
+/* category total row - visible only when expanded */
+tr.cat-total td{border-top:1px solid var(--ink);border-bottom:2px solid var(--ink);font-weight:700;background:#EFF1EA}
+tr.cat-total td.se-name-col{font-family:var(--disp);font-size:11px;background:#EFF1EA;cursor:default}
+tr.cat-total td.branch-col{background:#EFF1EA;font-family:var(--disp);font-size:11.5px;cursor:default}
+tr.cat-total td.se-uid-col{background:#EFF1EA}
+
+tr.grand-total td{border-top:2px solid var(--ink);font-weight:700;background:var(--ink);color:#fff}
+tr.grand-total td.se-name-col{font-family:var(--disp);font-size:12px;background:var(--ink);color:#fff;cursor:default}
+tr.grand-total td.branch-col{background:var(--ink);color:#fff;font-family:var(--disp);font-size:12px;cursor:default}
+tr.cat-total td.branch-col:hover, tr.grand-total td.branch-col:hover, tr.branch-total td.branch-col:hover{color:inherit}
+tr.grand-total td.se-uid-col{background:var(--ink);color:#fff}
+td.prod-c{color:var(--teal-ink);font-weight:600}
+td.cdi-c{color:var(--teal-ink);font-weight:600}
+tr.grand-total td.prod-c, tr.grand-total td.cdi-c{color:#fff}
+
+.note{margin-top:16px;font-size:11.5px;color:var(--muted);line-height:1.6;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+.note b{color:var(--ink)}
+footer{margin-top:16px;font-size:10.5px;color:var(--muted);text-align:center;font-family:var(--mono)}
+:focus-visible{outline:2px solid var(--teal);outline-offset:2px;border-radius:4px}
+@media (max-width:820px){ .search{margin-left:0;width:100%} .search input{width:100%} .rightgroup{margin-left:0} .ms-pop{left:0;right:auto} .wrap{padding:16px 12px 40px} }
+
+/* Final conversion amount columns: keep header and body widths aligned, sized to the heading. */
+thead th.conv-amt-col, tbody td.conv-amt-col{width:92px;min-width:92px;max-width:92px}
+thead th.conv-amt-col{text-align:center;white-space:normal;line-height:1.25;padding-left:6px;padding-right:6px}
+tbody td.conv-amt-col{text-align:right}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="mast">
+    <div class="brand">
+      <div class="mark" aria-hidden="true"></div>
+      <div>
+        <h1>Service Engineer Productivity Report <span class="tag-temp">TEMP DATA</span></h1>
+        <div class="sub">Kala Care Global · branches, IDs, categories &amp; fields as in your workbook</div>
+      </div>
+    </div>
+  </header>
+
+  <div class="controls">
+    <button class="btn" id="weekBtn"><span class="ico">▶</span> <span id="weekBtnLbl">Weekly breakdown</span></button>
+
+    <div class="ms" id="msWeek">
+      <button class="btn ms-btn" type="button">Weeks: <span class="cnt ms-lbl">All</span> <span class="ico">▾</span></button>
+      <div class="ms-pop">
+        <div class="ms-head"><button type="button" data-act="all">Tick all</button><button type="button" data-act="none">Clear</button></div>
+        <div class="ms-list"></div>
+      </div>
+    </div>
+
+    <div class="ms" id="msBranch">
+      <button class="btn ms-btn" type="button">Branch: <span class="cnt ms-lbl">All</span> <span class="ico">▾</span></button>
+      <div class="ms-pop">
+        <div class="ms-head"><input type="text" class="ms-search" placeholder="Search branch"><button type="button" data-act="all">Tick all</button><button type="button" data-act="none">Clear</button></div>
+        <div class="ms-list"></div>
+      </div>
+    </div>
+
+    <div class="ms" id="msSE">
+      <button class="btn ms-btn" type="button">SE: <span class="cnt ms-lbl">All</span> <span class="ico">▾</span></button>
+      <div class="ms-pop">
+        <div class="ms-head"><input type="text" class="ms-search" placeholder="Search SE"><button type="button" data-act="all">Tick all</button><button type="button" data-act="none">Clear</button></div>
+        <div class="ms-list"></div>
+      </div>
+    </div>
+
+    <div class="rightgroup">
+      <div class="daterow">
+        <input type="date" id="dfStart" title="From">
+        <span style="color:var(--muted);font-size:11px">–</span>
+        <input type="date" id="dfEnd" title="To">
+        <button class="btn" id="dfApply">Apply</button>
+        <button class="btn" id="dfClear">Clear</button>
+      </div>
+      <div class="search">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input type="text" id="searchI" placeholder="Filter branch or SE name">
+      </div>
+    </div>
+  </div>
+
+  <div class="tablecard">
+    <div class="tbl-scroll-top" id="scrollTop"><div id="scrollTopInner"></div></div>
+    <div class="tbl-scroll" id="scrollMain">
+      <table id="tbl">
+        <thead>
+          <tr class="grp" id="hRow1">
+            <th class="grp-col" rowspan="3"></th>
+            <th class="branch-col" rowspan="3">Branch Name</th>
+            <th class="se-uid-col" rowspan="3">SE UID</th>
+            <th class="se-name-col" rowspan="3">SE Name</th>
+            <th rowspan="3" class="total-sr-col">Total<br>SR</th>
+            <th class="wk-col" id="wkGroupTh" colspan="1">Weekly Total SR</th>
+            <th colspan="8" class="oil-group">SR Type</th>
+            <th rowspan="3">Working<br>Days</th>
+            <th rowspan="3">Days<br>Present</th>
+            <th rowspan="3">Product-<br>ivity</th>
+            <th rowspan="3">CDI %</th>
+            <th rowspan="3">Number<br>of Lead</th>
+            <th colspan="9">Product Wise Lead Count</th>
+            <th rowspan="3" class="conv-amt-col">Spare Conv.<br>Amount</th>
+            <th rowspan="3" class="conv-amt-col">Labour Conv.<br>Amount</th>
+          </tr>
+          <tr class="grp" id="hRow2">
+            <th colspan="2" class="oil-sub">Warranty</th><th colspan="2" class="oil-sub">PW</th><th colspan="2" class="oil-sub">AMC</th><th colspan="2" class="oil-sub">KOEL AMC</th>
+            <th rowspan="2">Allied<br>Prod.</th><th rowspan="2">AMC</th><th rowspan="2">Battery</th><th rowspan="2">Coolant</th><th rowspan="2">DEF</th><th rowspan="2">K-Oil</th><th rowspan="2">Others</th><th rowspan="2">Spares</th><th rowspan="2">Whole<br>Goods</th>
+          </tr>
+          <tr class="grp oil-detail-row" id="hRow3">
+            <th>Wet</th><th>Dry</th><th>Wet</th><th>Dry</th><th>Wet</th><th>Dry</th><th>Wet</th><th>Dry</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="note">
+    Click a <b>branch name</b> to expand/collapse its SEs (shown as one row each, centered branch name spanning the group) — expanding also reveals the <b>SE UID</b> and <b>SE Name</b> columns · The ▶ in column 1 toggles a whole branch-group · The selected period is split into <b id="wkCount">weeks</b>; use the <b>Weeks</b> dropdown to tick exactly which weeks are counted, and <b>Weekly breakdown</b> to show every week as its own column · <b>Branch</b> and <b>SE</b> are multi-select checkbox filters · <b>CDI %</b> is dummy data. TEMP DATA.
+  </div>
+
+  <footer id="footer"></footer>
+</div>
+
+<script>
+const DATA = {"branches": [{"id": "420435_1", "name": "Aurangabad", "ses": [{"name": "Karan Ganesh Sonare", "sr": 28, "workDays": 26, "daysPresent": 22, "oil": {"warranty": [10, 5], "pw": [5, 0], "amc": [0, 3], "koelAmc": [5, 0]}, "nosLead": 5, "lead": {"alliedProduct": [1, 0], "amc": [2, 1], "battery": [1, 1], "coolant": [1, 0], "def_": [0, 0], "koil": [0, 0], "others": [0, 0], "spares": [0, 0], "wholeGoods": [0, 0]}, "spareConvAmt": 100000, "labourConvAmt": 100000, "uid": "100001"}, {"name": "Hanumant Nagorao Nelge", "sr": 30, "workDays": 27, "daysPresent": 20, "oil": {"warranty": [2, 5], "pw": [2, 1], "amc": [1, 1], "koelAmc": [5, 0]}, "nosLead": 2, "lead": {"alliedProduct": [3, 0], "amc": [0, 0], "battery": [1, 0], "coolant": [0, 2], "def_": [1, 2], "koil": [3, 0], "others": [3, 2], "spares": [2, 0], "wholeGoods": [1, 2]}, "spareConvAmt": 75000, "labourConvAmt": 40000, "uid": "100002"}, {"name": "Rahul Vishnupant Kulkarni", "sr": 60, "workDays": 24, "daysPresent": 18, "oil": {"warranty": [5, 6], "pw": [2, 0], "amc": [0, 3], "koelAmc": [0, 2]}, "nosLead": 6, "lead": {"alliedProduct": [2, 0], "amc": [3, 2], "battery": [0, 1], "coolant": [0, 2], "def_": [2, 2], "koil": [2, 2], "others": [1, 2], "spares": [0, 0], "wholeGoods": [1, 1]}, "spareConvAmt": 0, "labourConvAmt": 20000, "uid": "100003"}, {"name": "Sagar Ajinath Sonavne", "sr": 100, "workDays": 22, "daysPresent": 21, "oil": {"warranty": [6, 3], "pw": [5, 2], "amc": [1, 2], "koelAmc": [2, 1]}, "nosLead": 5, "lead": {"alliedProduct": [0, 2], "amc": [1, 2], "battery": [1, 0], "coolant": [3, 1], "def_": [2, 2], "koil": [1, 2], "others": [2, 0], "spares": [1, 0], "wholeGoods": [2, 1]}, "spareConvAmt": 50000, "labourConvAmt": 0, "uid": "100004"}]}, {"id": "420435_4", "name": "Nanded", "ses": [{"name": "Atmaram Govindrao Rajegore", "sr": 87, "workDays": 27, "daysPresent": 24, "oil": {"warranty": [5, 5], "pw": [3, 3], "amc": [3, 1], "koelAmc": [2, 1]}, "nosLead": 4, "lead": {"alliedProduct": [2, 2], "amc": [3, 2], "battery": [3, 1], "coolant": [1, 0], "def_": [3, 0], "koil": [0, 0], "others": [1, 2], "spares": [1, 2], "wholeGoods": [3, 2]}, "spareConvAmt": 0, "labourConvAmt": 60000, "uid": "100005"}]}, {"id": "420435_7", "name": "Parbhani", "ses": [{"name": "Swapnil Bhushan Kale", "sr": 74, "workDays": 26, "daysPresent": 22, "oil": {"warranty": [10, 6], "pw": [0, 0], "amc": [4, 2], "koelAmc": [5, 2]}, "nosLead": 2, "lead": {"alliedProduct": [2, 1], "amc": [1, 1], "battery": [0, 2], "coolant": [2, 2], "def_": [1, 2], "koil": [0, 2], "others": [2, 2], "spares": [1, 0], "wholeGoods": [2, 0]}, "spareConvAmt": 100000, "labourConvAmt": 80000, "uid": "100006"}, {"name": "Hanumant Nagorao Nelge", "sr": 56, "workDays": 25, "daysPresent": 17, "oil": {"warranty": [3, 2], "pw": [6, 2], "amc": [1, 0], "koelAmc": [1, 0]}, "nosLead": 2, "lead": {"alliedProduct": [3, 0], "amc": [1, 0], "battery": [3, 2], "coolant": [1, 1], "def_": [3, 0], "koil": [1, 2], "others": [2, 1], "spares": [2, 1], "wholeGoods": [3, 0]}, "spareConvAmt": 25000, "labourConvAmt": 20000, "uid": "100007"}]}, {"id": "420435_2", "name": "Ahmednagar", "ses": [{"name": "Vikas Changdev Antre", "sr": 58, "workDays": 22, "daysPresent": 18, "oil": {"warranty": [11, 1], "pw": [0, 0], "amc": [0, 1], "koelAmc": [0, 0]}, "nosLead": 6, "lead": {"alliedProduct": [0, 2], "amc": [1, 1], "battery": [3, 0], "coolant": [1, 2], "def_": [3, 0], "koil": [3, 1], "others": [1, 0], "spares": [0, 2], "wholeGoods": [3, 1]}, "spareConvAmt": 75000, "labourConvAmt": 60000, "uid": "100008"}, {"name": "Pragati", "sr": 21, "workDays": 27, "daysPresent": 20, "oil": {"warranty": [2, 3], "pw": [5, 2], "amc": [0, 1], "koelAmc": [1, 1]}, "nosLead": 8, "lead": {"alliedProduct": [1, 1], "amc": [1, 1], "battery": [3, 0], "coolant": [0, 1], "def_": [0, 0], "koil": [0, 0], "others": [1, 0], "spares": [3, 1], "wholeGoods": [3, 0]}, "spareConvAmt": 150000, "labourConvAmt": 60000, "uid": "100009"}]}, {"id": "420435_3", "name": "Beed", "ses": [{"name": "Rajaram Ramrao Rathod", "sr": 36, "workDays": 25, "daysPresent": 17, "oil": {"warranty": [8, 2], "pw": [6, 3], "amc": [2, 3], "koelAmc": [5, 3]}, "nosLead": 3, "lead": {"alliedProduct": [1, 1], "amc": [1, 0], "battery": [0, 2], "coolant": [2, 0], "def_": [0, 2], "koil": [3, 2], "others": [1, 0], "spares": [0, 0], "wholeGoods": [0, 2]}, "spareConvAmt": 0, "labourConvAmt": 100000, "uid": "100010"}]}, {"id": "420435_5", "name": "Babhleshwar", "ses": [{"name": "Sagar Ajinath Sonavne", "sr": 66, "workDays": 22, "daysPresent": 18, "oil": {"warranty": [11, 4], "pw": [0, 4], "amc": [0, 3], "koelAmc": [5, 2]}, "nosLead": 5, "lead": {"alliedProduct": [1, 2], "amc": [2, 0], "battery": [2, 1], "coolant": [1, 2], "def_": [2, 1], "koil": [2, 0], "others": [0, 1], "spares": [0, 0], "wholeGoods": [1, 2]}, "spareConvAmt": 50000, "labourConvAmt": 20000, "uid": "100011"}, {"name": "Prashant Bharamanna Kakatikar", "sr": 23, "workDays": 23, "daysPresent": 20, "oil": {"warranty": [6, 1], "pw": [3, 4], "amc": [2, 4], "koelAmc": [5, 0]}, "nosLead": 5, "lead": {"alliedProduct": [0, 0], "amc": [2, 0], "battery": [0, 2], "coolant": [1, 1], "def_": [2, 2], "koil": [1, 2], "others": [2, 0], "spares": [2, 2], "wholeGoods": [3, 1]}, "spareConvAmt": 150000, "labourConvAmt": 0, "uid": "100012"}, {"name": "Arun Fakkirappa Matti", "sr": 69, "workDays": 24, "daysPresent": 16, "oil": {"warranty": [2, 2], "pw": [6, 1], "amc": [2, 1], "koelAmc": [5, 3]}, "nosLead": 7, "lead": {"alliedProduct": [0, 0], "amc": [0, 2], "battery": [1, 2], "coolant": [0, 1], "def_": [1, 1], "koil": [1, 0], "others": [2, 1], "spares": [0, 1], "wholeGoods": [1, 2]}, "spareConvAmt": 25000, "labourConvAmt": 100000, "uid": "100013"}]}, {"id": "420435_6", "name": "Latur", "ses": [{"name": "Suraj Ghangaokar", "sr": 60, "workDays": 26, "daysPresent": 24, "oil": {"warranty": [11, 5], "pw": [1, 1], "amc": [1, 1], "koelAmc": [3, 0]}, "nosLead": 3, "lead": {"alliedProduct": [2, 1], "amc": [1, 1], "battery": [1, 2], "coolant": [0, 1], "def_": [0, 1], "koil": [1, 0], "others": [3, 1], "spares": [2, 0], "wholeGoods": [1, 0]}, "spareConvAmt": 125000, "labourConvAmt": 20000, "uid": "100014"}]}, {"id": "420435_8", "name": "Hubli", "ses": [{"name": "Nikita P Hiremath", "sr": 50, "workDays": 22, "daysPresent": 19, "oil": {"warranty": [7, 5], "pw": [4, 3], "amc": [4, 2], "koelAmc": [0, 0]}, "nosLead": 5, "lead": {"alliedProduct": [1, 2], "amc": [2, 0], "battery": [0, 2], "coolant": [3, 1], "def_": [2, 1], "koil": [0, 1], "others": [1, 1], "spares": [0, 2], "wholeGoods": [3, 0]}, "spareConvAmt": 100000, "labourConvAmt": 80000, "uid": "100015"}, {"name": "Manjula K Nandalli", "sr": 40, "workDays": 24, "daysPresent": 22, "oil": {"warranty": [3, 5], "pw": [2, 4], "amc": [2, 0], "koelAmc": [5, 2]}, "nosLead": 5, "lead": {"alliedProduct": [3, 1], "amc": [3, 2], "battery": [2, 2], "coolant": [1, 0], "def_": [3, 2], "koil": [3, 2], "others": [1, 2], "spares": [2, 1], "wholeGoods": [0, 1]}, "spareConvAmt": 50000, "labourConvAmt": 20000, "uid": "100016"}]}, {"id": "420435_9", "name": "Belagavi", "ses": [{"name": "Anita Sachin Ajarekar", "sr": 89, "workDays": 26, "daysPresent": 23, "oil": {"warranty": [9, 3], "pw": [3, 1], "amc": [4, 3], "koelAmc": [5, 1]}, "nosLead": 2, "lead": {"alliedProduct": [2, 2], "amc": [2, 0], "battery": [1, 2], "coolant": [2, 0], "def_": [1, 0], "koil": [0, 0], "others": [1, 1], "spares": [0, 1], "wholeGoods": [3, 2]}, "spareConvAmt": 100000, "labourConvAmt": 20000, "uid": "100017"}]}, {"id": "420435_10", "name": "Hospet", "ses": [{"name": "Sneha B", "sr": 64, "workDays": 25, "daysPresent": 23, "oil": {"warranty": [5, 1], "pw": [5, 0], "amc": [0, 3], "koelAmc": [1, 1]}, "nosLead": 8, "lead": {"alliedProduct": [0, 2], "amc": [1, 0], "battery": [3, 0], "coolant": [3, 2], "def_": [2, 1], "koil": [3, 2], "others": [3, 0], "spares": [3, 1], "wholeGoods": [2, 0]}, "spareConvAmt": 150000, "labourConvAmt": 100000, "uid": "100018"}, {"name": "Naveena Kumara E", "sr": 81, "workDays": 25, "daysPresent": 20, "oil": {"warranty": [6, 3], "pw": [0, 2], "amc": [1, 2], "koelAmc": [2, 2]}, "nosLead": 2, "lead": {"alliedProduct": [1, 0], "amc": [1, 1], "battery": [1, 2], "coolant": [1, 0], "def_": [3, 1], "koil": [2, 2], "others": [3, 1], "spares": [0, 0], "wholeGoods": [3, 1]}, "spareConvAmt": 150000, "labourConvAmt": 80000, "uid": "100019"}]}, {"id": "420435_11", "name": "Ballari", "ses": [{"name": "Javid Mahmadrafik Shaikh", "sr": 88, "workDays": 25, "daysPresent": 24, "oil": {"warranty": [2, 2], "pw": [2, 3], "amc": [3, 4], "koelAmc": [5, 1]}, "nosLead": 8, "lead": {"alliedProduct": [1, 1], "amc": [3, 1], "battery": [0, 1], "coolant": [2, 2], "def_": [3, 2], "koil": [1, 1], "others": [1, 2], "spares": [0, 1], "wholeGoods": [0, 0]}, "spareConvAmt": 125000, "labourConvAmt": 60000, "uid": "100020"}, {"name": "Rajaram Ramrao Rathod", "sr": 74, "workDays": 23, "daysPresent": 15, "oil": {"warranty": [6, 3], "pw": [2, 1], "amc": [3, 2], "koelAmc": [2, 3]}, "nosLead": 5, "lead": {"alliedProduct": [3, 1], "amc": [0, 1], "battery": [0, 2], "coolant": [0, 1], "def_": [1, 2], "koil": [0, 2], "others": [0, 0], "spares": [1, 0], "wholeGoods": [0, 2]}, "spareConvAmt": 25000, "labourConvAmt": 20000, "uid": "100021"}, {"name": "Rahul Balasaheb Bhor", "sr": 29, "workDays": 26, "daysPresent": 21, "oil": {"warranty": [9, 5], "pw": [2, 2], "amc": [1, 4], "koelAmc": [4, 0]}, "nosLead": 3, "lead": {"alliedProduct": [2, 0], "amc": [0, 1], "battery": [3, 1], "coolant": [1, 0], "def_": [1, 0], "koil": [2, 2], "others": [0, 2], "spares": [0, 1], "wholeGoods": [3, 2]}, "spareConvAmt": 50000, "labourConvAmt": 0, "uid": "100022"}]}, {"id": "420435_12", "name": "Bagalkote", "ses": [{"name": "Khajisab Babusab Sandimani", "sr": 58, "workDays": 22, "daysPresent": 21, "oil": {"warranty": [9, 0], "pw": [3, 2], "amc": [3, 1], "koelAmc": [3, 1]}, "nosLead": 5, "lead": {"alliedProduct": [3, 1], "amc": [3, 2], "battery": [2, 1], "coolant": [1, 0], "def_": [2, 1], "koil": [1, 1], "others": [3, 1], "spares": [0, 1], "wholeGoods": [2, 0]}, "spareConvAmt": 75000, "labourConvAmt": 20000, "uid": "100023"}]}, {"id": "420435_13", "name": "Kalaburagi", "ses": [{"name": "Nagesh Shivaputra Dhuttargi", "sr": 48, "workDays": 24, "daysPresent": 20, "oil": {"warranty": [11, 5], "pw": [2, 4], "amc": [0, 4], "koelAmc": [1, 0]}, "nosLead": 4, "lead": {"alliedProduct": [3, 1], "amc": [1, 2], "battery": [3, 2], "coolant": [3, 1], "def_": [0, 0], "koil": [2, 0], "others": [3, 2], "spares": [1, 1], "wholeGoods": [2, 1]}, "spareConvAmt": 100000, "labourConvAmt": 80000, "uid": "100024"}, {"name": "Shrikanth S Astagi", "sr": 85, "workDays": 24, "daysPresent": 21, "oil": {"warranty": [9, 2], "pw": [2, 2], "amc": [1, 0], "koelAmc": [5, 1]}, "nosLead": 6, "lead": {"alliedProduct": [0, 2], "amc": [1, 0], "battery": [1, 2], "coolant": [3, 1], "def_": [2, 0], "koil": [1, 1], "others": [1, 1], "spares": [1, 1], "wholeGoods": [0, 2]}, "spareConvAmt": 100000, "labourConvAmt": 20000, "uid": "100025"}]}, {"id": "420435_14", "name": "Vijayapura", "ses": [{"name": "Sudha Krishna Murthy", "sr": 52, "workDays": 27, "daysPresent": 21, "oil": {"warranty": [12, 6], "pw": [6, 3], "amc": [0, 0], "koelAmc": [4, 2]}, "nosLead": 8, "lead": {"alliedProduct": [3, 1], "amc": [2, 0], "battery": [0, 1], "coolant": [3, 0], "def_": [0, 1], "koil": [3, 0], "others": [0, 0], "spares": [1, 2], "wholeGoods": [2, 0]}, "spareConvAmt": 25000, "labourConvAmt": 0, "uid": "100026"}]}], "categories": [{"type": "group", "branches": ["420435_1", "420435_4", "420435_7"]}, {"type": "group", "branches": ["420435_2", "420435_3", "420435_5", "420435_6"]}, {"type": "standalone", "branchId": "420435_8"}, {"type": "standalone", "branchId": "420435_9"}, {"type": "group", "branches": ["420435_10", "420435_11", "420435_12"]}, {"type": "group", "branches": ["420435_13", "420435_14"]}], "categoryColors": ["FFFFFF", "FFFFFF", "FFFFFF", "FFFFFF", "FFFFFF", "FFFFFF"]};
+const $=s=>document.getElementById(s);
+const num2=v=>v.toFixed(2);
+const fmtAmt=v=>v.toLocaleString('en-IN');
+const byId = id => DATA.branches.find(b=>b.id===id);
+
+/* ---------- period → weeks ---------- */
+const PERIOD_START='2026-07-01', PERIOD_END='2026-07-31';
+const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const shortD=d=>d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
+
+// Splits the selected period into calendar weeks (each ends on a Sunday, first/last are partial).
+function buildWeeks(startStr, endStr){
+  const out=[]; const end=new Date(endStr+'T00:00:00');
+  let cur=new Date(startStr+'T00:00:00'), n=1;
+  while(cur<=end){
+    const dowMon=(cur.getDay()+6)%7;          // Mon = 0
+    let we=new Date(cur); we.setDate(we.getDate()+(6-dowMon));
+    if(we>end) we=new Date(end);
+    const sameMonth = cur.getMonth()===we.getMonth();
+    const compact = sameMonth
+      ? `${String(cur.getDate()).padStart(2,'0')}–${shortD(we)}`
+      : `${shortD(cur)}–${shortD(we)}`;
+    out.push({n, label:'W'+n, start:iso(cur), end:iso(we), range:`${shortD(cur)} – ${shortD(we)}`, compact});
+    cur=new Date(we); cur.setDate(cur.getDate()+1); n++;
+  }
+  return out;
+}
+const WEEKS = buildWeeks(PERIOD_START, PERIOD_END);
+
+/* ---------- dummy data derived per SE (deterministic, so it never reshuffles) ---------- */
+function splitAcrossWeeks(total, n, seed){
+  let s=seed>>>0;
+  const rnd=()=>{ s=(s*1103515245+12345)>>>0; return (s>>>8)/0xFFFFFF; };
+  const w=Array.from({length:n},()=>0.6+rnd()*0.9);
+  const sum=w.reduce((a,b)=>a+b,0);
+  const raw=w.map(x=>total*x/sum);
+  const out=raw.map(Math.floor);
+  let rem=total-out.reduce((a,b)=>a+b,0);
+  const order=raw.map((v,i)=>[v-Math.floor(v),i]).sort((a,b)=>b[0]-a[0]);
+  for(let i=0;i<rem;i++) out[order[i%n][1]]++;
+  return out;
+}
+DATA.branches.forEach(b=>b.ses.forEach(se=>{
+  const seed=+se.uid;
+  se.weekly = splitAcrossWeeks(se.sr, WEEKS.length, seed);
+  se.cdi = Math.round((58 + (seed*37)%38 + ((seed*13)%10)/10) * 10)/10;   // dummy CDI %
+  if(se.cdi>99.5) se.cdi=99.5;
+}));
+
+const state = {
+  showWeeks:false,
+  catExpanded: new Set(DATA.categories.map((c,i)=>i).filter(i=>DATA.categories[i].type==='group')),
+  branchExpanded: new Set(),
+  query:'',
+  weekSel: new Set(),     // empty = all weeks
+  brSel:   new Set(),     // empty = all branches
+  seSel:   new Set()      // empty = all SEs (values are SE UIDs)
+};
+
+const selWeeks = () => state.weekSel.size ? WEEKS.filter(w=>state.weekSel.has(w.n)) : WEEKS;
+const weekIncluded = n => !state.weekSel.size || state.weekSel.has(n);
+
+/* ---------- period-aware SE figures ---------- */
+function withEff(se){
+  if(!state.weekSel.size || state.weekSel.size===WEEKS.length) return se;
+  const frac = state.weekSel.size/WEEKS.length;
+  const sr = WEEKS.reduce((s,w,i)=> s + (state.weekSel.has(w.n) ? se.weekly[i] : 0), 0);
+  return Object.assign({}, se, {
+    sr,
+    workDays: Math.round(se.workDays*frac),
+    daysPresent: Math.round(se.daysPresent*frac)
+  });
+}
+const wkCls = n => weekIncluded(n) ? 'wk-col' : 'wk-col wk-excluded';
+
+/* ---------- which rows are visible under the current filters ---------- */
+function visibleSEs(b){
+  const q=state.query.trim().toLowerCase();
+  let ses=b.ses;
+  if(state.seSel.size) ses=ses.filter(se=>state.seSel.has(se.uid));
+  if(q){
+    const bMatch=b.name.toLowerCase().includes(q)||b.id.toLowerCase().includes(q);
+    if(!bMatch) ses=ses.filter(se=>se.name.toLowerCase().includes(q));
+  }
+  return ses;
+}
+function branchVisible(b){
+  if(state.brSel.size && !state.brSel.has(b.id)) return false;
+  return visibleSEs(b).length>0;
+}
+
+/* ---------- aggregation ---------- */
+function emptyTotals(){
+  return {sr:0,warranty:[0,0],pw:[0,0],amc:[0,0],koelAmc:[0,0],workDays:0,daysPresent:0,nosLead:0,
+    lead:{alliedProduct:[0,0],amc:[0,0],battery:[0,0],coolant:[0,0],def_:[0,0],koil:[0,0],others:[0,0],spares:[0,0],wholeGoods:[0,0]},
+    spareConvAmt:0, labourConvAmt:0, weekly:new Array(WEEKS.length).fill(0), cdiSum:0, cdiN:0};
+}
+function addSE(t, se){
+  t.sr+=se.sr; t.workDays+=se.workDays; t.daysPresent+=se.daysPresent; t.nosLead+=se.nosLead;
+  t.spareConvAmt+=se.spareConvAmt; t.labourConvAmt+=se.labourConvAmt;
+  ['warranty','pw','amc','koelAmc'].forEach(k=>{ t[k][0]+=se.oil[k][0]; t[k][1]+=se.oil[k][1]; });
+  Object.keys(t.lead).forEach(k=>{ t.lead[k][0]+=se.lead[k][0]; t.lead[k][1]+=se.lead[k][1]; });
+  se.weekly.forEach((v,i)=>{ t.weekly[i]+=v; });
+  t.cdiSum+=se.cdi; t.cdiN++;
+}
+function sumBranch(b){ const t=emptyTotals(); visibleSEs(b).forEach(se=>addSE(t, withEff(se))); return t; }
+function sumBranches(ids){
+  const t=emptyTotals();
+  ids.map(byId).filter(branchVisible).forEach(b=>{ visibleSEs(b).forEach(se=>addSE(t, withEff(se))); });
+  return t;
+}
+function productivity(sr,dp){ return dp>0 ? sr/dp : 0; }
+
+function seAsTotals(se){
+  return {
+    sr: se.sr,
+    warranty: se.oil.warranty, pw: se.oil.pw, amc: se.oil.amc, koelAmc: se.oil.koelAmc,
+    workDays: se.workDays, daysPresent: se.daysPresent,
+    nosLead: se.nosLead, lead: se.lead,
+    spareConvAmt: se.spareConvAmt, labourConvAmt: se.labourConvAmt,
+    weekly: se.weekly, cdiSum: se.cdi, cdiN: 1
+  };
+}
+
+function amtCell(v){ return v ? fmtAmt(v) : '<span class="zero">·</span>'; }
+
+function dataCells(t){
+  const prod = num2(productivity(t.sr, t.daysPresent));
+  const cdi  = t.cdiN ? (t.cdiSum/t.cdiN).toFixed(1) : '<span class="zero">·</span>';
+  const wk   = WEEKS.map((w,i)=>`<td class="${wkCls(w.n)}">${t.weekly[i]}</td>`).join('');
+  return `
+    <td class="total-sr-col">${t.sr}</td>
+    ${wk}
+    <td>${t.warranty[0]}</td><td>${t.warranty[1]}</td>
+    <td>${t.pw[0]}</td><td>${t.pw[1]}</td>
+    <td>${t.amc[0]}</td><td>${t.amc[1]}</td>
+    <td>${t.koelAmc[0]}</td><td>${t.koelAmc[1]}</td>
+    <td>${t.workDays}</td><td>${t.daysPresent}</td><td class="prod-c">${prod}</td>
+    <td class="cdi-c">${cdi}</td>
+    <td>${t.nosLead}</td>
+    <td>${t.lead.alliedProduct[0]}</td>
+    <td>${t.lead.amc[0]}</td>
+    <td>${t.lead.battery[0]}</td>
+    <td>${t.lead.coolant[0]}</td>
+    <td>${t.lead.def_[0]}</td>
+    <td>${t.lead.koil[0]}</td>
+    <td>${t.lead.others[0]}</td>
+    <td>${t.lead.spares[0]}</td>
+    <td>${t.lead.wholeGoods[0]}</td>
+    <td class="conv-amt-col">${amtCell(t.spareConvAmt)}</td>
+    <td class="conv-amt-col">${amtCell(t.labourConvAmt)}</td>`;
+}
+
+function grpCell(standalone, opts, isVeryFirstRowOfGroup){
+  if(standalone) return '<td class="grp-col"></td>';
+  if(opts.mode==='first' && isVeryFirstRowOfGroup) return `<td class="grp-col" rowspan="${opts.rowspan}" data-cat="${opts.ci}"><span class="gchev open" data-cat="${opts.ci}">▶</span></td>`;
+  return '';
+}
+
+function branchHTML(b, opts){
+  const open = state.branchExpanded.has(b.id);
+  const t = sumBranch(b);
+  const ses = visibleSEs(b);
+  const standalone = !opts;
+
+  let html = '';
+  if(!open){
+    const seLabel = `${ses.length} SE${ses.length>1?'s':''}`;
+    html += `<tr class="branch-row" data-bid="${b.id}">
+      ${grpCell(standalone, opts, true)}
+      <td class="branch-col" data-bid="${b.id}"><span class="chev">▶</span>${b.name}<span class="bmeta"><span class="bid">${b.id}</span><span class="tagpill">${seLabel}</span></span></td>
+      <td class="se-uid-col">&nbsp;</td>
+      <td class="se-name-col">&nbsp;</td>
+      ${dataCells(t)}
+    </tr>`;
+  } else {
+    const rowCount = ses.length + 1;
+    ses.forEach((se,i)=>{
+      html += `<tr class="branch-row se-line ${i%2?'alt':''}" data-bid="${b.id}">
+        ${grpCell(standalone, opts, i===0)}
+        ${i===0 ? `<td class="branch-col" rowspan="${rowCount}" data-bid="${b.id}"><span class="chev open">▶</span>${b.name}<span class="bmeta"><span class="bid">${b.id}</span><span class="tagpill">${ses.length} SE${ses.length>1?'s':''}</span></span></td>` : ''}
+        <td class="se-uid-col">${se.uid}</td>
+        <td class="se-name-col" title="${se.name}">${se.name}</td>
+        ${dataCells(seAsTotals(withEff(se)))}
+      </tr>`;
+    });
+    html += `<tr class="branch-total">
+      ${grpCell(standalone, opts, false)}
+      <td class="se-uid-col">&nbsp;</td>
+      <td class="se-name-col">${b.name} — branch total</td>
+      ${dataCells(t)}
+    </tr>`;
+  }
+  return html;
+}
+
+function branchRowCount(b, open){ return open ? (visibleSEs(b).length + 1) : 1; }
+
+function render(){
+  let html='';
+
+  DATA.categories.forEach((cat, ci)=>{
+    if(cat.type==='standalone'){
+      const b = byId(cat.branchId);
+      if(!branchVisible(b)) return;
+      html += branchHTML(b);
+      return;
+    }
+    const bs = cat.branches.map(byId).filter(branchVisible);
+    if(!bs.length) return;
+    const ids = bs.map(b=>b.id);
+    const open = state.catExpanded.has(ci);
+
+    if(!open){
+      const t = sumBranches(ids);
+      const first = bs[0];
+      html += `<tr class="branch-row" data-cat="${ci}">
+        <td class="grp-col" data-cat="${ci}"><span class="gchev" data-cat="${ci}">▶</span></td>
+        <td class="branch-col" data-cat="${ci}">${first.name}<span class="bmeta"><span class="bid">${first.id}</span><span class="tagpill">+${bs.length-1} BR</span></span></td>
+        <td class="se-uid-col">&nbsp;</td>
+        <td class="se-name-col">&nbsp;</td>
+        ${dataCells(t)}
+      </tr>`;
+    } else {
+      let rowspan = 1;
+      bs.forEach(b=>{ rowspan += branchRowCount(b, state.branchExpanded.has(b.id)); });
+
+      html += branchHTML(bs[0], {mode:'first', ci, rowspan});
+      bs.slice(1).forEach(b=>{ html += branchHTML(b, {mode:'rest'}); });
+
+      const t = sumBranches(ids);
+      html += `<tr class="cat-total">
+        <td class="branch-col">Total</td>
+        <td class="se-uid-col">&nbsp;</td>
+        <td class="se-name-col">Total</td>
+        ${dataCells(t)}
+      </tr>`;
+    }
+  });
+
+  const grand = sumBranches(DATA.branches.map(b=>b.id));
+  html += `<tr class="grand-total"><td class="grp-col"></td><td class="branch-col">Grand Total</td><td class="se-uid-col">&nbsp;</td><td class="se-name-col">All branches — grand total</td>${dataCells(grand)}</tr>`;
+
+  $('tbody').innerHTML = html;
+  $('tbl').classList.toggle('se-open', state.branchExpanded.size>0);
+
+  const visBranches = DATA.branches.filter(branchVisible).length;
+  const wkTxt = state.weekSel.size ? `${state.weekSel.size}/${WEEKS.length} weeks` : `all ${WEEKS.length} weeks`;
+  $('footer').textContent = `Kala Care · Service Engineer Productivity · ${visBranches}/${DATA.branches.length} branches · ${wkTxt} of ${shortD(new Date(PERIOD_START))} – ${shortD(new Date(PERIOD_END))} · TEMP DATA for layout review`;
+  syncScrollWidth();
+}
+
+/* ---------- expand / collapse ---------- */
+$('tbody').addEventListener('click', e=>{
+  const grpCol = e.target.closest('.grp-col');
+  if(grpCol && grpCol.dataset.cat !== undefined && grpCol.dataset.cat !== ''){
+    const ci = +grpCol.dataset.cat;
+    if(state.catExpanded.has(ci)) state.catExpanded.delete(ci); else state.catExpanded.add(ci);
+    render(); return;
+  }
+  const branchCol = e.target.closest('.branch-col');
+  if(!branchCol) return;
+  if(branchCol.dataset.bid){
+    const bid = branchCol.dataset.bid;
+    if(state.branchExpanded.has(bid)) state.branchExpanded.delete(bid); else state.branchExpanded.add(bid);
+    render();
+  } else if(branchCol.dataset.cat !== undefined && branchCol.dataset.cat !== ''){
+    state.catExpanded.add(+branchCol.dataset.cat);
+    render();
+  }
+});
+
+/* ---------- weekly header cells (built from WEEKS) ---------- */
+function buildWeekHeaders(){
+  const r2=$('hRow2'), r3=$('hRow3');
+  r2.querySelectorAll('.wk-col').forEach(n=>n.remove());
+  r3.querySelectorAll('.wk-col').forEach(n=>n.remove());
+  WEEKS.slice().reverse().forEach(w=>{
+    r2.insertAdjacentHTML('afterbegin', `<th class="wk-col" title="${w.range}">${w.label}</th>`);
+    r3.insertAdjacentHTML('afterbegin', `<th class="wk-col" title="${w.range}">${w.compact}</th>`);
+  });
+  $('wkGroupTh').colSpan = WEEKS.length;
+  $('weekBtnLbl').textContent = `Weekly breakdown (W1–W${WEEKS.length})`;
+  $('wkCount').textContent = `${WEEKS.length} weeks`;
+}
+
+/* ---------- generic multi-select dropdown ---------- */
+function multiSelect(rootId, cfg){
+  const root=$(rootId);
+  const btn=root.querySelector('.ms-btn');
+  const lbl=root.querySelector('.ms-lbl');
+  const list=root.querySelector('.ms-list');
+  const searchI=root.querySelector('.ms-search');
+  const sel=cfg.sel;
+
+  function paint(){
+    const q=(searchI && searchI.value.trim().toLowerCase())||'';
+    const items=cfg.items().filter(it=>!q || it.t.toLowerCase().includes(q) || (it.sub||'').toLowerCase().includes(q));
+    list.innerHTML = items.length
+      ? items.map(it=>`<label class="ms-item"><input type="checkbox" value="${it.v}" ${sel.has(it.v)?'checked':''}><span title="${it.t}">${it.t}</span>${it.sub?`<em>${it.sub}</em>`:''}</label>`).join('')
+      : '<div class="ms-empty">No match</div>';
+    lbl.textContent = sel.size ? `${sel.size}` : 'All';
+  }
+  function commit(){ paint(); cfg.onChange(); }
+
+  btn.addEventListener('click', ()=>{
+    const wasOpen=root.classList.contains('open');
+    document.querySelectorAll('.ms.open').forEach(m=>m.classList.remove('open'));
+    if(!wasOpen){ root.classList.add('open'); paint(); if(searchI) searchI.focus(); }
+  });
+  list.addEventListener('change', e=>{
+    const cb=e.target; if(cb.type!=='checkbox') return;
+    const v=cfg.cast ? cfg.cast(cb.value) : cb.value;
+    if(cb.checked) sel.add(v); else sel.delete(v);
+    lbl.textContent = sel.size ? `${sel.size}` : 'All';
+    cfg.onChange();
+  });
+  root.querySelectorAll('[data-act]').forEach(b=>b.addEventListener('click', ()=>{
+    sel.clear();
+    if(b.dataset.act==='all') cfg.items().forEach(it=>sel.add(it.v));
+    commit();
+  }));
+  if(searchI) searchI.addEventListener('input', paint);
+
+  return {paint, repaintIfOpen(){ if(root.classList.contains('open')) paint(); }};
+}
+document.addEventListener('click', e=>{
+  if(!e.target.closest('.ms')) document.querySelectorAll('.ms.open').forEach(m=>m.classList.remove('open'));
+});
+
+const msWeek = multiSelect('msWeek', {
+  sel: state.weekSel,
+  cast: v=>+v,
+  items: ()=>WEEKS.map(w=>({v:w.n, t:w.label, sub:w.range})),
+  onChange: ()=>{ syncDateInputs(); render(); }
+});
+const msBranch = multiSelect('msBranch', {
+  sel: state.brSel,
+  items: ()=>DATA.branches.map(b=>({v:b.id, t:b.name, sub:b.id})),
+  onChange: ()=>{ msSE.repaintIfOpen(); render(); }
+});
+const msSE = multiSelect('msSE', {
+  sel: state.seSel,
+  items: ()=>{
+    const out=[];
+    DATA.branches.forEach(b=>{
+      if(state.brSel.size && !state.brSel.has(b.id)) return;
+      b.ses.forEach(se=>out.push({v:se.uid, t:se.name, sub:b.name}));
+    });
+    return out.sort((a,b)=>a.t.localeCompare(b.t));
+  },
+  onChange: ()=>render()
+});
+
+/* ---------- weekly-column toggle, text search ---------- */
+$('weekBtn').onclick = ()=>{
+  state.showWeeks = !state.showWeeks;
+  $('weekBtn').classList.toggle('on', state.showWeeks);
+  $('scrollMain').classList.toggle('show-weeks', state.showWeeks);
+  syncScrollWidth();
+};
+$('searchI').oninput = e=>{ state.query = e.target.value; render(); };
+
+/* ---------- date range ⇄ week checkboxes ---------- */
+$('dfStart').min = PERIOD_START; $('dfStart').max = PERIOD_END;
+$('dfEnd').min = PERIOD_START; $('dfEnd').max = PERIOD_END;
+$('dfStart').title = `From (period: ${PERIOD_START} – ${PERIOD_END})`;
+$('dfEnd').title = `To (period: ${PERIOD_START} – ${PERIOD_END})`;
+
+// Keeps the date inputs showing the span the ticked weeks actually cover.
+function syncDateInputs(){
+  const ws=selWeeks();
+  if(!state.weekSel.size){ $('dfStart').value=''; $('dfEnd').value=''; return; }
+  $('dfStart').value = ws[0].start;
+  $('dfEnd').value   = ws[ws.length-1].end;
+}
+
+$('dfApply').onclick = ()=>{
+  const s=$('dfStart').value, e=$('dfEnd').value;
+  if(!s || !e){ alert('Pick both a From and a To date.'); return; }
+  if(s>e){ alert('From is after To.'); return; }
+  const hit = WEEKS.filter(w=> w.start<=e && w.end>=s).map(w=>w.n);
+  if(!hit.length){ alert('That range doesn\'t fall inside the report period.'); return; }
+  state.weekSel.clear(); hit.forEach(n=>state.weekSel.add(n));
+  msWeek.paint(); render();
+};
+$('dfClear').onclick = ()=>{
+  $('dfStart').value=''; $('dfEnd').value='';
+  state.weekSel.clear();
+  msWeek.paint(); render();
+};
+
+buildWeekHeaders();
+msWeek.paint(); msBranch.paint(); msSE.paint();
+render();
+
+/* ---------- top scrollbar mirrors the table's real one ---------- */
+function syncScrollWidth(){
+  const main=$('scrollMain');
+  $('scrollTopInner').style.width = $('tbl').scrollWidth + 'px';
+  // No overflow → no mirror bar, so the card never carries an empty strip above the header.
+  $('scrollTop').classList.toggle('hide', main.scrollWidth <= main.clientWidth + 1);
+}
+let syncing = false;
+$('scrollTop').addEventListener('scroll', ()=>{
+  if(syncing) return; syncing = true;
+  $('scrollMain').scrollLeft = $('scrollTop').scrollLeft;
+  syncing = false;
+});
+$('scrollMain').addEventListener('scroll', ()=>{
+  if(syncing) return; syncing = true;
+  $('scrollTop').scrollLeft = $('scrollMain').scrollLeft;
+  syncing = false;
+});
+window.addEventListener('resize', syncScrollWidth);
+syncScrollWidth();
+</script>
+</body>
+</html>

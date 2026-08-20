@@ -127,7 +127,7 @@ const MaintenanceReports = () => {
     useEffect(() => { load(); }, [load]);
 
     return (
-        <div className="mr-font min-h-screen">
+        <div className="mr-font min-h-screen tbl-grid-dark">
             <style>{`
                 .r-scroll { scrollbar-width: thin; scrollbar-color: #c7c9e0 transparent; }
                 .r-scroll::-webkit-scrollbar { height: 6px; width: 6px; }

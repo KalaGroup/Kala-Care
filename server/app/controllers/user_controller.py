@@ -26,6 +26,12 @@ INITIAL_ADMIN_BRANCH = os.getenv("INITIAL_ADMIN_BRANCH", "HO")
 INITIAL_ADMIN_BRANCH_NAME = os.getenv("INITIAL_ADMIN_BRANCH_NAME", "Head Office")
 INITIAL_ADMIN_PASSWORD = os.getenv("INITIAL_ADMIN_PASSWORD")
 
+# Who may grant AOP & Master rights — and who always holds them. Mirrors the
+# client's VITE_PMS_AOP_ADMIN_IDS; the initial admin is always included.
+AOP_RIGHTS_ADMIN_IDS = {
+    u.strip() for u in os.getenv("AOP_RIGHTS_ADMIN_IDS", INITIAL_ADMIN_ID).split(",") if u.strip()
+} | {INITIAL_ADMIN_ID}
+
 class UserController:
     _admin_initialized = False
     
@@ -552,10 +558,10 @@ class UserController:
                 detail="Only Master Admin can change page access"
             )
 
-        if page not in ("part_detail", "mom", "approval"):
+        if page not in ("part_detail", "mom", "approval", "pms"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Unknown page — expected 'part_detail', 'mom' or 'approval'"
+                detail="Unknown page — expected 'part_detail', 'mom', 'approval' or 'pms'"
             )
 
         employee = db.query(User).filter(User.id == employee_id).first()
@@ -575,8 +581,55 @@ class UserController:
             employee.can_access_part_detail = allowed
         elif page == "approval":
             employee.can_access_approval = allowed
+        elif page == "pms":
+            employee.can_access_pms = allowed
+            # Hiding PMS hides everything inside it — drop AOP rights too, so a
+            # re-granted user does not silently get the old AOP level back.
+            if not allowed:
+                employee.aop_access = "none"
         else:
             employee.can_access_mom = allowed
+        db.commit()
+        db.refresh(employee)
+        return employee
+
+    @staticmethod
+    def set_aop_access(db: Session, employee_id: int, admin_user_id: str, level: str):
+        """Set a user's AOP & Master rights: 'none' | 'view' | 'edit'.
+
+        Only the AOP rights admins (AOP_RIGHTS_ADMIN_IDS in the server .env —
+        the same ids the client lists in VITE_PMS_AOP_ADMIN_IDS) may grant this;
+        they always hold 'edit' themselves and can never be demoted."""
+        if level not in ("none", "view", "edit"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown level — expected 'none', 'view' or 'edit'"
+            )
+
+        admin = db.query(User).filter(User.user_id == admin_user_id).first()
+        if not admin or admin.user_id not in AOP_RIGHTS_ADMIN_IDS:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not allowed to grant AOP & Master rights"
+            )
+
+        employee = db.query(User).filter(User.id == employee_id).first()
+        if not employee:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Employee not found"
+            )
+
+        if employee.user_id in AOP_RIGHTS_ADMIN_IDS and level != "edit":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This user always keeps full AOP & Master rights"
+            )
+
+        employee.aop_access = level
+        # AOP & Master lives inside PMS — granting it opens the module too.
+        if level != "none":
+            employee.can_access_pms = True
         db.commit()
         db.refresh(employee)
         return employee

@@ -14,13 +14,16 @@ import toast from 'react-hot-toast';
 import Swal from 'sweetalert2';
 import {
     X, Paperclip, Download, Eye, FileText, CheckCircle2, XCircle,
-    Building2, User, IndianRupee, Trash2, Clock3,
+    Building2, User, IndianRupee, Trash2, Clock3, UserCog, Info, Mail,
 } from 'lucide-react';
 import {
     createApplication, updateApplication, approveApplication, rejectApplication,
     deleteApplication, sendResultEmail, attachmentViewUrl, attachmentDownloadUrl,
-    attachmentsZipUrl, approvalPdfUrl, getExpenseTypes, getAccess, getChainPreview, errText,
+    attachmentsZipUrl, approvalPdfUrl, getExpenseTypes, getAccess, getChainPreview,
+    updateChosenApprovers, errText,
 } from './approvalApi';
+import RichTextBox from './RichTextBox';
+import { isRichEmpty, richToDisplayHtml, richToLine } from './richText';
 
 export const BRAND = '#2f3192';
 
@@ -35,14 +38,27 @@ export const TYPE_OPTIONS = [
     { value: 'credit', label: 'Credit' },
     { value: 'discounting_credit', label: 'Discounting & Credit' },
     { value: 'expense', label: 'Expense' },
+    /* "Other" — no discount / credit / expense value, so no authority limit
+       applies. It runs a fixed L4 (HOD) -> L5 (COO) chain; L2/L3 never act. */
+    { value: 'other', label: 'Other' },
 ];
+
+/* Expense settlement dropdowns. The reimbursement mode decides what the payee
+   has to do next, so each one carries its own instruction. */
+export const PAID_BY_MODES = ['UPI', 'Cash', 'Card', 'Net banking', 'Other'];
+export const REIMBURSE_MODES = ['UPI', 'Cash', 'Bank transfer'];
+export const REIMBURSE_NOTES = {
+    UPI: 'Share your UPI ID / QR code through WhatsApp to the respected person.',
+    Cash: 'Please contact the respected person to collect the cash.',
+    'Bank transfer': 'Enter your full bank details below.',
+};
 
 export const STATUS_META = {
     draft: { label: 'Draft', cls: 'bg-gray-100 text-gray-600 border-gray-200' },
     pending_l2: { label: 'Pending @ L2', cls: 'bg-amber-100 text-amber-700 border-amber-200' },
     pending_l3: { label: 'Pending @ L3', cls: 'bg-orange-100 text-orange-700 border-orange-200' },
-    pending_l4: { label: 'Pending @ L4 (HOD)', cls: 'bg-blue-100 text-blue-700 border-blue-200' },
-    pending_l5: { label: 'Pending @ L5 (COO)', cls: 'bg-purple-100 text-purple-700 border-purple-200' },
+    pending_l4: { label: 'Pending @ L4 - HOD', cls: 'bg-blue-100 text-blue-700 border-blue-200' },
+    pending_l5: { label: 'Pending @ L5 - COO', cls: 'bg-purple-100 text-purple-700 border-purple-200' },
     approved: { label: 'Approved', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
     rejected: { label: 'Rejected', cls: 'bg-amber-200 text-amber-900 border-amber-300' },
 };
@@ -94,7 +110,23 @@ export function StatusBadge({ status }) {
     );
 }
 
-export function SummaryCards({ apps, onCardClick = null }) {
+/* The same four boxes mean different things per level, so each card carries a
+   tiny scope tag under its number: an L1 sees only their own records, an L2/L3
+   their own plus their stage queue, an L4/L5 (and any Head Office member) the
+   whole company. `scope` arrives from the server with the list, so the tag can
+   never drift from the query that produced the counts. */
+const SCOPE_TAG = {
+    own: 'My NFAs only',
+    stage: 'Mine + my queue',
+    all: 'All branches',
+};
+const SCOPE_HELP = {
+    own: 'Your own NFAs only — plus any where you are a chosen approver',
+    stage: 'Your own NFAs + everything waiting at your level for your branches',
+    all: 'Every NFA of every branch — company-wide, not only yours',
+};
+
+export function SummaryCards({ apps, onCardClick = null, scope = null, myPending = null }) {
     const counts = useMemo(() => ({
         total: apps.length,
         pending: apps.filter(a => a.status.startsWith('pending')).length,
@@ -104,45 +136,71 @@ export function SummaryCards({ apps, onCardClick = null }) {
     // White cards with a soft tinted icon tile — light, and every class here has
     // an html.dark override in index.css so the cards adapt to dark mode too.
     // Clickable: opens that slice of records in a popup with filters.
-    const card = (key, label, value, Icon, tileCls, valueCls) => (
+    const card = (key, label, value, Icon, tileCls, valueCls, hint = null, hintTitle = null) => (
         <button type="button" onClick={() => onCardClick?.(key, label)}
             className={`rounded-xl border border-gray-200 bg-white shadow-sm p-3 flex items-center gap-3 text-left transition ${onCardClick ? 'cursor-pointer hover:border-indigo-300 hover:shadow' : 'cursor-default'}`}
-            title={onCardClick ? `View ${label.toLowerCase()} records` : undefined}>
+            title={[onCardClick ? `View ${label.toLowerCase()} records` : null, hintTitle].filter(Boolean).join(' — ') || undefined}>
             <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${tileCls}`}>
                 <Icon size={17} />
             </div>
             <div className="min-w-0">
                 <p className="text-[11px] font-medium text-gray-500 truncate">{label}</p>
                 <p className={`text-xl font-bold leading-tight ${valueCls}`}>{value}</p>
+                {hint && <p className="text-[9px] leading-tight text-gray-400 truncate">{hint}</p>}
             </div>
         </button>
     );
+    // Scope tag on every card; the Pending card gives up its tag when records
+    // are actually sitting on this user — "Pending" is routinely misread as
+    // "waiting on me", so the real number is the one worth the space.
+    const tag = scope ? SCOPE_TAG[scope] : null;
+    const help = scope ? SCOPE_HELP[scope] : null;
+    const pendHint = myPending
+        ? `${myPending} need${myPending === 1 ? 's' : ''} my approval`
+        : tag;
+    const pendHelp = myPending
+        ? `${myPending} of these are waiting on your approval; the rest sit at other levels`
+        : help && `${help}. Pending = open at any level, not only yours to sign`;
     return (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-            {card('all', 'Total Applications', counts.total, FileText, 'bg-indigo-50 text-indigo-600', 'text-gray-800')}
-            {card('pending', 'Pending', counts.pending, Clock3, 'bg-amber-50 text-amber-600', 'text-amber-600')}
-            {card('approved', 'Approved', counts.approved, CheckCircle2, 'bg-emerald-50 text-emerald-600', 'text-emerald-600')}
-            {card('rejected', 'Rejected', counts.rejected, XCircle, 'bg-amber-50 text-amber-600', 'text-amber-600')}
+            {card('all', 'Total Applications', counts.total, FileText, 'bg-indigo-50 text-indigo-600', 'text-gray-800', tag, help)}
+            {card('pending', 'Pending', counts.pending, Clock3, 'bg-amber-50 text-amber-600', 'text-amber-600', pendHint, pendHelp)}
+            {card('approved', 'Approved', counts.approved, CheckCircle2, 'bg-emerald-50 text-emerald-600', 'text-emerald-600', tag, help)}
+            {card('rejected', 'Rejected', counts.rejected, XCircle, 'bg-amber-50 text-amber-600', 'text-amber-600', tag, help)}
         </div>
     );
 }
 
-/* ---------------- Type tab bar (Discounting default) ---------------- */
+/* ---------------- Type tab buttons (Discounting default) ---------------- */
 
-export function TypeTabs({ value, onChange, counts = null }) {
-    // Rendered as a DROPDOWN (4 types would eat the toolbar as buttons);
-    // each option carries its record count.
+/* onDark: the bar sits INSIDE the brand-blue header (Reports box). There a
+   brand-blue "selected" fill is the same colour as the background behind it, so
+   the open tab disappears — it uses dark grey instead. On the ordinary white
+   toolbars the selected tab keeps the brand blue. */
+export function TypeTabs({ value, onChange, counts = null, onDark = false }) {
+    // One button per type, each labelled "Discounting - 29" with its record
+    // count. Wraps onto a second line rather than stretching the toolbar, so
+    // it fits the same slot the dropdown used to occupy on every view.
+    const activeStyle = onDark
+        ? { background: '#4b5563', borderColor: '#6b7280', color: '#ffffff' }
+        : { background: BRAND, borderColor: BRAND, color: '#ffffff' };
     return (
-        <select value={value} onChange={e => onChange(e.target.value)}
-            className="border rounded-lg px-2.5 py-2 text-xs font-semibold bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-300"
-            style={{ borderColor: BRAND, color: BRAND }}
-            title="Application type">
-            {TYPE_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>
-                    {o.label}{counts != null ? ` (${counts[o.value] ?? 0})` : ''}
-                </option>
-            ))}
-        </select>
+        <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Application type">
+            {TYPE_OPTIONS.map(o => {
+                const active = value === o.value;
+                return (
+                    <button key={o.value} type="button" role="tab" aria-selected={active}
+                        onClick={() => onChange(o.value)}
+                        title={o.label}
+                        className={`px-3 py-2 rounded-lg border text-xs font-semibold whitespace-nowrap transition
+                            focus:outline-none focus:ring-2 focus:ring-indigo-300
+                            ${active ? 'shadow-sm' : 'bg-white hover:bg-indigo-50'}`}
+                        style={active ? activeStyle : { color: BRAND, borderColor: '#c7d2fe' }}>
+                        {o.label}{counts != null ? ` - ${counts[o.value] ?? 0}` : ''}
+                    </button>
+                );
+            })}
+        </div>
     );
 }
 
@@ -191,6 +249,9 @@ export function ApplicationsTable({ apps, type = 'discounting', onOpen, emptyTex
     const tdSticky = `${td} sticky right-0 z-10 bg-white group-hover:bg-indigo-50 ${stickyShadow}`;
 
     const isExpense = type === 'expense';
+    // "Other": same customer / document / quotation columns minus SR No. and
+    // minus the discount-credit column (an Other NFA has no such value).
+    const isOther = type === 'other';
 
     const commonLeft = (app, index) => (
         <>
@@ -201,10 +262,13 @@ export function ApplicationsTable({ apps, type = 'discounting', onOpen, emptyTex
             <td className={`${td} whitespace-nowrap`}>{app.branch}{app.branch_name ? ` — ${app.branch_name}` : ''}</td>
         </>
     );
-    const commonRight = (app) => (
+    const commonRight = (app) => {
+        // a pasted table is flattened to one readable line for this column
+        const purpose = richToLine(app.description);
+        return (
         <>
             <td className={`${td} max-w-[220px]`}>
-                <span className="block truncate" title={app.description}>{app.description || '—'}</span>
+                <span className="block truncate" title={purpose}>{purpose || '—'}</span>
             </td>
             <td className={`${td} whitespace-nowrap`}>{app.created_by_name || app.created_by}</td>
             <td className={`${td} whitespace-nowrap`}>
@@ -214,7 +278,12 @@ export function ApplicationsTable({ apps, type = 'discounting', onOpen, emptyTex
             </td>
             <td className={tdSticky}><StatusBadge status={app.status} /></td>
         </>
-    );
+        );
+    };
+
+    // true when the table itself is the bottom of the card (no "Show more"
+    // bar and no empty state underneath it)
+    const closesCard = apps.length > 0 && apps.length <= rowLimit;
 
     return (
         <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
@@ -226,10 +295,21 @@ export function ApplicationsTable({ apps, type = 'discounting', onOpen, emptyTex
             {/* table — scrolls horizontally, but its own scrollbar is hidden;
                 the single scrollbar on top drives (and mirrors) the scroll */}
             <style>{'.apv-noscroll::-webkit-scrollbar{display:none}'}</style>
+            {/* When the table is the LAST thing in the card it has to close the
+                box cleanly:
+                - rounded-b-xl on the SCROLL box (not just the outer wrapper),
+                  because the sticky Status column paints its own opaque
+                  background and Chrome does not clip a sticky child to an
+                  ancestor's border radius — it squared off the corners;
+                - apv-table-open-bottom drops the last row's straight bottom
+                  border, so the card's OWN rounded border draws that edge and
+                  it curves into both corners instead of being cut short.
+                The "Show more" bar and the empty state close the box
+                themselves, so neither applies then. */}
             <div ref={tableScrollRef} onScroll={mirror(tableScrollRef, topScrollRef)}
-                className="overflow-x-auto apv-noscroll"
+                className={`overflow-x-auto apv-noscroll ${closesCard ? 'rounded-b-xl' : ''}`}
                 style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                <table className="min-w-full text-xs border-collapse">
+                <table className={`min-w-full text-xs border-collapse ${closesCard ? 'apv-table-open-bottom' : ''}`}>
                     {isExpense ? (
                         <thead>
                             <tr className="text-[11px] uppercase tracking-wide">
@@ -258,14 +338,16 @@ export function ApplicationsTable({ apps, type = 'discounting', onOpen, emptyTex
                                 <th rowSpan={2} className={th}>Date</th>
                                 <th rowSpan={2} className={th}>Category</th>
                                 <th rowSpan={2} className={th}>Branch</th>
-                                <th colSpan={3} className={th}>Customer Details</th>
+                                <th colSpan={isOther ? 2 : 3} className={th}>Customer Details</th>
                                 <th colSpan={2} className={th}>Documents</th>
                                 <th colSpan={2} className={th}>Quotation</th>
-                                <th rowSpan={2} className={th}>
-                                    {type === 'discounting' ? 'Discounting %'
-                                        : type === 'credit' ? 'Credit Period (Days)'
-                                            : 'Discounting % / Credit Days'}
-                                </th>
+                                {!isOther && (
+                                    <th rowSpan={2} className={th}>
+                                        {type === 'discounting' ? 'Discounting %'
+                                            : type === 'credit' ? 'Credit Period - Days'
+                                                : 'Discounting % / Credit Days'}
+                                    </th>
+                                )}
                                 <th rowSpan={2} className={th}>Purpose</th>
                                 <th rowSpan={2} className={th}>Created By</th>
                                 <th rowSpan={2} className={th}>Files</th>
@@ -274,7 +356,7 @@ export function ApplicationsTable({ apps, type = 'discounting', onOpen, emptyTex
                             <tr className="text-[11px] uppercase tracking-wide">
                                 <th className={th}>Name</th>
                                 <th className={th}>Instance ID</th>
-                                <th className={th}>SR No.</th>
+                                {!isOther && <th className={th}>SR No.</th>}
                                 <th className={th}>Invoice</th>
                                 <th className={th}>Delivery Challan</th>
                                 <th className={th}>Number</th>
@@ -298,18 +380,20 @@ export function ApplicationsTable({ apps, type = 'discounting', onOpen, emptyTex
                                     <>
                                         <td className={`${td} max-w-[160px] truncate`} title={app.customer_name}>{app.customer_name || '—'}</td>
                                         <td className={`${td} whitespace-nowrap`}>{app.instance_id || '—'}</td>
-                                        <td className={`${td} whitespace-nowrap`}>{app.sr_no || '—'}</td>
+                                        {!isOther && <td className={`${td} whitespace-nowrap`}>{app.sr_no || '—'}</td>}
                                         <td className={`${td} whitespace-nowrap`}>{app.invoice_no || '—'}</td>
                                         <td className={`${td} whitespace-nowrap`}>{app.delivery_challan || '—'}</td>
                                         <td className={`${td} whitespace-nowrap`}>{app.quotation_no || '—'}</td>
                                         <td className={`${td} whitespace-nowrap`}>{fmtAmount(app.quotation_amount)}</td>
-                                        <td className={`${td} whitespace-nowrap`}>
-                                            {type === 'discounting'
-                                                ? (app.discount_percent != null ? `${app.discount_percent}%` : '—')
-                                                : type === 'credit'
-                                                    ? (app.credit_days != null ? `${app.credit_days} days` : '—')
-                                                    : `${app.discount_percent != null ? `${app.discount_percent}%` : '—'} / ${app.credit_days != null ? `${app.credit_days} days` : '—'}`}
-                                        </td>
+                                        {!isOther && (
+                                            <td className={`${td} whitespace-nowrap`}>
+                                                {type === 'discounting'
+                                                    ? (app.discount_percent != null ? `${app.discount_percent}%` : '—')
+                                                    : type === 'credit'
+                                                        ? (app.credit_days != null ? `${app.credit_days} days` : '—')
+                                                        : `${app.discount_percent != null ? `${app.discount_percent}%` : '—'} / ${app.credit_days != null ? `${app.credit_days} days` : '—'}`}
+                                            </td>
+                                        )}
                                     </>
                                 )}
                                 {commonRight(app)}
@@ -345,7 +429,7 @@ export const finalActionText = (app) => {
     if (app.status === 'rejected')
         return `Rejected at ${levelLabel(app.rejected_at_level)} by ${app.rejected_by_name || app.rejected_by}`;
     if (app.auto_approved)
-        return `Self approved by ${app.created_by_name || app.created_by} (within own authority limit)`;
+        return `Self approved by ${app.created_by_name || app.created_by} - within own authority limit`;
     for (const lvl of ['l5', 'l4', 'l3', 'l2']) {
         const by = app[`${lvl}_action_by_name`] || app[`${lvl}_action_by`];
         if (by) return `Final approval at ${levelLabel(lvl)} by ${by}`;
@@ -357,27 +441,74 @@ export const finalActionText = (app) => {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const escHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+/* ---- remembered addresses (browser cache) ----------------------------------
+   Every address typed into ANY of these boxes (create-NFA CC, and the To / CC
+   boxes of the approve & reject result mail) is kept in localStorage and
+   offered back as a dropdown the next time. A native <datalist> is used on
+   purpose: the browser paints it, so it can never be clipped by the
+   SweetAlert box's own scrolling container. */
+const EMAIL_HISTORY_KEY = 'apv_email_history';
+const EMAIL_HISTORY_MAX = 40;
+
+const loadEmailHistory = () => {
+    try {
+        const raw = JSON.parse(localStorage.getItem(EMAIL_HISTORY_KEY) || '[]');
+        return Array.isArray(raw) ? raw.filter(e => typeof e === 'string' && EMAIL_RE.test(e)) : [];
+    } catch { return []; }   /* corrupt / unavailable storage — just no suggestions */
+};
+
+const rememberEmail = (addr) => {
+    try {
+        const next = [addr, ...loadEmailHistory().filter(e => e.toLowerCase() !== addr.toLowerCase())]
+            .slice(0, EMAIL_HISTORY_MAX);   // most recently used first
+        localStorage.setItem(EMAIL_HISTORY_KEY, JSON.stringify(next));
+    } catch { /* private mode / quota — suggestions are a convenience, never block the add */ }
+};
+
 const emailGroupHtml = (prefix, labelText) => `
     <p style="margin:10px 0 4px;font-size:12px;color:var(--apv-muted)">${labelText}</p>
     <div style="display:flex;gap:6px">
         <input id="${prefix}-in" type="email" placeholder="name@email.com"
+            list="${prefix}-dl" autocomplete="off"
             style="flex:1;min-width:0;border:1px solid var(--apv-field-border);border-radius:8px;padding:7px 10px;font-size:13px;outline:none;background:var(--apv-field-bg);color:var(--apv-field-text)">
+        <datalist id="${prefix}-dl"></datalist>
         <button type="button" id="${prefix}-add"
             style="background:${BRAND};color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">+ Add</button>
     </div>
     <p id="${prefix}-err" style="color:#d97706;font-size:11px;margin:4px 0 0;display:none"></p>
+    <p id="${prefix}-hint" style="font-size:10px;color:var(--apv-dim);margin:4px 0 0;display:none">
+        Previously used emails appear in the dropdown —
+        <span id="${prefix}-clear" style="cursor:pointer;text-decoration:underline">clear saved</span>
+    </p>
     <div id="${prefix}-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>`;
 
-const wireEmailGroup = (prefix, added) => {
+/* `locked` addresses are shown as fixed chips with no × — used for the
+   creator's own address in the submit box's To list, which always receives the
+   result mail and so must not be removable. They are NOT part of `added`, so
+   they never get submitted or double-counted. */
+const wireEmailGroup = (prefix, added, locked = []) => {
     const input = document.getElementById(`${prefix}-in`);
     const err = document.getElementById(`${prefix}-err`);
     const list = document.getElementById(`${prefix}-list`);
+    const dl = document.getElementById(`${prefix}-dl`);
+    const hint = document.getElementById(`${prefix}-hint`);
+    const taken = () => [...locked, ...added].map(e => e.toLowerCase());
+    // dropdown = remembered addresses minus the ones already on this record
+    const renderSuggestions = () => {
+        const pool = loadEmailHistory().filter(e => !taken().includes(e.toLowerCase()));
+        if (dl) dl.innerHTML = pool.map(e => `<option value="${escHtml(e)}"></option>`).join('');
+        if (hint) hint.style.display = pool.length ? 'block' : 'none';
+    };
+    const chip = (text, tail) =>
+        `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--apv-chip-bg);color:var(--apv-chip-text);border:1px solid var(--apv-chip-border);border-radius:999px;padding:3px 10px;font-size:12px">${escHtml(text)}${tail}</span>`;
     const render = () => {
-        list.innerHTML = added.map((e, i) =>
-            `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--apv-chip-bg);color:var(--apv-chip-text);border:1px solid var(--apv-chip-border);border-radius:999px;padding:3px 10px;font-size:12px">${escHtml(e)}
-                 <b data-i="${i}" title="Remove" style="cursor:pointer;color:var(--apv-dim);font-size:13px;line-height:1">×</b></span>`).join('');
+        list.innerHTML =
+            locked.map(e => chip(e, '<span title="Always included — cannot be removed" style="font-size:10px;opacity:.7">🔒</span>')).join('')
+            + added.map((e, i) =>
+                chip(e, `<b data-i="${i}" title="Remove" style="cursor:pointer;color:var(--apv-dim);font-size:13px;line-height:1">×</b>`)).join('');
         list.querySelectorAll('b[data-i]').forEach(b =>
             b.addEventListener('click', () => { added.splice(Number(b.dataset.i), 1); render(); }));
+        renderSuggestions();   // a removed address becomes selectable again
     };
     const add = () => {
         const v = (input.value || '').trim();
@@ -387,12 +518,13 @@ const wireEmailGroup = (prefix, added) => {
             err.style.display = 'block';
             return;
         }
-        if (added.includes(v)) {
+        if (taken().includes(v.toLowerCase())) {
             err.textContent = 'This email is already added';
             err.style.display = 'block';
             return;
         }
         added.push(v);
+        rememberEmail(v);      // keep it for the next NFA / result mail
         input.value = '';
         err.style.display = 'none';
         render();
@@ -402,11 +534,21 @@ const wireEmailGroup = (prefix, added) => {
     input.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter') { ev.preventDefault(); add(); }
     });
+    // picking a suggestion from the dropdown adds it straight away — a pick
+    // arrives as a replacement, so plain typing never triggers this
+    input.addEventListener('input', (ev) => {
+        const picked = !ev.inputType || ev.inputType === 'insertReplacementText';
+        if (picked && loadEmailHistory().some(e => e === input.value)) add();
+    });
+    document.getElementById(`${prefix}-clear`)?.addEventListener('click', () => {
+        try { localStorage.removeItem(EMAIL_HISTORY_KEY); } catch { /* ignore */ }
+        renderSuggestions();
+    });
     render();
 };
 
 // typed-but-not-added address must be valid (or cleared); it is auto-added
-const flushEmailGroup = (prefix, added) => {
+const flushEmailGroup = (prefix, added, locked = []) => {
     const input = document.getElementById(`${prefix}-in`);
     const v = (input?.value || '').trim();
     if (v) {
@@ -414,7 +556,9 @@ const flushEmailGroup = (prefix, added) => {
             Swal.showValidationMessage(`'${v}' is not a valid email address — press + Add or clear it`);
             return false;
         }
-        if (!added.includes(v)) added.push(v);
+        const taken = [...locked, ...added].map(e => e.toLowerCase());
+        if (!taken.includes(v.toLowerCase())) added.push(v);
+        rememberEmail(v);
     }
     return true;
 };
@@ -428,9 +572,9 @@ export async function promptCcEmails(initial = []) {
         html: `<div style="text-align:left;font-size:13px">
                    <p style="margin:0 0 2px;font-size:12px;color:var(--apv-muted)">
                        When this NFA is approved / rejected the result email goes
-                       <b>To: you (creator)</b> with the <b>approvers in CC automatically</b>.
+                       <b>To: you - creator</b> with the <b>approvers in CC automatically</b>.
                    </p>
-                   ${emailGroupHtml('apv-ccsub', 'Add more CC emails (optional):')}
+                   ${emailGroupHtml('apv-ccsub', 'Add more CC emails - optional:')}
                </div>`,
         showCancelButton: false,
         allowOutsideClick: false,
@@ -453,16 +597,19 @@ export async function promptResultEmail(app) {
         app.status === 'rejected' ? (app.rejected_by_name || app.rejected_by) : null,
         ...String(app.cc_emails || '').split(',').map(s => s.trim()).filter(Boolean),
     ].filter(n => n && n !== (app.created_by_name || app.created_by)))];
+    // extra recipients the CREATOR attached in the submit box — already stored
+    // on the record, shown here so the sender sees the full To line
+    const storedTo = String(app.to_emails || '').split(',').map(s => s.trim()).filter(Boolean);
     const addedTo = [];
     const addedCc = [];
     await Swal.fire({
         title: 'Send result email',
         html: `<div style="text-align:left;font-size:13px">
                    <p style="margin:0 0 6px"><b>${escHtml(app.app_no || '')}</b> — ${escHtml(finalActionText(app))}</p>
-                   <p style="margin:2px 0"><b>To:</b> ${escHtml(app.created_by_name || app.created_by)} (creator)</p>
+                   <p style="margin:2px 0"><b>To:</b> ${escHtml(app.created_by_name || app.created_by)} - creator${storedTo.length ? ', ' + escHtml(storedTo.join(', ')) : ''}</p>
                    <p style="margin:2px 0"><b>Cc:</b> ${ccNames.length ? escHtml(ccNames.join(', ')) : '—'}</p>
-                   ${emailGroupHtml('apv-to', 'Add To emails (optional):')}
-                   ${emailGroupHtml('apv-cc', 'Add CC emails (optional):')}
+                   ${emailGroupHtml('apv-to', 'Add To emails - optional:')}
+                   ${emailGroupHtml('apv-cc', 'Add CC emails - optional:')}
                </div>`,
         showCancelButton: false,
         allowOutsideClick: false,
@@ -534,6 +681,13 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
     // a rejected record can be corrected + resubmitted by its creator
     const canResubmit = app.status === 'rejected' && app.created_by === me.user_id && !!onEditResubmit;
 
+    // Result-mail recipients as ADDRESSES — the server builds these with the
+    // same rules send_result_email uses, so the box shows what will really be
+    // mailed. Older payloads without them fall back to the attached lists.
+    const csv = (v) => String(v || '').split(',').map(x => x.trim()).filter(Boolean);
+    const mailTo = app.mail_to?.length ? app.mail_to : csv(app.to_emails);
+    const mailCc = app.mail_cc?.length ? app.mail_cc : csv(app.cc_emails);
+
     // Chains vary per employee (Authority Matrix): a step only counts as done
     // when someone actually acted at it; passed-over steps show as skipped.
     const stepState = (level) => {
@@ -552,7 +706,7 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
             title: 'Approve application?',
             text: `${app.app_no} — ${typeLabel(app.request_type)}`,
             input: 'textarea',
-            inputPlaceholder: 'Approval remark (required)',
+            inputPlaceholder: 'Approval remark - required',
             inputAttributes: { rows: 4, style: 'min-height:110px;font-size:13px' },
             icon: 'question',
             showCancelButton: true,
@@ -566,10 +720,14 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
         try {
             const res = await approveApplication(app.id, remark || '');
             const st = res?.application?.status;
-            if (st === 'approved') toast.success('Approved — final (within your authorized limit)');
-            else if (st === 'pending_l3') toast.success('Approved — forwarded to L3 (beyond your authorized limit)');
-            else if (st === 'pending_l4') toast.success('Approved — forwarded to L4 HOD (beyond your authorized limit)');
-            else if (st === 'pending_l5') toast.success('Approved — forwarded to L5 COO (beyond your authorized limit)');
+            // An Other NFA carries no value, so no limit is involved — L4
+            // always forwards it and only the COO gives the final approval.
+            const isOtherApp = app.request_type === 'other';
+            if (st === 'approved') toast.success(isOtherApp ? 'Approved — final' : 'Approved — final - within your authorized limit');
+            else if (isOtherApp) toast.success('Approved — forwarded to L5 COO for final approval');
+            else if (st === 'pending_l3') toast.success('Approved — forwarded to L3 - beyond your authorized limit');
+            else if (st === 'pending_l4') toast.success('Approved — forwarded to L4 HOD - beyond your authorized limit');
+            else if (st === 'pending_l5') toast.success('Approved — forwarded to L5 COO - beyond your authorized limit');
             else toast.success('Application approved');
             if (st === 'approved') await promptResultEmail(res.application);
             onChanged();
@@ -627,6 +785,89 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
         } finally { setBusy(false); }
     };
 
+    // Creator of a PENDING record may change the level-wise chosen approvers
+    // (the chosen person is on leave / busy). Only the current and future
+    // levels are editable; the server re-routes the record after saving.
+    const canEditApprovers = app.created_by === me.user_id && app.status.startsWith('pending');
+
+    const doEditApprovers = async () => {
+        setBusy(true);
+        let preview = null;
+        try {
+            preview = await getChainPreview(app.branch, app.category, app.request_type);
+        } catch { /* preview stays null — handled below */ }
+        setBusy(false);
+        const levels = preview?.levels;
+        if (!levels) return toast.error('Could not load the approval flow — try again');
+        const isHO = preview.is_ho === true;
+
+        const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const LVL_ORDER = { l2: 2, l3: 3, l4: 4, l5: 5 };
+        const curOrder = LVL_ORDER[app.status.replace('pending_', '')] || 0;
+
+        const pickerLevels = [];
+        const rowsHtml = levels
+            .filter(l => (LVL_ORDER[l.level] || 0) >= curOrder)
+            .map(l => {
+                const tag = `${l.level.toUpperCase()} – ${esc(levelName(l.level))}`;
+                const row = (body) => `<div style="margin:6px 0"><b style="font-size:11px">${tag}</b>${body}</div>`;
+                if (l.skipped)
+                    return row(`<div style="font-size:11px;color:var(--apv-dim)">${esc(l.skipped)}</div>`);
+                const cands = l.candidates || [];
+                const hoL4 = isHO && l.level === 'l4';
+                if (cands.length <= 1 && !hoL4)
+                    return row(`<div style="font-size:11px;color:var(--apv-strong)">${esc(cands.map(c => c.name).join(', ') || '—')}</div>`);
+                pickerLevels.push(l.level);
+                const preset = String(app[`${l.level}_approver_id`] || '').split(',').map(s => s.trim()).filter(Boolean);
+                const hint = hoL4
+                    ? 'None ticked — skips this level, goes directly to COO - L5'
+                    : 'None ticked — all approvers, anyone may act';
+                const boxes = cands.map(c =>
+                    `<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin:2px 0;cursor:pointer;color:var(--apv-field-text)">
+                         <input type="checkbox" class="apvedit_${l.level}" value="${esc(c.user_id)}" ${preset.includes(c.user_id) ? 'checked' : ''} style="accent-color:#2f3192;flex-shrink:0">
+                         <span>${esc(c.name)}</span>
+                     </label>`).join('');
+                return row(`<div style="border:1px solid var(--apv-field-border);border-radius:8px;padding:5px 8px;margin-top:2px;background:var(--apv-field-bg);max-height:110px;overflow-y:auto">${boxes}</div>
+                    <div style="font-size:10px;color:var(--apv-dim);margin-top:2px">${hint}</div>`);
+            }).join('');
+
+        const res = await Swal.fire({
+            title: 'Edit Approvers',
+            width: 460,
+            html: `<div style="text-align:left;font-size:13px">
+                       <p style="margin:0 0 6px;font-size:11px;color:var(--apv-muted)">
+                           Change who approves <b>${esc(app.app_no || '')}</b> from its current level onward
+                           (e.g. the chosen approver is on leave). Levels already acted on are not affected.
+                       </p>
+                       ${rowsHtml || '<p style="font-size:11px;color:var(--apv-dim)">Nothing editable at this stage</p>'}
+                   </div>`,
+            showCancelButton: true,
+            confirmButtonText: 'Save Approvers',
+            confirmButtonColor: BRAND,
+            preConfirm: () => {
+                const picks = {};
+                pickerLevels.forEach(lvl => {
+                    const ticked = document.querySelectorAll(`.apvedit_${lvl}:checked`);
+                    picks[`${lvl}_approver_id`] = [...ticked].map(el => el.value).join(',');
+                });
+                return picks;
+            },
+        });
+        if (!res.isConfirmed) return;
+        setBusy(true);
+        try {
+            const out = await updateChosenApprovers(app.id, res.value || {});
+            const st = out?.application?.status;
+            toast.success(st && st !== app.status
+                ? `Approvers updated — application moved to ${statusLabel(st)}`
+                : 'Approvers updated');
+            onChanged();
+            onClose();
+        } catch (err) {
+            toast.error(errText(err, 'Failed to update approvers'));
+        } finally { setBusy(false); }
+    };
+
     // Bordered grid cell — the details render as a proper lined grid
     const Row = ({ label, value }) => (
         <div className="min-w-0 px-3 py-2 bg-white border-b border-r border-gray-100">
@@ -664,7 +905,12 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
                     {/* Purpose of approval — the headline of the application */}
                     <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3">
                         <p className="text-[10px] uppercase tracking-wide text-black font-bold">Purpose of Approval</p>
-                        <p className="text-xs text-gray-800 break-words">{app.description || '—'}</p>
+                        {/* pasted Excel tables render as tables; legacy plain text
+                            is escaped and keeps its line breaks */}
+                        {app.description
+                            ? <div className="apv-rich text-xs text-gray-800 break-words overflow-x-auto"
+                                dangerouslySetInnerHTML={{ __html: richToDisplayHtml(app.description) }} />
+                            : <p className="text-xs text-gray-800">—</p>}
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-3 rounded-xl border border-gray-200 overflow-hidden">
@@ -673,7 +919,8 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
                         <Row label="Branch" value={`${app.branch}${app.branch_name ? ` — ${app.branch_name}` : ''}`} />
                         {!isExpense && <Row label="Customer Name" value={app.customer_name} />}
                         {!isExpense && <Row label="Instance ID" value={app.instance_id} />}
-                        <Row label="SR No." value={app.sr_no} />
+                        {/* Other records carry no SR No. */}
+                        {app.request_type !== 'other' && <Row label="SR No." value={app.sr_no} />}
                         {!isExpense && <Row label="Invoice" value={app.invoice_no} />}
                         {!isExpense && <Row label="Delivery Challan" value={app.delivery_challan} />}
                         <Row label="Quotation Number" value={app.quotation_no} />
@@ -686,6 +933,12 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
                         )}
                         {isExpense && <Row label="Expense Amount" value={fmtAmount(app.expense_amount)} />}
                         {isExpense && <Row label="Expense Type" value={app.expense_type} />}
+                        {isExpense && (app.paid_by_name || app.paid_by_mode) && (
+                            <Row label="Paid By" value={[app.paid_by_name, app.paid_by_mode].filter(Boolean).join(' - ')} />
+                        )}
+                        {isExpense && (app.reimburse_to || app.reimburse_mode) && (
+                            <Row label="Reimburse To" value={[app.reimburse_to, app.reimburse_mode].filter(Boolean).join(' - ')} />
+                        )}
                         <Row label="Created By" value={`${app.created_by_name || app.created_by} · ${fmtDate(app.created_at)}`} />
                     </div>
 
@@ -694,6 +947,31 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
                             <Row label="Remark" value={app.remark} />
                         </div>
                     )}
+
+                    {isExpense && app.reimburse_bank_details && (
+                        <div className="rounded-xl border border-gray-200 overflow-hidden">
+                            <Row label="Bank Details" value={app.reimburse_bank_details} />
+                        </div>
+                    )}
+
+                    {/* Who this NFA's result email goes to — the To / CC lists the
+                        creator attached at submit, plus the approvers who are in
+                        CC automatically. Shown on every NFA box, Reports included. */}
+                    <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3">
+                        <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-black font-bold">
+                            <Mail size={12} /> Email Recipients
+                        </p>
+                        <p className="mt-1.5 text-[11px] text-gray-700 break-words">
+                            <b>To:</b> {mailTo.length ? mailTo.join(', ') : '—'}
+                        </p>
+                        <p className="mt-1 text-[11px] text-gray-700 break-words">
+                            <b>Cc:</b> {mailCc.length ? mailCc.join(', ') : '—'}
+                        </p>
+                        <p className="mt-1.5 text-[10px] text-gray-500">
+                            First To address is the creator. Approvers are added to Cc automatically, and
+                            anything added while sending the result mail stays on this list.
+                        </p>
+                    </div>
 
                     {/* Attachments */}
                     <div>
@@ -766,6 +1044,14 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
                                 <FileText size={13} /> Edit &amp; Resubmit
                             </button>
                         )}
+                        {canEditApprovers && (
+                            <button onClick={doEditApprovers} disabled={busy}
+                                className="mr-auto inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                                style={{ background: BRAND }}
+                                title="Change who approves this NFA from its current level onward">
+                                <UserCog size={13} /> Edit Approvers
+                            </button>
+                        )}
                         {canDelete && (
                             <button onClick={doDelete} disabled={busy}
                                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 disabled:opacity-50">
@@ -830,7 +1116,15 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
         credit_days: draft?.credit_days ?? '',
         expense_amount: draft?.expense_amount ?? '',
         expense_type: draft?.expense_type || '',
-        description: draft?.description || '',
+        // Expense settlement block — who paid and how, who is reimbursed and how
+        paid_by_name: draft?.paid_by_name || '',
+        paid_by_mode: draft?.paid_by_mode || '',
+        reimburse_to: draft?.reimburse_to || '',
+        reimburse_mode: draft?.reimburse_mode || '',
+        reimburse_bank_details: draft?.reimburse_bank_details || '',
+        /* a draft saved before rich purpose holds plain text — escape it so
+           a stray '<' or '&' survives the round-trip through the editor */
+        description: richToDisplayHtml(draft?.description),
         remark: draft?.remark || '',
     }));
     const [files, setFiles] = useState([]);
@@ -862,6 +1156,9 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
     const isDnC = form.request_type === 'discounting_credit';
     const isDiscounting = form.request_type === 'discounting' || isDnC;
     const isCredit = form.request_type === 'credit' || isDnC;
+    // "Other": customer block WITHOUT SR No., no value field, no limit — the
+    // record always runs L4 (HOD) -> L5 (COO).
+    const isOther = form.request_type === 'other';
 
     const buildFormData = () => {
         const fd = new FormData();
@@ -878,6 +1175,8 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
         'description', 'customer_name', 'instance_id', 'sr_no', 'invoice_no',
         'delivery_challan', 'quotation_no', 'quotation_amount', 'discount_percent',
         'credit_days', 'expense_amount', 'expense_type', 'remark',
+        'paid_by_name', 'paid_by_mode', 'reimburse_to', 'reimburse_mode',
+        'reimburse_bank_details',
     ].some(k => String(form[k] ?? '').trim() !== '');
 
     const saveDraft = async () => {
@@ -944,25 +1243,29 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
         if (!form.category) return toast.error('Please select Spares / Services');
         if (!form.request_type) return toast.error('Please select Discounting / Credit / Expense');
         if (!form.branch) return toast.error('Please select a branch');
-        if (!form.description.trim()) return toast.error('Purpose of approval is required');
+        if (isRichEmpty(form.description)) return toast.error('Purpose of approval is required');
         if (isDnC) {
             // combined type: either one may be blank, but never BOTH
             if (!form.discount_percent && !form.credit_days)
-                return toast.error('Enter Discounting % or Credit Period (days) — at least one');
+                return toast.error('Enter Discounting % or Credit Period - days — at least one');
         } else {
             if (isDiscounting && !form.discount_percent) return toast.error('Discounting % is required');
-            if (isCredit && !form.credit_days) return toast.error('Credit period (days) is required');
+            if (isCredit && !form.credit_days) return toast.error('Credit period - days is required');
         }
         // Discounting / Credit: Customer Name & Quotation Amount mandatory;
-        // Instance ID / SR No. / Invoice / Delivery Challan are optional
+        // Instance ID / SR No. / Invoice / Delivery Challan are optional.
+        // Other: only Customer Name (with Purpose & Remark) is mandatory.
         if (!isExpense) {
             if (!form.customer_name.trim()) return toast.error('Customer name is required');
-            if (!form.quotation_amount) return toast.error('Quotation amount is required');
+            if (!isOther && !form.quotation_amount) return toast.error('Quotation amount is required');
         }
         // Expense: at least one type + the single combined amount
         if (isExpense) {
             if (!expTypes.length) return toast.error('Select at least one expense type');
             if (!form.expense_amount) return toast.error('Expense amount is required');
+            // a bank transfer is useless without the account details
+            if (form.reimburse_mode === 'Bank transfer' && !form.reimburse_bank_details.trim())
+                return toast.error('Enter the bank details for the reimbursement');
         }
         if (!form.remark.trim()) return toast.error('Remark is required');
 
@@ -972,11 +1275,14 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
         const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const li = (label, value) => (value === null || value === undefined || String(value).trim() === '')
             ? '' : `<li style="margin:3px 0"><b>${label}:</b> ${esc(value)}</li>`;
+        // Purpose may hold a pasted table — show it as one, not as escaped tags
+        const liRich = (label, value) => isRichEmpty(value) ? ''
+            : `<li style="margin:3px 0"><b>${label}:</b><div class="apv-rich" style="margin-top:3px;overflow-x:auto">${richToDisplayHtml(value)}</div></li>`;
         const bullets = [
             li('Category', catLabel(form.category)),
             li('Type', typeLabel(form.request_type)),
             li('Branch', `${form.branch}${branchObj?.branch_name ? ' — ' + branchObj.branch_name : ''}`),
-            li('Purpose of Approval', form.description),
+            liRich('Purpose of Approval', form.description),
             !isExpense ? li('Customer Name', form.customer_name) : '',
             !isExpense ? li('Instance ID', form.instance_id) : '',
             li('SR No.', form.sr_no),
@@ -988,6 +1294,9 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
             isCredit && form.credit_days ? li('Credit Period', `${form.credit_days} days`) : '',
             isExpense ? li('Expense Types', expTypes.join(', ')) : '',
             isExpense && form.expense_amount ? li('Expense Amount', `₹${Number(form.expense_amount).toLocaleString('en-IN')}`) : '',
+            isExpense ? li('Paid By', [form.paid_by_name, form.paid_by_mode].filter(Boolean).join(' - ')) : '',
+            isExpense ? li('Reimburse To', [form.reimburse_to, form.reimburse_mode].filter(Boolean).join(' - ')) : '',
+            isExpense && form.reimburse_mode === 'Bank transfer' ? li('Bank Details', form.reimburse_bank_details) : '',
             li('Remark', form.remark),
             li('Attachments', files.length ? files.map(f => f.name).join(', ') : ''),
         ].join('');
@@ -1006,7 +1315,9 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
 
         const res = await Swal.fire({
             title: 'Are you sure to submit for approval?',
-            html: `<div style="text-align:left;max-height:45vh;overflow-y:auto;font-size:13px">
+            // wider popup: a purpose pasted from Excel needs the room
+            width: 760,
+            html: `<div style="text-align:left;max-height:45vh;overflow:auto;font-size:13px">
                        <ul style="padding-left:18px;margin:0;list-style:disc">${bullets}</ul>
                    </div>`,
             icon: 'question',
@@ -1050,61 +1361,78 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
             if (cands.length <= 1 && !hoL4)
                 return row(`<div style="font-size:11px;color:var(--apv-strong)">${esc(cands.map(c => c.name).join(', ') || '—')}</div>`);
             pickerLevels.push(l.level);
-            const preset = l.level === 'l4' ? form.l4_approver_id : '';
-            // HO must pick ONE L4 (validated below) — no "all approvers" option
-            const allOpt = hoL4
-                ? '<option value="">Select…</option>'
-                : '<option value="">All approvers — anyone may act</option>';
-            const opts = cands.map(c =>
-                `<option value="${esc(c.user_id)}" ${c.user_id === preset ? 'selected' : ''}>${esc(c.name)} (${esc(c.user_id)})</option>`).join('');
-            return row(`<select id="chainpick_${l.level}" style="display:block;width:100%;border:1px solid var(--apv-field-border);border-radius:8px;padding:5px 8px;font-size:12px;margin-top:2px;background:var(--apv-field-bg);color:var(--apv-field-text)">${allOpt}${opts}</select>`);
+            // MULTI-SELECT (2026-08-11): tick one or several approvers — ANY of
+            // the ticked may act on the record. None ticked = all approvers
+            // may act (HO L4: none ticked = skip straight to COO/L5).
+            const preset = l.level === 'l4'
+                ? String(form.l4_approver_id || '').split(',').map(s => s.trim()).filter(Boolean)
+                : [];
+            const hint = hoL4
+                ? 'None ticked — skips this level, goes directly to COO - L5'
+                : 'None ticked — all approvers, anyone may act';
+            const boxes = cands.map(c =>
+                `<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin:2px 0;cursor:pointer;color:var(--apv-field-text)">
+                     <input type="checkbox" class="chainpick_${l.level}" value="${esc(c.user_id)}" ${preset.includes(c.user_id) ? 'checked' : ''} style="accent-color:#2f3192;flex-shrink:0">
+                     <span>${esc(c.name)}</span>
+                 </label>`).join('');
+            return row(`<div style="border:1px solid var(--apv-field-border);border-radius:8px;padding:5px 8px;margin-top:2px;background:var(--apv-field-bg);max-height:110px;overflow-y:auto">${boxes}</div>
+                <div style="font-size:10px;color:var(--apv-dim);margin-top:2px">${hint}</div>`);
         }).join('');
 
         // Creator attaches CC addresses for the future result email (left)
         // and picks the record's approvers per level (right) — ONE box.
         const ccAdded = String(draft?.cc_emails || '').split(',').map(s => s.trim()).filter(Boolean);
+        const toAdded = String(draft?.to_emails || '').split(',').map(s => s.trim()).filter(Boolean);
+        // The creator's own address always receives the result mail, so it is
+        // shown as a LOCKED chip in the To list — visible, never removable, and
+        // never submitted (the server resolves it from the profile).
+        const myEmail = (access?.email || '').trim();
+        const toLocked = myEmail ? [myEmail] : [];
         const ccRes = await Swal.fire({
-            title: 'CC emails & approval flow',
+            title: 'To / CC emails & approval flow',
             width: 720,
             html: `<div style="display:flex;gap:14px;text-align:left;font-size:13px;flex-wrap:wrap">
                        <div style="flex:1;min-width:230px">
                            <p style="margin:0 0 2px;font-size:12px;color:var(--apv-muted)">
                                When this NFA is approved / rejected the result email goes
-                               <b>To: you (creator)</b> with the <b>approvers in CC automatically</b>.
+                               <b>To: you - creator</b> with the <b>approvers in CC automatically</b>.
                            </p>
-                           ${emailGroupHtml('apv-ccsub', 'Add more CC emails (optional):')}
+                           ${emailGroupHtml('apv-tosub', 'Add more To emails - optional:')}
+                           ${emailGroupHtml('apv-ccsub', 'Add more CC emails - optional:')}
                        </div>
                        <div style="flex:1;min-width:230px;border-left:1px solid var(--apv-divider);padding-left:14px">
                            <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:var(--apv-strong)">
-                               APPROVAL FLOW — pick who approves where several people hold a level
+                               APPROVAL FLOW — tick who approves where several people hold a level - any ticked may act
                            </p>
                            ${flowRows || '<p style="font-size:11px;color:var(--apv-dim)">Flow preview unavailable — default approvers apply</p>'}
                        </div>
                    </div>`,
-            showCancelButton: false,
+            showCancelButton: true,
             allowOutsideClick: false,
             allowEscapeKey: false,
             confirmButtonText: 'OK — Continue',
+            cancelButtonText: 'Cancel',
             confirmButtonColor: BRAND,
             didOpen: () => {
                 Swal.hideLoading();   // if the transient loader's spinner landed here, put the OK button back
+                wireEmailGroup('apv-tosub', toAdded, toLocked);
                 wireEmailGroup('apv-ccsub', ccAdded);
             },
             preConfirm: () => {
+                if (!flushEmailGroup('apv-tosub', toAdded, toLocked)) return false;
                 if (!flushEmailGroup('apv-ccsub', ccAdded)) return false;
                 const picks = {};
                 pickerLevels.forEach(lvl => {
-                    const el = document.getElementById(`chainpick_${lvl}`);
-                    if (el) picks[lvl] = el.value || '';
+                    const ticked = document.querySelectorAll(`.chainpick_${lvl}:checked`);
+                    picks[lvl] = [...ticked].map(el => el.value).join(',');
                 });
-                // HO records need an explicit HOD pick (qualifying HODs exist)
-                if (isHO && pickerLevels.includes('l4') && !picks.l4) {
-                    Swal.showValidationMessage(`Select your L4 (${levelName('l4')}) approver`);
-                    return false;
-                }
+                // No ticks = all approvers may act (HO L4: straight to COO/L5)
                 return picks;
             },
         });
+        // Cancel here aborts the whole submit — the form stays open with every
+        // field intact so the creator can edit and submit again.
+        if (!ccRes.isConfirmed) return;
         const approverPicks = (ccRes.value && typeof ccRes.value === 'object') ? ccRes.value : {};
         const ccList = ccAdded;
 
@@ -1123,6 +1451,7 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
             let res;
             const fd = buildFormData();
             fd.set('cc_emails', ccList.join(', '));
+            fd.set('to_emails', toAdded.join(', '));
             // chosen approvers from the CC box's flow panel (empty = default)
             ['l2', 'l3', 'l4', 'l5'].forEach(lvl => {
                 if (lvl in approverPicks) fd.set(`${lvl}_approver_id`, approverPicks[lvl] || '');
@@ -1134,7 +1463,7 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
                 res = await createApplication(fd);
             }
             if (res?.application?.status === 'approved') {
-                toast.success('Submitted — auto approved (within your own authority limit)');
+                toast.success('Submitted — auto approved - within your own authority limit');
                 await promptResultEmail(res.application);
             } else {
                 toast.success('Application submitted');
@@ -1202,7 +1531,10 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
                                 {/* Purpose — full width */}
                                 <div className={full}>
                                     <span className={label}>Purpose of Approval *</span>
-                                    <textarea className={input} rows={2} value={form.description} onChange={set('description')}
+                                    <RichTextBox
+                                        className={input}
+                                        value={form.description}
+                                        onChange={(html) => setForm(f => ({ ...f, description: html }))}
                                         placeholder="Explain why this approval is needed" />
                                 </div>
 
@@ -1216,10 +1548,13 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
                                             <span className={label}>Instance ID</span>
                                             <input className={input} value={form.instance_id} onChange={set('instance_id')} placeholder="Instance ID" />
                                         </div>
-                                        <div className={cell}>
-                                            <span className={label}>SR No.</span>
-                                            <input className={input} value={form.sr_no} onChange={set('sr_no')} placeholder="SR number" />
-                                        </div>
+                                        {/* Other carries no SR No. */}
+                                        {!isOther && (
+                                            <div className={cell}>
+                                                <span className={label}>SR No.</span>
+                                                <input className={input} value={form.sr_no} onChange={set('sr_no')} placeholder="SR number" />
+                                            </div>
+                                        )}
                                         <div className={cell}>
                                             <span className={label}>Invoice</span>
                                             <input className={input} value={form.invoice_no} onChange={set('invoice_no')} placeholder="Invoice no." />
@@ -1233,11 +1568,19 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
                                             <input className={input} value={form.quotation_no} onChange={set('quotation_no')} placeholder="Quotation no." />
                                         </div>
                                         <div className={cell}>
-                                            <span className={label}>Quotation Amount *</span>
+                                            <span className={label}>Quotation Amount {isOther ? '' : '*'}</span>
                                             <input className={input} type="number" step="0.01" min="0" value={form.quotation_amount}
                                                 onChange={set('quotation_amount')} placeholder="0.00" />
                                         </div>
                                     </>
+                                )}
+                                {isOther && (
+                                    <div className={`${full} !py-1.5`}>
+                                        <p className="text-[10px] text-gray-500">
+                                            No approval limit applies to an Other NFA — it goes to L4 - HOD and then
+                                            to the COO - L5 for final approval.
+                                        </p>
+                                    </div>
                                 )}
 
                                 {isExpense && (
@@ -1303,7 +1646,7 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
                                 )}
                                 {isCredit && (
                                     <div className={cell}>
-                                        <span className={label}>Credit Period (Days) {isDnC ? '' : '*'}</span>
+                                        <span className={label}>Credit Period - Days {isDnC ? '' : '*'}</span>
                                         <input className={input} type="number" step="1" min="1"
                                             value={form.credit_days} onChange={set('credit_days')} placeholder="e.g. 30" />
                                     </div>
@@ -1328,6 +1671,58 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
                                         }}
                                         placeholder="Any remark for the approvers" />
                                 </div>
+
+                                {/* Expense settlement — who actually paid, and who
+                                    has to be reimbursed. The reimbursement mode
+                                    decides what the payee has to do next, so the
+                                    instruction for it shows right here. */}
+                                {isExpense && (
+                                    <>
+                                        <div className={cell}>
+                                            <span className={label}>Paid By Name</span>
+                                            <input className={input} value={form.paid_by_name}
+                                                onChange={set('paid_by_name')} placeholder="Who paid" />
+                                        </div>
+                                        <div className={`${cell} col-span-1 sm:col-span-2`}>
+                                            <span className={label}>Mode of Payment</span>
+                                            <select className={input} value={form.paid_by_mode} onChange={set('paid_by_mode')}>
+                                                <option value="">Select…</option>
+                                                {PAID_BY_MODES.map(m => <option key={m} value={m}>{m}</option>)}
+                                            </select>
+                                        </div>
+
+                                        <div className={cell}>
+                                            <span className={label}>Reimburse To</span>
+                                            <input className={input} value={form.reimburse_to}
+                                                onChange={set('reimburse_to')} placeholder="Who gets reimbursed" />
+                                        </div>
+                                        <div className={`${cell} col-span-1 sm:col-span-2`}>
+                                            <span className={label}>Mode of Payment</span>
+                                            <select className={input} value={form.reimburse_mode} onChange={set('reimburse_mode')}>
+                                                <option value="">Select…</option>
+                                                {REIMBURSE_MODES.map(m => <option key={m} value={m}>{m}</option>)}
+                                            </select>
+                                        </div>
+
+                                        {form.reimburse_mode === 'Bank transfer' && (
+                                            <div className={full}>
+                                                <span className={label}>Bank Details *</span>
+                                                <textarea className={`${input} resize-y`} rows={3}
+                                                    value={form.reimburse_bank_details}
+                                                    onChange={set('reimburse_bank_details')}
+                                                    placeholder={'Account holder name\nBank name & branch\nAccount number\nIFSC code'} />
+                                            </div>
+                                        )}
+                                        {form.reimburse_mode && form.reimburse_mode !== 'Bank transfer' && (
+                                            <div className={`${full} !py-2`}>
+                                                <p className="flex items-start gap-1.5 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
+                                                    <Info size={13} className="flex-shrink-0 mt-px" />
+                                                    <span>{REIMBURSE_NOTES[form.reimburse_mode]}</span>
+                                                </p>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
                             </div>
                         );
                     })()}

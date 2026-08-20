@@ -60,6 +60,11 @@ def _iso(d):
     return d.isoformat() if d else ""
 
 
+def _iso_dt(dt):
+    """datetime → 'YYYY-MM-DDTHH:MM:SS' (naive IST, as stored) | ''."""
+    return dt.isoformat(timespec="seconds") if dt else ""
+
+
 def _load_json_list(raw):
     """TEXT column that should contain a JSON list → list (never raises)."""
     if not raw:
@@ -127,6 +132,9 @@ def serialize_row(r: MomRow):
         "originDate": _iso(r.origin_date),
         "carried": bool(r.carried),
         "prevRemarks": _load_json_list(r.prev_remarks),
+        # when the point's wording / owners / due were last rewritten — the
+        # client uses it to decide whose version of a tracked point is newest
+        "editedAt": _iso_dt(r.edited_at),
     }
 
 
@@ -151,6 +159,7 @@ def serialize_meeting(m: MomMeeting):
         "location": m.location or "",
         "type": m.type or "",
         "conductedBy": m.conducted_by or "",
+        "createdAt": _iso_dt(m.created_at),             # when the sheet was finalized
         "heads": [str(h).strip() for h in _load_json_list(m.heads) if str(h).strip()],
         "attendees": [serialize_attendee(a) for a in m.attendees],
         "rows": [serialize_row(r) for r in m.rows],
@@ -314,6 +323,118 @@ def create_meeting(db: Session, data: dict, conducted_by_id: str | None = None,
     return serialize_meeting(meeting)
 
 
+def _row_definition(area, category, point, resp, due, flag, master_id):
+    """The part of a row that DEFINES the tracked point (what was discussed and
+    by whom, by when) — status / remark are that meeting's own outcome and are
+    deliberately left out, so re-typing a remark never counts as a rewrite."""
+    return (
+        (area or "").strip(), (category or "").strip(), (point or "").strip(),
+        tuple(resp or []), due, flag,
+        str(master_id) if master_id is not None else "",
+    )
+
+
+def _later_meetings(db: Session, meeting: MomMeeting):
+    """Every meeting of the SAME branch(es) held after `meeting`, oldest first.
+
+    Meetings can cover several branches, so the overlap is checked on the full
+    branch list, not just the primary branch code."""
+    codes = {b["code"] for b in _load_branches(meeting)}
+    candidates = (
+        db.query(MomMeeting)
+        .options(selectinload(MomMeeting.rows))
+        .filter(MomMeeting.date >= meeting.date, MomMeeting.id != meeting.id)
+        .order_by(MomMeeting.date, MomMeeting.id)
+        .all()
+    )
+    return [
+        m for m in candidates
+        if (m.date, m.id) > (meeting.date, meeting.id)
+        and codes & {b["code"] for b in _load_branches(m)}
+    ]
+
+
+def _propagate_added_rows(db: Session, meeting: MomMeeting, added: list):
+    """Push points ADDED while editing a past meeting into the meetings that
+    already happened after it.
+
+    Rule (Master Admin editing MOM History):
+      • editing an EXISTING point only changes that meeting — the sheets of the
+        meetings held after it keep the snapshot they were signed off with;
+      • ADDING a new open task is a point the branch still owes, so it is
+        inserted as a carried (C/F) row into every later meeting of the same
+        branch and therefore also carries into the next new meeting.
+
+    The remark trail is chained meeting by meeting exactly like a normally
+    carried task, and the push stops at the meeting where the task is already
+    marked completed. Re-running the edit is safe: a meeting that already holds
+    the track is left alone.
+
+    Returns the later meetings that were changed."""
+    open_tasks = [r for r in added if r["flag"] == "T" and r["status"] != "completed"]
+    if not open_tasks:
+        return []
+    later = _later_meetings(db, meeting)
+    if not later:
+        return []
+
+    # running carry state per track, starting from how the row stands in the
+    # edited meeting (its own review becomes the first trail entry)
+    state = {
+        r["track_id"]: {
+            "status": r["status"],
+            "trail": list(r["prev_remarks"]) + [{
+                "date": _iso(meeting.date), "text": r["remark"] or "",
+                "status": r["status"], "by": meeting.conducted_by or "",
+            }],
+        }
+        for r in open_tasks
+    }
+
+    touched = []
+    for m in later:
+        existing = {r.track_id: r for r in m.rows if r.track_id}
+        next_pos = max((r.position for r in m.rows), default=-1) + 1
+        changed = False
+        for r in open_tasks:
+            st = state[r["track_id"]]
+            if st["status"] == "completed":
+                continue                      # closed earlier — nothing left to carry
+            row = existing.get(r["track_id"])
+            if row is None:
+                m.rows.append(MomRow(
+                    position=next_pos,
+                    track_id=r["track_id"],
+                    master_id=r["master_id"],
+                    area=r["area"],
+                    category=r["category"],
+                    point=r["point"],
+                    responsibility=r["responsibility"],
+                    due_date=r["due_date"],
+                    flag="T",
+                    status=st["status"],
+                    remark="",                # not reviewed in that meeting
+                    origin_date=r["origin_date"],
+                    carried=True,
+                    prev_remarks=json.dumps(st["trail"], ensure_ascii=False),
+                    edited_at=r["edited_at"],
+                ))
+                next_pos += 1
+                changed = True
+                review_text, review_status = "", st["status"]
+            else:
+                # already on that sheet (earlier push) — keep its own review
+                review_text, review_status = (row.remark or ""), row.status
+            st["trail"] = st["trail"] + [{
+                "date": _iso(m.date), "text": review_text,
+                "status": review_status, "by": m.conducted_by or "",
+            }]
+            st["status"] = review_status
+        if changed:
+            touched.append(m)
+    return touched
+
+
 def update_meeting(db: Session, meeting_id: int, data: dict, editor_name: str = ""):
     """Edit an already-finalized meeting (MOM History → Edit).
 
@@ -322,10 +443,37 @@ def update_meeting(db: Session, meeting_id: int, data: dict, editor_name: str = 
     Attendees and rows are fully replaced from the payload; the client sends
     the carried (past) rows back unchanged along with the edited current rows,
     so the full sheet is preserved. Row storage mirrors create_meeting() so
-    the saved shape stays identical."""
-    meeting = db.query(MomMeeting).filter(MomMeeting.id == meeting_id).first()
+    the saved shape stays identical.
+
+    Two things reach beyond this meeting (see _propagate_added_rows):
+      • a rewritten point is stamped `edited_at`, so the next meeting carries
+        the NEW wording forward while the already-saved later meetings keep
+        their own snapshot;
+      • a newly added open task is inserted into the later meetings of the
+        same branch as a carried row.
+
+    Returns {"meeting": …, "propagated": [later meetings that changed]}."""
+    meeting = (
+        db.query(MomMeeting)
+        .options(selectinload(MomMeeting.rows))
+        .filter(MomMeeting.id == meeting_id)
+        .first()
+    )
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
+
+    # snapshot the rows BEFORE they are replaced, so the save can tell an
+    # untouched row from a rewritten one and a brand-new point from both
+    before = {
+        r.track_id: {
+            "definition": _row_definition(
+                r.area, r.category, r.point, _load_resp(r.responsibility),
+                r.due_date, r.flag, r.master_id,
+            ),
+            "edited_at": r.edited_at,
+        }
+        for r in meeting.rows if r.track_id
+    }
 
     if data.get("date") is not None:
         mdate = _parse_date(data.get("date"))
@@ -364,32 +512,66 @@ def update_meeting(db: Session, meeting_id: int, data: dict, editor_name: str = 
             ))
 
     # rows — full replace (client resends carried + current + new)
+    propagated = []
     if data.get("rows") is not None:
-        meeting.rows.clear()
-        db.flush()
+        now = now_ist()
+        prepared, added = [], []
         for pos, row in enumerate(data.get("rows") or []):
             flag = "T" if row.get("flag") == "T" else "I"
             resp = _normalize_resp(row.get("resp"))
+            track_id = (row.get("trackId") or f"t{meeting.id}-{pos}")
+            area = (row.get("area") or "").strip() or "—"
+            category = row.get("category") or "Other"
+            point = row.get("point") or ""
+            due = _parse_date(row.get("due")) if flag == "T" else None
+            master_id = row.get("masterId")
+
+            definition = _row_definition(area, category, point, resp, due, flag, master_id)
+            old = before.get(track_id)
+            if old is None or old["definition"] != definition:
+                edited_at = now          # brand-new point, or its wording rewritten
+            else:
+                edited_at = old["edited_at"]     # untouched — keep it as old as it was
+
+            spec = {
+                "position": pos,
+                "track_id": track_id,
+                "master_id": master_id,
+                "area": area,
+                "category": category,
+                "point": point,
+                "responsibility": json.dumps(resp, ensure_ascii=False) if resp else None,
+                "due_date": due,
+                "flag": flag,
+                "status": row.get("status") or "pending",
+                "remark": row.get("remark") or "",
+                "origin_date": _parse_date(row.get("originDate")) or mdate,
+                "carried": bool(row.get("carried")),
+                "prev_remarks": row.get("prevRemarks") or [],
+                "edited_at": edited_at,
+            }
+            prepared.append(spec)
+            if old is None:
+                added.append(spec)
+
+        meeting.rows.clear()
+        db.flush()
+        for spec in prepared:
             meeting.rows.append(MomRow(
-                position=pos,
-                track_id=(row.get("trackId") or f"t{meeting.id}-{pos}"),
-                master_id=row.get("masterId"),
-                area=(row.get("area") or "").strip() or "—",
-                category=row.get("category") or "Other",
-                point=row.get("point") or "",
-                responsibility=json.dumps(resp, ensure_ascii=False) if resp else None,
-                due_date=_parse_date(row.get("due")) if flag == "T" else None,
-                flag=flag,
-                status=row.get("status") or "pending",
-                remark=row.get("remark") or "",
-                origin_date=_parse_date(row.get("originDate")) or mdate,
-                carried=bool(row.get("carried")),
-                prev_remarks=json.dumps(row.get("prevRemarks") or [], ensure_ascii=False),
+                **{k: v for k, v in spec.items() if k != "prev_remarks"},
+                prev_remarks=json.dumps(spec["prev_remarks"], ensure_ascii=False),
             ))
+        db.flush()
+
+        # points added to a past meeting also land in the meetings held after it
+        propagated = _propagate_added_rows(db, meeting, added)
 
     db.commit()
     db.refresh(meeting)
-    return serialize_meeting(meeting)
+    return {
+        "meeting": serialize_meeting(meeting),
+        "propagated": [serialize_meeting(m) for m in propagated],
+    }
 
 
 def delete_meeting(db: Session, meeting_id: int):

@@ -387,6 +387,16 @@ class ApprovalApplication(Base):
     expense_type = Column(String(400), nullable=True)
     payment_mode = Column(String(50), nullable=True)
 
+    # Expense settlement block (asked for after the Remark field). Who actually
+    # paid the money and how, then who has to be reimbursed and how. When the
+    # reimbursement mode is a bank transfer the account details are typed into
+    # reimburse_bank_details; UPI / Cash instead show an instruction in the form.
+    paid_by_name = Column(String(150), nullable=True)
+    paid_by_mode = Column(String(30), nullable=True)      # UPI|Cash|Card|Net banking|Other
+    reimburse_to = Column(String(150), nullable=True)
+    reimburse_mode = Column(String(30), nullable=True)    # UPI|Cash|Bank transfer
+    reimburse_bank_details = Column(Text, nullable=True)
+
     description = Column(Text, nullable=True)
     remark = Column(Text, nullable=True)
 
@@ -403,20 +413,27 @@ class ApprovalApplication(Base):
 
     # Extra CC addresses the CREATOR attached at submit — automatically added
     # to the result email's CC when the record is approved / rejected
-    cc_emails = Column(String(500), nullable=True)
+    cc_emails = Column(Text, nullable=True)
 
-    # Creator-chosen approvers (submit-time CC box). L4/L5: HO creators
-    # always choose their HOD; non-HO creators may pick ONE person per level
-    # when it has several approvers (NULL = any assigned approver may act).
+    # Extra TO addresses the creator attached at submit. The creator's own
+    # address is ALWAYS a recipient (resolved from their profile when the mail
+    # goes out) — these are additional people who should get it as a recipient
+    # rather than in CC.
+    to_emails = Column(Text, nullable=True)
+
+    # Creator-chosen approvers (submit-time CC box). A creator may pick ONE
+    # OR SEVERAL people per level (ids CSV-joined, names ", "-joined —
+    # multi-select 2026-08-11); any of the chosen may act. NULL = every
+    # assigned approver may act (HO L4: NULL = skip straight to L5/COO).
     # L2/L3 choices apply to non-HO records only (HO skips those stages).
-    l2_approver_id = Column(String(50), nullable=True)
-    l2_approver_name = Column(String(100), nullable=True)
-    l3_approver_id = Column(String(50), nullable=True)
-    l3_approver_name = Column(String(100), nullable=True)
-    l4_approver_id = Column(String(50), nullable=True)
-    l4_approver_name = Column(String(100), nullable=True)
-    l5_approver_id = Column(String(50), nullable=True)
-    l5_approver_name = Column(String(100), nullable=True)
+    l2_approver_id = Column(String(500), nullable=True)
+    l2_approver_name = Column(String(1000), nullable=True)
+    l3_approver_id = Column(String(500), nullable=True)
+    l3_approver_name = Column(String(1000), nullable=True)
+    l4_approver_id = Column(String(500), nullable=True)
+    l4_approver_name = Column(String(1000), nullable=True)
+    l5_approver_id = Column(String(500), nullable=True)
+    l5_approver_name = Column(String(1000), nullable=True)
 
     # Per-level approval audit trail (L2, L3, L4=HOD, L5=COO)
     l2_action_by = Column(String(50), nullable=True)
@@ -475,6 +492,11 @@ class ApprovalApplication(Base):
             "expense_amount": self.expense_amount,
             "expense_type": self.expense_type,
             "payment_mode": self.payment_mode,
+            "paid_by_name": self.paid_by_name,
+            "paid_by_mode": self.paid_by_mode,
+            "reimburse_to": self.reimburse_to,
+            "reimburse_mode": self.reimburse_mode,
+            "reimburse_bank_details": self.reimburse_bank_details,
             "description": self.description,
             "remark": self.remark,
             "status": self.status,
@@ -483,6 +505,7 @@ class ApprovalApplication(Base):
             "created_by_level": self.created_by_level,
             "auto_approved": bool(self.auto_approved),
             "cc_emails": self.cc_emails,
+            "to_emails": self.to_emails,
             "l2_approver_id": self.l2_approver_id,
             "l2_approver_name": self.l2_approver_name,
             "l3_approver_id": self.l3_approver_id,

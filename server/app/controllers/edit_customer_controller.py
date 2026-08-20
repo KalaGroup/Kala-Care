@@ -22,6 +22,7 @@ from app.schemas import edit_customer_schema
 from app.models.customer_model import Customer
 from app.models.user_model import User
 from app.time_utils import now_ist
+from app import mail_utils
 
 class EditCustomerController:
     def __init__(self, db: Session):
@@ -515,7 +516,8 @@ class EditCustomerController:
             # showed there but not in Outlook).
             msg = MIMEMultipart('mixed')
             msg['Subject'] = subject
-            msg['From'] = from_email
+            msg['From'] = mail_utils.from_header(from_email)
+            msg['Reply-To'] = mail_utils.reply_to(from_email)
             msg['To'] = ', '.join(recipient_emails)
             msg['MIME-Version'] = '1.0'
 

@@ -1195,7 +1195,9 @@ const BranchCustomersModal = ({ isOpen, onClose, branch, apiBaseUrl, userData,
                                                         <td className="border border-gray-300 px-1 py-1.5 text-center">
                                                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-black">
                                                                 {customer.last_status
-                                                                    ? customer.last_status.replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase())
+                                                                    ? (customer.last_status.toLowerCase() === 'rescheduled'
+                                                                        ? 'Followups'
+                                                                        : customer.last_status.replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase()))
                                                                     : 'Pending'}
                                                             </span>
                                                         </td>

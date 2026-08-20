@@ -21,6 +21,10 @@ export const routeImporters = {
   '/sales-finance': () => import('./pages/SalseANDFinance'),
   '/aop-master': () => import('./pages/AOPMaster'),
   '/sales-labour-report': () => import('./pages/SalesLabourReport'),
+  '/employee-productivity': () => import('./pages/EmployeeProductivity'),
+  '/sr-allocation': () => import('./pages/SRAllocation'),
+  '/annual-reports': () => import('./pages/AnnualReports'),
+  '/welcome-letter': () => import('./pages/WelcomeLetter'),
   '/import': () => import('./pages/Import'),
 };
 

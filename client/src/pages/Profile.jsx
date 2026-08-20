@@ -18,6 +18,8 @@ import { MdOutlineFileDownload, MdOutlineFileUpload } from "react-icons/md";
 import * as XLSX from 'xlsx';
 import EmpQuery from '../components/EmpQuery';
 import AdminQueries from '../components/AdminQueries';
+import SeUidMaster from '../components/SeUidMaster';
+import { isAopRightsAdmin, AOP_ADMIN_IDS } from '../utils/pagePermission';
 
 const themeColor = '#2f3192';
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
@@ -1050,9 +1052,36 @@ const Profile = () => {
         if (from.current && to.current && to.current.scrollLeft !== from.current.scrollLeft)
             to.current.scrollLeft = from.current.scrollLeft;
     };
+    // Sticky-column offsets for the employees table, measured from the real
+    // rendered header widths. Auto table layout may resolve the first columns
+    // wider/narrower than their w-* classes (especially while the loading row
+    // spans the table), so hardcoded left offsets drift — pin them to reality.
+    const empSrNoThRef = useRef(null);
+    const empNameThRef = useRef(null);
+    const [empStickyLefts, setEmpStickyLefts] = useState({ name: 64, userId: 204 });
+    useEffect(() => {
+        const srNoTh = empSrNoThRef.current;
+        const nameTh = empNameThRef.current;
+        if (!srNoTh || !nameTh) return;
+        const measure = () => {
+            const w1 = srNoTh.getBoundingClientRect().width;
+            const w2 = nameTh.getBoundingClientRect().width;
+            setEmpStickyLefts(prev =>
+                prev.name === w1 && prev.userId === w1 + w2 ? prev : { name: w1, userId: w1 + w2 }
+            );
+        };
+        measure();
+        const ro = new ResizeObserver(measure);
+        ro.observe(srNoTh);
+        ro.observe(nameTh);
+        return () => ro.disconnect();
+    });
     const canGrantExpense = isMasterAdmin;
     const canViewCDBUpdate = isMasterAdmin;
     const canExport = isMasterAdmin || (user && user.can_export);
+    // AOP & Master rights may only be granted by the ids in
+    // VITE_PMS_AOP_ADMIN_IDS — they also always hold those rights themselves.
+    const canGrantAop = isAopRightsAdmin(user);
     const RESTRICTED_USER_IDS = (import.meta.env.VITE_RESTRICTED_USER_IDS || '')
         .split(',')
         .map(id => id.trim())
@@ -2037,10 +2066,11 @@ const Profile = () => {
         }
     };
 
-    // Grant/revoke the Part Detail Info or MOM Tracking pages for a user.
-    // Master Admin only; page is 'part_detail' | 'mom'.
+    // Grant/revoke a per-page permission for a user. Master Admin only;
+    // page is 'part_detail' | 'mom' | 'approval' | 'pms'.
     const handleTogglePageAccess = async (id, page, currentStatus) => {
-        const label = { part_detail: 'Part Detail Info', approval: 'Note For Approval' }[page] || 'MOM Tracking';
+        const label = { part_detail: 'Part Detail Info', approval: 'Note For Approval',
+            pms: 'PMS' }[page] || 'MOM Tracking';
         if (!isMasterAdmin) {
             Swal.fire({
                 title: 'Access Denied',
@@ -2071,9 +2101,13 @@ const Profile = () => {
                 if (editingUser && editingUser.id === id) {
                     const field = {
                         part_detail: 'can_access_part_detail',
-                        approval: 'can_access_approval'
+                        approval: 'can_access_approval',
+                        pms: 'can_access_pms'
                     }[page] || 'can_access_mom';
-                    setEditingUser({ ...editingUser, [field]: !currentStatus });
+                    const next = { ...editingUser, [field]: !currentStatus };
+                    // Revoking PMS drops the AOP rights with it (server does the same)
+                    if (page === 'pms' && currentStatus) next.aop_access = 'none';
+                    setEditingUser(next);
                 }
             }
         } catch (err) {
@@ -2081,6 +2115,55 @@ const Profile = () => {
             Swal.fire({
                 title: 'Error!',
                 text: err.response?.data?.detail || `Failed to update ${label} access`,
+                icon: 'error',
+                confirmButtonColor: '#2f3192'
+            });
+        }
+    };
+
+    // AOP & Master rights: 'none' | 'view' | 'edit'. Only the ids listed in
+    // VITE_PMS_AOP_ADMIN_IDS may set this (the server checks the same list).
+    const handleSetAopAccess = async (id, level) => {
+        if (!canGrantAop) {
+            Swal.fire({
+                title: 'Access Denied',
+                text: 'You do not have permission to grant AOP & Master rights',
+                icon: 'error',
+                confirmButtonColor: '#2f3192'
+            });
+            return;
+        }
+
+        try {
+            const response = await axios.put(`${API_BASE_URL}/users/employees/${id}/aop-access`,
+                { level },
+                { headers: { 'user-id': user.user_id } }
+            );
+
+            if (response.data.success) {
+                Swal.fire({
+                    title: 'Success!',
+                    text: response.data.message,
+                    icon: 'success',
+                    confirmButtonColor: '#2f3192',
+                    timer: 2000
+                });
+
+                await fetchEmployees();
+
+                if (editingUser && editingUser.id === id) {
+                    setEditingUser({
+                        ...editingUser,
+                        aop_access: level,
+                        can_access_pms: level !== 'none' ? true : editingUser.can_access_pms
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('Set AOP access error:', err);
+            Swal.fire({
+                title: 'Error!',
+                text: err.response?.data?.detail || 'Failed to update AOP & Master rights',
                 icon: 'error',
                 confirmButtonColor: '#2f3192'
             });
@@ -2639,6 +2722,23 @@ const Profile = () => {
                                         )}
                                     </button>
                                 )}
+                                {isMasterAdmin && (
+                                    <button
+                                        onClick={() => setActiveAdminTab('se-uid')}
+                                        className={`px-4 sm:px-5 py-2.5 text-xs sm:text-sm font-medium transition-colors relative ${activeAdminTab === 'se-uid'
+                                            ? 'text-[#2f3192]'
+                                            : 'text-black hover:text-gray-800'
+                                            }`}
+                                    >
+                                        <div className="flex items-center space-x-1.5">
+                                            <FaIdCard className={activeAdminTab === 'se-uid' ? 'text-[#2f3192]' : 'text-black'} />
+                                            <span>SE UID Master</span>
+                                        </div>
+                                        {activeAdminTab === 'se-uid' && (
+                                            <div className="absolute bottom-0 left-0 w-full h-0.5 bg-[#2f3192]"></div>
+                                        )}
+                                    </button>
+                                )}
                             </div>
                         </div>
 
@@ -2651,44 +2751,7 @@ const Profile = () => {
                                             <span>Employee Management</span>
                                         </h3>
 
-                                        {(isMasterAdmin || isITAdmin) && (
-                                            <div className="flex space-x-2 whitespace-nowrap order-1 sm:order-2 max-sm:flex-wrap max-sm:gap-y-2">
-                                                {canExport && (
-                                                    <button
-                                                        onClick={handleExportEmployees}
-                                                        className="export-btn flex items-center justify-center space-x-1 bg-green-500 hover:bg-green-600 text-white px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-sm hover:shadow"
-                                                    >
-                                                        <MdOutlineFileUpload className="text-xs" />
-                                                        <span className="hidden sm:inline">Export</span>
-                                                        <span className="sm:hidden">Exp</span>
-                                                    </button>
-                                                )}
-
-                                                {!isRestrictedUser && (
-                                                    <button
-                                                        onClick={() => setShowImportModal(true)}
-                                                        className="flex items-center justify-center space-x-1 bg-[#2f3192] hover:bg-[#3a5885] text-white px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-sm hover:shadow"
-                                                    >
-                                                        <MdOutlineFileDownload className="text-xs" />
-                                                        <span className="hidden sm:inline">Import</span>
-                                                        <span className="sm:hidden">Imp</span>
-                                                    </button>
-                                                )}
-
-                                                {!isRestrictedUser && (
-                                                    <button
-                                                        onClick={() => setShowAddModal(true)}
-                                                        className="flex items-center justify-center space-x-1 bg-[#2f3192] hover:bg-[#3a5885] text-white px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-sm hover:shadow"
-                                                    >
-                                                        <FaUserPlus className="text-xs" />
-                                                        <span className="hidden sm:inline">Add</span>
-                                                        <span className="sm:hidden">Add</span>
-                                                    </button>
-                                                )}
-                                            </div>
-                                        )}
-
-                                        <div className="flex items-center justify-end gap-2 flex-1 sm:ml-auto order-2 sm:order-1 max-sm:w-full max-sm:flex-wrap">
+                                        <div className="flex items-center justify-end gap-2 flex-1 sm:ml-auto max-sm:w-full max-sm:flex-wrap">
                                             <select
                                                 value={branchFilter}
                                                 onChange={(e) => setBranchFilter(e.target.value)}
@@ -2701,7 +2764,7 @@ const Profile = () => {
                                                 ))}
                                             </select>
 
-                                            <div className="relative max-w-md flex-1 max-sm:w-full max-sm:min-w-0">
+                                            <div className="relative w-52 flex-none max-sm:w-full max-sm:min-w-0">
                                                 <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black text-xs" />
                                                 <input
                                                     type="text"
@@ -2719,6 +2782,43 @@ const Profile = () => {
                                                     </button>
                                                 )}
                                             </div>
+
+                                            {(isMasterAdmin || isITAdmin) && (
+                                                <div className="flex items-center gap-2 whitespace-nowrap max-sm:flex-wrap max-sm:gap-y-2">
+                                                    {canExport && (
+                                                        <button
+                                                            onClick={handleExportEmployees}
+                                                            className="export-btn flex items-center justify-center space-x-1 bg-green-500 hover:bg-green-600 text-white px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-sm hover:shadow"
+                                                        >
+                                                            <MdOutlineFileUpload className="text-xs" />
+                                                            <span className="hidden sm:inline">Export</span>
+                                                            <span className="sm:hidden">Exp</span>
+                                                        </button>
+                                                    )}
+
+                                                    {!isRestrictedUser && (
+                                                        <button
+                                                            onClick={() => setShowImportModal(true)}
+                                                            className="flex items-center justify-center space-x-1 bg-[#2f3192] hover:bg-[#3a5885] text-white px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-sm hover:shadow"
+                                                        >
+                                                            <MdOutlineFileDownload className="text-xs" />
+                                                            <span className="hidden sm:inline">Import</span>
+                                                            <span className="sm:hidden">Imp</span>
+                                                        </button>
+                                                    )}
+
+                                                    {!isRestrictedUser && (
+                                                        <button
+                                                            onClick={() => setShowAddModal(true)}
+                                                            className="flex items-center justify-center space-x-1 bg-[#2f3192] hover:bg-[#3a5885] text-white px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-sm hover:shadow"
+                                                        >
+                                                            <FaUserPlus className="text-xs" />
+                                                            <span className="hidden sm:inline">Add</span>
+                                                            <span className="sm:hidden">Add</span>
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
 
@@ -2735,9 +2835,9 @@ const Profile = () => {
                                             <table className="border-separate border-spacing-0 min-w-[1420px] w-full">
                                                 <thead className="bg-gray-50 sticky top-0 z-10">
                                                     <tr>
-                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-16 max-w-[64px] box-border overflow-hidden sticky left-0 z-20 bg-gray-50">Sr. No.</th>
-                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-[140px] max-w-[140px] box-border overflow-hidden sticky left-16 z-20 bg-gray-50">Employee</th>
-                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-[130px] max-w-[130px] box-border overflow-hidden sticky left-[204px] z-20 bg-gray-50">User ID</th>
+                                                        <th ref={empSrNoThRef} className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-16 max-w-[64px] box-border overflow-hidden sticky left-0 z-20 bg-gray-50">Sr. No.</th>
+                                                        <th ref={empNameThRef} style={{ left: empStickyLefts.name }} className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-[140px] max-w-[140px] box-border overflow-hidden sticky z-20 bg-gray-50">Employee</th>
+                                                        <th style={{ left: empStickyLefts.userId }} className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-[130px] max-w-[130px] box-border overflow-hidden sticky z-20 bg-gray-50">User ID</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Mobile</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Email</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Branch Code</th>
@@ -2749,6 +2849,8 @@ const Profile = () => {
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Part Detail Info</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">MOM Tracking</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Note For Approval</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">PMS</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">AOP &amp; Master</th>
                                                         {!isRestrictedUser && (
                                                             <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap">Actions</th>
                                                         )}
@@ -2757,7 +2859,7 @@ const Profile = () => {
                                                 <tbody className="bg-white divide-y divide-gray-200">
                                                     {loading ? (
                                                         <tr>
-                                                            <td colSpan={isRestrictedUser ? 14 : 15} className="px-2 py-4 text-center">
+                                                            <td colSpan={isRestrictedUser ? 16 : 17} className="px-2 py-4 text-center">
                                                                 <div className="flex flex-col items-center justify-center space-y-2">
                                                                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#2f3192]"></div>
                                                                     <p className="text-xs text-black">Loading employees...</p>
@@ -2771,7 +2873,7 @@ const Profile = () => {
                                                                     <td className="px-2 py-1 text-center text-xs text-black border-r border-b border-gray-200 w-16 max-w-[64px] box-border overflow-hidden sticky left-0 z-10 bg-white group-hover:bg-gray-50">
                                                                         {index + 1}
                                                                     </td>
-                                                                    <td className="px-2 py-1 text-center text-xs text-black border-r border-b border-gray-200 w-[140px] max-w-[140px] box-border overflow-hidden sticky left-16 z-10 bg-white group-hover:bg-gray-50">
+                                                                    <td style={{ left: empStickyLefts.name }} className="px-2 py-1 text-center text-xs text-black border-r border-b border-gray-200 w-[140px] max-w-[140px] box-border overflow-hidden sticky z-10 bg-white group-hover:bg-gray-50">
                                                                         <span
                                                                             className="text-black truncate max-w-[120px] block"
                                                                             title={emp.name}
@@ -2779,33 +2881,33 @@ const Profile = () => {
                                                                             {highlightText(emp.name, searchTerm)}
                                                                         </span>
                                                                     </td>
-                                                                    <td className="px-2 py-1 text-center text-xs text-black border-r border-b border-gray-200 w-[130px] max-w-[130px] box-border overflow-hidden sticky left-[204px] z-10 bg-white group-hover:bg-gray-50">                                                                        <span
+                                                                    <td style={{ left: empStickyLefts.userId }} className="px-2 py-1 text-center text-xs text-black border-r border-b border-gray-200 w-[130px] max-w-[130px] box-border overflow-hidden sticky z-10 bg-white group-hover:bg-gray-50">                                                                        <span
                                                                         className="text-black truncate max-w-[112px] block mx-auto"
                                                                         title={emp.user_id}
                                                                     >
                                                                         {highlightText(emp.user_id, searchTerm)}
                                                                     </span>
                                                                     </td>
-                                                                    <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200">
+                                                                    <td className="px-2 py-1 text-center text-xs text-black border-r border-b border-gray-200">
                                                                         {emp.mobile_number ? highlightText(emp.mobile_number, searchTerm) : '-'}
                                                                     </td>
-                                                                    <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200">
+                                                                    <td className="px-2 py-1 text-center text-xs text-black border-r border-b border-gray-200">
                                                                         {emp.email ? highlightText(emp.email, searchTerm) : '-'}
                                                                     </td>
-                                                                    <td className="px-2 py-1 text-center border-r border-gray-200">
+                                                                    <td className="px-2 py-1 text-center border-r border-b border-gray-200">
                                                                         <span className="px-1 py-0.5 bg-gray-100 text-black rounded text-xs">
                                                                             {highlightText(emp.branch, searchTerm)}
                                                                         </span>
                                                                     </td>
-                                                                    <td className="px-2 py-1 text-center text-xs text-black border-r border-gray-200">
+                                                                    <td className="px-2 py-1 text-center text-xs text-black border-r border-b border-gray-200">
                                                                         {emp.branch_name ? highlightText(emp.branch_name, searchTerm) : '-'}
                                                                     </td>
-                                                                    <td className="px-2 py-1 text-center border-r border-gray-200">
+                                                                    <td className="px-2 py-1 text-center border-r border-b border-gray-200">
                                                                         <span className={`px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${getRoleColor(emp.role)} text-black`}>
                                                                             {getRoleDisplayName(emp.role)}
                                                                         </span>
                                                                     </td>
-                                                                    <td className="px-2 py-1 text-center border-r border-gray-200">
+                                                                    <td className="px-2 py-1 text-center border-r border-b border-gray-200">
                                                                         {emp.is_blocked ? (
                                                                             <span className="px-1 py-0.5 bg-red-100 text-black rounded text-xs font-medium inline-flex items-center justify-center gap-1">
                                                                                 <FaBan className="text-xs" /> Blocked
@@ -2816,43 +2918,62 @@ const Profile = () => {
                                                                             </span>
                                                                         )}
                                                                     </td>
-                                                                    <td className="px-2 py-1 text-center border-r border-gray-200">
+                                                                    <td className="px-2 py-1 text-center border-r border-b border-gray-200">
                                                                         {emp.user_id === MASTER_ADMIN_ID || emp.can_export ? (
                                                                             <FaCheck className="inline-block text-sm text-green-500" title={emp.user_id === MASTER_ADMIN_ID ? 'Always Allowed' : 'Allowed'} />
                                                                         ) : (
                                                                             <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />
                                                                         )}
                                                                     </td>
-                                                                    <td className="px-2 py-1 text-center border-r border-gray-200">
+                                                                    <td className="px-2 py-1 text-center border-r border-b border-gray-200">
                                                                         {emp.user_id === MASTER_ADMIN_ID || emp.can_access_expense ? (
                                                                             <FaCheck className="inline-block text-sm text-green-500" title={emp.user_id === MASTER_ADMIN_ID ? 'Always Allowed' : 'Allowed'} />
                                                                         ) : (
                                                                             <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />
                                                                         )}
                                                                     </td>
-                                                                    <td className="px-2 py-1 text-center border-r border-gray-200">
+                                                                    <td className="px-2 py-1 text-center border-r border-b border-gray-200">
                                                                         {emp.user_id === MASTER_ADMIN_ID || emp.can_access_part_detail ? (
                                                                             <FaCheck className="inline-block text-sm text-green-500" title={emp.user_id === MASTER_ADMIN_ID ? 'Always Allowed' : 'Allowed'} />
                                                                         ) : (
                                                                             <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />
                                                                         )}
                                                                     </td>
-                                                                    <td className="px-2 py-1 text-center border-r border-gray-200">
+                                                                    <td className="px-2 py-1 text-center border-r border-b border-gray-200">
                                                                         {emp.user_id === MASTER_ADMIN_ID || emp.can_access_mom ? (
                                                                             <FaCheck className="inline-block text-sm text-green-500" title={emp.user_id === MASTER_ADMIN_ID ? 'Always Allowed' : 'Allowed'} />
                                                                         ) : (
                                                                             <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />
                                                                         )}
                                                                     </td>
-                                                                    <td className="px-2 py-1 text-center border-r border-gray-200">
+                                                                    <td className="px-2 py-1 text-center border-r border-b border-gray-200">
                                                                         {emp.user_id === MASTER_ADMIN_ID || emp.can_access_approval ? (
                                                                             <FaCheck className="inline-block text-sm text-green-500" title={emp.user_id === MASTER_ADMIN_ID ? 'Always Allowed' : 'Allowed'} />
                                                                         ) : (
                                                                             <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />
                                                                         )}
                                                                     </td>
+                                                                    <td className="px-2 py-1 text-center border-r border-b border-gray-200">
+                                                                        {emp.role === 'master_admin' || emp.can_access_pms ? (
+                                                                            <FaCheck className="inline-block text-sm text-green-500" title={emp.role === 'master_admin' ? 'Always Allowed' : 'Allowed'} />
+                                                                        ) : (
+                                                                            <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />
+                                                                        )}
+                                                                    </td>
+                                                                    {/* AOP & Master: the rights admins always hold full rights */}
+                                                                    <td className="px-2 py-1 text-center border-r border-b border-gray-200 whitespace-nowrap">
+                                                                        {AOP_ADMIN_IDS.includes(emp.user_id) ? (
+                                                                            <span className="px-1 py-0.5 bg-green-100 text-black rounded text-xs font-medium">Show &amp; edit</span>
+                                                                        ) : emp.aop_access === 'edit' ? (
+                                                                            <span className="px-1 py-0.5 bg-green-100 text-black rounded text-xs font-medium">Show &amp; edit</span>
+                                                                        ) : emp.aop_access === 'view' ? (
+                                                                            <span className="px-1 py-0.5 bg-amber-100 text-black rounded text-xs font-medium">Show only</span>
+                                                                        ) : (
+                                                                            <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />
+                                                                        )}
+                                                                    </td>
                                                                     {!isRestrictedUser && (
-                                                                        <td className="px-2 py-1 text-center">
+                                                                        <td className="px-2 py-1 text-center border-b border-gray-200">
                                                                             <div className="flex items-center justify-center gap-1">
                                                                                 <button
                                                                                     onClick={() => setEditingUser(emp)}
@@ -2877,7 +2998,7 @@ const Profile = () => {
                                                             ))
                                                     ) : (
                                                         <tr>
-                                                            <td colSpan={isRestrictedUser ? 14 : 15} className="px-2 py-6 text-center text-black">
+                                                            <td colSpan={isRestrictedUser ? 16 : 17} className="px-2 py-6 text-center text-black">
                                                                 <div className="flex flex-col items-center gap-1">
                                                                     <FaUsers className="w-5 h-5 text-gray-300" />
                                                                     <p className="text-xs">No employees found</p>
@@ -2895,7 +3016,7 @@ const Profile = () => {
                                                     )}
                                                     {visibleEmployeeCount < filteredEmployees.length && (
                                                         <tr ref={employeeLoadMoreRef}>
-                                                            <td colSpan={isRestrictedUser ? 14 : 15} className="py-3 text-center text-xs text-gray-400">
+                                                            <td colSpan={isRestrictedUser ? 16 : 17} className="py-3 text-center text-xs text-gray-400">
                                                                 Loading more... ({visibleEmployeeCount}/{filteredEmployees.length})
                                                             </td>
                                                         </tr>
@@ -2953,6 +3074,10 @@ const Profile = () => {
 
                             {activeAdminTab === 'cdb-update' && canViewCDBUpdate && (
                                 <CDBUpdateTable user={user} showToast={showToast} />
+                            )}
+
+                            {activeAdminTab === 'se-uid' && isMasterAdmin && (
+                                <SeUidMaster user={user} showToast={showToast} />
                             )}
                         </div>
                     </div>
@@ -3551,6 +3676,55 @@ const Profile = () => {
                                                 >
                                                     {editingUser.can_access_approval ? 'Revoke' : 'Grant'}
                                                 </button>
+                                            </div>
+                                        )}
+
+                                        {/* PMS module — one flag for all its pages */}
+                                        {isMasterAdmin && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id && (
+                                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg max-sm:flex-wrap max-sm:gap-2">
+                                                <div className="flex items-center space-x-3">
+                                                    <FaBuilding className={`text-sm ${editingUser.can_access_pms ? 'text-emerald-500' : 'text-gray-400'}`} />
+                                                    <div>
+                                                        <p className="text-xs font-medium text-black">PMS Access</p>
+                                                        <p className="text-xs text-black">Show the PMS pages (Sales &amp; Labour Report, Employee Productivity, SR Allocation)</p>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleTogglePageAccess(editingUser.id, 'pms', editingUser.can_access_pms)}
+                                                    disabled={loading}
+                                                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${editingUser.can_access_pms
+                                                        ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                        } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                >
+                                                    {editingUser.can_access_pms ? 'Revoke' : 'Grant'}
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {/* AOP & Master rights — three levels, and only the AOP rights
+                                            admins (VITE_PMS_AOP_ADMIN_IDS) may set them */}
+                                        {canGrantAop && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id
+                                            && !AOP_ADMIN_IDS.includes(editingUser.user_id) && (
+                                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg max-sm:flex-wrap max-sm:gap-2">
+                                                <div className="flex items-center space-x-3">
+                                                    <FaBuilding className={`text-sm ${editingUser.aop_access && editingUser.aop_access !== 'none' ? 'text-emerald-500' : 'text-gray-400'}`} />
+                                                    <div>
+                                                        <p className="text-xs font-medium text-black">AOP &amp; Master Rights</p>
+                                                        <p className="text-xs text-black">Target setting and the SR Type / Lead Category masters. Granting it also opens PMS.</p>
+                                                    </div>
+                                                </div>
+                                                <select
+                                                    value={editingUser.aop_access || 'none'}
+                                                    onChange={(e) => handleSetAopAccess(editingUser.id, e.target.value)}
+                                                    disabled={loading}
+                                                    className={`px-2.5 py-1 rounded-lg text-xs font-medium border border-gray-200 bg-white text-black ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                >
+                                                    <option value="none">Don&apos;t show</option>
+                                                    <option value="view">Show only</option>
+                                                    <option value="edit">Show and edit</option>
+                                                </select>
                                             </div>
                                         )}
 

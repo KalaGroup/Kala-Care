@@ -65,7 +65,7 @@ function MyLimitsModal({ access, onClose }) {
         if (chain.is_ho) {
             return access.level === 'l4'
                 ? <ChainStep tag={`L5 ${levelName('l5')}`} text={stepNames(chain.l5)} />
-                : <ChainStep tag={`L4 ${levelName('l4')}`} text="You choose your approver at submit" />;
+                : <ChainStep tag={`L4 ${levelName('l4')}`} text="Optional — pick your approver at submit, or skip straight to COO" />;
         }
         if (access.level === 'l2' && live(chain.l3))
             return <ChainStep tag="L3" text={stepNames(chain.l3)} />;
@@ -91,7 +91,7 @@ function MyLimitsModal({ access, onClose }) {
                     <div className="rounded-xl border border-gray-200 overflow-hidden">
                         <Row label="Max Discounting %" value={fmt(lim.max_discount_percent, '%')} />
                         <Row label="Max Credit Days" value={fmt(lim.max_credit_days, ' days')} />
-                        <Row label="Max Expense Amount (all types combined)" value={fmt(lim.max_expense_amount, 'inr')} />
+                        <Row label="Max Expense Amount - all types combined" value={fmt(lim.max_expense_amount, 'inr')} />
                     </div>
                     {/* The hierarchy this user's own records follow (hidden for L5/COO — top of the chain) */}
                     {access.level !== 'l5' && (
@@ -102,7 +102,7 @@ function MyLimitsModal({ access, onClose }) {
                         {isMid ? (
                             <>
                                 <ChainStep tag={access.level.toUpperCase()}
-                                    text={`${access.name} (You) — creates the record`} />
+                                    text={`${access.name} - You — creates the record`} />
                                 {nextStage()}
                             </>
                         ) : (<>
@@ -110,7 +110,7 @@ function MyLimitsModal({ access, onClose }) {
                         {chain.is_ho ? (
                             <>
                                 <ChainStep tag="L2 · L3" text="Skipped — Head Office records go directly to L4/L5" />
-                                <ChainStep tag={`L4 ${levelName('l4')}`} text="You choose your approver at submit" />
+                                <ChainStep tag={`L4 ${levelName('l4')}`} text="Optional — pick your approver at submit, or skip straight to COO" />
                                 <ChainStep tag={`L5 ${levelName('l5')}`} text={stepNames(chain.l5)} />
                             </>
                         ) : (
@@ -190,7 +190,7 @@ export default function ApprovalApplication() {
             : {};
 
     return (
-        <div className="min-h-screen font-sans">
+        <div className="min-h-screen font-sans tbl-grid-dark">
         <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-10 max-md:px-2">
             {/* ===== Hero header (same style as Knowledge Bank / Part Detail Info) ===== */}
             <div className="rounded-2xl px-3 sm:px-5 py-3 mb-3 text-white relative overflow-hidden"
@@ -205,7 +205,7 @@ export default function ApprovalApplication() {
                         <div>
                             <h1 className="text-lg sm:text-xl font-bold leading-tight">Note For Approval</h1>
                             <p className="text-[11px] text-white/70 leading-tight">
-                                Discounting, Credit &amp; Expense approvals — L2 → L3 → L4 (HOD) → L5 (COO)
+                                Discounting, Credit &amp; Expense approvals — L2 → L3 → L4 - HOD → L5 - COO
                             </p>
                         </div>
                     </div>

@@ -1,774 +1,847 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Part Detail Info — Welcome Letter (Prototype)</title>
+<title>Welcome Letter — Prototype</title>
 <style>
+  /* ============ KALA Care system theme (white, MOM-style indigo brand) ============ */
   :root{
-    --blue:#1d4ed8; --blue-d:#1e40af; --blue-l:#eff6ff;
-    --ink:#0f172a; --mut:#64748b; --line:#e2e8f0; --bg:#f1f5f9;
-    --green:#059669; --green-l:#ecfdf5; --amber:#d97706; --amber-l:#fffbeb;
-    --red:#dc2626; --red-l:#fef2f2;
+    --brand:#2f3192; --brand-dark:#23255f; --brand-soft:rgba(47,49,146,.10);
+    --ground:#f3f4f6; --card:#ffffff; --line:#e5e7eb; --line2:#f1f2f4;
+    --ink:#111827; --gray:#6b7280; --gray2:#9ca3af;
+    --ok:#059669; --ok-soft:rgba(5,150,105,.12);
+    --pend:#d97706; --pend-soft:rgba(217,119,6,.12);
+    --danger:#dc2626;
   }
-  *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}
-  body{background:var(--bg);color:var(--ink);font-size:14px}
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--ground); color:var(--ink);
+    font:13.5px/1.5 'Inter','Segoe UI',Arial,sans-serif; -webkit-font-smoothing:antialiased;
+  }
+  button{font:inherit; cursor:pointer; border:none; background:none; color:inherit}
+  input,select,textarea{
+    font:inherit; color:var(--ink); background:#fff; border:1px solid var(--line);
+    border-radius:8px; padding:7px 10px;
+  }
+  input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--brand); outline-offset:1px}
+  .wrap{max-width:1400px; margin:0 auto; padding:14px 16px 60px}
+  .num{font-variant-numeric:tabular-nums}
+  .muted{color:var(--gray2)}
+  svg.ic{width:15px; height:15px; flex:none; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round}
 
-  /* ---------- top bar ---------- */
-  .topbar{background:#fff;border-bottom:1px solid var(--line);padding:10px 22px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:50}
-  .topbar h1{font-size:17px;font-weight:700}
-  .topbar .crumb{color:var(--mut);font-size:12.5px}
-  .topbar .spacer{flex:1}
-  .btn{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:.15s}
-  .btn:hover{background:var(--bg)}
-  .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
-  .btn.primary:hover{background:var(--blue-d)}
-  .btn.primary:disabled{background:#93c5fd;border-color:#93c5fd;cursor:not-allowed}
-  .btn.green{background:var(--green);border-color:var(--green);color:#fff}
-  .btn.green:hover{background:#047857}
-  .btn.ghost{border-color:transparent;color:var(--blue)}
-  .btn.sm{padding:5px 10px;font-size:12px;border-radius:6px}
-  .btn.danger{color:var(--red);border-color:#fecaca}
-  .btn.danger:hover{background:var(--red-l)}
+  /* ============ HERO (tabs live on its right side) ============ */
+  .hero{
+    border-radius:16px; padding:12px 18px; margin-bottom:14px; color:#fff;
+    background:linear-gradient(120deg, var(--brand) 0%, var(--brand-dark) 100%);
+    position:relative; overflow:hidden;
+  }
+  .hero::before{content:""; position:absolute; right:-32px; top:-40px; width:130px; height:130px; border-radius:50%; background:rgba(255,255,255,.07)}
+  .hero::after{content:""; position:absolute; right:64px; bottom:-48px; width:96px; height:96px; border-radius:50%; background:rgba(255,255,255,.05)}
+  .hero .row{position:relative; display:flex; flex-wrap:wrap; align-items:center; gap:12px; z-index:1}
+  .hero .icobox{width:38px; height:38px; border-radius:10px; background:rgba(255,255,255,.15); display:grid; place-items:center}
+  .hero .icobox svg.ic{width:20px; height:20px}
+  .hero h1{margin:0; font-size:19px; font-weight:700; line-height:1.2}
+  .hero .sub{font-size:11px; color:rgba(255,255,255,.72); line-height:1.3}
+  .hero .spacer{flex:1}
+  .hpill{
+    display:inline-flex; align-items:center; gap:5px; border-radius:999px;
+    background:rgba(255,255,255,.15); padding:4px 11px; font-size:11px; font-weight:500;
+    cursor:pointer; transition:.15s; border:1px solid transparent;
+  }
+  .hpill:hover{background:rgba(255,255,255,.28)}
+  .hpill.on{background:#fff; color:var(--brand)}
+  .hpill b{font-weight:700}
 
-  /* ---------- tabs ---------- */
-  .tabs{background:#fff;border-bottom:1px solid var(--line);padding:0 22px;display:flex;gap:4px}
-  .tab{padding:11px 18px;font-size:13.5px;font-weight:600;color:var(--mut);border-bottom:2.5px solid transparent;cursor:pointer}
-  .tab:hover{color:var(--ink)}
-  .tab.active{color:var(--blue);border-bottom-color:var(--blue)}
-  .tab .badge-new{background:var(--green);color:#fff;font-size:9.5px;padding:1.5px 6px;border-radius:99px;margin-left:6px;vertical-align:2px}
+  /* tabs inside hero */
+  .tabs{
+    display:flex; gap:3px; background:rgba(255,255,255,.14);
+    border-radius:10px; padding:3px;
+  }
+  .tab{
+    display:inline-flex; align-items:center; gap:6px; border-radius:8px;
+    padding:6px 12px; font-size:12.5px; font-weight:600; color:rgba(255,255,255,.75); transition:.15s;
+  }
+  .tab:hover{color:#fff}
+  .tab.on{background:#fff; color:var(--brand)}
+  .tab .cnt{font-size:10px; font-weight:700; background:var(--pend-soft); color:var(--pend); border-radius:999px; padding:1px 6px}
+  .tab:not(.on) .cnt{background:rgba(255,255,255,.25); color:#fff}
 
-  .wrap{max-width:1240px;margin:0 auto;padding:20px 22px 60px}
-  .view{display:none}
-  .view.active{display:block}
+  /* ============ CARDS ============ */
+  .card{background:var(--card); border:1px solid var(--line); border-radius:12px; box-shadow:0 1px 2px rgba(16,24,40,.05)}
+  .card-h{
+    display:flex; align-items:center; gap:8px; padding:11px 14px; border-bottom:1px solid var(--line);
+    font-size:12.5px; font-weight:700; color:var(--ink);
+  }
+  .card-h svg.ic{color:var(--brand)}
+  .card-h .note{margin-left:auto; font-size:11.5px; font-weight:500; color:var(--gray)}
 
-  /* ---------- stepper ---------- */
-  .stepper{display:flex;align-items:center;gap:0;margin-bottom:20px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 22px}
-  .step{display:flex;align-items:center;gap:9px;color:var(--mut);font-size:13px;font-weight:600}
-  .step .num{width:26px;height:26px;border-radius:50%;background:var(--bg);border:1.5px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:12.5px}
-  .step.done .num{background:var(--green);border-color:var(--green);color:#fff}
-  .step.on{color:var(--blue)}
-  .step.on .num{background:var(--blue);border-color:var(--blue);color:#fff}
-  .step-line{flex:1;height:1.5px;background:var(--line);margin:0 14px;min-width:30px}
+  /* KPI row */
+  .kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin-bottom:12px}
+  .kpi{
+    background:#fff; border:1px solid var(--line); border-radius:12px; padding:11px 14px;
+    box-shadow:0 1px 2px rgba(16,24,40,.05); display:flex; align-items:center; gap:11px;
+    cursor:pointer; transition:.15s; text-align:left; width:100%;
+  }
+  .kpi:hover{border-color:var(--brand); box-shadow:0 2px 8px rgba(47,49,146,.15)}
+  .kpi .kico{width:34px; height:34px; border-radius:9px; display:grid; place-items:center; background:var(--brand-soft); color:var(--brand); flex:none}
+  .kpi.ok .kico{background:var(--ok-soft); color:var(--ok)}
+  .kpi.pend .kico{background:var(--pend-soft); color:var(--pend)}
+  .kpi .lbl{font-size:10.5px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--gray)}
+  .kpi .val{font-size:21px; font-weight:700; line-height:1.15}
 
-  /* ---------- cards / tables ---------- */
-  .card{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:16px}
-  .card-h{padding:13px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-  .card-h h3{font-size:14.5px;font-weight:700}
-  .card-h .sub{color:var(--mut);font-size:12.5px;font-weight:400}
-  .card-b{padding:16px 18px}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th{background:#f8fafc;text-align:left;padding:9px 12px;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);border-bottom:1px solid var(--line);white-space:nowrap}
-  td{padding:9px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
-  tr:hover td{background:#f8fafc}
-  tr.rowsel td{background:var(--blue-l)}
-  .tbl-scroll{overflow-x:auto}
-  .empty{padding:34px;text-align:center;color:var(--mut)}
+  /* toolbar */
+  .toolbar{display:flex; flex-wrap:wrap; gap:9px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--line)}
+  .toolbar label{display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--gray)}
+  .toolbar select,.toolbar input{font-size:12.5px; padding:6px 9px}
+  .toolbar input[type=search]{min-width:230px}
+  .toolbar .spacer{flex:1}
+  .rowcount{font-size:11.5px; color:var(--gray)}
 
-  .pill{display:inline-block;padding:2.5px 10px;border-radius:99px;font-size:11.5px;font-weight:600}
-  .pill.up{background:var(--green-l);color:var(--green)}
-  .pill.pend{background:var(--amber-l);color:var(--amber)}
-  .pill.sent{background:var(--green-l);color:var(--green)}
-  .pill.sched{background:var(--blue-l);color:var(--blue)}
-  .pill.fail{background:var(--red-l);color:var(--red)}
-  .code-chip{font-family:Consolas,monospace;font-weight:700;color:var(--blue-d);background:var(--blue-l);padding:2px 8px;border-radius:6px;font-size:12.5px}
+  /* ============ TABLE — grid format, one line per row ============ */
+  /* thin scrollbars everywhere they appear */
+  .scrollx{overflow-x:auto; scrollbar-width:thin; scrollbar-color:#c3c6d1 transparent}
+  .scrollx::-webkit-scrollbar{height:8px}
+  .scrollx::-webkit-scrollbar-track{background:transparent}
+  .scrollx::-webkit-scrollbar-thumb{background:#c3c6d1; border-radius:4px}
+  .scrollx::-webkit-scrollbar-thumb:hover{background:#9ca3af}
+  /* top scrollbar strip (synced with the table below it) */
+  .topscroll{border-bottom:1px solid var(--line2)}
+  .topscroll > div{height:1px}
 
-  input[type=text],input[type=email],input[type=search],input[type=date],input[type=time],input[type=datetime-local],select,textarea{
-    border:1px solid #cbd5e1;border-radius:8px;padding:8px 11px;font-size:13px;color:var(--ink);background:#fff;outline:none;font-family:inherit}
-  input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(29,78,216,.12)}
-  label.f{display:block;font-size:12px;font-weight:600;color:var(--mut);margin-bottom:5px}
-  .field{margin-bottom:14px}
+  table{border-collapse:collapse; width:100%; font-size:12.5px}
+  th{
+    text-align:left; font-size:10.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+    color:var(--gray); background:#f9fafb; padding:8px 11px; border-bottom:1px solid var(--line);
+    border-right:1px solid var(--line2); white-space:nowrap;
+  }
+  th:last-child{border-right:none}
+  td{
+    padding:4px 10px; border-bottom:1px solid var(--line2); border-right:1px solid var(--line2);
+    white-space:nowrap; vertical-align:middle; line-height:1.3; font-size:12px;
+    max-width:260px; overflow:hidden; text-overflow:ellipsis;
+  }
+  td:last-child{border-right:none}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover td{background:#f8f9ff}
+  .strong{font-weight:600}
+  .subl{font-size:11px; color:var(--gray)}
 
-  /* ---------- email chips ---------- */
-  .chips{display:flex;flex-wrap:wrap;gap:6px;border:1px solid #cbd5e1;border-radius:8px;padding:6px 8px;background:#fff;min-height:38px;align-items:center}
-  .chips:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px rgba(29,78,216,.12)}
-  .chip{display:inline-flex;align-items:center;gap:5px;background:var(--blue-l);color:var(--blue-d);border-radius:99px;padding:3px 5px 3px 10px;font-size:12px;font-weight:600}
-  .chip.cc{background:#f5f3ff;color:#6d28d9}
-  .chip.def{background:#f1f5f9;color:var(--mut)}
-  .chip button{border:none;background:rgba(0,0,0,.08);color:inherit;width:16px;height:16px;border-radius:50%;font-size:10px;cursor:pointer;line-height:1}
-  .chips input{border:none!important;box-shadow:none!important;flex:1;min-width:140px;padding:4px;font-size:12.5px}
+  /* action column pinned to the right */
+  th.actcol, td.actcol{
+    position:sticky; right:0; z-index:2; text-align:center;
+    border-left:1px solid var(--line); box-shadow:-6px 0 8px -6px rgba(16,24,40,.18);
+  }
+  th.actcol{background:#f9fafb}
+  td.actcol{background:#fff}
+  tbody tr:hover td.actcol{background:#f8f9ff}
 
-  /* ---------- customer send cards ---------- */
-  .cust-card{border:1px solid var(--line);border-radius:12px;margin-bottom:14px;background:#fff;overflow:hidden}
-  .cust-head{padding:12px 16px;background:#f8fafc;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-  .cust-head .nm{font-weight:700;font-size:14px}
-  .cust-head .meta{color:var(--mut);font-size:12px}
-  .cust-body{padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  .cust-body .full{grid-column:1/-1}
-  .cust-foot{padding:10px 16px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px;align-items:center}
-  @media(max-width:820px){.cust-body{grid-template-columns:1fr}}
+  .pill{display:inline-block; font-size:10.5px; font-weight:700; border-radius:999px; padding:2px 9px}
+  .pill.pend{background:var(--pend-soft); color:var(--pend)}
+  .pill.ok{background:var(--ok-soft); color:var(--ok)}
+  .pill.cc{background:var(--brand-soft); color:var(--brand)}
 
-  /* ---------- modal ---------- */
-  .overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:100;padding:20px}
+  .btn{
+    display:inline-flex; align-items:center; gap:6px; border-radius:8px; padding:7px 14px;
+    font-weight:600; font-size:12.5px; background:var(--brand); color:#fff; transition:.15s;
+  }
+  .btn:hover{background:var(--brand-dark)}
+  .btn.sm{padding:3px 10px; font-size:11.5px}
+  .btn.ghost{background:#fff; color:var(--ink); border:1px solid var(--line)}
+  .btn.ghost:hover{background:#f9fafb}
+  .btn.ok{background:var(--ok)}
+  .btn.ok:hover{background:#047857}
+  .del{color:var(--danger); font-size:15px; padding:2px 7px; border-radius:6px}
+  .del:hover{background:rgba(220,38,38,.08)}
+  .editb{color:var(--brand); padding:2px 7px; border-radius:6px}
+  .editb:hover{background:var(--brand-soft)}
+  .editb svg.ic{width:13px; height:13px}
+  tr.editing td{background:var(--brand-soft) !important}
+  .empty{padding:34px; text-align:center; color:var(--gray2); font-size:12.5px}
+
+  /* ============ REPORT ============ */
+  .rep-two{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; align-items:start}
+  @media (max-width:920px){ .rep-two{grid-template-columns:1fr} }
+  .ubar{display:grid; grid-template-columns:1fr auto; gap:3px 10px; padding:9px 14px; border-bottom:1px solid var(--line2); align-items:center}
+  .ubar:last-child{border-bottom:none}
+  .track{height:7px; border-radius:4px; background:var(--line2); overflow:hidden}
+  .ubar .track{margin-top:5px}
+  .fill{height:100%; border-radius:4px; background:var(--brand)}
+  .ubar .n{font-size:18px; font-weight:700; color:var(--brand)}
+
+  /* ============ MASTER ============ */
+  .msubtabs{display:flex; gap:2px; padding:0 14px; border-bottom:1px solid var(--line)}
+  .msub{
+    padding:10px 13px; font-size:12.5px; font-weight:600; color:var(--gray2);
+    border-bottom:2px solid transparent; margin-bottom:-1px; border-radius:6px 6px 0 0;
+  }
+  .msub:hover{color:var(--gray)}
+  .msub.on{color:var(--brand); border-bottom-color:var(--brand)}
+  .mpane{padding:16px}
+  textarea#tplTxt{width:100%; min-height:230px; resize:vertical; line-height:1.65; font-size:12.5px}
+  .savenote{font-size:12px; color:var(--ok); font-weight:600; display:none}
+  .addrow{display:flex; flex-wrap:wrap; gap:8px; padding:11px 14px; border-top:1px solid var(--line); background:#f9fafb; border-radius:0 0 12px 12px}
+  .addrow input{flex:1; min-width:70px; font-size:12.5px}
+  .addrow input.wide{min-width:210px; flex:3}
+  .att{display:flex; align-items:center; gap:10px; padding:9px 14px; border-bottom:1px solid var(--line2); font-size:12.5px}
+  .att:last-child{border-bottom:none}
+  .att .fico{
+    width:30px; height:30px; border-radius:7px; background:var(--brand-soft); color:var(--brand);
+    display:grid; place-items:center; font-size:9.5px; font-weight:800; flex:none;
+  }
+  .att.kva .fico{background:var(--pend-soft); color:var(--pend)}
+  .att .why{margin-left:auto; font-size:10.5px; color:var(--gray); text-align:right; line-height:1.4}
+  .hint{font-size:12px; color:var(--gray); line-height:1.6; background:#f9fafb; border:1px solid var(--line); border-radius:10px; padding:11px 14px}
+  .hint b{color:var(--ink)}
+
+  /* ============ MODAL ============ */
+  .overlay{
+    position:fixed; inset:0; background:rgba(17,24,39,.5); display:none;
+    align-items:flex-start; justify-content:center; padding:26px 14px; overflow-y:auto; z-index:50;
+  }
   .overlay.open{display:flex}
-  .modal{background:#fff;border-radius:14px;width:100%;max-width:760px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,.25)}
-  .modal-h{padding:15px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center}
-  .modal-h h3{font-size:15px;font-weight:700;flex:1}
-  .modal-b{padding:18px 20px;overflow-y:auto}
-  .modal-f{padding:13px 20px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px}
-  .x{border:none;background:var(--bg);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--mut)}
+  .modal{background:#fff; border-radius:14px; width:100%; max-width:840px; overflow:hidden; box-shadow:0 20px 60px rgba(16,24,40,.25)}
+  .modal-h{display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--line)}
+  .modal-h h2{margin:0; font-size:15px; font-weight:700}
+  .xbtn{margin-left:auto; font-size:20px; color:var(--gray2); line-height:1; padding:2px 8px; border-radius:6px}
+  .xbtn:hover{color:var(--ink); background:var(--line2)}
+  .modal-b{padding:16px; display:grid; gap:14px; background:#f9fafb}
+  .modal-f{display:flex; gap:10px; align-items:center; padding:12px 16px; border-top:1px solid var(--line); background:#fff}
+  .sendto{font-size:12px; color:var(--gray)}
 
-  /* ---------- letter preview ---------- */
-  .letter{border:1px solid var(--line);border-radius:10px;background:#fff;padding:28px 32px;font-size:13.5px;line-height:1.75;white-space:pre-wrap;box-shadow:inset 0 0 0 1px #f8fafc}
-  .letter .lg{font-weight:800;color:var(--blue-d);font-size:16px;margin-bottom:2px}
-  .tok{display:inline-block;background:var(--amber-l);color:var(--amber);border-radius:5px;padding:0 5px;font-family:Consolas,monospace;font-size:12px;font-weight:700}
-  .tok-btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
-  .tok-btns button{border:1px dashed #cbd5e1;background:#f8fafc;border-radius:6px;padding:3px 8px;font-size:11.5px;font-family:Consolas,monospace;cursor:pointer;color:var(--mut)}
-  .tok-btns button:hover{border-color:var(--blue);color:var(--blue)}
+  /* letter sheet */
+  .letter{
+    background:#fff; border:1px solid var(--line); border-radius:8px;
+    padding:32px 38px; max-width:660px; margin:0 auto; box-shadow:0 2px 8px rgba(16,24,40,.07);
+  }
+  .letter .lh{display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid var(--brand); padding-bottom:11px; margin-bottom:18px}
+  .letter .logo{font-weight:800; font-size:16px}
+  .letter .logo span{background:var(--brand); color:#fff; border-radius:4px; padding:1px 7px; margin-right:6px}
+  .letter .ref{font-size:11px; color:var(--gray); text-align:right; line-height:1.45}
+  .letter p{margin:0 0 12px; font-size:13px; line-height:1.65; max-width:64ch}
+  .letter .fld{background:var(--brand-soft); color:var(--brand-dark); border-radius:3px; padding:0 3px; font-weight:600}
+  .letter table.gd{font-size:12px; margin:13px 0; width:auto}
+  .letter table.gd td{border:1px solid var(--line); padding:5px 12px; white-space:nowrap; max-width:none}
+  .letter table.gd td:first-child, .letter table.gd td:nth-child(3){color:var(--gray); font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em}
+  .attbox{border:1px solid var(--line); border-radius:10px; overflow:hidden; background:#fff}
+  .attbox .bh{padding:8px 14px; background:#f9fafb; font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--gray); border-bottom:1px solid var(--line)}
 
-  /* ---------- filters bar ---------- */
-  .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
-  .filters .fg{display:flex;flex-direction:column;gap:4px}
-  .filters .fg span{font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
-
-  /* ---------- toast ---------- */
-  #toast{position:fixed;bottom:24px;right:24px;z-index:200;display:flex;flex-direction:column;gap:8px}
-  .toast{background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.25);animation:tin .25s}
-  .toast.ok{background:var(--green)}
-  @keyframes tin{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}
-
-  .hint{background:var(--blue-l);border:1px solid #bfdbfe;border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--blue-d);margin-bottom:14px}
-  .cnt{font-size:12.5px;color:var(--mut)}
-  .cnt b{color:var(--ink)}
+  /* toast */
+  #toast{
+    position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(16px);
+    background:var(--ink); color:#fff; font-size:12.5px; font-weight:600;
+    padding:10px 18px; border-radius:9px; opacity:0; pointer-events:none; transition:.25s; z-index:99;
+  }
+  #toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+  @media (prefers-reduced-motion: reduce){ #toast{transition:none} }
 </style>
-</head>
-<body>
-
-<!-- ============ TOP BAR ============ -->
-<div class="topbar">
-  <div>
-    <h1>Part Detail Info</h1>
-    <div class="crumb">Master Report &nbsp;›&nbsp; Welcome Letter</div>
-  </div>
-  <div class="spacer"></div>
-  <button class="btn" onclick="openFormatMaster()">⚙️ Letter Format Master</button>
-  <button class="btn primary" onclick="showView('report')">📊 Sent Email Report</button>
-</div>
-
-<!-- ============ TABS ============ -->
-<div class="tabs">
-  <div class="tab" onclick="fakeTab(this)">App Code Master</div>
-  <div class="tab" onclick="fakeTab(this)">App Mapping</div>
-  <div class="tab" onclick="fakeTab(this)">Master of Service</div>
-  <div class="tab active" id="tabWelcome" onclick="showView('wizard')">Welcome Letter <span class="badge-new">NEW</span></div>
-</div>
 
 <div class="wrap">
 
-<!-- ================= WIZARD VIEW ================= -->
-<div class="view active" id="view-wizard">
-
-  <div class="stepper">
-    <div class="step on" id="st1"><span class="num">1</span> Select App Codes</div>
-    <div class="step-line"></div>
-    <div class="step" id="st2"><span class="num">2</span> Letter Format</div>
-    <div class="step-line"></div>
-    <div class="step" id="st3"><span class="num">3</span> Schedule &amp; Send</div>
-  </div>
-
-  <!-- ---- STEP 1 ---- -->
-  <div id="step1">
-    <div class="hint">💡 Select one or more <b>Application Codes</b> below. All App&nbsp;Mapping data (engine model, segment, KVA, emission, assets, commissioning) is shown so you can verify each code <b>before</b> selecting. Click <b>OK</b> to continue to the letter format.</div>
-    <div class="card">
-      <div class="card-h">
-        <h3>Application Codes <span class="sub">(as displayed in App Mapping)</span></h3>
-        <div class="spacer" style="flex:1"></div>
-        <input type="search" id="s1search" placeholder="🔍 Search app code / engine / segment…" style="width:280px" oninput="renderStep1()">
-        <span class="cnt" id="s1cnt"></span>
+  <!-- ============ HERO with tabs on the right ============ -->
+  <div class="hero">
+    <div class="row">
+      <div class="icobox">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></svg>
       </div>
-      <div class="tbl-scroll">
-        <table>
-          <thead><tr>
-            <th style="width:36px"><input type="checkbox" id="s1all" onchange="toggleAll(this)"></th>
-            <th>App Code</th><th>Engine Model</th><th>Segment</th><th>KVA</th>
-            <th>Emission</th><th style="text-align:right">Assets</th><th>Commissioning</th><th>Master Status</th>
-          </tr></thead>
-          <tbody id="s1body"></tbody>
-        </table>
+      <div>
+        <h1>Welcome Letter</h1>
+        <div class="sub">Open SR register · Sub Type <b>CC (Commissioning)</b> · welcome letter dispatch &amp; tracking</div>
       </div>
-      <div class="card-h" style="border-top:1px solid var(--line);border-bottom:none;justify-content:flex-end">
-        <span class="cnt" id="s1sel"></span>
-        <button class="btn primary" id="s1ok" disabled onclick="goStep(2)">OK — Continue →</button>
+      <div class="spacer"></div>
+      <button class="hpill" onclick="goStatus('')" title="Show all CC customers">Customers: <b id="hTotal">0</b></button>
+      <button class="hpill" onclick="goStatus('PENDING')" title="Show pending records">Pending: <b id="hPend">0</b></button>
+      <button class="hpill" onclick="goStatus('SENT')" title="Show sent records">Sent: <b id="hSent">0</b></button>
+      <div class="tabs" role="tablist">
+        <button class="tab on" id="tabBtn0" onclick="showTab(0)">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2Z"/><path d="m22 6-10 7L2 6"/></svg>
+          Pending Letters <span class="cnt" id="pendCnt"></span>
+        </button>
+        <button class="tab" id="tabBtn1" onclick="showTab(1)">
+          <svg class="ic" viewBox="0 0 24 24"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
+          Reports
+        </button>
+        <button class="tab" id="tabBtn2" onclick="showTab(2)">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01" stroke-width="3"/></svg>
+          Master Setup
+        </button>
       </div>
     </div>
   </div>
 
-  <!-- ---- STEP 2 ---- -->
-  <div id="step2" style="display:none">
+  <!-- ============ TAB 0 : PENDING ============ -->
+  <section id="tabPane0">
+    <div class="card">
+      <div class="toolbar">
+        <label>Branch <select id="fBranch" onchange="renderPending()"></select></label>
+        <label>Status
+          <select id="fStatus" onchange="renderPending()">
+            <option value="">All</option>
+            <option value="PENDING" selected>Pending</option>
+            <option value="SENT">Sent</option>
+          </select>
+        </label>
+        <input type="search" id="fSearch" placeholder="Search customer / instance / SR / engine…" oninput="renderPending()" aria-label="Search">
+        <div class="spacer"></div>
+        <span class="rowcount" id="rowCount"></span>
+      </div>
+      <!-- top thin scrollbar (synced with the table) -->
+      <div class="scrollx topscroll" id="topScroll" aria-hidden="true"><div id="topSpacer"></div></div>
+      <div class="scrollx" id="tblScroll" style="border-radius:0 0 12px 12px">
+        <table id="pendTable">
+          <thead><tr>
+            <th>Instance ID</th><th>Customer Name</th><th>Mobile No</th><th>Email</th>
+            <th>Branch — ID</th><th>Segment</th>
+            <th>App Code</th><th>Engine Model</th><th>Serial No</th><th>KVA</th><th>Commissioning</th>
+            <th>SR No</th><th>Sub Type</th>
+            <th>Status</th><th>Sent By</th><th class="actcol">Action</th>
+          </tr></thead>
+          <tbody id="pendBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TAB 1 : REPORTS ============ -->
+  <section id="tabPane1" hidden>
+    <div class="kpis">
+      <button class="kpi ok" id="kpiSent" onclick="setRepMode('SENT')" title="Show sent records in the table below">
+        <div class="kico"><svg class="ic" viewBox="0 0 24 24"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></svg></div>
+        <div><div class="lbl">Letters Sent</div><div class="val" id="kSent">0</div></div>
+      </button>
+      <button class="kpi pend" id="kpiPend" onclick="setRepMode('PENDING')" title="Show pending records in the table below">
+        <div class="kico"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+        <div><div class="lbl">Pending</div><div class="val" id="kPend">0</div></div>
+      </button>
+      <button class="kpi" onclick="openRepPopup('users')" title="Open user-wise report">
+        <div class="kico"><svg class="ic" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
+        <div><div class="lbl">Active Users</div><div class="val" id="kUsers">0</div></div>
+      </button>
+      <button class="kpi" onclick="openRepPopup('branch')" title="Open branch-wise summary">
+        <div class="kico"><svg class="ic" viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/></svg></div>
+        <div><div class="lbl">Branches Covered</div><div class="val" id="kBr">0</div></div>
+      </button>
+    </div>
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="toolbar" style="border-bottom:none">
+        <label>Branch <select id="rBranch" onchange="renderReport()"></select></label>
+        <label>User <select id="rUser" onchange="renderReport()"></select></label>
+        <div class="spacer"></div>
+        <span class="rowcount" id="rCount"></span>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-h">
-        <h3>Choose Letter Format</h3>
-        <div class="spacer" style="flex:1"></div>
-        <button class="btn sm" onclick="openFormatMaster()">⚙️ Manage formats</button>
+        <svg class="ic" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>
+        <span id="repTitle">Sent Letter Details</span>
+        <span class="note" id="repNote">newest first</span>
       </div>
-      <div class="card-b">
-        <div style="display:grid;grid-template-columns:340px 1fr;gap:22px">
-          <div>
-            <div class="field">
-              <label class="f">Letter format (from master)</label>
-              <select id="tplSelect" style="width:100%" onchange="renderTplPreview()"></select>
-            </div>
-            <div class="field">
-              <label class="f">Default TO (from master)</label>
-              <div id="tplDefTo"></div>
-            </div>
-            <div class="field">
-              <label class="f">Default CC (from master)</label>
-              <div id="tplDefCc"></div>
-            </div>
-            <div class="field">
-              <label class="f">Default send time (from master)</label>
-              <div id="tplDefTime" style="font-weight:700"></div>
-            </div>
-            <div class="hint" style="margin-top:8px">TO / CC and send time can still be <b>edited per customer</b> in the next step.</div>
-          </div>
-          <div>
-            <label class="f">Preview (sample data merged)</label>
-            <div class="letter" id="tplPreview"></div>
+      <div class="scrollx" style="border-radius:0 0 12px 12px">
+        <table>
+          <thead><tr id="repHead"></tr></thead>
+          <tbody id="repBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TAB 2 : MASTER SETUP ============ -->
+  <section id="tabPane2" hidden>
+    <div class="card">
+      <div class="card-h">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01" stroke-width="3"/></svg>
+        Master Setup
+        <span class="note">Master Admin only — letter text, default attachments &amp; KVA range mapping</span>
+      </div>
+      <div class="msubtabs">
+        <button class="msub on" id="msub0" onclick="showMsub(0)">Letter Text</button>
+        <button class="msub" id="msub1" onclick="showMsub(1)">Default Attachments</button>
+        <button class="msub" id="msub2" onclick="showMsub(2)">KVA Range &amp; Year Mapping</button>
+      </div>
+
+      <!-- letter text — simple editor -->
+      <div class="mpane" id="mpane0">
+        <textarea id="tplTxt" aria-label="Letter template" placeholder="Write the welcome letter text here…"></textarea>
+        <div style="display:flex; gap:10px; align-items:center; margin-top:10px">
+          <button class="btn" onclick="saveTpl()">
+            <svg class="ic" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+            Save Letter Text
+          </button>
+          <span class="savenote" id="tplSaved">Saved ✓</span>
+        </div>
+      </div>
+
+      <!-- default attachments -->
+      <div class="mpane" id="mpane1" hidden style="padding:0">
+        <div id="defAttList"></div>
+        <div class="addrow">
+          <input id="dFile" class="wide" placeholder="Attachment file name (.pdf)" aria-label="Default attachment name">
+          <button class="btn sm" onclick="addDefAtt()">+ Add Attachment</button>
+        </div>
+      </div>
+
+      <!-- kva mapping -->
+      <div class="mpane" id="mpane2" hidden style="padding:0">
+        <div class="scrollx" style="border-radius:0">
+          <table>
+            <thead><tr><th>KVA From</th><th>KVA To</th><th>Year</th><th>Attachment</th><th style="text-align:center">Action</th></tr></thead>
+            <tbody id="kvaBody"></tbody>
+          </table>
+        </div>
+        <div class="addrow" style="border-radius:0">
+          <input id="kFrom" type="number" placeholder="KVA from" min="0" step="0.1" aria-label="KVA from">
+          <input id="kTo" type="number" placeholder="KVA to" min="0" step="0.1" aria-label="KVA to">
+          <input id="kYear" type="number" placeholder="Year" min="2020" max="2035" aria-label="Year">
+          <input id="kFile" class="wide" placeholder="Attachment file name (.pdf)" aria-label="Attachment name">
+          <button class="btn sm" id="kvaBtn" onclick="addKvaRule()">+ Add Range</button>
+          <button class="btn sm ghost" id="kvaCancel" onclick="cancelKvaEdit()" style="display:none">Cancel</button>
+        </div>
+        <div style="padding:12px 14px">
+          <div class="hint">
+            <b>How matching works:</b> every letter carries all default attachments. Then the customer's
+            <b>KVA rating</b> and <b>commissioning year</b> (SR year if commissioning date is blank) are matched
+            against these ranges and the matching attachment is added automatically.
           </div>
         </div>
       </div>
-      <div class="card-h" style="border-top:1px solid var(--line);border-bottom:none;justify-content:flex-end">
-        <button class="btn" onclick="goStep(1)">← Back</button>
-        <button class="btn primary" onclick="goStep(3)">Continue — Schedule &amp; Send →</button>
-      </div>
     </div>
-  </div>
-
-  <!-- ---- STEP 3 ---- -->
-  <div id="step3" style="display:none">
-    <div class="hint">✉️ One card per customer under the selected app codes. Edit the <b>send time per customer</b>, add extra <b>TO / CC</b> emails, preview the merged letter, then send individually or <b>Send All</b>.</div>
-    <div class="card-h" style="background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:14px">
-      <span class="cnt" id="s3cnt"></span>
-      <div class="spacer" style="flex:1"></div>
-      <button class="btn" onclick="goStep(2)">← Back</button>
-      <button class="btn green" onclick="sendAll()">🚀 Send All Pending</button>
-    </div>
-    <div id="custList"></div>
-  </div>
+  </section>
 </div>
 
-<!-- ================= REPORT VIEW ================= -->
-<div class="view" id="view-report">
-  <div class="card">
-    <div class="card-h">
-      <h3>📊 Welcome Letter — Sent Email Report</h3>
-      <div class="spacer" style="flex:1"></div>
-      <button class="btn" onclick="showView('wizard')">← Back to Welcome Letter</button>
-      <button class="btn green" onclick="exportCSV()">⬇️ Export CSV</button>
+<!-- ============ PREVIEW MODAL ============ -->
+<div class="overlay" id="ovl" role="dialog" aria-modal="true" aria-label="Welcome letter preview">
+  <div class="modal">
+    <div class="modal-h">
+      <h2>Welcome Letter Preview</h2>
+      <span class="pill cc" id="mSr"></span>
+      <button class="xbtn" onclick="closePreview()" aria-label="Close">×</button>
     </div>
-    <div class="card-b" style="border-bottom:1px solid var(--line)">
-      <div class="filters">
-        <div class="fg"><span>From date</span><input type="date" id="fFrom" onchange="renderReport()"></div>
-        <div class="fg"><span>To date</span><input type="date" id="fTo" onchange="renderReport()"></div>
-        <div class="fg"><span>App code</span><select id="fApp" onchange="renderReport()"><option value="">All</option></select></div>
-        <div class="fg"><span>Letter format</span><select id="fTpl" onchange="renderReport()"><option value="">All</option></select></div>
-        <div class="fg"><span>Status</span><select id="fStatus" onchange="renderReport()">
-          <option value="">All</option><option>Sent</option><option>Scheduled</option><option>Failed</option></select></div>
-        <div class="fg" style="flex:1;min-width:200px"><span>Search</span><input type="search" id="fSearch" placeholder="Customer / email / serial…" oninput="renderReport()" style="width:100%"></div>
-        <button class="btn sm" onclick="clearFilters()">✕ Clear</button>
-      </div>
-    </div>
-    <div class="tbl-scroll">
-      <table>
-        <thead><tr>
-          <th>#</th><th>Sent / Scheduled At</th><th>App Code</th><th>Customer</th><th>Engine Serial</th>
-          <th>Letter Format</th><th>To</th><th>Cc</th><th>Status</th><th>Sent By</th>
-        </tr></thead>
-        <tbody id="repBody"></tbody>
-      </table>
-    </div>
-    <div class="card-b"><span class="cnt" id="repCnt"></span></div>
-  </div>
-</div>
-
-</div><!-- /wrap -->
-
-<!-- ================= LETTER FORMAT MASTER MODAL ================= -->
-<div class="overlay" id="mFormats">
-  <div class="modal" style="max-width:900px">
-    <div class="modal-h"><h3>⚙️ Master — Letter Formats</h3><button class="x" onclick="closeModal('mFormats')">✕</button></div>
     <div class="modal-b">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
-        <button class="btn primary sm" onclick="editFormat(null)">＋ New Letter Format</button>
-      </div>
-      <div class="tbl-scroll">
-        <table>
-          <thead><tr><th>Format Name</th><th>Subject</th><th>Default To</th><th>Default Cc</th><th>Default Send Time</th><th style="width:130px">Actions</th></tr></thead>
-          <tbody id="fmtBody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ================= FORMAT EDITOR MODAL ================= -->
-<div class="overlay" id="mEditor">
-  <div class="modal" style="max-width:860px">
-    <div class="modal-h"><h3 id="edTitle">New Letter Format</h3><button class="x" onclick="closeModal('mEditor')">✕</button></div>
-    <div class="modal-b">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-        <div class="field"><label class="f">Format name *</label><input type="text" id="edName" style="width:100%" placeholder="e.g. Standard Welcome Letter"></div>
-        <div class="field"><label class="f">Default send time *</label><input type="time" id="edTime" style="width:100%" value="10:00"></div>
-      </div>
-      <div class="field"><label class="f">Email subject *</label><input type="text" id="edSubject" style="width:100%" placeholder="Welcome to Kala Care — {APP_CODE}"></div>
-      <div class="field">
-        <label class="f">Default TO emails (added in master — applied to every send)</label>
-        <div id="edTo"></div>
-      </div>
-      <div class="field">
-        <label class="f">Default CC emails (added in master — applied to every send)</label>
-        <div id="edCc"></div>
-      </div>
-      <div class="field">
-        <label class="f">Letter body * &nbsp;<span style="font-weight:400">(click a token to insert at cursor)</span></label>
-        <div class="tok-btns" id="edToks"></div>
-        <textarea id="edBody" style="width:100%;min-height:220px;margin-top:8px;line-height:1.6"></textarea>
+      <div class="letter" id="letterBody"></div>
+      <div class="attbox">
+        <div class="bh">Attachments</div>
+        <div id="attList"></div>
       </div>
     </div>
     <div class="modal-f">
-      <button class="btn" onclick="closeModal('mEditor')">Cancel</button>
-      <button class="btn primary" onclick="saveFormat()">💾 Save Format</button>
+      <span class="sendto" id="mTo"></span>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn ghost" onclick="closePreview()">Cancel</button>
+      <button class="btn ok" id="sendBtn" onclick="doSend()">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></svg>
+        Send Welcome Letter
+      </button>
     </div>
   </div>
 </div>
 
-<!-- ================= LETTER PREVIEW MODAL ================= -->
-<div class="overlay" id="mPreview">
-  <div class="modal">
-    <div class="modal-h"><h3 id="pvTitle">Letter Preview</h3><button class="x" onclick="closeModal('mPreview')">✕</button></div>
-    <div class="modal-b"><div class="letter" id="pvBody"></div></div>
-    <div class="modal-f"><button class="btn" onclick="closeModal('mPreview')">Close</button></div>
+<!-- ============ REPORT POPUP ============ -->
+<div class="overlay" id="ovl2" role="dialog" aria-modal="true" aria-label="Report popup" style="align-items:center; justify-content:center">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-h">
+      <h2 id="ovl2Title"></h2>
+      <button class="xbtn" onclick="closeRepPopup()" aria-label="Close">×</button>
+    </div>
+    <div id="ovl2Body" style="max-height:70vh; overflow-y:auto"></div>
   </div>
 </div>
 
-<div id="toast"></div>
+<div id="toast" role="status"></div>
 
 <script>
-/* =====================================================================
-   SAMPLE DATA  (mirrors App Mapping columns + Asset Detailed customers)
-===================================================================== */
-const APP_CODES = [
-  {appCode:"3H.8422", engineModel:"4R1040", segment:"Telecom",      kva:"15",  emission:"CPCB IV+", assets:42, commissioning:"2026-06-14", uploaded:true},
-  {appCode:"5D.2210", engineModel:"6R1080", segment:"Industrial",   kva:"62.5",emission:"CPCB IV+", assets:31, commissioning:"2026-07-02", uploaded:true},
-  {appCode:"2K.1104", engineModel:"3R750",  segment:"Retail",       kva:"10",  emission:"CPCB II",  assets:27, commissioning:"2026-05-20", uploaded:true},
-  {appCode:"7A.9033", engineModel:"6R1080T",segment:"Healthcare",   kva:"125", emission:"CPCB IV+", assets:19, commissioning:"2026-07-18", uploaded:true},
-  {appCode:"4M.5561", engineModel:"4R1040", segment:"Banking",      kva:"25",  emission:"CPCB IV+", assets:15, commissioning:"2026-04-11", uploaded:true},
-  {appCode:"9C.3307", engineModel:"8V2500", segment:"Data Centre",  kva:"500", emission:"CPCB IV+", assets:8,  commissioning:"2026-07-25", uploaded:false},
-  {appCode:"6T.7719", engineModel:"3R750",  segment:"Agriculture",  kva:"7.5", emission:"CPCB II",  assets:6,  commissioning:"2026-03-30", uploaded:true},
-  {appCode:"8B.4470", engineModel:"6R1080", segment:"Infrastructure",kva:"82.5",emission:"CPCB IV+",assets:4,  commissioning:"2026-07-10", uploaded:false},
+/* ============ REAL DATA — open_sr_load_reports (sr_sub_type='CC') + asset_detailed + customers ============ */
+const ROWS = [
+ {iid:"100926327",sr:"213668433",name:"NUJLS GROUP INDIA",app:"3H.8903.C4..",model:"3R1190ENA 4G2",serial:"2620196",kva:null,seg:"PG",email:null,mob:"9421084005",brId:null,brName:null,comm:null,srDate:"2026-07-07",status:"PENDING"},
+ {iid:"100934698",sr:"213665629",name:"Spencer Enterprises",app:"6H.8438.C4..",model:"6K1080ETA 4G2",serial:"2620289",kva:200,seg:"PG",email:"nomailid@na.com",mob:"9049490873",brId:"420435_3",brName:"Beed",comm:null,srDate:"2026-07-06",status:"PENDING"},
+ {iid:"100939439",sr:"213660376",name:"NKS DIGGAI PETROL PUMP",app:"GK3.8603...",model:"3GK550TC 4SR1",serial:"2621487",kva:20,seg:"PG",email:"akengineersglb@gmail.com",mob:"9036522105",brId:"420435_13",brName:"Kalaburagi",comm:null,srDate:"2026-07-04",status:"PENDING"},
+ {iid:"100920634",sr:"213639552",name:"Shreenath Petrolium",app:"GK3.8503...",model:"3GK550TC 4SR2",serial:"2620443",kva:15,seg:"PG",email:"S.james@hdfcbank.com",mob:"8484860588",brId:"420435_9",brName:"Belagavi",comm:null,srDate:"2026-06-30",status:"PENDING"},
+ {iid:"100925841",sr:"213625135",name:"SOMESHWAR SANSTHAN JIREWADI",app:"3H.8903.C4..",model:"3R1190ENA 4G2",serial:"2620192",kva:30,seg:"PG",email:"someshwar111@gmail.com",mob:"9422240837",brId:"420435_3",brName:"Beed",comm:null,srDate:"2026-06-26",status:"PENDING"},
+ {iid:"100927817",sr:"213623710",name:"Ashvin lohana",app:"02.8342.C4..",model:"HA294NA 4G1",serial:"2620574",kva:15,seg:"PG",email:"noemailid@gmail.com",mob:"9545454723",brId:"420435_1",brName:"Ch.Sambhaji Nagar",comm:null,srDate:"2026-06-25",status:"PENDING"},
+ {iid:"100929264",sr:"213602926",name:"Elite PU Science College",app:"3H.8951...",model:"3R1190ETA 4G1",serial:"2620832",kva:40,seg:"PG",email:"noemailid@na.com",mob:"9019171376",brId:"420435_14",brName:"Vijayapura",comm:null,srDate:"2026-06-20",status:"PENDING"},
+ {iid:"100934018",sr:"213568686",name:"A V Education Society",app:"T4.8941...",model:"4R810ETA 4G1",serial:"2622439",kva:58.5,seg:"PG",email:"nomailid@na.com",mob:"9423429463",brId:"420435_4",brName:"Nanded",comm:null,srDate:"2026-06-11",status:"SENT",sentBy:"Atmaram Govindrao Rajegore",sentAt:"2026-08-07 14:33"},
+ {iid:"100927810",sr:"213549360",name:"REDDY PETROLEUMS (MRPL)",app:"GK3.8603...",model:"3GK550TC 4SR1",serial:"2620992",kva:20,seg:"PG",email:"akengineersglb@gmail.com",mob:"9902108385",brId:"420435_13",brName:"Kalaburagi",comm:null,srDate:"2026-06-06",status:"PENDING"},
+ {iid:"100900883",sr:"213306269",name:"Get Engineering Solution Private Limited",app:"GK3.8503...",model:"3GK550TC 4SR2",serial:"2620208",kva:15,seg:"PG",email:"nomailid@gmail.com",mob:"9604436308",brId:"420435_2",brName:"Ahilyanagar",comm:"2026-06-29",srDate:null,status:"SENT",sentBy:"Anil Dilip Sonawane",sentAt:"2026-08-05 11:00"},
+ {iid:"100910247",sr:"213442864",name:"Mahesh Nandkumar Wani",app:"3H.8902...",model:"3R1190ENA 4G1",serial:"2620809",kva:30,seg:"PG",email:"abc@abc.com",mob:"9637970104",brId:"420435_2",brName:"Ahilyanagar",comm:"2026-06-14",srDate:null,status:"PENDING"},
+ {iid:"100927378",sr:"213491271",name:"MR.OM SHANTARAM KALE",app:"3H.8903.C4..",model:"3R1190ENA 4G2",serial:"2620296",kva:35,seg:"PG",email:"abc@gmail.com",mob:"9511128889",brId:"420435_2",brName:"Ahilyanagar",comm:"2026-06-02",srDate:null,status:"SENT",sentBy:"Vikas Changdev Antre",sentAt:"2026-08-01 13:15"},
+ {iid:"100822989",sr:"213380910",name:"Aansh Services",app:"5H.8901...",model:"4R1190ETA 4G1",serial:"2520270",kva:82.5,seg:"PG",email:"nomail@gmail.com",mob:"7760910285",brId:"420435_8",brName:"Hubli",comm:null,srDate:"2026-05-25",status:"SENT",sentBy:"Nikita P Hiremath",sentAt:"2026-07-25 12:30"},
+ {iid:"100919540",sr:"213386840",name:"Deepak G Ratan",app:"T4.8941...",model:"4R810ETA 4G1",serial:"2620987",kva:58.5,seg:"PG",email:"noemailid@na.com",mob:"9242357004",brId:"420435_8",brName:"Hubli",comm:"2026-06-13",srDate:null,status:"SENT",sentBy:"Manjula K Nandalli",sentAt:"2026-08-04 09:48"},
+ {iid:"100911266",sr:"213426637",name:"Adil Ahmed",app:"5H.8901...",model:"4R1190ETA 4G1",serial:"2620330",kva:82.5,seg:"PG",email:"noemailid@na.com",mob:"9845057380",brId:"420435_8",brName:"Hubli",comm:null,srDate:"2026-05-28",status:"SENT",sentBy:"Nikita P Hiremath",sentAt:"2026-08-06 16:22"},
+ {iid:"100927300",sr:"213457189",name:"Shri Dhanvantri Hospital",app:"T4.8941...",model:"4R810ETA 4G1",serial:"2621623",kva:58.5,seg:"PG",email:"pravintawale28@gmail.com",mob:"9448144024",brId:"420435_9",brName:"Belagavi",comm:"2026-05-29",srDate:null,status:"SENT",sentBy:"Anita Sachin Ajarekar",sentAt:"2026-08-02 10:05"},
+ {iid:"100925132",sr:"213476897",name:"Ashwini Electricals",app:"T4.8941...",model:"4R810ETA 4G1",serial:"2621686",kva:58.5,seg:"PG",email:"abc@gmail.com",mob:"8956746707",brId:"420435_9",brName:"Belagavi",comm:"2026-06-20",srDate:null,status:"SENT",sentBy:"Prashant Bharamanna Kakatikar",sentAt:"2026-07-30 15:10"},
+ {iid:"100899501",sr:"213490351",name:"MARATHA CO-OPERATIVE BANK",app:"02.8342.C4..",model:"HA294NA 4G1",serial:"2620271",kva:15,seg:"PG",email:"ravikalghatgi123@hotmail.com",mob:"7204525153",brId:"420435_9",brName:"Belagavi",comm:"2026-05-26",srDate:null,status:"SENT",sentBy:"Anita Sachin Ajarekar",sentAt:"2026-07-28 11:42"},
+ {iid:"100786999",sr:"213352224",name:"Techno Electric & Engineering Co. Ltd.",app:"DV8.8501.C4..",model:"DV8ETA 4G3",serial:"2420387",kva:500,seg:"PG",email:"noemailid@na.com",mob:"9674916280",brId:"420435_13",brName:"Kalaburagi",comm:"2026-05-27",srDate:null,status:"PENDING"},
+ {iid:"100899499",sr:"213472311",name:"SRINIVAS MANIKARAO KATARE",app:"02.8342.C4..",model:"HA294NA 4G1",serial:"2620313",kva:15,seg:"PG",email:"abc@abc.com",mob:"9148861724",brId:"420435_13",brName:"Kalaburagi",comm:"2026-06-26",srDate:null,status:"PENDING"},
+ {iid:"100926342",sr:"213468152",name:"SHRI RAGHAVENDRA FUELS",app:"GK3.8603...",model:"3GK550TC 4SR1",serial:"2620881",kva:20,seg:"PG",email:"bandughuge4@gmail.com",mob:"8698749898",brId:"420435_14",brName:"Vijayapura",comm:"2026-06-05",srDate:null,status:"PENDING"},
 ];
 
-const CUSTOMERS = [
-  {id:1, appCode:"3H.8422", name:"Reliance Jio Infocomm Ltd",   contact:"Amit Sharma",   email:"amit.sharma@jio.com",        serial:"ESN-88213", city:"Mumbai",    commissioning:"2026-06-14"},
-  {id:2, appCode:"3H.8422", name:"Bharti Airtel Ltd",           contact:"Priya Nair",    email:"priya.nair@airtel.com",      serial:"ESN-88450", city:"Pune",      commissioning:"2026-06-21"},
-  {id:3, appCode:"5D.2210", name:"Tata Motors Ltd",             contact:"Rakesh Verma",  email:"rakesh.verma@tatamotors.com",serial:"ESN-71022", city:"Pimpri",    commissioning:"2026-07-02"},
-  {id:4, appCode:"5D.2210", name:"Bajaj Auto Ltd",              contact:"Sneha Kulkarni",email:"sneha.k@bajajauto.com",      serial:"ESN-71388", city:"Akurdi",    commissioning:"2026-07-05"},
-  {id:5, appCode:"2K.1104", name:"DMart (Avenue Supermarts)",   contact:"Vikram Patil",  email:"vikram.patil@dmart.in",      serial:"ESN-55901", city:"Thane",     commissioning:"2026-05-20"},
-  {id:6, appCode:"7A.9033", name:"Ruby Hall Clinic",            contact:"Dr. Meera Joshi",email:"meera.joshi@rubyhall.com",  serial:"ESN-93011", city:"Pune",      commissioning:"2026-07-18"},
-  {id:7, appCode:"4M.5561", name:"HDFC Bank Ltd",               contact:"Suresh Iyer",   email:"suresh.iyer@hdfcbank.com",   serial:"ESN-40077", city:"Mumbai",    commissioning:"2026-04-11"},
-  {id:8, appCode:"9C.3307", name:"CtrlS Datacenters Ltd",       contact:"Anand Rao",     email:"anand.rao@ctrls.in",         serial:"ESN-62544", city:"Navi Mumbai",commissioning:"2026-07-25"},
-  {id:9, appCode:"6T.7719", name:"Jain Irrigation Systems",     contact:"Kiran Jain",    email:"kiran.jain@jains.com",       serial:"ESN-31209", city:"Jalgaon",   commissioning:"2026-03-30"},
-  {id:10,appCode:"8B.4470", name:"L&T Construction",            contact:"Deepak Menon",  email:"deepak.menon@lntecc.com",    serial:"ESN-27680", city:"Chennai",   commissioning:"2026-07-10"},
+const BRANCHES = [
+ ["420435_1","Ch.Sambhaji Nagar"],["420435_2","Ahilyanagar"],["420435_3","Beed"],
+ ["420435_4","Nanded"],["420435_5","Babhaleshwar"],["420435_6","Latur"],["420435_7","Parbhani"],
+ ["420435_8","Hubli"],["420435_9","Belagavi"],["420435_10","Hospet"],["420435_11","Ballari"],
+ ["420435_12","Bagalkote"],["420435_13","Kalaburagi"],["420435_14","Vijayapura"],
 ];
 
-const TOKENS = ["{CUSTOMER_NAME}","{CONTACT_NAME}","{APP_CODE}","{ENGINE_MODEL}","{ENGINE_SERIAL_NO}","{KVA}","{SEGMENT}","{EMISSION}","{COMMISSIONING_DATE}","{CITY}"];
-
-let FORMATS = [
-  {id:1, name:"Standard Welcome Letter", time:"10:00",
-   subject:"Welcome to Kala Care — Genset {APP_CODE} | {CUSTOMER_NAME}",
-   to:["care@kalabiz.com"], cc:["kala.itss@kalabiz.com","service.head@kalabiz.com"],
-   body:"Dear {CONTACT_NAME},\n\nGreetings from Kala Care!\n\nWe are delighted to welcome {CUSTOMER_NAME} to the Kala Care family. Your genset with Application Code {APP_CODE} (Engine Model {ENGINE_MODEL}, {KVA} KVA, Serial No. {ENGINE_SERIAL_NO}) was commissioned on {COMMISSIONING_DATE} at {CITY}.\n\nAs part of our commitment, your asset is now covered under our preventive maintenance program. Our service team will reach out before every scheduled service (500 / 1000 / 1500 hrs) with the applicable part kits.\n\nFor any support, call our 24x7 helpline 1800-XXX-XXXX or reply to this email.\n\nWarm regards,\nKala Care Service Team\nKala Group"},
-  {id:2, name:"AMC Welcome + Service Schedule", time:"09:30",
-   subject:"Your AMC is Active — {CUSTOMER_NAME} ({APP_CODE})",
-   to:["amc@kalabiz.com"], cc:["kala.itss@kalabiz.com"],
-   body:"Dear {CONTACT_NAME},\n\nWelcome aboard! Your Annual Maintenance Contract for the {SEGMENT} segment genset (App Code {APP_CODE}, {ENGINE_MODEL}, Emission {EMISSION}) is now ACTIVE.\n\nCommissioning Date: {COMMISSIONING_DATE}\nEngine Serial No.: {ENGINE_SERIAL_NO}\n\nYour first preventive service is due at 500 running hours. The service schedule and part kit details are attached.\n\nThank you for choosing Kala Group.\n\nBest regards,\nKala Care AMC Desk"},
+const USERS = [
+ {n:"Master Admin",br:"HO",brN:"Head Office"},
+ {n:"Hanumant Nagorao Nelge",br:"420435_1",brN:"Ch.Sambhaji Nagar"},
+ {n:"Karan Ganesh Sonare",br:"420435_1",brN:"Ch.Sambhaji Nagar"},
+ {n:"Vikas Changdev Antre",br:"420435_2",brN:"Ahilyanagar"},
+ {n:"Anil Dilip Sonawane",br:"420435_2",brN:"Ahilyanagar"},
+ {n:"Jyoti Mangesh Swami",br:"420435_2",brN:"Ahilyanagar"},
+ {n:"Rajaram Ramrao Rathod",br:"420435_3",brN:"Beed"},
+ {n:"Atmaram Govindrao Rajegore",br:"420435_4",brN:"Nanded"},
+ {n:"Sagar Ajinath Sonavne",br:"420435_5",brN:"Babhaleshwar"},
+ {n:"Suraj Ghangaokar",br:"420435_6",brN:"Latur"},
+ {n:"Nikita P Hiremath",br:"420435_8",brN:"Hubli"},
+ {n:"Manjula K Nandalli",br:"420435_8",brN:"Hubli"},
+ {n:"Arun Fakkirappa Matti",br:"420435_8",brN:"Hubli"},
+ {n:"Anita Sachin Ajarekar",br:"420435_9",brN:"Belagavi"},
+ {n:"Prashant Bharamanna Kakatikar",br:"420435_9",brN:"Belagavi"},
 ];
-let nextFmtId = 3;
+const CURRENT_USER = "Master Admin";
 
-/* Pre-seeded sent log so the report is not empty */
-let SENT_LOG = [
-  {id:1, ts:"2026-07-20 10:00", appCode:"3H.8422", customer:"Reliance Jio Infocomm Ltd", serial:"ESN-88213", tpl:"Standard Welcome Letter", to:"amit.sharma@jio.com; care@kalabiz.com", cc:"kala.itss@kalabiz.com; service.head@kalabiz.com", status:"Sent", by:"kala.itss"},
-  {id:2, ts:"2026-07-21 09:30", appCode:"5D.2210", customer:"Tata Motors Ltd", serial:"ESN-71022", tpl:"AMC Welcome + Service Schedule", to:"rakesh.verma@tatamotors.com; amc@kalabiz.com", cc:"kala.itss@kalabiz.com", status:"Sent", by:"kala.itss"},
-  {id:3, ts:"2026-07-24 11:15", appCode:"2K.1104", customer:"DMart (Avenue Supermarts)", serial:"ESN-55901", tpl:"Standard Welcome Letter", to:"vikram.patil@dmart.in; care@kalabiz.com", cc:"kala.itss@kalabiz.com", status:"Failed", by:"kala.itss"},
-  {id:4, ts:"2026-07-30 10:00", appCode:"7A.9033", customer:"Ruby Hall Clinic", serial:"ESN-93011", tpl:"Standard Welcome Letter", to:"meera.joshi@rubyhall.com; care@kalabiz.com", cc:"kala.itss@kalabiz.com; service.head@kalabiz.com", status:"Scheduled", by:"kala.itss"},
+/* ============ MASTER DATA (editable in Master Setup) ============ */
+let TEMPLATE =
+`Dear Valued Customer,
+
+Thank You and Welcome!
+
+Thank you for choosing Kirloskar Oil Engines Ltd. as your trusted partner for your power generation needs.
+
+We warmly welcome you on behalf of Kala Care Global LLP, the Authorized Kirloskar Care Centre for Spare Parts, Services, Kirloskar Engines, Kirloskar Generators, and Allied Products.
+
+Our dedicated team is committed to providing you with prompt and reliable support throughout the life of your genset. We are always available to guide you with:
+•  Installation support
+•  Customized service schedule as per your requirement
+•  Preventive maintenance services and Annual Maintenance Contracts (AMC)
+•  Service on demand
+•  Genuine spare parts, consumables, K-Oil, K-Coolant
+•  Technical support and troubleshooting for warranty and post warranty services
+
+Should you have any questions or require assistance at any time, please do not hesitate to contact us.
+
+To ensure optimum performance, maximum reliability, and extended service life of your generator, we recommend following the operating and maintenance guidelines provided in the Kirloskar Operation & Maintenance Manual, that is sent to your registered email ID. Adhering to the prescribed maintenance schedule also helps maintain warranty compliance.
+
+The enclosed maintenance chart provides a quick reference to the recommended service intervals, preventive maintenance activities, and parts replacement schedule based on the running hours of your generator. We encourage you to keep this chart readily accessible for easy reference.
+
+Thank you once again for your trust and confidence in Kirloskar and Kala Care Global LLP. We value your business and look forward to serving you for many years to come while building a lasting relationship founded on quality, reliability, and exceptional customer service.
+
+Warm regards,
+Team Kala Care Global LLP`;
+
+let DEFAULT_ATT = [
+ "KALA Care Welcome Brochure.pdf",
+ "Warranty Terms & Conditions.pdf",
+ "Branch Service Network Contact Card.pdf",
 ];
-let nextLogId = 5;
 
-/* =====================================================================
-   STATE
-===================================================================== */
-let selectedCodes = new Set();
-let currentTplId = 1;
-let custState = {};   // per-customer editable state: {when, to[], cc[], sent}
+let KVA_RULES = [
+ {from:0,   to:30,   year:2026, file:"Genset O&M Guide 15–30 KVA (2026).pdf"},
+ {from:30.1,to:82.5, year:2026, file:"Genset O&M Guide 40–82.5 KVA (2026).pdf"},
+ {from:83,  to:200,  year:2026, file:"Genset O&M Guide 100–200 KVA (2026).pdf"},
+ {from:200.1,to:1010,year:2026, file:"HHP Genset Manual 250–1010 KVA (2026).pdf"},
+ {from:0,   to:30,   year:2025, file:"Genset O&M Guide 15–30 KVA (2025).pdf"},
+];
 
-/* =====================================================================
-   HELPERS
-===================================================================== */
+/* ============ helpers ============ */
 const $ = id => document.getElementById(id);
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const emailOk = e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
-const fmtDate = d => { const [y,m,dd]=d.split("-"); return `${dd}-${m}-${y}`; };
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmtD = d => { if(!d) return null; const [y,m,dd]=d.split(" ")[0].split("-"); return `${dd}-${m}-${y}`; };
+const rowYear = r => { const d = r.comm || r.srDate; return d ? +d.slice(0,4) : new Date().getFullYear(); };
+const matchRule = r => r.kva==null ? null :
+  KVA_RULES.find(k => r.kva>=k.from && r.kva<=k.to && k.year===rowYear(r)) || null;
+function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2600); }
 
-function toast(msg, ok){
-  const t = document.createElement("div");
-  t.className = "toast" + (ok ? " ok" : "");
-  t.textContent = msg;
-  $("toast").appendChild(t);
-  setTimeout(()=>t.remove(), 3200);
+/* ============ tabs ============ */
+function showTab(i){
+  for(let k=0;k<3;k++){ $("tabPane"+k).hidden = k!==i; $("tabBtn"+k).classList.toggle("on",k===i); }
+  if(i===0) renderPending(); if(i===1) renderReport(); if(i===2) renderMaster();
 }
-function fakeTab(el){ toast("Prototype: only the Welcome Letter tab is functional here."); }
-function showView(v){
-  document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));
-  $("view-"+v).classList.add("active");
-  if(v==="report") renderReport();
+function showMsub(i){
+  for(let k=0;k<3;k++){ $("mpane"+k).hidden = k!==i; $("msub"+k).classList.toggle("on",k===i); }
 }
-function closeModal(id){ $(id).classList.remove("open"); }
-function openModal(id){ $(id).classList.add("open"); }
-
-function tplById(id){ return FORMATS.find(f=>f.id===Number(id)); }
-function merge(text, c){
-  const app = APP_CODES.find(a=>a.appCode===c.appCode) || {};
-  const map = {
-    "{CUSTOMER_NAME}":c.name, "{CONTACT_NAME}":c.contact, "{APP_CODE}":c.appCode,
-    "{ENGINE_MODEL}":app.engineModel||"", "{ENGINE_SERIAL_NO}":c.serial, "{KVA}":app.kva||"",
-    "{SEGMENT}":app.segment||"", "{EMISSION}":app.emission||"",
-    "{COMMISSIONING_DATE}":fmtDate(c.commissioning), "{CITY}":c.city,
-  };
-  return text.replace(/\{[A-Z_]+\}/g, m => map[m] !== undefined ? map[m] : m);
+/* hero pills + KPI boxes → open the list filtered to that status */
+function goStatus(st){
+  $("fStatus").value = st;
+  showTab(0);
 }
 
-/* ---------- generic email-chips widget ---------- */
-function chipsWidget(hostId, list, kind, defaults){
-  const host = $(hostId);
-  host.innerHTML = "";
-  const box = document.createElement("div");
-  box.className = "chips";
-  list.forEach((e,i)=>{
-    const isDef = defaults && defaults.includes(e);
-    const c = document.createElement("span");
-    c.className = "chip " + (isDef ? "def" : kind==="cc" ? "cc" : "");
-    c.innerHTML = esc(e) + (isDef ? ' <span title="from master" style="font-size:9px">🔒</span>' : "");
-    if(!isDef){
-      const b = document.createElement("button");
-      b.textContent = "✕";
-      b.onclick = ()=>{ list.splice(i,1); chipsWidget(hostId,list,kind,defaults); };
-      c.appendChild(b);
-    }
-    box.appendChild(c);
-  });
-  const inp = document.createElement("input");
-  inp.type = "text";
-  inp.placeholder = "＋ add email & press Enter";
-  inp.onkeydown = ev => {
-    if(ev.key==="Enter" || ev.key===","){
-      ev.preventDefault();
-      const v = inp.value.trim().replace(/,$/,"");
-      if(!v) return;
-      if(!emailOk(v)) return toast("⚠️ Invalid email: " + v);
-      if(list.includes(v)) return toast("Already added");
-      list.push(v);
-      chipsWidget(hostId,list,kind,defaults);
-      $(hostId).querySelector("input").focus();
-    }
-  };
-  box.appendChild(inp);
-  host.appendChild(box);
+/* ============ tab 0 : pending ============ */
+function branchOptions(sel, allLabel){
+  sel.innerHTML = `<option value="">${allLabel}</option>` +
+    BRANCHES.map(b=>`<option value="${b[0]}">${esc(b[1])} — ${b[0]}</option>`).join("");
+}
+function renderHero(){
+  const sent = ROWS.filter(r=>r.status==="SENT").length;
+  $("hTotal").textContent = ROWS.length;
+  $("hPend").textContent = ROWS.length - sent;
+  $("hSent").textContent = sent;
+  $("pendCnt").textContent = ROWS.length - sent;
+}
+function renderPending(){
+  renderHero();
+  const br=$("fBranch").value, st=$("fStatus").value, q=$("fSearch").value.trim().toLowerCase();
+  const list = ROWS.filter(r =>
+    (!br || r.brId===br) && (!st || r.status===st) &&
+    (!q || [r.name,r.iid,r.sr,r.model,r.serial,r.app].join(" ").toLowerCase().includes(q))
+  );
+  $("rowCount").textContent = `${list.length} of ${ROWS.length} records`;
+  $("pendBody").innerHTML = list.length ? list.map(r=>`
+    <tr>
+      <td class="num strong">${r.iid}</td>
+      <td class="strong" title="${esc(r.name)}">${esc(r.name)}</td>
+      <td class="num">${esc(r.mob)}</td>
+      <td title="${esc(r.email||'')}">${r.email?esc(r.email):'<span class="muted">—</span>'}</td>
+      <td title="${esc(r.brName||'')} ${r.brId||''}">${r.brName?`${esc(r.brName)} — <span class="num">${r.brId}</span>`:'<span class="muted">—</span>'}</td>
+      <td>${esc(r.seg)}</td>
+      <td class="num">${esc(r.app)}</td>
+      <td>${esc(r.model)}</td>
+      <td class="num">${r.serial}</td>
+      <td class="num">${r.kva ?? '<span class="muted">—</span>'}</td>
+      <td class="num">${fmtD(r.comm) || (r.srDate?`<span class="muted" title="SR date (commissioning date not updated yet)">${fmtD(r.srDate)} *</span>`:'<span class="muted">—</span>')}</td>
+      <td class="num">${r.sr}</td>
+      <td><span class="pill cc">CC</span></td>
+      <td>${r.status==="SENT"
+          ?`<span class="pill ok" title="Sent by ${esc(r.sentBy)} on ${r.sentAt}">Sent ✓</span>`
+          :'<span class="pill pend">Pending</span>'}</td>
+      <td title="${r.status==='SENT'?esc(r.sentBy)+' · '+r.sentAt:''}">${r.status==="SENT"?`${esc(r.sentBy)} <span class="subl num">${r.sentAt}</span>`:'<span class="muted">—</span>'}</td>
+      <td class="actcol">${r.status==="SENT"
+          ?`<button class="btn sm ghost" onclick="openPreview('${r.iid}',true)">View</button>`
+          :`<button class="btn sm" onclick="openPreview('${r.iid}')">Preview &amp; Send</button>`}</td>
+    </tr>`).join("") :
+    `<tr><td colspan="16"><div class="empty">No records match the current filters.</div></td></tr>`;
+  syncTopScroll();
 }
 
-/* =====================================================================
-   STEP 1 — app code selection (app-mapping style)
-===================================================================== */
-function renderStep1(){
-  const q = $("s1search").value.trim().toLowerCase();
-  const rows = APP_CODES.filter(a =>
-    !q || [a.appCode,a.engineModel,a.segment,a.kva,a.emission].join(" ").toLowerCase().includes(q));
-  $("s1body").innerHTML = rows.map(a=>{
-    const sel = selectedCodes.has(a.appCode);
-    return `<tr class="${sel?'rowsel':''}" onclick="toggleCode('${a.appCode}')" style="cursor:pointer">
-      <td><input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleCode('${a.appCode}')"></td>
-      <td><span class="code-chip">${esc(a.appCode)}</span></td>
-      <td>${esc(a.engineModel)}</td><td>${esc(a.segment)}</td><td>${esc(a.kva)}</td>
-      <td>${esc(a.emission)}</td><td style="text-align:right;font-weight:700">${a.assets}</td>
-      <td>${fmtDate(a.commissioning)}</td>
-      <td>${a.uploaded?'<span class="pill up">Uploaded</span>':'<span class="pill pend">Remaining</span>'}</td>
-    </tr>`;
-  }).join("") || `<tr><td colspan="9" class="empty">No app codes match your search.</td></tr>`;
-  $("s1cnt").innerHTML = `<b>${rows.length}</b> of ${APP_CODES.length} codes`;
-  $("s1sel").innerHTML = `Selected: <b>${selectedCodes.size}</b> app code(s) · <b>${selCustomers().length}</b> customer(s)`;
-  $("s1ok").disabled = selectedCodes.size===0;
-  $("s1all").checked = rows.length>0 && rows.every(a=>selectedCodes.has(a.appCode));
-}
-function toggleCode(code){
-  selectedCodes.has(code) ? selectedCodes.delete(code) : selectedCodes.add(code);
-  renderStep1();
-}
-function toggleAll(cb){
-  const q = $("s1search").value.trim().toLowerCase();
-  APP_CODES.filter(a=>!q||[a.appCode,a.engineModel,a.segment,a.kva,a.emission].join(" ").toLowerCase().includes(q))
-    .forEach(a => cb.checked ? selectedCodes.add(a.appCode) : selectedCodes.delete(a.appCode));
-  renderStep1();
-}
-function selCustomers(){ return CUSTOMERS.filter(c=>selectedCodes.has(c.appCode)); }
-
-/* =====================================================================
-   STEP navigation
-===================================================================== */
-function goStep(n){
-  [1,2,3].forEach(i=>{
-    $("step"+i).style.display = i===n ? "" : "none";
-    const st = $("st"+i);
-    st.className = "step" + (i===n ? " on" : i<n ? " done" : "");
-  });
-  if(n===2) renderTplSelect();
-  if(n===3) renderStep3();
-  window.scrollTo({top:0,behavior:"smooth"});
-}
-
-/* =====================================================================
-   STEP 2 — letter format
-===================================================================== */
-function renderTplSelect(){
-  $("tplSelect").innerHTML = FORMATS.map(f=>`<option value="${f.id}" ${f.id===currentTplId?'selected':''}>${esc(f.name)}</option>`).join("");
-  renderTplPreview();
-}
-function renderTplPreview(){
-  currentTplId = Number($("tplSelect").value);
-  const t = tplById(currentTplId);
-  if(!t) return;
-  const sample = selCustomers()[0] || CUSTOMERS[0];
-  $("tplPreview").innerHTML =
-    `<div class="lg">KALA GROUP · Kala Care</div><div style="color:var(--mut);font-size:12px;margin-bottom:12px">Subject: ${esc(merge(t.subject,sample))}</div>` + esc(merge(t.body,sample));
-  $("tplDefTo").innerHTML = t.to.map(e=>`<span class="chip def" style="margin:2px">${esc(e)} 🔒</span>`).join("") || '<span class="cnt">—</span>';
-  $("tplDefCc").innerHTML = t.cc.map(e=>`<span class="chip def" style="margin:2px">${esc(e)} 🔒</span>`).join("") || '<span class="cnt">—</span>';
-  $("tplDefTime").textContent = t.time + " (daily default)";
-  custState = {};   // template changed → reset per-customer state
-}
-
-/* =====================================================================
-   STEP 3 — schedule & send  (per-customer edit of time / to / cc)
-===================================================================== */
-function ensureCust(c){
-  if(!custState[c.id]){
-    const t = tplById(currentTplId);
-    const today = new Date().toISOString().slice(0,10);
-    custState[c.id] = {
-      when: `${today}T${t.time}`,
-      to:  [c.email, ...t.to],
-      cc:  [...t.cc],
-      sent:false,
-    };
-  }
-  return custState[c.id];
-}
-function renderStep3(){
-  const list = selCustomers();
-  const t = tplById(currentTplId);
-  $("s3cnt").innerHTML = `Format: <b>${esc(t.name)}</b> · <b>${list.length}</b> customer(s) across <b>${selectedCodes.size}</b> app code(s)`;
-  $("custList").innerHTML = "";
-  list.forEach(c=>{
-    const s = ensureCust(c);
-    const card = document.createElement("div");
-    card.className = "cust-card";
-    card.innerHTML = `
-      <div class="cust-head">
-        <span class="code-chip">${esc(c.appCode)}</span>
-        <span class="nm">${esc(c.name)}</span>
-        <span class="meta">👤 ${esc(c.contact)} · 🔧 ${esc(c.serial)} · 📍 ${esc(c.city)}</span>
-        <div style="flex:1"></div>
-        ${s.sent?'<span class="pill sent">✓ Queued</span>':''}
-      </div>
-      <div class="cust-body">
-        <div class="field" style="margin:0">
-          <label class="f">📅 Send date &amp; time (editable per customer)</label>
-          <input type="datetime-local" value="${s.when}" style="width:100%" ${s.sent?'disabled':''}
-                 onchange="custState[${c.id}].when=this.value">
-        </div>
-        <div class="field" style="margin:0">
-          <label class="f">Status</label>
-          <div style="padding-top:8px">${s.sent?'<span class="pill sent">Queued for sending</span>':'<span class="pill pend">Pending</span>'}</div>
-        </div>
-        <div class="field full" style="margin:0">
-          <label class="f">TO emails <span style="font-weight:400">(customer + master defaults 🔒 — add more below)</span></label>
-          <div id="to-${c.id}"></div>
-        </div>
-        <div class="field full" style="margin:0">
-          <label class="f">CC emails <span style="font-weight:400">(master defaults 🔒 — add more below)</span></label>
-          <div id="cc-${c.id}"></div>
-        </div>
-      </div>
-      <div class="cust-foot">
-        <button class="btn sm" onclick="previewCust(${c.id})">👁 Preview Letter</button>
-        <button class="btn green sm" ${s.sent?'disabled':''} onclick="sendOne(${c.id})">✉️ Send Email</button>
-      </div>`;
-    $("custList").appendChild(card);
-    const t2 = tplById(currentTplId);
-    chipsWidget("to-"+c.id, s.to, "to", t2.to);
-    chipsWidget("cc-"+c.id, s.cc, "cc", t2.cc);
-  });
-}
-function previewCust(id){
-  const c = CUSTOMERS.find(x=>x.id===id);
-  const t = tplById(currentTplId);
-  $("pvTitle").textContent = "Preview — " + c.name;
-  $("pvBody").innerHTML =
-    `<div class="lg">KALA GROUP · Kala Care</div>
-     <div style="color:var(--mut);font-size:12px;margin-bottom:12px">
-       Subject: ${esc(merge(t.subject,c))}<br>
-       To: ${esc(custState[id].to.join("; "))}<br>
-       Cc: ${esc(custState[id].cc.join("; "))}</div>` + esc(merge(t.body,c));
-  openModal("mPreview");
-}
-function sendOne(id, silent){
-  const c = CUSTOMERS.find(x=>x.id===id);
-  const s = custState[id];
-  if(s.sent) return;
-  if(!s.to.length) return toast("⚠️ " + c.name + ": at least one TO email is required");
-  const t = tplById(currentTplId);
-  const when = s.when.replace("T"," ");
-  const future = new Date(s.when) > new Date();
-  SENT_LOG.unshift({
-    id: nextLogId++, ts: when, appCode: c.appCode, customer: c.name, serial: c.serial,
-    tpl: t.name, to: s.to.join("; "), cc: s.cc.join("; "),
-    status: future ? "Scheduled" : "Sent", by: "kala.itss",
-  });
-  s.sent = true;
-  if(!silent){
-    toast((future?"🕑 Scheduled for "+when+" — ":"✅ Sent — ") + c.name, true);
-    renderStep3();
+/* top thin scrollbar — synced both ways with the table scroller */
+function syncTopScroll(){
+  const top=$("topScroll"), tbl=$("tblScroll");
+  $("topSpacer").style.width = $("pendTable").scrollWidth + "px";
+  if(!top._wired){
+    top._wired = true;
+    top.addEventListener("scroll", ()=>{ if(!top._lock){ tbl._lock=true; tbl.scrollLeft=top.scrollLeft; tbl._lock=false; } });
+    tbl.addEventListener("scroll", ()=>{ if(!tbl._lock){ top._lock=true; top.scrollLeft=tbl.scrollLeft; top._lock=false; } });
+    window.addEventListener("resize", ()=>{ $("topSpacer").style.width = $("pendTable").scrollWidth + "px"; });
   }
 }
-function sendAll(){
-  const pending = selCustomers().filter(c=>!ensureCust(c).sent);
-  if(!pending.length) return toast("Nothing pending — all letters already queued.");
-  pending.forEach(c=>sendOne(c.id, true));
-  renderStep3();
-  toast(`✅ ${pending.length} welcome letter(s) queued. See the Sent Email Report.`, true);
+
+/* ============ preview / send ============ */
+let CUR=null;
+function mergeLetter(r){
+  const map={CUSTOMER_NAME:r.name, INSTANCE_ID:r.iid, ENGINE_MODEL:r.model, ENGINE_SERIAL:r.serial,
+    APP_CODE:r.app, KVA_RATING:r.kva ?? "—", COMMISSIONING_DATE:fmtD(r.comm)||fmtD(r.srDate)||"—",
+    BRANCH_NAME:r.brName||"—", BRANCH_MOBILE:"1800-KALACARE"};
+  let out = esc(TEMPLATE).replace(/\{\{(\w+)\}\}/g,(m,k)=> k in map ? `<span class="fld">${esc(map[k])}</span>` : m);
+  return out.split(/\n{2,}/).map(p=>`<p>${p.replace(/\n/g,"<br>")}</p>`).join("");
+}
+function openPreview(iid, viewOnly){
+  const r = ROWS.find(x=>x.iid===iid); if(!r) return; CUR=r;
+  $("mSr").textContent = `SR ${r.sr} • ${r.iid}`;
+  const today = new Date().toLocaleDateString("en-GB").replace(/\//g,"-");
+  $("letterBody").innerHTML = `
+    <div class="lh">
+      <div class="logo"><span>KALA</span>Care Global LLP</div>
+      <div class="ref">Ref: WL/${r.brId||"HO"}/${r.sr}<br>Date: ${r.status==="SENT"?r.sentAt.split(" ")[0].split("-").reverse().join("-"):today}</div>
+    </div>
+    ${mergeLetter(r)}
+    <table class="gd">
+      <tr><td>Instance ID</td><td class="num">${r.iid}</td><td>App Code</td><td class="num">${esc(r.app)}</td></tr>
+      <tr><td>Engine Model</td><td>${esc(r.model)}</td><td>Engine Serial</td><td class="num">${r.serial}</td></tr>
+      <tr><td>KVA Rating</td><td class="num">${r.kva ?? "—"}</td><td>Segment</td><td>${esc(r.seg)}</td></tr>
+      <tr><td>Commissioning</td><td class="num">${fmtD(r.comm)||fmtD(r.srDate)||"—"}</td><td>Branch</td><td>${esc(r.brName||"—")}</td></tr>
+    </table>`;
+  const rule = matchRule(r);
+  $("attList").innerHTML =
+    DEFAULT_ATT.map(a=>`<div class="att"><span class="fico">PDF</span>${esc(a)}<span class="why">default</span></div>`).join("") +
+    (rule
+      ?`<div class="att kva"><span class="fico">PDF</span><b>${esc(rule.file)}</b><span class="why">matched: ${rule.from}–${rule.to} KVA · year ${rule.year}<br>(customer: ${r.kva} KVA, ${rowYear(r)})</span></div>`
+      :`<div class="att kva"><span class="fico">!</span><span class="muted">No KVA-range attachment matched ${r.kva==null?"(KVA rating not available)":`(${r.kva} KVA, year ${rowYear(r)})`} — add a range in Master Setup.</span></div>`);
+  $("mTo").innerHTML = r.email
+    ? `Will be emailed to <b>${esc(r.email)}</b> · SMS alert to <b>${esc(r.mob)}</b>`
+    : `<span style="color:var(--danger)">No email on record</span> — SMS alert to <b>${esc(r.mob)}</b>`;
+  $("sendBtn").style.display = (viewOnly||r.status==="SENT") ? "none" : "";
+  $("ovl").classList.add("open");
+}
+function closePreview(){ $("ovl").classList.remove("open"); CUR=null; }
+function doSend(){
+  if(!CUR) return;
+  const now = new Date();
+  CUR.status="SENT"; CUR.sentBy=CURRENT_USER;
+  CUR.sentAt = now.toISOString().slice(0,10)+" "+now.toTimeString().slice(0,5);
+  toast(`Welcome letter sent to ${CUR.name} ✓`);
+  closePreview(); renderPending();
+}
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ closePreview(); closeRepPopup(); } });
+$("ovl").addEventListener("click",e=>{ if(e.target===$("ovl")) closePreview(); });
+
+/* ============ tab 1 : reports ============ */
+let REP_MODE = "SENT";           /* which records the bottom table shows */
+function setRepMode(m){ REP_MODE = m; renderReport(); }
+
+function repData(){
+  const br=$("rBranch").value, us=$("rUser").value;
+  const sent = ROWS.filter(r=>r.status==="SENT" && (!br||r.brId===br) && (!us||r.sentBy===us))
+                   .sort((a,b)=> b.sentAt.localeCompare(a.sentAt));
+  const pend = ROWS.filter(r=>r.status==="PENDING" && (!br||r.brId===br));
+  return {br, us, sent, pend};
 }
 
-/* =====================================================================
-   LETTER FORMAT MASTER  (CRUD + default TO/CC in master)
-===================================================================== */
-let edToList = [], edCcList = [], editingId = null;
-
-function openFormatMaster(){
-  renderFormats();
-  openModal("mFormats");
-}
-function renderFormats(){
-  $("fmtBody").innerHTML = FORMATS.map(f=>`<tr>
-    <td style="font-weight:700">${esc(f.name)}</td>
-    <td>${esc(f.subject)}</td>
-    <td>${f.to.map(e=>`<span class="chip" style="margin:1px">${esc(e)}</span>`).join(" ")||"—"}</td>
-    <td>${f.cc.map(e=>`<span class="chip cc" style="margin:1px">${esc(e)}</span>`).join(" ")||"—"}</td>
-    <td style="font-weight:700">${f.time}</td>
-    <td>
-      <button class="btn sm" onclick="editFormat(${f.id})">✏️ Edit</button>
-      <button class="btn sm danger" onclick="delFormat(${f.id})">🗑</button>
-    </td></tr>`).join("") || `<tr><td colspan="6" class="empty">No letter formats yet — create one.</td></tr>`;
-}
-function editFormat(id){
-  editingId = id;
-  const f = id ? tplById(id) : null;
-  $("edTitle").textContent = f ? "Edit Letter Format" : "New Letter Format";
-  $("edName").value = f ? f.name : "";
-  $("edSubject").value = f ? f.subject : "";
-  $("edTime").value = f ? f.time : "10:00";
-  $("edBody").value = f ? f.body : "Dear {CONTACT_NAME},\n\n";
-  edToList = f ? [...f.to] : [];
-  edCcList = f ? [...f.cc] : [];
-  chipsWidget("edTo", edToList, "to");
-  chipsWidget("edCc", edCcList, "cc");
-  $("edToks").innerHTML = TOKENS.map(t=>`<button onclick="insertTok('${t}')">${t}</button>`).join("");
-  openModal("mEditor");
-}
-function insertTok(tok){
-  const ta = $("edBody");
-  const s = ta.selectionStart, e = ta.selectionEnd;
-  ta.value = ta.value.slice(0,s) + tok + ta.value.slice(e);
-  ta.focus(); ta.selectionStart = ta.selectionEnd = s + tok.length;
-}
-function saveFormat(){
-  const name = $("edName").value.trim(), subject = $("edSubject").value.trim(), body = $("edBody").value.trim();
-  if(!name || !subject || !body) return toast("⚠️ Name, subject and body are required");
-  const data = {name, subject, body, time:$("edTime").value||"10:00", to:[...edToList], cc:[...edCcList]};
-  if(editingId){ Object.assign(tplById(editingId), data); }
-  else { FORMATS.push({id:nextFmtId++, ...data}); }
-  closeModal("mEditor");
-  renderFormats();
-  toast("💾 Letter format saved to master", true);
-}
-function delFormat(id){
-  if(FORMATS.length===1) return toast("⚠️ At least one letter format must remain");
-  if(!confirm("Delete this letter format?")) return;
-  FORMATS = FORMATS.filter(f=>f.id!==id);
-  if(currentTplId===id) currentTplId = FORMATS[0].id;
-  renderFormats();
-  toast("🗑 Format deleted", true);
-}
-
-/* =====================================================================
-   REPORT  (filters + export)
-===================================================================== */
-function reportRows(){
-  const from = $("fFrom").value, to = $("fTo").value,
-        app = $("fApp").value, tpl = $("fTpl").value,
-        st  = $("fStatus").value, q = $("fSearch").value.trim().toLowerCase();
-  return SENT_LOG.filter(r=>{
-    const d = r.ts.slice(0,10);
-    if(from && d < from) return false;
-    if(to && d > to) return false;
-    if(app && r.appCode!==app) return false;
-    if(tpl && r.tpl!==tpl) return false;
-    if(st && r.status!==st) return false;
-    if(q && ![r.customer,r.to,r.cc,r.serial,r.appCode].join(" ").toLowerCase().includes(q)) return false;
-    return true;
-  });
-}
 function renderReport(){
-  // (re)fill filter dropdowns, keeping current choice
-  const appSel = $("fApp"), tplSel = $("fTpl");
-  const keepA = appSel.value, keepT = tplSel.value;
-  appSel.innerHTML = '<option value="">All</option>' + [...new Set(SENT_LOG.map(r=>r.appCode))].sort().map(c=>`<option>${esc(c)}</option>`).join("");
-  tplSel.innerHTML = '<option value="">All</option>' + [...new Set(SENT_LOG.map(r=>r.tpl))].map(t=>`<option>${esc(t)}</option>`).join("");
-  appSel.value = keepA; tplSel.value = keepT;
+  const {sent, pend} = repData();
+  $("kSent").textContent = sent.length;
+  $("kPend").textContent = pend.length;
+  $("kUsers").textContent = new Set(sent.map(r=>r.sentBy)).size;
+  $("kBr").textContent = new Set(sent.filter(r=>r.brId).map(r=>r.brId)).size;
+  $("rCount").textContent = `${sent.length} sent · ${pend.length} pending`;
+  /* highlight the active KPI */
+  $("kpiSent").style.borderColor = REP_MODE==="SENT" ? "var(--ok)" : "var(--line)";
+  $("kpiPend").style.borderColor = REP_MODE==="PENDING" ? "var(--pend)" : "var(--line)";
 
-  const rows = reportRows();
-  $("repBody").innerHTML = rows.map((r,i)=>`<tr>
-    <td>${i+1}</td><td style="white-space:nowrap;font-weight:600">${esc(r.ts)}</td>
-    <td><span class="code-chip">${esc(r.appCode)}</span></td>
-    <td>${esc(r.customer)}</td><td>${esc(r.serial)}</td><td>${esc(r.tpl)}</td>
-    <td style="max-width:220px;word-break:break-all;font-size:12px">${esc(r.to)}</td>
-    <td style="max-width:200px;word-break:break-all;font-size:12px">${esc(r.cc)}</td>
-    <td><span class="pill ${r.status==='Sent'?'sent':r.status==='Scheduled'?'sched':'fail'}">${r.status}</span></td>
-    <td>${esc(r.by)}</td></tr>`).join("")
-    || `<tr><td colspan="10" class="empty">No records match the selected filters.</td></tr>`;
+  if(REP_MODE==="SENT"){
+    $("repTitle").textContent = "Sent Letter Details";
+    $("repNote").textContent = "newest first";
+    $("repHead").innerHTML = `
+      <th>Ref No</th><th>Sent Date &amp; Time</th><th>Sent By</th><th>Customer</th><th>Instance ID</th>
+      <th>Branch — ID</th><th>KVA</th><th>Attachments</th><th>Sent To (Email)</th>`;
+    $("repBody").innerHTML = sent.length ? sent.map(r=>{
+      const rule = matchRule(r);
+      return `<tr>
+        <td class="num strong">WL/${r.brId||"HO"}/${r.sr}</td>
+        <td class="num">${r.sentAt}</td>
+        <td class="strong">${esc(r.sentBy)}</td>
+        <td title="${esc(r.name)}">${esc(r.name)}</td>
+        <td class="num">${r.iid}</td>
+        <td>${r.brName?`${esc(r.brName)} — <span class="num">${r.brId}</span>`:'—'}</td>
+        <td class="num">${r.kva ?? "—"}</td>
+        <td class="num">${DEFAULT_ATT.length + (rule?1:0)} files${rule?` <span class="subl">(incl. KVA PDF)</span>`:""}</td>
+        <td>${r.email?esc(r.email):'<span class="muted">—</span>'}</td>
+      </tr>`;}).join("") :
+      `<tr><td colspan="9"><div class="empty">No sent letters match the current filters.</div></td></tr>`;
+  } else {
+    $("repTitle").textContent = "Pending Letter Details";
+    $("repNote").textContent = "welcome letter not sent yet";
+    $("repHead").innerHTML = `
+      <th>SR No</th><th>Instance ID</th><th>Customer</th><th>Branch — ID</th>
+      <th>KVA</th><th>Segment</th><th>Email</th><th>Mobile No</th>`;
+    $("repBody").innerHTML = pend.length ? pend.map(r=>`
+      <tr>
+        <td class="num">${r.sr}</td>
+        <td class="num">${r.iid}</td>
+        <td class="strong" title="${esc(r.name)}">${esc(r.name)}</td>
+        <td>${r.brName?`${esc(r.brName)} — <span class="num">${r.brId}</span>`:'—'}</td>
+        <td class="num">${r.kva ?? "—"}</td>
+        <td>${esc(r.seg)}</td>
+        <td>${r.email?esc(r.email):'<span class="muted">—</span>'}</td>
+        <td class="num">${esc(r.mob)}</td>
+      </tr>`).join("") :
+      `<tr><td colspan="8"><div class="empty">No pending letters match the current filters.</div></td></tr>`;
+  }
+}
 
-  const sent = rows.filter(r=>r.status==="Sent").length,
-        sch  = rows.filter(r=>r.status==="Scheduled").length,
-        fail = rows.filter(r=>r.status==="Failed").length;
-  $("repCnt").innerHTML = `Showing <b>${rows.length}</b> of ${SENT_LOG.length} records — Sent: <b>${sent}</b> · Scheduled: <b>${sch}</b> · Failed: <b>${fail}</b>`;
+/* ---- popups: user-wise / branch-wise ---- */
+function userBarsHtml(){
+  const {sent} = repData();
+  const agg={};
+  sent.forEach(r=>{ (agg[r.sentBy]=agg[r.sentBy]||{c:0,last:""}).c++; if(r.sentAt>agg[r.sentBy].last) agg[r.sentBy].last=r.sentAt; });
+  const rows = Object.entries(agg).sort((a,b)=>b[1].c-a[1].c);
+  const max = rows.length? rows[0][1].c : 1;
+  return rows.length ? rows.map(([u,v])=>{
+    const ub = USERS.find(x=>x.n===u);
+    return `<div class="ubar">
+      <div><b>${esc(u)}</b><div class="subl">${ub?esc(ub.brN):""} · last sent ${v.last}</div>
+        <div class="track"><div class="fill" style="width:${Math.round(v.c/max*100)}%"></div></div></div>
+      <div class="n num">${v.c}</div>
+    </div>`;}).join("") : `<div class="empty">No letters sent for this filter yet.</div>`;
 }
-function clearFilters(){
-  ["fFrom","fTo","fApp","fTpl","fStatus","fSearch"].forEach(id=>$(id).value="");
-  renderReport();
+function branchTableHtml(){
+  const {br} = repData();
+  const brs = BRANCHES.filter(b=>!br || b[0]===br);
+  const body = brs.map(b=>{
+    const all = ROWS.filter(r=>r.brId===b[0]);
+    if(!all.length) return "";
+    const s = all.filter(r=>r.status==="SENT").length;
+    const pct = Math.round(s/all.length*100);
+    return `<tr>
+      <td class="strong">${esc(b[1])}</td>
+      <td class="num">${b[0]}</td>
+      <td class="num">${all.length}</td>
+      <td class="num" style="color:var(--ok);font-weight:700">${s}</td>
+      <td class="num" style="color:var(--pend);font-weight:700">${all.length-s}</td>
+      <td style="min-width:130px">
+        <div class="track"><div class="fill" style="width:${pct}%; background:${pct===100?'var(--ok)':'var(--brand)'}"></div></div>
+        <span class="subl num">${pct}%</span>
+      </td>
+    </tr>`;}).join("");
+  return `<div class="scrollx"><table>
+    <thead><tr><th>Branch</th><th>ID</th><th>Total</th><th>Sent</th><th>Pending</th><th>Completion</th></tr></thead>
+    <tbody>${body || `<tr><td colspan="6"><div class="empty">No CC customers in this branch.</div></td></tr>`}</tbody>
+  </table></div>`;
 }
-function exportCSV(){
-  const rows = reportRows();
-  if(!rows.length) return toast("Nothing to export with current filters");
-  const head = ["Sr No","Sent/Scheduled At","App Code","Customer","Engine Serial","Letter Format","To","Cc","Status","Sent By"];
-  const csv = [head.join(",")].concat(rows.map((r,i)=>
-    [i+1, r.ts, r.appCode, r.customer, r.serial, r.tpl, r.to, r.cc, r.status, r.by]
-      .map(v=>`"${String(v).replace(/"/g,'""')}"`).join(","))).join("\r\n");
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob(["﻿"+csv], {type:"text/csv"}));
-  a.download = "welcome_letter_report.csv";
-  a.click();
-  toast("⬇️ Report exported (" + rows.length + " rows)", true);
+function openRepPopup(kind){
+  if(kind==="users"){ $("ovl2Title").textContent="User-wise Letters Sent"; $("ovl2Body").innerHTML = userBarsHtml(); }
+  else { $("ovl2Title").textContent="Branch-wise Summary"; $("ovl2Body").innerHTML = branchTableHtml(); }
+  $("ovl2").classList.add("open");
+}
+function closeRepPopup(){ $("ovl2").classList.remove("open"); }
+$("ovl2").addEventListener("click",e=>{ if(e.target===$("ovl2")) closeRepPopup(); });
+
+/* ============ tab 2 : master ============ */
+function renderMaster(){
+  $("tplTxt").value = TEMPLATE;
+  $("defAttList").innerHTML = DEFAULT_ATT.map((a,i)=>
+    `<div class="att"><span class="fico">PDF</span>${esc(a)}
+     <button class="del" style="margin-left:auto" title="Remove" onclick="delDefAtt(${i})" aria-label="Remove ${esc(a)}">×</button></div>`).join("")
+    || `<div class="empty">No default attachments yet.</div>`;
+  $("kvaBody").innerHTML = KVA_RULES.map((k,i)=>`
+    <tr${i===KVA_EDIT?' class="editing"':''}><td class="num">${k.from}</td><td class="num">${k.to}</td><td class="num">${k.year}</td>
+    <td>${esc(k.file)}</td>
+    <td style="text-align:center; white-space:nowrap">
+      <button class="editb" title="Edit" onclick="editKvaRule(${i})" aria-label="Edit rule">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+      </button>
+      <button class="del" title="Remove" onclick="delKvaRule(${i})" aria-label="Remove rule">×</button>
+    </td></tr>`).join("");
+}
+function saveTpl(){ TEMPLATE=$("tplTxt").value; $("tplSaved").style.display="inline"; setTimeout(()=>$("tplSaved").style.display="none",2000); toast("Letter text saved"); }
+function addDefAtt(){ const v=$("dFile").value.trim(); if(!v) return; DEFAULT_ATT.push(v); $("dFile").value=""; renderMaster(); toast("Default attachment added"); }
+function delDefAtt(i){ DEFAULT_ATT.splice(i,1); renderMaster(); }
+
+/* KVA rules — add / edit / delete */
+let KVA_EDIT = null;                       /* index being edited, null = add mode */
+function editKvaRule(i){
+  const k = KVA_RULES[i];
+  $("kFrom").value=k.from; $("kTo").value=k.to; $("kYear").value=k.year; $("kFile").value=k.file;
+  KVA_EDIT = i;
+  $("kvaBtn").textContent = "Update Range";
+  $("kvaCancel").style.display = "";
+  renderMaster(); $("kFrom").focus();
+}
+function cancelKvaEdit(){
+  KVA_EDIT = null;
+  ["kFrom","kTo","kYear","kFile"].forEach(id=>$(id).value="");
+  $("kvaBtn").textContent = "+ Add Range";
+  $("kvaCancel").style.display = "none";
+  renderMaster();
+}
+function addKvaRule(){
+  const f=+$("kFrom").value, t=+$("kTo").value, y=+$("kYear").value, file=$("kFile").value.trim();
+  if(!file || isNaN(f) || isNaN(t) || !y){ toast("Fill KVA from, to, year and file name"); return; }
+  if(t<f){ toast("KVA 'to' must be ≥ 'from'"); return; }
+  if(KVA_EDIT!==null){
+    KVA_RULES[KVA_EDIT] = {from:f,to:t,year:y,file};
+    toast("KVA range updated");
+  } else {
+    KVA_RULES.push({from:f,to:t,year:y,file});
+    toast("KVA range added");
+  }
+  KVA_RULES.sort((a,b)=> a.year-b.year || a.from-b.from);
+  cancelKvaEdit();
+}
+function delKvaRule(i){
+  if(KVA_EDIT!==null) cancelKvaEdit();
+  KVA_RULES.splice(i,1); renderMaster();
 }
 
-/* ---------- init ---------- */
-renderStep1();
+/* ============ init ============ */
+branchOptions($("fBranch"),"All Branches");
+branchOptions($("rBranch"),"All Branches");
+$("rUser").innerHTML = '<option value="">All Users</option>' + USERS.map(u=>`<option>${esc(u.n)}</option>`).join("");
+renderPending();
 </script>
-</body>
-</html>

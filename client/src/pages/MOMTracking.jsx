@@ -272,17 +272,45 @@ const sheetGroupKey = (r) => r.masterId ? `m-${r.masterId}` : (r.area ? `a-${r.a
 const taskRows = (m) => m.rows.filter((r) => r.flag === 'T');
 const progress = (m) => { const t = taskRows(m); return t.length ? Math.round(t.filter((r) => r.status === 'completed').length / t.length * 100) : 100; };
 
+/* 'YYYY-MM-DDTHH:MM:SS' | 'YYYY-MM-DD' → sortable number (0 when unusable) */
+const stamp = (s) => { const t = Date.parse(s || ''); return Number.isNaN(t) ? 0 : t; };
+
 /* Collect still-open Tasks across all selected branches
-   (latest state per trackId — branch arrays are newest-first). */
+   (latest state per trackId — branch arrays are newest-first).
+
+   STATUS / remark trail always come from the most RECENT meeting — that is the
+   sheet the task was last reviewed on. The point's DEFINITION (area, category,
+   wording, owners, due date) comes from whichever copy was written last in real
+   time: when the Master Admin rewrites a point on an OLD meeting, that row is
+   stamped `editedAt`, so the corrected wording is what carries into the next
+   meeting — while the already-signed-off meetings in between keep showing
+   exactly what they were saved with. */
 function collectCarry(history, codes) {
   const seen = new Set(); const out = [];
+  /* trackId → the newest-written copy of the point */
+  const defs = new Map();
+  (codes || []).forEach((code) => (history[code] || []).forEach((m) => {
+    const mAt = stamp(m.createdAt) || stamp(m.date);
+    m.rows.forEach((r) => {
+      if (!r.trackId) return;
+      const at = stamp(r.editedAt) || mAt;
+      const cur = defs.get(r.trackId);
+      if (!cur || at > cur.at) defs.set(r.trackId, { at, row: r });
+    });
+  }));
   (codes || []).forEach((code) => (history[code] || []).forEach((m) => {
     m.rows.forEach((r) => {
       if (r.flag !== 'T' || !r.trackId || seen.has(r.trackId)) { if (r.trackId) seen.add(r.trackId); return; }
       seen.add(r.trackId);
       if (r.status !== 'completed') {
+        const d = defs.get(r.trackId)?.row || r;
         out.push({
-          ...r, resp: respArr(r.resp), id: uid(), carried: true, srcDate: m.date,
+          ...r, id: uid(), carried: true, srcDate: m.date,
+          /* newest wording / owners / due — from the last-written copy */
+          masterId: d.masterId ?? r.masterId, area: d.area, category: d.category,
+          point: d.point, resp: respArr(d.resp),
+          /* an Information copy never holds a due date — keep the task's own */
+          due: d.flag === 'T' ? d.due : r.due,
           prevRemarks: [...(r.prevRemarks || []), { date: m.date, text: r.remark || '', status: r.status, by: m.conductedBy }],
           remark: '',
         });
@@ -2569,7 +2597,15 @@ export default function MOMTracking() {
       {/* ===== EDIT MEETING (current details · attendees · add row) ===== */}
       {editMtg && <MeetingEditModal data={editMtg} employees={employees} categories={categories} master={master} authHeaders={authHeaders}
         onClose={() => setEditMtg(null)}
-        onSaved={(mt) => { setHistory((h) => replaceMeeting(h, mt)); setEditMtg(null); ping('Meeting updated'); }} />}
+        onSaved={(mt, propagated = []) => {
+          /* a point added to a past meeting also lands in the meetings held
+             after it — the server returns those, so History refreshes too */
+          setHistory((h) => propagated.reduce((acc, p) => replaceMeeting(acc, p), replaceMeeting(h, mt)));
+          setEditMtg(null);
+          ping(propagated.length
+            ? `Meeting updated — the new point was added to ${propagated.length} later meeting${propagated.length > 1 ? 's' : ''} too`
+            : 'Meeting updated');
+        }} />}
 
       {/* ===== CONFIRM (finalize) ===== */}
       {confirm && (
@@ -2885,7 +2921,7 @@ function MeetingEditModal({ data, employees = [], categories, master = [], authH
     };
     setSaving(true);
     axios.put(`${MOM_API}/meetings/${data.id}`, payload, { headers: authHeaders })
-      .then((res) => { if (!res.data?.success) throw new Error('Save failed'); onSaved(res.data.meeting); })
+      .then((res) => { if (!res.data?.success) throw new Error('Save failed'); onSaved(res.data.meeting, res.data.propagated || []); })
       .catch((e) => toast.error(e?.response?.data?.detail || 'Could not save changes — is the server running?'))
       .finally(() => setSaving(false));
   };
@@ -2991,6 +3027,10 @@ function MeetingEditModal({ data, employees = [], categories, master = [], authH
                 <span className="inline-flex items-center gap-1"><FlagChip f="T" small /> Task</span>
                 <span className="inline-flex items-center gap-1"><FlagChip f="I" small /> Information</span>
               </div>
+            </div>
+            {/* how an edit of a past meeting travels forward */}
+            <div className="px-3 py-1.5 fs-10 text-gray-500 border-b border-gray-100" style={{ background: '#fbfbfe' }}>
+              Correcting an existing point changes <b>this meeting only</b> — meetings already held after it keep the sheet they were saved with, but the corrected wording is what carries into the next meeting. A <b>new task</b> added here is also added to the later meetings of this branch as a C/F point.
             </div>
             <DualScroll>
               <table className="mom-sheet w-full fs-12" style={{ borderCollapse: 'collapse', minWidth: SHEET_MINW }}>

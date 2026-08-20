@@ -129,6 +129,19 @@
   height: 14px !important;
 }
 
+/* Sidebar pending-count blink (Welcome Letter / Note For Approval).
+   Toggles visibility, not opacity: an animated opacity promotes the text to
+   its own composited layer and drops subpixel antialiasing, which makes small
+   text look blurry. visibility keeps the text on the normal paint path, so it
+   stays crisp, and steps() means it is never half-faded. */
+@keyframes navBlink {
+  0%, 59%   { visibility: visible; }
+  60%, 100% { visibility: hidden; }
+}
+.nav-blink {
+  animation: navBlink 1.1s steps(1, end) infinite;
+}
+
 /* Animation */
 @keyframes slideIn {
   from {
@@ -662,6 +675,72 @@ html.dark {
   --apv-chip-border: rgba(99, 102, 241, 0.45);
 }
 
+/* ============================================================
+   Rich "Purpose of Approval" — content pasted from Excel.
+   `.apv-rich` wraps both the editor (Create NFA) and every read-only
+   render (detail modal, submit confirmation). The pasted markup keeps
+   its own inline colors/alignment; these rules only supply what Excel
+   loses on the way out: gridlines, spacing and sane defaults.
+   ============================================================ */
+/* The table keeps the column widths it had in Excel and overflows its box —
+   the wrapper scrolls sideways. Squeezing it to the box width instead is what
+   turns a 10-column sheet into columns one character wide. */
+.apv-rich table {
+  border-collapse: collapse;
+  width: max-content;
+  max-width: none;
+  table-layout: auto;
+  margin: 2px 0;
+}
+.apv-rich td,
+.apv-rich th {
+  border: 1px solid #d1d5db;
+  padding: 2px 6px;
+  vertical-align: top;
+  white-space: nowrap;   /* Excel's own wrapped cells still break on their <br> */
+}
+/* every place a pasted table is shown scrolls rather than clipping */
+.apv-rich {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.apv-rich th {
+  background: #f3f4f6;
+  font-weight: 700;
+  text-align: left;
+}
+.apv-rich p { margin: 0 0 2px; }
+.apv-rich ul,
+.apv-rich ol { margin: 2px 0; padding-left: 18px; list-style: revert; }
+.apv-rich b, .apv-rich strong { font-weight: 700; }
+
+/* the editable box itself — looks like the textarea it replaced */
+.apv-rich-edit {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+.apv-rich-edit:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(165 180 252 / 1);
+}
+
+html.dark .apv-rich td,
+html.dark .apv-rich th { border-color: #3a4150; }
+html.dark .apv-rich th { background: #232833; }
+
+/* ============================================================
+   Approval applications table — closing the card's bottom edge.
+   The last row used to draw its own straight bottom border across
+   the rounded corners, so the curve looked cut off at both ends.
+   Dropping that border lets the card's OWN rounded border be the
+   bottom edge, which curves into the corners properly. Applied
+   only when the table really is the last thing in the card.
+   ============================================================ */
+.apv-table-open-bottom tbody tr:last-child > td {
+  border-bottom-color: transparent;
+}
+
 /* ---------- Toasts (react-hot-toast) ---------- */
 html.dark .react-hot-toast {
   background: #171a20 !important;
@@ -1036,9 +1115,40 @@ html.dark [style*="background: rgb(170, 170, 170)"] { background: #39404e !impor
 /* Employee Progress table: the Employee column is position:sticky, but with
    border-collapse the cell borders stay in the table grid and scroll away
    under it. Draw the left/right lines as an inset shadow that moves WITH the
-   sticky cell, so the column separator stays visible while scrolling. */
+   sticky cell, so the column separator stays visible while scrolling.
+   The cells carry border-y only (no left/right grid border) and get exactly
+   ONE inset each — the left-frozen cells their trailing line, the right-frozen
+   cell its leading line. The opposite side is already covered by the next
+   sticky column or by the scroll container's own border; a collapsed border or
+   a second inset there is what renders as a double line. */
 .emp-sticky-col {
-  box-shadow: inset 1px 0 0 #d1d5db, inset -1px 0 0 #d1d5db;
+  box-shadow: inset -1px 0 0 #d1d5db;
+}
+
+/* Right-frozen "Drive Progress" column — see .emp-sticky-col above. */
+.emp-sticky-col-right {
+  box-shadow: inset 1px 0 0 #d1d5db;
+}
+
+/* ============================================================
+   DARK GREY TABLE GRID — Drive Data, Non-Drive Data, Part Detail
+   Info (Quotation Template / Master Report), Customers and Note
+   For Approval. Those tables are dense and the gray-100/200/300
+   grid washes out; recolour every cell border from one place
+   instead of touching hundreds of utility classes. The page root
+   carries .tbl-grid-dark, so anything rendered inside it (modals,
+   child views) picks the darker grid up too.
+   Light theme only — the html.dark border overrides above use
+   !important and keep their own dark-surface palette.
+   ============================================================ */
+.tbl-grid-dark table,
+.tbl-grid-dark table thead,
+.tbl-grid-dark table tbody,
+.tbl-grid-dark table tfoot,
+.tbl-grid-dark table tr,
+.tbl-grid-dark table th,
+.tbl-grid-dark table td {
+  border-color: #9ca3af;
 }
 
 /* ============================================================
@@ -1061,7 +1171,10 @@ html.dark [style*="color: rgb(22, 163, 74)"] { color: #4ade80 !important; }
 
 /* Sticky Employee column separator lines (see .emp-sticky-col above) */
 html.dark .emp-sticky-col {
-  box-shadow: inset 1px 0 0 #3a4150, inset -1px 0 0 #3a4150 !important;
+  box-shadow: inset -1px 0 0 #3a4150 !important;
+}
+html.dark .emp-sticky-col-right {
+  box-shadow: inset 1px 0 0 #3a4150 !important;
 }
 /* Correction — elements with a brand-blue inline BACKGROUND also match the
    inline text-color rule above (the attribute string contains "color:").
@@ -1759,3 +1872,149 @@ input[type="number"] {
    ============================================================ */
 html.dark .bg-rose-50\/50 { background-color: rgba(244, 63, 94, 0.12) !important; }
 html.dark .border-sky-300 { border-color: rgba(56, 189, 248, 0.45) !important; }
+
+/* ============================================================
+   WELCOME LETTER SHEET — the preview is stationery (the exact
+   page the customer receives by email), so it stays on white
+   paper with dark ink even when the app is in dark mode. The
+   .wl-head rule comes last so the navy welcome heading keeps
+   its brand colour instead of being flattened to body ink.
+   ============================================================ */
+html.dark .wl-sheet,
+html.dark .wl-sheet .bg-white,
+html.dark .wl-sheet .bg-gray-50 { background-color: #ffffff !important; }
+html.dark .wl-sheet { border-color: #e5e7eb !important; }
+html.dark .wl-sheet,
+html.dark .wl-sheet p,
+html.dark .wl-sheet ul,
+html.dark .wl-sheet li,
+html.dark .wl-sheet .text-gray-800,
+html.dark .wl-sheet .text-gray-700 { color: #1f2937 !important; }
+html.dark .wl-sheet .text-gray-400,
+html.dark .wl-sheet .text-gray-500 { color: #9ca3af !important; }
+html.dark .wl-sheet .wl-head { color: #2f3192 !important; }
+
+/* ============================================================
+   PMS REPORT GRIDS (Employee Productivity, SR Allocation)
+   The pinned Branch / SE UID / SE Name columns are position:
+   sticky, and a sticky cell's 1px border is the first thing a
+   browser drops at fractional zoom or display scaling — the
+   column then looks like it lost its horizontal or vertical
+   rules. An INSET SHADOW paints the same right + bottom
+   hairline as part of the cell's own box, which survives that
+   rounding, so every cell of a .pms-grid table keeps its grid
+   whatever the zoom.
+
+   The shadow is the ONLY painter: the cells' own Tailwind
+   borders are made transparent here so the two do not stack.
+   They kept their widths, so the layout is untouched — but two
+   1px lines landing a sub-pixel apart were rendering as one
+   thick dark rule, which is what made the grid look heavy.
+   Inline border colours (the section dividers, the frozen-block
+   edge) beat this rule and still show.
+   ============================================================ */
+/* The wide PMS grids are scrolled from the SYNCED BAR ABOVE them
+   (reportChrome's TopScrollbar), so the box's own bottom scrollbar
+   is redundant — and its strip sat between the pinned Grand Total
+   row and the bottom of the window, reading as a gap under the row.
+   Wheel / trackpad / the top bar all still scroll the box. */
+.pms-hscroll { scrollbar-width: none; }
+.pms-hscroll::-webkit-scrollbar { height: 0; width: 0; }
+
+/* ---- PMS report palette (Employee Productivity, SR Allocation, Annual) ----
+   The grids paint their fills INLINE (a cell's tint depends on its row, its
+   block and its state, which no static class can express), and an inline style
+   beats every dark-mode override in this file. So the palette lives in CSS
+   VARIABLES: reportChrome's GRID maps each name to var(--pms-*), the values
+   below are the light theme, and the html.dark block re-points them. Nothing in
+   the JSX changes between themes — the same var resolves to a different colour.
+   ------------------------------------------------------------------------- */
+:root {
+  --pms-head: #e8f3fc;                    /* every header cell */
+  --pms-row-a: #fbfdff;                   /* engineer rows */
+  --pms-row-b: #f1f8fe;
+  --pms-band-a: #ffffff;                  /* collapsed rows / branch column */
+  --pms-band-b: #eaf4fd;
+  --pms-grp-a: #f0f8fe;                   /* group arrow column */
+  --pms-grp-b: #e1effb;
+  --pms-subtot: #dcebf9;                  /* Sub Total rows */
+  --pms-grptot: #cbe1f5;
+  --pms-region: #5e8fc2;                  /* MH / KA totals (white text) */
+  --pms-grand: #23255f;                   /* Grand Total (ERP blue) */
+  --pms-type: #e4f0fb;                    /* SR Type block */
+  --pms-sel: #bfdcf7;                     /* an open / picked SE row */
+  --pms-line: #9fc0df;                    /* the grid hairline (horizontal) */
+  --pms-line-v: #6f9dc9;                  /* COLUMN rules — a step darker so a
+                                             column can be followed down a wide
+                                             table without counting cells */
+  --pms-div: #6e9bc7;                     /* dividers / frozen-block edge */
+  --pms-hover: #cbe4fb;                   /* a clickable cell under the pointer */
+  --pms-edge-shadow: rgba(20, 32, 28, .22);   /* the frozen block's drop shadow */
+}
+html.dark {
+  /* the same ladder, dark: adjacent blocks still never share a tint, and every
+     step stays dark enough for the light text the dark theme puts on it */
+  --pms-head: #1c2c3e;
+  --pms-row-a: #121820;
+  --pms-row-b: #17202b;
+  --pms-band-a: #0f141a;
+  --pms-band-b: #18232f;
+  --pms-grp-a: #141d27;
+  --pms-grp-b: #1b2733;
+  --pms-subtot: #20303f;
+  --pms-grptot: #27394b;
+  --pms-region: #2f5375;
+  --pms-grand: #1b1d4a;
+  --pms-type: #182636;
+  --pms-sel: #274763;
+  --pms-line: #3a4756;
+  --pms-line-v: #55697f;
+  --pms-div: #4a5a6e;
+  --pms-hover: #26384c;
+  --pms-edge-shadow: rgba(0, 0, 0, .6);
+}
+
+/* ---- % ACHIEVED cells, shared by every PMS report ------------------------
+   The Excel-style block fill business reads its result sheets by: AT or above
+   target green, within a fifth of it yellow, further off amber. Classes rather
+   than inline colours, so the dark theme can restyle them — and they live HERE
+   rather than in one page's injected <style> because the Sales & Labour report
+   and the Annual Reports' Service Penetration sheet must paint the same
+   percentage the same colour. A cell with no value stays neutral: a dash is
+   never painted as if it were a real miss. */
+.pms-pct-good { background-color: #86efac; color: #111827; }
+.pms-pct-mid { background-color: #fde047; color: #111827; }
+.pms-pct-low { background-color: #fdba74; color: #111827; }
+html.dark .pms-pct-good { background-color: rgba(34, 197, 94, .30); color: #86efac; }
+html.dark .pms-pct-mid { background-color: rgba(234, 179, 8, .28); color: #fde047; }
+html.dark .pms-pct-low { background-color: rgba(249, 115, 22, .28); color: #fdba74; }
+
+/* An inline background beats a hover CLASS, which is why the grids' hover tint
+   never showed. This one wins (and follows the theme). */
+.pms-hover:hover { background: var(--pms-hover) !important; }
+
+.pms-grid {
+  --pms-grid-line: var(--pms-line);               /* row rule (bottom edge) */
+  --pms-grid-line-v: var(--pms-line-v);           /* column rule (right edge) */
+}
+.pms-grid th,
+.pms-grid td {
+  border-color: transparent;
+  box-shadow: inset -1px 0 0 0 var(--pms-grid-line-v),
+              inset 0 -1px 0 0 var(--pms-grid-line);
+}
+/* (the dark hairline now comes from --pms-line in the palette block above) */
+
+/* ---- PMS report filter row: ONLY the search box is elastic -----------------
+   A no-wrap flex row shrinks EVERY child by default (flex-shrink: 1), which
+   squashed all the buttons the moment the row ran out of room. So the row's
+   controls are pinned to their natural size and the search box is made the one
+   elastic item: it is 11rem when there is room and gives width back, down to
+   5.5rem, as the row needs it. Every button and filter trigger keeps its size
+   and its full label at every window width.
+
+   The last resort is FilterRow (reportChrome.jsx) flipping the row to wrap,
+   which it does only when even the narrowest search box will not fit. */
+.pms-tb > * { flex: none; }
+.pms-tb > .pms-search { flex: 0 1 11rem; min-width: 5.5rem; }
+.pms-tb > .pms-search > input { width: 100%; }

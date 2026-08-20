@@ -31,6 +31,9 @@ from app.models.approval_application_model import (
     DEFAULT_LEVEL_NAMES,
 )
 from app.time_utils import now_ist
+# "Purpose of Approval" may hold a table pasted from Excel — the browser
+# sanitizes it, and this re-applies the same allow-list for API callers.
+from app.controllers.approval_richtext import html_to_text, sanitize_rich_html
 
 # Static fallback labels — the live labels come from _level_label(db, lvl),
 # which honours the COO-renamed level names (ApprovalLevelConfig.display_name).
@@ -166,6 +169,13 @@ def _level_user_ids(db: Session, level: str) -> set:
     ).all()}
 
 
+def _ids_csv(val) -> list:
+    """A chosen-approver value holds ONE id or a comma-separated list
+    (multi-select, 2026-08-11). Returns the ids as a list (empty = no choice).
+    Legacy single-id rows parse the same way."""
+    return [p.strip() for p in str(val or "").split(",") if p.strip()]
+
+
 # ---------------- MERGED BRANCH ROWS ---------------- #
 # Several branches may share ONE hierarchy row (ApprovalBranchGroup). Every
 # branch-scoped lookup (stage approvers, HOD map, level-wise limits) resolves
@@ -230,23 +240,25 @@ def _available_approvers(db: Session, level: str, branch: str, category: str,
     """The USABLE approver ids who may act at `level` for a record of this
     branch+category. Self-approval removed: the creator never appears.
     Blocked / deleted users and excluded approvers do not count. A creator's
-    CHOSEN approver narrows a level to that one person — while the choice is
-    still among the level's valid approvers (else the full list applies
-    again, so the record never strands)."""
+    CHOSEN approvers (one or several, CSV) narrow a level to those people —
+    while at least one choice is still among the level's valid approvers
+    (else the full list applies again, so the record never strands)."""
     excl = _exclusions_for(db, creator_id, category)
     branch = _row_branch(db, branch)   # merged rows govern their member branches
 
     if level in ("l2", "l3"):
         ids = _usable_ids(db, _stage_approver_ids(db, branch, level))
         choice = l2_choice if level == "l2" else l3_choice
-        if choice and choice in ids:
-            ids = {choice}
+        chosen = set(_ids_csv(choice)) & ids
+        if chosen:
+            ids = chosen
     elif level == "l4":
         all_l4 = _usable_ids(db, _level_user_ids(db, "l4"))
-        # HO creators may choose ANY HO member as their L4 approver — the
-        # choice wins as long as that person is still usable
-        if l4_choice and _usable_ids(db, [l4_choice]):
-            ids = {l4_choice}
+        # HO creators may choose HO members as their L4 approvers — the
+        # choice wins as long as at least one chosen person is still usable
+        chosen = _usable_ids(db, _ids_csv(l4_choice)) if l4_choice else set()
+        if chosen:
+            ids = chosen
         else:
             # An NFA goes only to the HODs of its category: the branch's own
             # map wins; a branch without one falls back to the L4 users
@@ -261,8 +273,9 @@ def _available_approvers(db: Session, level: str, branch: str, category: str,
                 ids = (mapped & all_l4) or all_l4
     else:  # l5 — rights masters + any explicitly granted L5 users
         ids = _usable_ids(db, set(RIGHTS_MASTER_IDS) | _level_user_ids(db, "l5"))
-        if l5_choice and l5_choice in ids:
-            ids = {l5_choice}
+        chosen = set(_ids_csv(l5_choice)) & ids
+        if chosen:
+            ids = chosen
 
     ids = ids - excl
     ids.discard(creator_id)   # self-approval removed
@@ -272,8 +285,54 @@ def _available_approvers(db: Session, level: str, branch: str, category: str,
 SKIP_REASONS = {
     "l2": "Skipped — no L2 approver available for this branch",
     "l3": "Skipped — no L3 approver available for this branch",
-    "l4": "Skipped — no L4 (HOD) approver available for this category",
+    "l4": "Skipped — no L4 - HOD approver available for this category",
 }
+
+
+OTHER_STAGE_NOTE = "Skipped — an Other NFA is approved by L4 - HOD and L5 - COO only"
+
+
+def _creator_level(db: Session, app_row: ApprovalApplication) -> str:
+    """The level the creator held when the record was submitted (falling back
+    to the level they hold now for records stamped before submit)."""
+    stamped = _norm_level(app_row.created_by_level or "")
+    if stamped in APPROVAL_LEVELS:
+        return stamped
+    creator = db.query(User).filter(User.user_id == app_row.created_by).first()
+    return resolve_level(db, creator) if creator else "l1"
+
+
+def _other_next_status(db: Session, app_row: ApprovalApplication, after_level, skip_notes):
+    """Routing for the OTHER type — a fixed two-stage chain, L4 then L5.
+
+    - L2 / L3 never act, whatever the employee's chain rules say.
+    - A creator who already holds L4 (or above) goes STRAIGHT to L5: their own
+      level never approves their record, so there is no self approval here.
+    - No authority limit is consulted anywhere (approve_application forwards
+      L4 to L5 unconditionally), so the record always ends at the COO.
+    - An L4 with no available approver auto-skips to L5 rather than stranding.
+    """
+    after_order = LEVEL_ORDER.get(after_level, 0) if after_level else 0
+    for lvl in ("l2", "l3"):
+        if LEVEL_ORDER[lvl] > after_order:
+            skip_notes.append((lvl, OTHER_STAGE_NOTE))
+
+    if after_order < LEVEL_ORDER["l4"]:
+        creator = db.query(User).filter(User.user_id == app_row.created_by).first()
+        is_ho = _is_ho_user(db, creator) if creator else False
+        if LEVEL_ORDER.get(_creator_level(db, app_row), 1) >= LEVEL_ORDER["l4"]:
+            skip_notes.append(("l4", "Skipped — the creator holds L4; sent directly to COO - L5"))
+        elif is_ho and not app_row.l4_approver_id:
+            # same rule HO records already follow: no chosen HOD = straight to L5
+            skip_notes.append(("l4", "Skipped — no L4 approver chosen; sent directly to COO - L5"))
+        else:
+            ids = _available_approvers(
+                db, "l4", app_row.branch, app_row.category, app_row.created_by,
+                l4_choice=app_row.l4_approver_id)
+            if ids:
+                return "pending_l4"
+            skip_notes.append(("l4", SKIP_REASONS["l4"]))
+    return "pending_l5"
 
 
 def _next_pending_status(db: Session, app_row: ApprovalApplication, after_level, skip_notes):
@@ -286,6 +345,9 @@ def _next_pending_status(db: Session, app_row: ApprovalApplication, after_level,
     level. Each auto-skip is appended to skip_notes as (level, reason).
     L5 (COO) always exists (the fixed rights-master users), so the chain
     terminates."""
+    if app_row.request_type == OTHER_TYPE:
+        return _other_next_status(db, app_row, after_level, skip_notes)
+
     creator_id = app_row.created_by
     rule = _employee_rule(db, creator_id)
     creator = db.query(User).filter(User.user_id == creator_id).first()
@@ -306,11 +368,11 @@ def _next_pending_status(db: Session, app_row: ApprovalApplication, after_level,
     for lvl in order:
         if lvl == "l5":
             return "pending_l5"
-        # HO record WITHOUT a chosen L4: no HO HOD held higher authority
-        # than the creator at submit — the step skips straight to L5 (the
-        # branch's L4 map never applies to an HO creator's record).
+        # HO record WITHOUT a chosen L4 — either no qualifying HO HOD existed
+        # at submit, or the creator chose to skip L4 — goes straight to L5
+        # (the branch's L4 map never applies to an HO creator's record).
         if lvl == "l4" and is_ho and not app_row.l4_approver_id:
-            skip_notes.append(("l4", "Skipped — no L4 approver with higher authority than the creator"))
+            skip_notes.append(("l4", "Skipped — no L4 approver chosen; sent directly to COO - L5"))
             continue
         ids = _available_approvers(
             db, lvl, app_row.branch, app_row.category, creator_id,
@@ -373,8 +435,11 @@ def reroute_pending(db: Session) -> int:
         lvl = STATUS_ACTING_LEVEL[app_row.status]
         rule = _rule_of(app_row.created_by)
         is_ho = _is_ho_of(app_row.created_by)
-        still_required = (rule[f"require_{lvl}"]
-                          and not (is_ho and lvl in ("l2", "l3")))
+        # 'Other' runs its own fixed L4 -> L5 chain: the per-employee rules do
+        # not apply, so L4 stays required as long as an approver exists.
+        still_required = (lvl == "l4" if app_row.request_type == OTHER_TYPE
+                          else (rule[f"require_{lvl}"]
+                                and not (is_ho and lvl in ("l2", "l3"))))
         if still_required and _available_approvers(
             db, lvl, app_row.branch, app_row.category, app_row.created_by,
             l4_choice=app_row.l4_approver_id, l5_choice=app_row.l5_approver_id,
@@ -411,7 +476,13 @@ def cleanup_user_config(db: Session, user_id: str):
 # Valid application types ('discounting_credit' = BOTH asks in one record —
 # either value may be filled; every present value must clear the approver's
 # limit before the record can finalize)
-REQUEST_TYPES = ("discounting", "credit", "expense", "discounting_credit")
+REQUEST_TYPES = ("discounting", "credit", "expense", "discounting_credit", "other")
+
+# "Other" NFAs carry NO measurable value, so the Authority Matrix limits never
+# apply to them. They run a fixed short chain instead: L4 (HOD) then L5 (COO),
+# with no L2/L3 stage and no self / auto approval — see _other_next_status and
+# approve_application.
+OTHER_TYPE = "other"
 
 
 def _record_value(app_row):
@@ -528,6 +599,7 @@ METRIC_ATTRS = {
     "credit": ("max_credit_days",),
     "expense": ("max_expense_amount",),
     "discounting_credit": ("max_discount_percent", "max_credit_days"),
+    # "other" is absent on purpose — it has no metric and no limit anywhere
 }
 
 
@@ -736,6 +808,9 @@ def get_access(db: Session, user_id: str):
     return {
         "user_id": user.user_id,
         "name": user.name,
+        # the creator's own address — shown LOCKED in the submit box's To list,
+        # because the result email always goes to them
+        "email": (user.email or "").strip(),
         "level": level,
         "level_label": _level_label(db, level),
         "level_names": _level_names(db),
@@ -785,15 +860,35 @@ def get_chain_preview(db: Session, user_id: str, branch: str = None,
                       key=lambda x: x["name"])
 
     levels = []
+    # 'Other' shows its own fixed chain: no L2/L3, no limit filtering, and a
+    # creator who already holds L4 goes straight to the COO.
+    if (request_type or "").strip() == OTHER_TYPE:
+        levels = [{"level": "l2", "skipped": OTHER_STAGE_NOTE},
+                  {"level": "l3", "skipped": OTHER_STAGE_NOTE}]
+        if LEVEL_ORDER.get(resolve_level(db, user), 1) >= LEVEL_ORDER["l4"]:
+            levels.append({"level": "l4",
+                           "skipped": "You hold L4 — this record goes directly to the COO - L5"})
+        else:
+            ids = (_qualifying_ho_l4_ids(db, user, branch, request_type, category) if is_ho
+                   else _available_approvers(db, "l4", branch, category, user.user_id))
+            levels.append({"level": "l4", "candidates": _people(ids)} if ids
+                          else {"level": "l4", "skipped": "No L4 - HOD approver — goes straight to L5"})
+        levels.append({"level": "l5",
+                       "candidates": _people(
+                           _available_approvers(db, "l5", branch, category, user.user_id)
+                           - {"kala000001"})})
+        return {"is_ho": is_ho, "levels": levels}
+
     if is_ho:
         levels.append({"level": "l2", "skipped": "Head Office records go directly to L4/L5"})
         levels.append({"level": "l3", "skipped": "Head Office records go directly to L4/L5"})
         ids = _qualifying_ho_l4_ids(db, user, branch, request_type, category)
         if ids:
-            levels.append({"level": "l4", "candidates": _people(ids), "required_pick": True})
+            # pick is OPTIONAL — no pick sends the record straight to L5 (COO)
+            levels.append({"level": "l4", "candidates": _people(ids)})
         else:
             levels.append({"level": "l4",
-                           "skipped": "No qualifying L4 (HOD) for this record's category / authority — goes straight to L5"})
+                           "skipped": "No qualifying L4 - HOD for this record's category / authority — goes straight to L5"})
     else:
         for lvl in ("l2", "l3"):
             if not rule[f"require_{lvl}"]:
@@ -864,7 +959,7 @@ def set_right(db: Session, admin_id: str, target_user_id: str, level: str):
     if level not in APPROVAL_LEVELS:
         raise HTTPException(status_code=400, detail=f"Unknown level — expected one of {APPROVAL_LEVELS}")
     if target_user_id in RIGHTS_MASTER_IDS:
-        raise HTTPException(status_code=403, detail="Rights-master users are always L5 (COO) and cannot be changed")
+        raise HTTPException(status_code=403, detail="Rights-master users are always L5 - COO and cannot be changed")
 
     target = db.query(User).filter(User.user_id == target_user_id).first()
     if not target:
@@ -905,7 +1000,7 @@ def remove_right(db: Session, admin_id: str, target_user_id: str):
 # ---------------- APP NUMBERING ---------------- #
 
 APP_NO_PREFIXES = {"discounting": "DIS", "credit": "CRE", "expense": "EXP",
-                   "discounting_credit": "DNC"}
+                   "discounting_credit": "DNC", "other": "OTH"}
 
 
 def _fy_label(dt):
@@ -938,7 +1033,7 @@ def _require_coo(db: Session, user_id: str) -> User:
     if resolve_level(db, user) != "l5":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only COO (L5) can manage this",
+            detail="Only COO - L5 can manage this",
         )
     return user
 
@@ -1310,7 +1405,7 @@ def remove_employee_rights(db: Session, admin_id: str, payload: dict):
     if not target_id:
         raise HTTPException(status_code=400, detail="user_id is required")
     if target_id in RIGHTS_MASTER_IDS:
-        raise HTTPException(status_code=403, detail="Rights-master users are fixed at L5 (COO)")
+        raise HTTPException(status_code=403, detail="Rights-master users are fixed at L5 - COO")
     cleanup_user_config(db, target_id)
     moved = reroute_pending(db)
     return {"moved": moved}
@@ -1397,7 +1492,7 @@ def set_stage_approvers(db: Session, admin_id: str, branch: str, stage: str, use
         if not target:
             raise HTTPException(status_code=404, detail=f"User {uid} not found")
         if uid in RIGHTS_MASTER_IDS:
-            raise HTTPException(status_code=400, detail="Rights-master users are fixed at L5 (COO)")
+            raise HTTPException(status_code=400, detail="Rights-master users are fixed at L5 - COO")
         row = ApprovalStageApprover(
             branch=branch,
             stage=stage,
@@ -1451,7 +1546,7 @@ def set_hod_category(db: Session, admin_id: str, branch: str, category: str, use
         if not target:
             raise HTTPException(status_code=404, detail=f"User {uid} not found")
         if uid in RIGHTS_MASTER_IDS:
-            raise HTTPException(status_code=400, detail="Rights-master users are fixed at L5 (COO)")
+            raise HTTPException(status_code=400, detail="Rights-master users are fixed at L5 - COO")
         row = ApprovalHODCategory(
             branch=branch,
             category=category,
@@ -1527,7 +1622,7 @@ def set_authority(db: Session, admin_id: str, payload: dict):
     if not target_id:
         raise HTTPException(status_code=400, detail="user_id is required")
     if target_id in RIGHTS_MASTER_IDS:
-        raise HTTPException(status_code=403, detail="Rights-master users are always L5 (COO) and cannot be changed")
+        raise HTTPException(status_code=403, detail="Rights-master users are always L5 - COO and cannot be changed")
     target = db.query(User).filter(User.user_id == target_id).first()
     if not target:
         raise HTTPException(status_code=404, detail="Target user not found")
@@ -1545,7 +1640,7 @@ def set_authority(db: Session, admin_id: str, payload: dict):
         if level == "l5":
             raise HTTPException(
                 status_code=403,
-                detail="L5 (COO) authority is fixed to the rights-master users and cannot be assigned",
+                detail="L5 - COO authority is fixed to the rights-master users and cannot be assigned",
             )
     else:
         level = previous_level
@@ -1703,6 +1798,43 @@ def set_expense_type_limit(db: Session, admin_id: str, payload: dict):
 
 # ---------------- APPLICATIONS ---------------- #
 
+# Expense settlement block. Only an EXPENSE record carries it, and the bank
+# details are kept only when the reimbursement really is a bank transfer —
+# switching the mode afterwards must not leave stale account numbers behind.
+PAID_MODES = ("UPI", "Cash", "Card", "Net banking", "Other")
+REIMBURSE_MODES = ("UPI", "Cash", "Bank transfer")
+
+
+def _settlement_fields(fields: dict, is_expense: bool) -> dict:
+    if not is_expense:
+        return {"paid_by_name": None, "paid_by_mode": None, "reimburse_to": None,
+                "reimburse_mode": None, "reimburse_bank_details": None}
+
+    def _txt(key, limit):
+        v = (fields.get(key) or "").strip()
+        return v[:limit] if v else None
+
+    def _mode(key, allowed):
+        v = (fields.get(key) or "").strip()
+        if not v:
+            return None
+        match = next((a for a in allowed if a.lower() == v.lower()), None)
+        if not match:
+            raise HTTPException(status_code=400,
+                                detail=f"{v} is not a valid mode of payment — expected one of {', '.join(allowed)}")
+        return match
+
+    reimburse_mode = _mode("reimburse_mode", REIMBURSE_MODES)
+    bank = (fields.get("reimburse_bank_details") or "").strip() or None
+    return {
+        "paid_by_name": _txt("paid_by_name", 150),
+        "paid_by_mode": _mode("paid_by_mode", PAID_MODES),
+        "reimburse_to": _txt("reimburse_to", 150),
+        "reimburse_mode": reimburse_mode,
+        "reimburse_bank_details": bank if reimburse_mode == "Bank transfer" else None,
+    }
+
+
 def _validate_for_submit(db, user, fields, request_type):
     """Field checks that must pass before an application enters the approval
     flow. Drafts skip these — they may be half-filled."""
@@ -1711,83 +1843,90 @@ def _validate_for_submit(db, user, fields, request_type):
         raise HTTPException(status_code=400, detail="Category must be spares / services / spares & services")
     if not (fields.get("branch") or "").strip():
         raise HTTPException(status_code=400, detail="Branch is required")
-    if not (fields.get("description") or "").strip():
+    # markup alone is not content — a pasted table must carry text or cells
+    if not html_to_text(fields.get("description") or "").strip():
         raise HTTPException(status_code=400, detail="Purpose of approval is required")
     if request_type != "expense" and not (fields.get("customer_name") or "").strip():
         raise HTTPException(status_code=400, detail="Customer name is required")
     # combined type: either value may be blank, but never BOTH
     if request_type == "discounting_credit":
         if not str(fields.get("discount_percent") or "").strip() and not str(fields.get("credit_days") or "").strip():
-            raise HTTPException(status_code=400, detail="Enter Discounting % or Credit Period (days) — at least one")
-    # HO members choose who approves their record at L4; L5 (COO) is fixed.
-    # Only required when a QUALIFYING choice exists — with no HO HOD holding
-    # higher authority than the creator, the record goes straight to L5.
-    if _is_ho_user(db, user) and user.user_id not in RIGHTS_MASTER_IDS:
-        if not (fields.get("l4_approver_id") or "").strip():
-            if _qualifying_ho_l4_ids(db, user, (fields.get("branch") or "").strip(), request_type, category):
-                raise HTTPException(status_code=400, detail="Select your L4 (HOD) approver")
+            raise HTTPException(status_code=400, detail="Enter Discounting % or Credit Period - days — at least one")
+    # HO members MAY choose an L4 (HOD) approver; L5 (COO) is fixed. The L4
+    # pick is OPTIONAL — leaving it empty sends the record straight to the
+    # COO (L5), even when qualifying HODs exist.
 
 
 def _resolve_chosen_approvers(db: Session, user: User, fields: dict, strict: bool = True):
     """Validate + name-resolve the creator's CHOSEN approvers (submit box).
-    HO creators: L4 / L5 only (L2/L3 skip for HO). Non-HO creators may pick
-    ONE person per level when the level has several approvers — the choice
-    must be among that level's valid approvers for the record. Empty choice
-    = every assigned approver may act. Returns {lvl_id, lvl_name} per level.
+    HO creators: L4 / L5 only (L2/L3 skip for HO). A creator may pick ONE OR
+    SEVERAL people per level (CSV in the field, multi-select 2026-08-11) —
+    every choice must be among that level's valid approvers for the record;
+    any of the chosen may act. Empty choice = every assigned approver may
+    act. Returns {lvl_id, lvl_name} per level (ids CSV-joined).
     strict=False (drafts) skips the validity checks — re-run at submit."""
     out = {f"{lvl}_{k}": None for lvl in ("l2", "l3", "l4", "l5") for k in ("id", "name")}
 
     def _pick(key):
-        return (fields.get(key) or "").strip() or None
+        return _ids_csv(fields.get(key))
 
     def _name_of(uid):
         target = db.query(User).filter(User.user_id == uid).first()
         return target.name if target else None
 
+    def _store(lvl, ids):
+        out[f"{lvl}_id"] = ",".join(ids)
+        out[f"{lvl}_name"] = ", ".join(_name_of(i) or i for i in ids)
+
     branch = (fields.get("branch") or "").strip()
     category = (fields.get("category") or "").strip()
     is_ho = _is_ho_user(db, user)
 
-    l4_id = _pick("l4_approver_id")
-    l5_id = _pick("l5_approver_id")
+    l4_ids = _pick("l4_approver_id")
+    l5_ids = _pick("l5_approver_id")
 
     if is_ho:
-        if l4_id:
-            if l4_id == user.user_id:
+        if l4_ids:
+            if user.user_id in l4_ids:
                 raise HTTPException(status_code=400, detail="You cannot choose yourself as approver")
-            if l4_id not in _ho_member_ids(db):
-                raise HTTPException(status_code=400, detail="Chosen L4 approver must be a Head Office member")
-            # the choice must hold L4 AND beat the creator's own limit for the
-            # record's type — same rule the dropdown is filtered by
-            if strict and l4_id not in _qualifying_ho_l4_ids(
-                db, user, branch, (fields.get("request_type") or "").strip(), category or None,
-            ):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Chosen L4 approver must be a Head Office HOD covering this record's category with higher authority than yours",
-                )
-            out["l4_id"], out["l4_name"] = l4_id, _name_of(l4_id)
-        if l5_id:
-            if l5_id == user.user_id:
+            ho_members = _ho_member_ids(db)
+            if any(uid not in ho_members for uid in l4_ids):
+                raise HTTPException(status_code=400, detail="Chosen L4 approvers must be Head Office members")
+            # every choice must hold L4 AND beat the creator's own limit for
+            # the record's type — same rule the checkbox list is filtered by
+            if strict:
+                qual = _qualifying_ho_l4_ids(
+                    db, user, branch, (fields.get("request_type") or "").strip(), category or None)
+                if any(uid not in qual for uid in l4_ids):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Every chosen L4 approver must be a Head Office HOD covering this record's category with higher authority than yours",
+                    )
+            _store("l4", l4_ids)
+        if l5_ids:
+            if user.user_id in l5_ids:
                 raise HTTPException(status_code=400, detail="You cannot choose yourself as approver")
-            if l5_id not in (set(RIGHTS_MASTER_IDS) | _level_user_ids(db, "l5")):
-                raise HTTPException(status_code=400, detail="Chosen L5 approver does not hold COO (L5) authority")
-            out["l5_id"], out["l5_name"] = l5_id, _name_of(l5_id)
+            valid_l5 = set(RIGHTS_MASTER_IDS) | _level_user_ids(db, "l5")
+            if any(uid not in valid_l5 for uid in l5_ids):
+                raise HTTPException(status_code=400, detail="Every chosen L5 approver must hold COO - L5 authority")
+            _store("l5", l5_ids)
         return out
 
-    # Non-HO: every level may carry a choice — validated against the level's
+    # Non-HO: every level may carry choices — validated against the level's
     # actual approver set for THIS record (branch + category)
     for lvl, chosen in (("l2", _pick("l2_approver_id")), ("l3", _pick("l3_approver_id")),
-                        ("l4", l4_id), ("l5", l5_id)):
+                        ("l4", l4_ids), ("l5", l5_ids)):
         if not chosen:
             continue
-        if chosen == user.user_id:
+        if user.user_id in chosen:
             raise HTTPException(status_code=400, detail="You cannot choose yourself as approver")
-        if strict and chosen not in _available_approvers(db, lvl, branch, category, user.user_id):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Chosen {lvl.upper()} approver is not an available approver for this record")
-        out[f"{lvl}_id"], out[f"{lvl}_name"] = chosen, _name_of(chosen)
+        if strict:
+            avail = _available_approvers(db, lvl, branch, category, user.user_id)
+            if any(uid not in avail for uid in chosen):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A chosen {lvl.upper()} approver is not an available approver for this record")
+        _store(lvl, chosen)
     return out
 
 
@@ -1808,13 +1947,55 @@ def _finalize_submit(db: Session, user: User, app_row: ApprovalApplication):
     _apply_skip_notes(app_row, skip_notes)
 
 
+def _notify_submitted(db: Session, app_row: ApprovalApplication):
+    """Mail everyone the moment an NFA enters the flow: To = the creator plus
+    the recipients they attached in the submit box, Cc = the CC addresses they
+    attached plus the approvers the record is now waiting on. Fire-and-forget —
+    a mail problem never blocks the submit."""
+    try:
+        creator = db.query(User).filter(User.user_id == app_row.created_by).first()
+        stored_to = [e.strip() for e in (app_row.to_emails or "").split(",") if e.strip()]
+        tos = list(dict.fromkeys(
+            ([creator.email.strip()] if creator and (creator.email or "").strip() else []) + stored_to))
+
+        cc = [e.strip() for e in (app_row.cc_emails or "").split(",") if e.strip()]
+
+        # who the record is waiting on right now — they go in CC and are named
+        acting = STATUS_ACTING_LEVEL.get(app_row.status)
+        pending_names, pending_label = [], ""
+        if acting:
+            pending_label = _level_label(db, acting)
+            ids = _available_approvers(
+                db, acting, app_row.branch, app_row.category, app_row.created_by,
+                l4_choice=app_row.l4_approver_id, l5_choice=app_row.l5_approver_id,
+                l2_choice=app_row.l2_approver_id, l3_choice=app_row.l3_approver_id)
+            if ids:
+                for u in db.query(User).filter(User.user_id.in_(list(ids))).all():
+                    pending_names.append(u.name or u.user_id)
+                    if (u.email or "").strip() and u.email.strip() not in tos:
+                        cc.append(u.email.strip())
+                pending_names.sort()
+        # status 'approved' already at submit: pending_label stays empty and the
+        # mail says so instead of naming an approver
+
+        if not tos:
+            print(f"[approval-email] {app_row.app_no}: no recipient for the submit mail — skipped")
+            return
+        from app.controllers.approval_notify import send_submitted_email_async
+        send_submitted_email_async(
+            tos, app_row.to_dict(), _attachment_payloads(db, app_row.id),
+            cc, pending_label, pending_names)
+    except Exception as e:      # never let the notification break the submit
+        print(f"[approval-email] submit notification skipped: {e}")
+
+
 async def create_application(db: Session, user_id: str, fields: dict, files, as_draft: bool = False):
     user = _get_user(db, user_id)
     level = resolve_level(db, user)
 
     request_type = (fields.get("request_type") or "").strip()
     if request_type not in REQUEST_TYPES:
-        raise HTTPException(status_code=400, detail="Type must be discounting / credit / expense / discounting & credit")
+        raise HTTPException(status_code=400, detail="Type must be discounting / credit / expense / discounting & credit / other")
     if not as_draft:
         _validate_for_submit(db, user, fields, request_type)
     category = (fields.get("category") or "").strip()
@@ -1860,9 +2041,11 @@ async def create_application(db: Session, user_id: str, fields: dict, files, as_
         credit_days=_int("credit_days") if request_type in ("credit", "discounting_credit") else None,
         expense_amount=_num("expense_amount") if is_expense else None,
         expense_type=(fields.get("expense_type") or "").strip() or None if is_expense else None,
-        description=(fields.get("description") or "").strip() or None,
+        description=sanitize_rich_html(fields.get("description")) or None,
         remark=(fields.get("remark") or "").strip() or None,
         cc_emails=(fields.get("cc_emails") or "").strip() or None,
+        to_emails=(fields.get("to_emails") or "").strip() or None,
+        **_settlement_fields(fields, is_expense),
         status="draft",
         created_by=user.user_id,
         created_by_name=user.name,
@@ -1897,6 +2080,8 @@ async def create_application(db: Session, user_id: str, fields: dict, files, as_
 
     db.commit()
     db.refresh(app_row)
+    if not as_draft:
+        _notify_submitted(db, app_row)
     return app_row.to_dict()
 
 
@@ -1918,7 +2103,7 @@ async def update_application(db: Session, user_id: str, app_id: int, fields: dic
 
     request_type = (fields.get("request_type") or "").strip()
     if request_type not in REQUEST_TYPES:
-        raise HTTPException(status_code=400, detail="Type must be discounting / credit / expense / discounting & credit")
+        raise HTTPException(status_code=400, detail="Type must be discounting / credit / expense / discounting & credit / other")
     if submit:
         _validate_for_submit(db, user, fields, request_type)
     is_expense = request_type == "expense"
@@ -1958,10 +2143,14 @@ async def update_application(db: Session, user_id: str, app_id: int, fields: dic
     app_row.credit_days = _int("credit_days") if request_type in ("credit", "discounting_credit") else None
     app_row.expense_amount = _num("expense_amount") if is_expense else None
     app_row.expense_type = (fields.get("expense_type") or "").strip() or None if is_expense else None
-    app_row.description = (fields.get("description") or "").strip() or None
+    app_row.description = sanitize_rich_html(fields.get("description")) or None
     app_row.remark = (fields.get("remark") or "").strip() or None
     if "cc_emails" in fields:
         app_row.cc_emails = (fields.get("cc_emails") or "").strip() or None
+    if "to_emails" in fields:
+        app_row.to_emails = (fields.get("to_emails") or "").strip() or None
+    for _k, _v in _settlement_fields(fields, is_expense).items():
+        setattr(app_row, _k, _v)
     app_row.l2_approver_id = chosen["l2_id"]
     app_row.l2_approver_name = chosen["l2_name"]
     app_row.l3_approver_id = chosen["l3_id"]
@@ -2003,6 +2192,8 @@ async def update_application(db: Session, user_id: str, app_id: int, fields: dic
 
     db.commit()
     db.refresh(app_row)
+    if submit:
+        _notify_submitted(db, app_row)
     return app_row.to_dict()
 
 
@@ -2046,18 +2237,30 @@ def list_applications(db: Session, user_id: str, status_filter=None, request_typ
 
     q = db.query(ApprovalApplication).options(selectinload(ApprovalApplication.attachments))
 
-    if level not in ("l4", "l5") and not _is_ho_user(db, user):
-        from sqlalchemy import and_, or_
+    # What this caller can SEE — returned so the summary cards can caption
+    # themselves honestly: 'all' = every branch company-wide (L4/L5 and any HO
+    # member), 'stage' = own records + own stage queue, 'own' = own only.
+    sees_all = level in ("l4", "l5") or _is_ho_user(db, user)
+    scope = "all" if sees_all else ("stage" if level in ("l2", "l3") else "own")
+
+    if not sees_all:
+        from sqlalchemy import and_, or_, func
+
+        # chosen-approver columns hold ONE id or a CSV list (multi-select) —
+        # membership test instead of equality, matching legacy single values too
+        def _chosen_has(col):
+            return func.concat(",", func.replace(col, " ", ""), ",").like(f"%,{user.user_id},%")
+
         conds = [
             ApprovalApplication.created_by == user.user_id,
             ApprovalApplication.l2_action_by == user.user_id,
             ApprovalApplication.l3_action_by == user.user_id,
             ApprovalApplication.l4_action_by == user.user_id,
             # records whose creator CHOSE this user as an approver
-            ApprovalApplication.l2_approver_id == user.user_id,
-            ApprovalApplication.l3_approver_id == user.user_id,
-            ApprovalApplication.l4_approver_id == user.user_id,
-            ApprovalApplication.l5_approver_id == user.user_id,
+            _chosen_has(ApprovalApplication.l2_approver_id),
+            _chosen_has(ApprovalApplication.l3_approver_id),
+            _chosen_has(ApprovalApplication.l4_approver_id),
+            _chosen_has(ApprovalApplication.l5_approver_id),
         ]
         # records waiting at a stage where THIS user is an assigned approver
         # (a merged row's approver sees every member branch's records)
@@ -2119,7 +2322,37 @@ def list_applications(db: Session, user_id: str, status_filter=None, request_typ
     my_l2 = my_stage_branches["l2"]
     my_l3 = my_stage_branches["l3"]
     all_maps = db.query(ApprovalHODCategory).filter(ApprovalHODCategory.user_id.isnot(None)).all()
-    usable_map_ids = _usable_ids(db, [m.user_id for m in all_maps])
+
+    # ---- ONE rights fetch + ONE user fetch for everything below ----
+    # This block used to cost five round trips: _level_user_ids('l4'),
+    # _level_user_ids('l5') and three separate _usable_ids() user queries over
+    # overlapping id sets. Both levels come from a single rights query (legacy
+    # 'hod'/'coo' names normalised in Python), and one user query answers BOTH
+    # "is this user usable" and "what is their name" for every id involved.
+    lvl_ids = {"l4": set(), "l5": set()}
+    legacy_of = {lvl: [k for k, v in LEGACY_LEVEL_MAP.items() if v == lvl] for lvl in ("l4", "l5")}
+    wanted_levels = ["l4", "l5"] + legacy_of["l4"] + legacy_of["l5"]
+    for uid, lvl in db.query(ApprovalRight.user_id, ApprovalRight.level).filter(
+        ApprovalRight.level.in_(wanted_levels)
+    ).all():
+        norm = _norm_level(lvl)
+        if norm in lvl_ids:
+            lvl_ids[norm].add(uid)
+
+    map_ids = {m.user_id for m in all_maps if m.user_id}
+    # names are resolved for the same people again a few lines down, so fetch
+    # name + usability together and reuse the dict for both purposes
+    usable_name = {}
+    seed_ids = map_ids | lvl_ids["l4"] | lvl_ids["l5"] | set(RIGHTS_MASTER_IDS)
+    if seed_ids:
+        for uid, uname in db.query(User.user_id, User.name).filter(
+            User.user_id.in_(list(seed_ids)),
+            User.is_blocked == False,   # noqa: E712
+            User.is_deleted == False,   # noqa: E712
+        ).all():
+            usable_name[uid] = uname
+
+    usable_map_ids = map_ids & set(usable_name)
     mapped = {}
     # category-wise fallback: {category: L4 users covering it on ANY row} —
     # a branch without its own L4 map routes to the category's HODs only
@@ -2138,8 +2371,9 @@ def list_applications(db: Session, user_id: str, status_filter=None, request_typ
     excl_map = {}
     for r in all_excl_rows:
         excl_map.setdefault((r.employee_id, r.category), set()).add(r.approver_id)
-    l4_all = _usable_ids(db, _level_user_ids(db, "l4"))
-    l5_all = _usable_ids(db, set(RIGHTS_MASTER_IDS) | _level_user_ids(db, "l5")) - {"kala000001"}
+    # derived from the single fetch above — no further user / rights queries
+    l4_all = lvl_ids["l4"] & set(usable_name)
+    l5_all = (set(RIGHTS_MASTER_IDS) | lvl_ids["l5"]) & set(usable_name) - {"kala000001"}
 
     def _pending_ids(a):
         acting = STATUS_ACTING_LEVEL.get(a.status)
@@ -2147,33 +2381,72 @@ def list_applications(db: Session, user_id: str, status_filter=None, request_typ
             return set()
         if acting in ("l2", "l3"):
             ids = set(stage_map.get((_rowb(a.branch), acting), set()))
-            # creator's chosen approver narrows the stage to that ONE person
-            # (while the choice is still among the stage's assigned approvers)
+            # creator's chosen approvers narrow the stage to those people
+            # (while a choice is still among the stage's assigned approvers)
             choice = a.l2_approver_id if acting == "l2" else a.l3_approver_id
-            if choice and choice in ids:
-                ids = {choice}
+            chosen = set(_ids_csv(choice)) & ids
+            if chosen:
+                ids = chosen
         elif acting == "l4":
             if a.l4_approver_id:
-                ids = {a.l4_approver_id}
+                ids = set(_ids_csv(a.l4_approver_id))
             else:
                 m = mapped.get((_rowb(a.branch), a.category)) or cat_l4.get(a.category)
                 ids = set(m) if m else set(l4_all)
         else:
-            ids = {a.l5_approver_id} if a.l5_approver_id else set(l5_all)
+            ids = set(_ids_csv(a.l5_approver_id)) if a.l5_approver_id else set(l5_all)
         ids -= excl_map.get((a.created_by, a.category), set())
         ids.discard(a.created_by)
         return ids
 
     pending_ids_by_app = {a.id: _pending_ids(a) for a in rows}
     all_ids = set().union(*pending_ids_by_app.values()) if pending_ids_by_app else set()
-    name_by_id = {}
-    if all_ids:
-        for u in db.query(User).filter(
-            User.user_id.in_(list(all_ids)),
+    # Most of these names are already in usable_name (HOD map + L4/L5 holders);
+    # only stage approvers and creator-chosen ids still need a lookup, so this
+    # query is usually skipped entirely instead of re-fetching everyone.
+    missing = all_ids - set(usable_name)
+    if missing:
+        for uid, uname in db.query(User.user_id, User.name).filter(
+            User.user_id.in_(list(missing)),
             User.is_blocked == False,   # noqa: E712
             User.is_deleted == False,   # noqa: E712
         ).all():
-            name_by_id[u.user_id] = u.name
+            usable_name[uid] = uname
+    name_by_id = usable_name
+
+    # ---- result-mail recipients per record (the Email Recipients box) ----
+    # ADDRESSES, not names: the box must show exactly what the mail will use.
+    # No usability filter here — send_result_email does not apply one either, so
+    # a blocked approver's address still shows if the mail would carry it.
+    ACTOR_COLS = ("l2_action_by", "l3_action_by", "l4_action_by", "l5_action_by", "rejected_by")
+    mail_ids = set(all_ids)
+    for a in rows:
+        if a.created_by:
+            mail_ids.add(a.created_by)
+        mail_ids.update(v for v in (getattr(a, c, None) for c in ACTOR_COLS) if v)
+    email_by_id = {}
+    if mail_ids:
+        for uid, addr in db.query(User.user_id, User.email).filter(
+            User.user_id.in_(list(mail_ids))
+        ).all():
+            if (addr or "").strip():
+                email_by_id[uid] = addr.strip()
+
+    def _csv(v):
+        return [e.strip() for e in str(v or "").split(",") if e.strip()]
+
+    def _mail_lists(a):
+        """(to, cc) exactly as send_result_email builds them: To = the creator
+        plus the addresses they attached at submit; Cc = the CC addresses they
+        attached plus everyone acting on / who acted on the record."""
+        to = ([email_by_id[a.created_by]] if a.created_by in email_by_id else []) + _csv(a.to_emails)
+        cc = _csv(a.cc_emails)
+        cc += [email_by_id[i] for i in sorted(pending_ids_by_app.get(a.id, set())) if i in email_by_id]
+        cc += [email_by_id[uid] for uid in
+               (getattr(a, c, None) for c in ACTOR_COLS)
+               if uid and uid != a.created_by and uid in email_by_id]
+        to = list(dict.fromkeys(to))
+        return to, [e for e in dict.fromkeys(cc) if e not in to]
 
     def _can_act(a):
         acting = STATUS_ACTING_LEVEL.get(a.status)
@@ -2185,20 +2458,21 @@ def list_applications(db: Session, user_id: str, status_filter=None, request_typ
             rb = _rowb(a.branch)
             if rb not in (my_l2 if acting == "l2" else my_l3):
                 return False
-            # chosen approver: only that person may act (while still assigned)
-            choice = a.l2_approver_id if acting == "l2" else a.l3_approver_id
-            return (not choice or choice == user.user_id
-                    or choice not in stage_map.get((rb, acting), set()))
+            # chosen approvers: only those people may act (while at least one
+            # choice is still an assigned stage approver — else all may act)
+            choice = _ids_csv(a.l2_approver_id if acting == "l2" else a.l3_approver_id)
+            return (not choice or user.user_id in choice
+                    or not (set(choice) & stage_map.get((rb, acting), set())))
         if acting == "l4":
             if a.l4_approver_id:
-                return a.l4_approver_id == user.user_id
+                return user.user_id in _ids_csv(a.l4_approver_id)
             if not am_l4:
                 return False
             ids = mapped.get((_rowb(a.branch), a.category)) or cat_l4.get(a.category)
             return True if not ids else user.user_id in ids
         # l5
         if a.l5_approver_id:
-            return a.l5_approver_id == user.user_id
+            return user.user_id in _ids_csv(a.l5_approver_id)
         return am_l5
 
     out = []
@@ -2207,8 +2481,9 @@ def list_applications(db: Session, user_id: str, status_filter=None, request_typ
         d["can_act"] = _can_act(r)
         d["pending_approver_names"] = sorted(
             name_by_id[i] for i in pending_ids_by_app.get(r.id, set()) if i in name_by_id)
+        d["mail_to"], d["mail_cc"] = _mail_lists(r)
         out.append(d)
-    return {"level": level, "applications": out}
+    return {"level": level, "scope": scope, "applications": out}
 
 
 def _get_application(db: Session, app_id: int) -> ApprovalApplication:
@@ -2235,7 +2510,12 @@ def _check_can_act(db: Session, user: User, app_row: ApprovalApplication) -> str
         l4_choice=app_row.l4_approver_id, l5_choice=app_row.l5_approver_id,
         l2_choice=app_row.l2_approver_id, l3_choice=app_row.l3_approver_id)
     if user.user_id not in available:
-        names = ", ".join(_names_of(db, available)) or "nobody (step will auto-forward)"
+        # kala000001 (master admin) is never named in a user-facing message —
+        # same convention as the chain preview / COO choices
+        shown = _names_of(db, available - {"kala000001"})
+        if not shown and available:
+            shown = [_level_names(db).get(acting) or LEVEL_LABELS.get(acting, acting)]
+        names = ", ".join(shown) or "nobody (step will auto-forward)"
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"This application is waiting for {_level_label(db, acting)} action by: {names}",
@@ -2257,7 +2537,10 @@ def approve_application(db: Session, user_id: str, app_id: int, remark=None):
 
     # Decide the outcome BEFORE touching the record. Combined Discounting &
     # Credit records finalize only when EVERY filled value is within limit.
-    within = _within_limit(db, user, app_row)
+    # 'Other' carries no measurable value, so NO authority limit is consulted:
+    # L4 always forwards to the COO and only L5 gives the final approval.
+    within = (acting == "l5" if app_row.request_type == OTHER_TYPE
+              else _within_limit(db, user, app_row))
     skip_notes = []
     if within:
         next_status = "approved"
@@ -2331,8 +2614,35 @@ def send_result_email(db: Session, user_id: str, app_id: int, extra_emails=None,
     extra_cc = _clean_emails(extra_emails, "CC")
     extra_to = _clean_emails(to_emails, "To")
 
+    # An NFA passes through several approvers, and each of them may add
+    # recipients when the mail goes out. Those additions are APPENDED to the
+    # record instead of being used once and forgotten, so the Email Recipients
+    # box shows the complete list to everyone who can see the NFA — the creator
+    # included — however many stages it went through.
+    def _append(existing, extras):
+        have = [e.strip() for e in str(existing or "").split(",") if e.strip()]
+        lower = {e.lower() for e in have}
+        for e in extras:
+            if e.lower() not in lower:
+                have.append(e)
+                lower.add(e.lower())
+        return ", ".join(have) or None
+
+    if extra_to or extra_cc:
+        app_row.to_emails = _append(app_row.to_emails, extra_to)
+        app_row.cc_emails = _append(app_row.cc_emails, extra_cc)
+        db.commit()
+        db.refresh(app_row)
+
     creator = db.query(User).filter(User.user_id == app_row.created_by).first()
-    tos = ([creator.email.strip()] if creator and (creator.email or "").strip() else []) + extra_to
+    # To = the creator (always) + the extra recipients they attached at submit
+    # + anything typed in the send dialog. Dedup keeps the order and stops the
+    # creator's own address appearing twice if they also listed it.
+    stored_to = [e.strip() for e in (app_row.to_emails or "").split(",") if e.strip()]
+    tos = list(dict.fromkeys(
+        ([creator.email.strip()] if creator and (creator.email or "").strip() else [])
+        + stored_to + extra_to
+    ))
 
     # CC — every user who acted on the trail (self-approve = creator, already TO)
     actor_ids = [i for i in {
@@ -2470,6 +2780,51 @@ def delete_application(db: Session, user_id: str, app_id: int):
     return True
 
 
+def update_chosen_approvers(db: Session, user_id: str, app_id: int, fields: dict):
+    """Creator-only, PENDING records: change the level-wise CHOSEN approvers
+    (2026-08-11 — a chosen person is on leave / busy). Only the CURRENT and
+    FUTURE levels are editable — levels already acted on keep their audit
+    trail and stored choice untouched. After the update the record re-routes
+    from just below its current stage, so a stage whose new choice has nobody
+    available auto-forwards, and an HO record whose L4 ticks were cleared
+    moves straight to L5 (COO)."""
+    user = _get_user(db, user_id)
+    app_row = _get_application(db, app_id)
+    if app_row.created_by != user.user_id:
+        raise HTTPException(status_code=403, detail="Only the creator can change the approvers")
+    cur = STATUS_ACTING_LEVEL.get(app_row.status)
+    if not cur:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Approvers can be changed only while the application is pending - it is {app_row.status}")
+
+    order = ["l2", "l3", "l4", "l5"]
+    editable = order[order.index(cur):]
+
+    # Validate ONLY the editable levels against the record's own
+    # branch / category / type — past levels stay exactly as they were.
+    base = {
+        "branch": app_row.branch,
+        "category": app_row.category,
+        "request_type": app_row.request_type,
+    }
+    for lvl in editable:
+        base[f"{lvl}_approver_id"] = fields.get(f"{lvl}_approver_id")
+    chosen = _resolve_chosen_approvers(db, user, base, strict=True)
+    for lvl in editable:
+        setattr(app_row, f"{lvl}_approver_id", chosen[f"{lvl}_id"])
+        setattr(app_row, f"{lvl}_approver_name", chosen[f"{lvl}_name"])
+
+    # Re-route from the level below the current stage with the new choices
+    prev = {"l2": None, "l3": "l2", "l4": "l3", "l5": "l4"}[cur]
+    skip_notes = []
+    app_row.status = _next_pending_status(db, app_row, prev, skip_notes)
+    _apply_skip_notes(app_row, skip_notes)
+    db.commit()
+    db.refresh(app_row)
+    return app_row.to_dict()
+
+
 def get_attachment(db: Session, attachment_id: int) -> ApprovalAttachment:
     row = db.query(ApprovalAttachment).filter(ApprovalAttachment.id == attachment_id).first()
     if not row:
@@ -2490,4 +2845,6 @@ def get_summary(db: Session, user_id: str):
         "pending_l5": sum(1 for a in apps if a["status"] == "pending_l5"),
         "approved": sum(1 for a in apps if a["status"] == "approved"),
         "rejected": sum(1 for a in apps if a["status"] == "rejected"),
+        # records waiting on THIS user's action right now (navbar badge)
+        "my_pending": sum(1 for a in apps if a.get("can_act") is True),
     }

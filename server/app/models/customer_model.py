@@ -517,6 +517,7 @@ class LMSData(Base):
     sic_code = Column(String(200), nullable=True)
     sic_code_type = Column(String(200), nullable=True)
     labour_invoice_number = Column(String(200), nullable=True)
+    labour_invoice_amount = Column(Float, nullable=True)
     part_invoice_amount = Column(Float, nullable=True)
     part_invoice_number = Column(String(200), nullable=True)
     lead_source = Column(String(200), nullable=True)
@@ -534,8 +535,19 @@ class LMSData(Base):
 
 
 class OpenSRLoadReport(Base):
+    """'Open SR Load Report' import — one row per unique
+    (Instance Id [Asset #], Service Request #), upserted on re-import.
+    Rows are NEVER deleted or flagged by an import: every SR the file has
+    ever carried stays here, so the customer's SR history survives.
+
+    OPEN vs CLOSED is NOT stored on this row. An SR counts as CLOSED when the
+    same (instance_id, sr_number) exists in MaxTTROilChangeSRZeroLabourFlag —
+    that file is the closure record and every one of its rows carries a real
+    SR CLOSE DATE. The SR Details box therefore lists a row here only while no
+    MaxTTR row matches it (see
+    CustomerController.get_open_sr_load_reports_by_instance)."""
     __tablename__ = "open_sr_load_reports"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     instance_id = Column(String(100), index=True, nullable=True)
     branch_id = Column(String(100), nullable=True)  
@@ -612,6 +624,12 @@ class OpenSRLoadReport(Base):
     dry_csp_approved_by = Column(String(500), nullable=True)
     dry_csp_approved_date = Column(DateTime, nullable=True)
 
+    # Date of the last import in which this SR was still present in the file.
+    # Informational only — nothing filters on it. (The is_active soft-delete
+    # flag that used to sit here was removed: closure is now decided against
+    # the MaxTTR file, not against "was it in the latest upload".)
+    last_seen_date = Column(DateTime, nullable=True)
+
     # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
     extra_data = Column(Text, nullable=True)
 
@@ -666,14 +684,21 @@ class ResponseTimeMaxTTR(Base):
     updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 
-class OpenSRData(Base):
-    """'Open SR Data' (Close SR Report) import — ONE row per unique
+class MaxTTROilChangeSRZeroLabourFlag(Base):
+    """'MaxTTR - Oil Change SR Zero Labour Flag' import (was called
+    'Open SR Data' / Close SR Report) — ONE row per unique
     (instance_id, sr_number) combination, upserted on re-import. Only
     instance_ids that already exist in the customers table are stored;
-    surfaced in the SR Details box (CustomerEng/CustomerEng2) and Customer page."""
-    __tablename__ = "open_sr_data"
+    surfaced in the SR Details box (CustomerEng/CustomerEng2) and Customer page.
+
+    Renamed 2026-08-13 (class + table) from OpenSRData / open_sr_data. The
+    existing table is renamed in place at startup — see the rename migration in
+    performance_indexes.ensure_table_renames(). The HTTP API keeps its legacy
+    path (/customers/open-sr-data) and `open_sr_data` response key so the
+    already-built frontend pages keep working."""
+    __tablename__ = "maxttr_oil_change_sr_zero_labour_flag"
     __table_args__ = (
-        Index('UQ_open_sr_data_instance_sr', 'instance_id', 'sr_number', unique=True),
+        Index('UQ_maxttr_oil_change_sr_instance_sr', 'instance_id', 'sr_number', unique=True),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -700,6 +725,115 @@ class OpenSRData(Base):
     zero_labour_flag = Column(String(100), nullable=True)
     oil_change_flag = Column(String(100), nullable=True)
     count_of_tasks = Column(String(50), nullable=True)
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
+
+
+class CDIDetailReport(Base):
+    """'CDI Detail Report' import — a STANDALONE report table: it never writes
+    to the customers table or to any other import table.
+
+    SR NUMBER is the primary key: ONE row per unique SR NUMBER, upserted on
+    re-import. When the same SR NUMBER appears more than once in a file, the
+    FIRST occurrence wins. Only the fixed columns below are stored in
+    their own DB fields — every other column of the file is dynamic and kept
+    as JSON in extra_data. Shown on the Customer page."""
+    __tablename__ = "cdi_detail_report"
+    __table_args__ = (
+        Index('UQ_cdi_detail_report_sr_number', 'sr_number', unique=True),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    sr_number = Column(String(200), index=True, nullable=False)
+
+    x_technician_id = Column(String(200), nullable=True, index=True)
+    x_technician_name = Column(String(500), nullable=True)
+    cdi_category = Column(String(200), nullable=True)
+    # The ERP branch the feedback belongs to. This file is the ONE PMS import
+    # that carries no BRANCH ID, only the branch NAME - the Customer Delight
+    # Index report resolves it back to a branch id against the names the other
+    # ERP files carry (see pms_controller._branch_by_name).
+    branch_name = Column(String(150), nullable=True, index=True)
+    # When the feedback activity closed — the date the Employee Productivity
+    # report's CDI columns are counted on.
+    activity_end_date = Column(DateTime, nullable=True, index=True)
+    overall_experience = Column(String(50), nullable=True)
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
+
+
+class EFSRReport(Base):
+    """'EFSR Report' import — a STANDALONE report table: it never writes to the
+    customers table or to any other import table.
+
+    The key is the COMBINATION Appointment Number + Service Engineer UID +
+    Task Assigned Date & Time: ONE row per unique triple, upserted on
+    re-import. Only the fixed columns below are stored in their own DB fields —
+    every other column of the file is dynamic and kept as JSON in extra_data.
+    Shown on the Customer page.
+
+    WHY THAT TRIPLE — the file's grain is one row per TASK ASSIGNMENT, not one
+    per SR and not one per engineer-on-an-SR. Verified against the two real
+    exports (11,760 and 9,929 rows): the same engineer is assigned the same
+    appointment more than once (attempt 1 Cancelled, attempt 2 Completed) and
+    one appointment is re-assigned between engineers. So:
+      Service Request No. + UID  dropped 898 (7.6%) / 714 (7.2%) of rows, and
+                                 'first wins' kept the CANCELLED attempt while
+                                 deleting the COMPLETED one — 601 real closures
+                                 lost in one file.
+      Appointment Number alone   still dropped 91 / 7 (re-assignment).
+      + Service Engineer UID     still dropped 26 / 4 (same engineer twice).
+      + Task Assigned Date       0 dropped in BOTH files. <- this key.
+    Service Request No. is deliberately NOT in the key: Appointment Number is
+    '<SR No.>_<n>' in 100% of rows, so the SR adds no discriminating power (an
+    index on it as well is identical in width and effect). It stays as a normal
+    indexed column for display, search and grouping.
+
+    Task Assigned Date is safe in a key because it is stamped when the task is
+    allocated and never moves: across the 9,499 (appointment, UID) pairs present
+    in BOTH exports it changed 0 times, while 108 of them GAINED a Task End Date
+    — exactly the update the upsert has to land on the existing row.
+
+    Key history: Service Request No. alone -> + Service Engineer UID
+    (2026-08-13) -> Appointment Number + UID + Task Assigned Date (2026-08-20).
+    Each old unique index is dropped and the new one created at startup — see
+    the UQ_efsr_report_* statements in performance_indexes.py."""
+    __tablename__ = "efsr_report"
+    __table_args__ = (
+        Index('UQ_efsr_report_appt_uid_assigned', 'appointment_number',
+              'service_engineer_uid', 'task_assigned_date', unique=True),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    service_request_no = Column(String(200), index=True, nullable=False)
+    # The eFSR task/visit id, '<Service Request No.>_<n>'. The record key's
+    # first column — one appointment is one dispatch of one engineer to a job.
+    appointment_number = Column(String(200), index=True, nullable=True)
+
+    sd_branch_code = Column(String(100), nullable=True, index=True)
+    sr_type = Column(String(200), nullable=True)
+    # When the SR was ALLOCATED to the engineer — the date the Employee
+    # Productivity report's 'Allocate SR' column is counted on. Every row with
+    # a Service Engineer UID has one, while sr_closed_date is null for the ~1/3
+    # of SRs that are assigned but not closed yet.
+    task_assigned_date = Column(DateTime, nullable=True, index=True)
+    # When the ENGINEER finished the job. This — not sr_closed_date — is what
+    # the SR Allocation report counts a closure on: an SR is closed in the back
+    # office days after the task ended, and often not at all (task_end_date is
+    # filled on ~2,300 rows that have no sr_closed_date).
+    task_end_date = Column(DateTime, nullable=True, index=True)
+    sr_closed_date = Column(DateTime, nullable=True)
+    sr_status = Column(String(200), nullable=True)
+    service_engineer_name = Column(String(500), nullable=True, index=True)
+    service_engineer_uid = Column(String(100), nullable=True, index=True)
 
     # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
     extra_data = Column(Text, nullable=True)

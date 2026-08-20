@@ -20,6 +20,7 @@ from app.models.non_followup_model import NonFollowUp
 import time
 import threading
 from app.time_utils import now_ist
+from app import mail_utils
 
 # ---- Non-campaign list cache (kills the per-page full-dataset recomputation) ----
 _NC_CACHE = {
@@ -266,7 +267,8 @@ class EngagementController:
         try:
             # Create message
             msg = MIMEMultipart()
-            msg['From'] = self.sender_email
+            msg['From'] = mail_utils.from_header(self.sender_email)
+            msg['Reply-To'] = mail_utils.reply_to(self.sender_email)
             msg['To'] = customer.email
             msg['Subject'] = f"Thank You for Your Interest in {campaign.name}"
             
@@ -759,6 +761,7 @@ class EngagementController:
             campaign_status = {}
             campaign_transferred = {}
             campaign_old_status = {}
+            campaign_carry_forward = {}
             
             # Pre-build a map: campaign_id -> latest followup for THIS customer in THAT campaign
             # (built from the customer_followups list, no DB hit)
@@ -795,9 +798,51 @@ class EngagementController:
                     if is_transferred:
                         break
                 
+                # ===== Carry-forward from the matching INACTIVE same-product drive =====
+                # A customer sitting in a NEW drive — transferred (T) or added by
+                # hand — who already has follow-up history on the SAME product in
+                # an INACTIVE drive, and was NOT completed there, shows that
+                # drive's last follow-up on this drive until they get a follow-up
+                # of their own here. Keyed on follow-up HISTORY (not on asset
+                # membership like `is_transferred`), which is what makes it cover
+                # manually added customers too.
+                carry_forward = None
+                if current_campaign_followup is None:
+                    best_old_followup = None
+                    best_old_campaign = None
+                    for old_campaign in old_campaigns:   # inactive + same service
+                        old_f = latest_followup_per_campaign.get(old_campaign.id)
+                        if old_f is None:
+                            continue
+                        if (old_f.status or '').strip().lower() == 'completed':
+                            continue
+                        if (best_old_followup is None
+                                or (old_f.followup_date or datetime.min)
+                                > (best_old_followup.followup_date or datetime.min)):
+                            best_old_followup = old_f
+                            best_old_campaign = old_campaign
+                    if best_old_followup is not None:
+                        carry_forward = {
+                            "status": best_old_followup.status,
+                            # Flag recomputed LIVE from the carried next date, the
+                            # same way the row-level flag is (C3 -> C2 -> C1 as
+                            # days pass), so a carried flag never goes stale.
+                            "followup_flag": self._flag_for_next_date(
+                                best_old_followup.next_followup_date,
+                                best_old_followup.followup_flag
+                            ),
+                            "followup_date": best_old_followup.followup_date,
+                            "user_name": best_old_followup.user_name,
+                            "next_followup_date": best_old_followup.next_followup_date,
+                            "remark": best_old_followup.followup_remark,
+                            "source_campaign": best_old_campaign.name if best_old_campaign else None,
+                        }
+
                 campaign_status[campaign_name] = status
                 campaign_transferred[campaign_name] = is_transferred
                 campaign_old_status[campaign_name] = old_campaign_status
+                if carry_forward is not None:
+                    campaign_carry_forward[campaign_name] = carry_forward
 
             # Synthetic "Post Warranty" pseudo-drive: checkmark + status come from
             # the customer's latest non-campaign (campaign_id NULL) follow-up.
@@ -826,6 +871,13 @@ class EngagementController:
                 "campaign_status": campaign_status,
                 "campaign_transferred": campaign_transferred,
                 "campaign_old_status": campaign_old_status,
+                # Display-only history carried from an inactive same-product
+                # drive. Deliberately NOT folded into campaign_status: the
+                # drive-page counts, status chips and the single-drive
+                # "hide rejected" rule must keep counting real work done in
+                # THIS drive (otherwise a customer carried in as 'rejected'
+                # would be hidden from the new drive entirely).
+                "campaign_carry_forward": campaign_carry_forward,
                 "followup_flags": followup_flags,
                 "latest_status": latest_status,
                 "last_followup_date": latest_followup.followup_date if latest_followup else None,
@@ -2526,6 +2578,46 @@ class EngagementController:
 
 # ==================== CSP Status (branch-wise) ====================
 
+    def _maxttr_closed_csp_pairs(self, pairs) -> set:
+        """(normalized instance_id, sr_number) pairs the 'MaxTTR - Oil Change SR
+        Zero Labour Flag' file has already closed.
+
+        That file is the SR closure record (same rule as
+        CustomerController._sr_closed_in_maxttr — matched on BOTH columns, the
+        upsert key of both tables). CampaignController.auto_complete_csp_srs_closed_in_maxttr
+        completes those assets in their CSP drive; this set keeps them out of the
+        Total CSP / Open CSP counts too, so a drive that has not been re-synced
+        yet still shows the right numbers.
+
+        `pairs` is an iterable of (instance_id, sr_number) as stored on the CSP
+        Info rows. Looked up chunked, with both the raw and normalized instance
+        form, so '.0'-formatted ids still match.
+        """
+        from app.models.customer_model import MaxTTROilChangeSRZeroLabourFlag
+
+        candidates = set()
+        for inst, sr in pairs:
+            if not inst or not sr:
+                continue
+            candidates.add(str(inst).strip())
+            norm = self._normalize_id(inst)
+            if norm:
+                candidates.add(norm)
+        cand_list = [c for c in candidates if c]
+        if not cand_list:
+            return set()
+
+        closed = set()
+        for i in range(0, len(cand_list), 1000):
+            for inst, sr in self.db.query(
+                MaxTTROilChangeSRZeroLabourFlag.instance_id,
+                MaxTTROilChangeSRZeroLabourFlag.sr_number,
+            ).filter(MaxTTROilChangeSRZeroLabourFlag.instance_id.in_(cand_list[i:i + 1000])).all():
+                norm = self._normalize_id(inst)
+                if norm:
+                    closed.add((norm, (sr or '').strip()))
+        return closed
+
     def get_csp_status_for_branch(self, branch_id: Optional[str], role: Optional[str]) -> Dict[str, Any]:
         """
         Return CSP campaign rows (campaign_csp_info) whose instance_id is actually
@@ -2566,6 +2658,12 @@ class EngagementController:
 
         sp_rows = rows_q.all()
 
+        # SRs the MaxTTR file has already closed are auto-completed in their CSP
+        # drive, so they belong in neither the Total CSP nor the Open CSP box.
+        closed_pairs = self._maxttr_closed_csp_pairs(
+            (r.instance_id, r.sr_number) for r in sp_rows
+        )
+
         def parse_any_date(s):
             if not s:
                 return None
@@ -2603,6 +2701,9 @@ class EngagementController:
             if not norm_inst:
                 continue
             if norm_inst not in assets_in_campaign.get(row.campaign_id, set()):
+                continue
+            sr_no = (row.sr_number or '').strip()
+            if sr_no and (norm_inst, sr_no) in closed_pairs:
                 continue
 
             instance_ids.add(norm_inst)
@@ -2802,18 +2903,28 @@ class EngagementController:
             CampaignCSPInfo.branch_id,
             CampaignCSPInfo.instance_id,
             CampaignCSPInfo.sr_status,
+            CampaignCSPInfo.sr_number,
         ).filter(
             CampaignCSPInfo.campaign_id.in_(list(assets_in_campaign.keys())),
             CampaignCSPInfo.branch_id.in_(list(wanted)),
         ).all()
 
+        # Same MaxTTR closure rule as get_csp_status_for_branch — an SR closed
+        # there counts towards neither Total CSP nor Open CSP.
+        closed_pairs = self._maxttr_closed_csp_pairs(
+            (inst, sr_number) for _, _, inst, _, sr_number in sp_rows
+        )
+
         total_by_branch: Dict[str, set] = {b: set() for b in wanted}
         open_by_branch: Dict[str, set] = {b: set() for b in wanted}
         # raw + normalized instance forms for the Customer lookup below
         open_candidates: set = set()
-        for camp_id, branch, inst, sr_status in sp_rows:
+        for camp_id, branch, inst, sr_status, sr_number in sp_rows:
             norm = self._normalize_id(inst) if inst else None
             if not norm or norm not in assets_in_campaign.get(camp_id, set()):
+                continue
+            sr_no = (sr_number or '').strip()
+            if sr_no and (norm, sr_no) in closed_pairs:
                 continue
             b = str(branch)
             if b not in total_by_branch:
@@ -3175,7 +3286,8 @@ class EngagementController:
                     cc_clean.append(e)
 
             msg = MIMEMultipart('mixed')
-            msg['From'] = self.sender_email
+            msg['From'] = mail_utils.from_header(self.sender_email)
+            msg['Reply-To'] = mail_utils.reply_to(self.sender_email)
             msg['To'] = ", ".join(to_clean)
             if cc_clean:
                 msg['Cc'] = ", ".join(cc_clean)

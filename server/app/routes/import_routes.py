@@ -14,8 +14,8 @@ from app.time_utils import now_ist
 from app.models.customer_model import (
     AMCAgreement, AssetDetailed, AssetService,
     AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
-    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, OpenSRData,
-    ResponseTimeMaxTTR
+    PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, MaxTTROilChangeSRZeroLabourFlag,
+    ResponseTimeMaxTTR, CDIDetailReport, EFSRReport
 )
 
 router = APIRouter(prefix="/import", tags=["import"])
@@ -41,9 +41,21 @@ FILE_TYPES = [
     "Regular Bandhan Customers Report",
     "LMS Data for ERP",
     "Open SR Load Report",
-    "Open SR Data",
-    "Response Time & MaxTTR Details"
+    "MaxTTR - Oil Change SR Zero Labour Flag",
+    "Response Time & MaxTTR Details",
+    "CDI Detail Report",
+    "EFSR Report"
 ]
+
+# Old file-type names still accepted from clients running a cached JS bundle.
+LEGACY_FILE_TYPES = {
+    "Open SR Data": "MaxTTR - Oil Change SR Zero Labour Flag",
+}
+
+
+def normalize_file_type(file_type: str) -> str:
+    """Map a legacy file-type name onto its current one (pass-through otherwise)."""
+    return LEGACY_FILE_TYPES.get(file_type, file_type)
 
 
 def run_import_job(job_id: str, file_contents: bytes, filename: str, file_type: str,
@@ -106,6 +118,7 @@ async def import_excel(
     The actual import runs in the background so large files never time out.
     Poll GET /import/status/{job_id} to check progress.
     """
+    file_type = normalize_file_type(file_type)
     if file_type not in FILE_TYPES:
         raise HTTPException(
             status_code=400,
@@ -181,8 +194,10 @@ FILE_TYPE_MODELS = {
     "Regular Bandhan Customers Report": RegularBandhan,
     "LMS Data for ERP": LMSData,
     "Open SR Load Report": OpenSRLoadReport,
-    "Open SR Data": OpenSRData,
+    "MaxTTR - Oil Change SR Zero Labour Flag": MaxTTROilChangeSRZeroLabourFlag,
     "Response Time & MaxTTR Details": ResponseTimeMaxTTR,
+    "CDI Detail Report": CDIDetailReport,
+    "EFSR Report": EFSRReport,
 }
 
 # In-memory cache so clicking through the dropdown doesn't re-hit the DB.
@@ -197,7 +212,8 @@ _UPDATED_AT_TABLES = [
     "amc_agreements", "asset_detailed", "oil_services",
     "anubandhan_plus_quotes", "anubandhan_quotes", "bandhan_plus_quotes",
     "pulse_quotations", "regular_bandhan", "lms_data", "open_sr_load_reports",
-    "open_sr_data", "response_time_maxttr",
+    "maxttr_oil_change_sr_zero_labour_flag", "response_time_maxttr",
+    "cdi_detail_report", "efsr_report",
 ]
 
 
@@ -233,6 +249,7 @@ def _ensure_updated_at_indexes(db: Session):
 @router.get("/last-updated")
 async def get_last_updated(file_type: str, db: Session = Depends(get_db)):
     """Newest updated_at + record count for a file type. Served from cache when fresh."""
+    file_type = normalize_file_type(file_type)
     model = FILE_TYPE_MODELS.get(file_type)
     if model is None:
         raise HTTPException(status_code=400, detail=f"Unknown file type: {file_type}")

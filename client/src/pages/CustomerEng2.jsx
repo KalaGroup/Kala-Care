@@ -12,6 +12,7 @@ import { BsGraphUpArrow } from "react-icons/bs";
 import { MdOutlineFollowTheSigns } from "react-icons/md";
 import toast from "react-hot-toast";
 import * as XLSX from "xlsx";
+import { dateOnly, finishDateColumns } from "../utils/excelDateColumns";
 import { DndContext, closestCenter } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -2953,8 +2954,33 @@ const CustomerEng2 = () => {
   };
 
   // Handle "Other" selection for non-campaign follow-ups
+  // "Post Warranty" only makes sense once the asset's warranty has run out.
+  // While the customer is still inside warranty the pseudo-drive is hidden from
+  // the Create New Follow-ups box; it comes back the day the warranty expires.
+  // Date comes from the list row (asset_detailed.warranty_expiry_date), with the
+  // complete-data payload as fallback. No date on file -> treated as out of
+  // warranty, so the option stays available.
+  const isUnderWarranty = useMemo(() => {
+    const raw =
+      customers.find(c => c.customer_id === selectedCustomer)?.warranty_expiry_date ||
+      customerCompleteData?.asset_detailed?.[0]?.warranty_expiry_date ||
+      customerDetails?.warranty_expiry_date;
+    if (!raw) return false;
+    const expiry = String(raw).slice(0, 10); // 'YYYY-MM-DD'
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)) return false;
+    const n = new Date();
+    const today = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+    return expiry >= today; // expires today or later -> still under warranty
+  }, [customers, selectedCustomer, customerCompleteData, customerDetails]);
+
   const handleOtherSelection = () => {
     const otherId = 'other'; // Special identifier for Other type
+
+    // Blocked while the asset is under warranty (the chip is hidden too)
+    if (isUnderWarranty && !selectedCampaignsForFollowup.includes(otherId)) {
+      toast.error('Customer is still under warranty — "Post Warranty" follow-up is not available');
+      return;
+    }
 
     if (selectedCampaignsForFollowup.includes(otherId)) {
       // Remove "Other" from selection
@@ -3129,32 +3155,37 @@ const CustomerEng2 = () => {
         "Customer ID": customer.customer_id || "",
         "Instance ID": customer.instance_id || "",
         "Last Oil Change SR Type": customer.last_oil_change_sr_type || "",
-        "Last Oil Change Date": formatDate(customer.last_oil_change_date),
+        "Last Oil Change Date": dateOnly(customer.last_oil_change_date),
         "Branch ID": customer.branch_id || "",
         "Customer Name": customer.customer_name || "",
         Contact: customer.mobile || "",
         Email: customer.email || "",
-        "Warranty Expiry": formatDate(customer.warranty_expiry_date),
-        "Agreement End Date": formatDate(customer.agreement_end_date),
+        "Warranty Expiry": dateOnly(customer.warranty_expiry_date),
+        "Agreement End Date": dateOnly(customer.agreement_end_date),
         "Campaign Status": getStatusLetter(customer.latest_status) || "-",
         "Latest Flag": Object.keys(customer.followup_flags || {})
           .filter((flag) => customer.followup_flags[flag])
           .join(", ") || "-",
-        "Last Follow-up": formatDate(customer.last_followup_date),
+        "Last Follow-up": dateOnly(customer.last_followup_date),
         "Last Follow-up User": customer.last_followup_user || "-",
-        "Next Follow-up": formatDate(customer.next_followup_date),
+        "Next Follow-up": dateOnly(customer.next_followup_date),
         "Last Remark": customer.last_followup_remark || "-",
       };
     });
 
-    const ws = XLSX.utils.json_to_sheet(exportData);
+    // cellDates keeps the Date objects as date cells, finishDateColumns then
+    // rewrites them as clean dd-mm-yyyy Excel dates and turns on the header-row
+    // AutoFilter.
+    const ws = XLSX.utils.json_to_sheet(exportData, { cellDates: true, dateNF: "dd-mm-yyyy" });
+    finishDateColumns(ws, 0);
 
     const colWidths = [];
     const headers = Object.keys(exportData[0] || {});
     headers.forEach((header) => {
       let maxLength = header.length;
       exportData.forEach((row) => {
-        const value = String(row[header] || "");
+        const cell = row[header];
+        const value = cell instanceof Date ? "dd-mm-yyyy" : String(cell || "");
         maxLength = Math.max(maxLength, value.length);
       });
       colWidths.push({ wch: Math.min(maxLength + 2, 50) });
@@ -6100,11 +6131,13 @@ ${f.start_para}`;
       ),
       sr: (() => {
         const oilServices = (customerServices && customerServices.length > 0) ? customerServices : [{}];
-        // ALL Open SR file rows for this instance, latest due date first
+        // STILL-OPEN SRs of this instance, latest due date first. The backend
+        // already dropped every SR whose (instance, SR number) is in the
+        // MaxTTR file — those are closed and belong in the box below.
         const openSrRows = [...(data.open_sr_load_reports || [])].sort(
           (a, b) => new Date(b.sr_due_date || 0) - new Date(a.sr_due_date || 0)
         );
-        // ALL Close SR file rows for this instance, latest open date first
+        // ALL closed SRs of this instance (MaxTTR file), latest open date first
         const closeSrRows = [...(data.open_sr_data || [])].sort(
           (a, b) => new Date(b.sr_open_date || 0) - new Date(a.sr_open_date || 0)
         );
@@ -6168,7 +6201,7 @@ ${f.start_para}`;
               </div>
             </div>
 
-            {/* Open SR Report — every Open SR file record of this instance, latest first */}
+            {/* Open SR Report — the STILL-OPEN SRs of this instance, latest first */}
             <div className="border border-gray-300 rounded-md overflow-hidden">
               <p className="text-[11px] font-bold text-black uppercase tracking-wide text-center px-2 py-1">Open SR Report</p>
               <div className="overflow-x-auto">
@@ -6177,7 +6210,6 @@ ${f.start_para}`;
                     <tr>
                       <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Number</th>
                       <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">SR Created Date</th>
-                      <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Close Date/Time</th>
                       <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Type</th>
                       <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Sub-Type</th>
                       <th className="px-2 py-1 border border-gray-300 bg-gray-100 text-center text-[11px] font-bold text-black whitespace-nowrap">Status</th>
@@ -6189,7 +6221,6 @@ ${f.start_para}`;
                       <tr key={idx}>
                         <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.service_request_no || '-'}</td>
                         <td className="px-2 py-1 border border-gray-200 text-[11px] text-black whitespace-nowrap text-center">{formatShortDate(sr.sr_created_date)}</td>
-                        <td className="px-2 py-1 border border-gray-200 text-[11px] text-black whitespace-nowrap text-center">{formatShortDate(sr.close_date_time)}</td>
                         <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.sr_type || '-'}</td>
                         <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.sr_sub_type || '-'}</td>
                         <td className="px-2 py-1 border border-gray-200 text-[11px] text-black text-center">{sr.status || '-'}</td>
@@ -6197,7 +6228,7 @@ ${f.start_para}`;
                       </tr>
                     )) : (
                       <tr>
-                        <td colSpan={7} className="px-2 py-1.5 border border-gray-200 text-[11px] text-gray-500 text-center">No Open SR records</td>
+                        <td colSpan={6} className="px-2 py-1.5 border border-gray-200 text-[11px] text-gray-500 text-center">No Open SR records</td>
                       </tr>
                     )}
                   </tbody>
@@ -6205,9 +6236,9 @@ ${f.start_para}`;
               </div>
             </div>
 
-            {/* Close SR Report — every Close SR file record of this instance, latest first */}
+            {/* Close SR Report — every CLOSED SR (MaxTTR file) of this instance, latest first */}
             <div className="border border-gray-300 rounded-md overflow-hidden">
-              <p className="text-[11px] font-bold text-black uppercase tracking-wide text-center px-2 py-1">MaxTTR - Oil Change SR Zero Labour Flag</p>
+              <p className="text-[11px] font-bold text-black uppercase tracking-wide text-center px-2 py-1">Close SR Report</p>
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse min-w-[520px]">
                   <thead>
@@ -6284,7 +6315,7 @@ ${f.start_para}`;
   // Main List View
   if (!showCustomerDetails) {
     return (
-      <div className="min-h-screen">
+      <div className="min-h-screen tbl-grid-dark">
         <div className="max-w-7xl mx-auto px-4 sm:px-3">
           {/* Row 1 : Title + Filters */}
           <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3 mb-1.5">
@@ -7834,7 +7865,7 @@ ${f.start_para}`;
 
   // Customer Details View
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen tbl-grid-dark">
       <div className="max-w-7xl mx-auto px-3 sm:px-3">
         <div className="sticky top-0 z-20 -mx-1 sm:-mx-2 px-2 sm:px-2 mb-1 sm:mb-2">
           <button
@@ -8359,25 +8390,29 @@ ${f.start_para}`;
                   );
                 })}
 
-                {/* "Other" button */}
-                <button
-                  type="button"
-                  onClick={() => handleOtherSelection()}
-                  className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${selectedCampaignsForFollowup.includes('other')
-                    ? "text-white"
-                    : "bg-gray-100 text-black hover:bg-gray-200"
-                    }`}
-                  style={
-                    selectedCampaignsForFollowup.includes('other')
-                      ? { backgroundColor: "#9CA3AF" }
-                      : {}
-                  }
-                >
-                  <span>Post Warranty</span>
-                  {selectedCampaignsForFollowup.includes('other') && (
-                    <CheckCircleIcon className="h-3 w-3" />
-                  )}
-                </button>
+                {/* "Other" button — hidden while the asset is still under
+                    warranty; an already selected chip stays visible so it can
+                    be un-picked. */}
+                {(!isUnderWarranty || selectedCampaignsForFollowup.includes('other')) && (
+                  <button
+                    type="button"
+                    onClick={() => handleOtherSelection()}
+                    className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${selectedCampaignsForFollowup.includes('other')
+                      ? "text-white"
+                      : "bg-gray-100 text-black hover:bg-gray-200"
+                      }`}
+                    style={
+                      selectedCampaignsForFollowup.includes('other')
+                        ? { backgroundColor: "#9CA3AF" }
+                        : {}
+                    }
+                  >
+                    <span>Post Warranty</span>
+                    {selectedCampaignsForFollowup.includes('other') && (
+                      <CheckCircleIcon className="h-3 w-3" />
+                    )}
+                  </button>
+                )}
               </div>
             </div>
             {selectedCampaignsForFollowup.length === 0 && (

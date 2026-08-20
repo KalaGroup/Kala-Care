@@ -36,15 +36,23 @@ const FILE_TYPES = [
     "Regular Bandhan Customers Report",
     "LMS Data for ERP",
     "Open SR Load Report",
-    "Open SR Data",
-    "Response Time & MaxTTR Details"
+    "MaxTTR - Oil Change SR Zero Labour Flag",
+    "Response Time & MaxTTR Details",
+    "CDI Detail Report",
+    "EFSR Report"
 ];
 
-// Frontend-only display names; the original value is still sent to the backend
-const FILE_TYPE_LABELS = {
-    "Open SR Data": "MaxTTR - Oil Change SR Zero Labour Flag"
-};
+// Display names differing from the backend file type (none right now — the
+// former "Open SR Data" was renamed on the backend itself).
+const FILE_TYPE_LABELS = {};
 const getFileTypeLabel = (type) => FILE_TYPE_LABELS[type] || type;
+
+// Order shown in the file-type dropdown: A -> Z on the label the user actually
+// reads (FILE_TYPES itself stays in backend order, so adding a type there needs
+// no thought about where it lands in the menu).
+const FILE_TYPES_SORTED = [...FILE_TYPES].sort((a, b) =>
+    getFileTypeLabel(a).localeCompare(getFileTypeLabel(b), undefined, { sensitivity: 'base' })
+);
 
 // Define expected columns for each file type to display in the UI
 const FILE_TYPE_COLUMNS = {
@@ -173,7 +181,8 @@ const FILE_TYPE_COLUMNS = {
         "Total Quote Amount", "Quotation Lead Assigned Name", "Quotation Lead Assigned UID",
         "Quotation Lead Assigned Job Title", "Enquiry Loss Reason", "Service Engineer Name",
         "Service Engineer UID", "Service Engineer Mobile Number", "Order Number",
-        "SIC Code", "SIC Code Type", "Labour Invoice Number", "Part Invoice Amount",
+        "SIC Code", "SIC Code Type", "Labour Invoice Number", "Labour Invoice Amount",
+        "Part Invoice Amount",
         "Lead Source", "Next Action Required", "New Contact", "Lead Contact Number",
         "Next Action Date", "Lead Assign To SD", "Part Invoice Number"
     ],
@@ -204,7 +213,7 @@ const FILE_TYPE_COLUMNS = {
         "Account Id", "SR Created BY", "eFSR KRM Number", "Dry CSP Approved by",
         "Dry CSP Approved Date"
     ],
-    "Open SR Data": [
+    "MaxTTR - Oil Change SR Zero Labour Flag": [
         "ZONE NAME", "ASM NAME", "SD ID", "SD NAME", "BRANCH ID", "BRANCH NAME",
         "INSTANCE ID", "APPLICATION CODE", "ENGINE SERIAL NO", "ENGINE MODEL",
         "SEGMENT", "PRODUCT SEGMENT", "ACCOUNT NAME", "SR NUMBER", "SR TYPE",
@@ -219,6 +228,17 @@ const FILE_TYPE_COLUMNS = {
         "SR CLOSE DATE", "ENGINEER REMARKS", "SE NAME", "SE TICKET NUM",
         "RESPONSE TIME RANGE IN HRS", "Response Time",
         "MaxTTR on Task Closed in hrs", "MaxTTR on SR Closed in hrs"
+    ],
+    // CDI Detail Report / EFSR Report list ONLY their fixed columns — every
+    // other header in those files is imported automatically as dynamic data.
+    "CDI Detail Report": [
+        "SR NUMBER", "BRANCH NAME", "X TECHNICIAN ID", "X TECHNICIAN NAME",
+        "CDI CATEGORY", "Overall Experience", "ACTIVITY END DATE"
+    ],
+    "EFSR Report": [
+        "SD Branch Code", "Service Request No.", "Appointment Number", "SR Type",
+        "Task Assigned Date & Time", "Task End Date", "SR Closed Date",
+        "SR Status", "Service Engineer Name", "Service Engineer UID"
     ]
 };
 
@@ -228,20 +248,42 @@ const FILE_TYPE_COLUMNS = {
 // ============================================================================
 const FILE_TYPE_REQUIRED_COLUMNS = {
     "AMC Population Report": ["INSTANCE ID", "AGREEMENT NUMBER"],
-    "Asset Detailed Report": ["ASSET NUMBER", "ENGINE SERIAL NO"],
+    // ASSET OPERATIONAL STATUS decides Service Penetration's population — an
+    // "Inactive" asset is retired and stays out of the installed base.
+    "Asset Detailed Report": ["ASSET NUMBER", "ENGINE SERIAL NO", "ASSET OPERATIONAL STATUS"],
     "Asset Details with Last Oil Service": ["ASSET NUMBER", "ENGINE SERIAL NO"],
     "Anubandhan Plus Quotes Report": ["Pulse Instance ID", "QuotationRefNo", "EngineNo"],
     "Anubandhan Quotes Report": ["Pulse Instance ID", "QuotationRefNo", "EngineNo"],
     "BandhanPlus Quotes Report": ["Pulse Instance ID", "QuotationRefNo", "EngineNo"],
     "Pulse Quotation - Service Only": ["Instance Id", "Quote ID"],
     "Regular Bandhan Customers Report": ["Pulse Instance ID", "Quotation Ref No"],
-    "LMS Data for ERP": ["Instance ID", "Lead Number"],
+    // Everything the Employee Productivity report reads out of LMS: without
+    // any of these the report loses a whole column without saying why.
+    "LMS Data for ERP": [
+        "Instance ID", "Lead Number", "Lead Created Date", "Lead Raised For",
+        "SD Branch Code", "SD Branch Name", "Service Engineer Name",
+        "Service Engineer UID", "Part Invoice Amount", "Labour Invoice Amount"
+    ],
     "Open SR Load Report": ["Service Request #", "Instance Id [Asset #]", "Engine Serial#"],
-    "Open SR Data": ["INSTANCE ID", "SR NUMBER", "SR TYPE", "SR SUBTYPE"],
+    "MaxTTR - Oil Change SR Zero Labour Flag": ["INSTANCE ID", "SR NUMBER", "SR TYPE", "SR SUBTYPE"],
+    // SR TYPE drives the report's SR Type split, BRANCH NAME the branch label,
+    // SEGMENT splits Service Penetration's serviced assets into IND / PG.
+    // SR TASK END DATE (added 2026-08-19) is the attendance date Employee
+    // Productivity counts 'Days present on Task end' on — without it that column
+    // and every Productivity figure read zero, so the upload is blocked.
     "Response Time & MaxTTR Details": [
-        "BRANCH ID", "INSTANCE ID", "SR NUMBER", "SR OPEN DATE",
-        "SR CLOSE DATE", "SE NAME", "SE TICKET NUM"
-    ]
+        "BRANCH ID", "BRANCH NAME", "INSTANCE ID", "SR NUMBER", "SR TYPE",
+        "SEGMENT", "SR OPEN DATE", "SR TASK END DATE", "SR CLOSE DATE",
+        "SE NAME", "SE TICKET NUM"
+    ],
+    // Only the record key is mandatory — the other fixed columns are warned
+    // about (important), never blocking.
+    "CDI Detail Report": ["SR NUMBER"],
+    // The record key is Appointment Number + Service Engineer UID + Task
+    // Assigned Date & Time, so all three are mandatory; the SR number stays
+    // required because every row is displayed and grouped by it.
+    "EFSR Report": ["Service Request No.", "Appointment Number",
+        "Service Engineer UID", "Task Assigned Date & Time"]
 };
 
 // ============================================================================
@@ -258,7 +300,8 @@ const FILE_TYPE_IMPORTANT_COLUMNS = {
     ],
     "Asset Detailed Report": [
         "ASSET NUMBER", "ENGINE SERIAL NO", "BRANCH ID", "WARRANTY EXPIRY DATE",
-        "GOEM OEM", "SEGMENT", "ENGINE MODEL", "KVA RATING", "ACCOUNT NAME",
+        "GOEM OEM", "SEGMENT", "ASSET OPERATIONAL STATUS", "ENGINE MODEL",
+        "KVA RATING", "ACCOUNT NAME",
         "CUSTOMER NAME", "CONTACT PHONE NUMBER", "CONTACT EMAIL ID",
         "INSTALLATION SITE ADDRESS", "COMMISSIONING DATE", "PRODUCT SEGMENT",
         "APPLICATION CODE", "EMISSION NORM", "KRM NUMBER", "KRM STATUS"
@@ -292,11 +335,13 @@ const FILE_TYPE_IMPORTANT_COLUMNS = {
         "Billing City", "DG City"
     ],
     "LMS Data for ERP": [
-        "Instance ID", "Lead Number", "SD Branch Code", "Account Name",
-        "Account Contact Number", "Account Contact Email ID",
+        "Instance ID", "Lead Number", "SD Branch Code", "SD Branch Name",
+        "Account Name", "Account Contact Number", "Account Contact Email ID",
         "Installation Site Address", "Lead Created Date", "Lead Status",
-        "Lead Raised By", "SR Type", "SR Sub Type", "KVA Rating",
-        "Service Engineer", "Tele Caller", "Quotation Number",
+        "Lead Raised By", "Lead Raised For", "SR Type", "SR Sub Type",
+        "KVA Rating", "Service Engineer Name",
+        "Service Engineer UID", "Part Invoice Amount", "Labour Invoice Amount",
+        "Tele Caller", "Quotation Number",
         "Quotation Submit Date", "Quotation Approval Date", "Order Number"
     ],
     "Open SR Load Report": [
@@ -304,16 +349,29 @@ const FILE_TYPE_IMPORTANT_COLUMNS = {
         "SR Due Date", "SR Type", "SR Sub-Type", "Status", "Account",
         "Customer Name", "Customer Mobile #", "Primary Phone#",
         "Installation Site Address", "Oil Change Flg", "Segment", "Engine Model",
+        // Engine App Code + Engine Series feed the Welcome Letter module —
+        // fixed columns, not dynamic ones.
+        "Engine App Code", "Engine Series",
         "SR Created Date", "Close Date/Time"
     ],
-    "Open SR Data": [
+    "MaxTTR - Oil Change SR Zero Labour Flag": [
         "INSTANCE ID", "BRANCH ID", "ENGINE SERIAL NO", "ACCOUNT NAME",
         "SR NUMBER", "SR TYPE", "SR SUBTYPE", "SR OPEN DATE", "SR CLOSE DATE",
         "OIL CHANGE FLAG", "ZERO LABOUR FLAG"
     ],
     "Response Time & MaxTTR Details": [
-        "BRANCH ID", "INSTANCE ID", "SR NUMBER", "SR OPEN DATE",
-        "SR CLOSE DATE", "SE NAME", "SE TICKET NUM"
+        "BRANCH ID", "BRANCH NAME", "INSTANCE ID", "SR NUMBER", "SR TYPE",
+        "SEGMENT", "SR OPEN DATE", "SR TASK END DATE", "SR CLOSE DATE",
+        "SE NAME", "SE TICKET NUM"
+    ],
+    "CDI Detail Report": [
+        "SR NUMBER", "BRANCH NAME", "X TECHNICIAN ID", "X TECHNICIAN NAME",
+        "CDI CATEGORY", "Overall Experience", "ACTIVITY END DATE"
+    ],
+    "EFSR Report": [
+        "SD Branch Code", "Service Request No.", "Appointment Number", "SR Type",
+        "Task Assigned Date & Time", "Task End Date", "SR Closed Date",
+        "SR Status", "Service Engineer Name", "Service Engineer UID"
     ]
 };
 
@@ -324,9 +382,11 @@ const IMPORTANT_COLUMN_ALIASES = {
         "Engine Serial#": ["Engine Serial No", "Engine Serial Number"],
         "Service Request #": ["Service Request No", "Service Request Number"],
         "Instance Id [Asset #]": ["Instance Id", "Instance ID", "Asset Number"],
-        "Oil Change Flg": ["Oil Change Flag"]
+        "Oil Change Flg": ["Oil Change Flag"],
+        "Engine App Code": ["Engine Application Code", "Engine Appcode", "App Code"],
+        "Engine Series": ["Series"]
     },
-    "Open SR Data": {
+    "MaxTTR - Oil Change SR Zero Labour Flag": {
         "INSTANCE ID": ["Instance Id [Asset #]", "Instance Id", "Asset Number"],
         "SR SUBTYPE": ["SR SUB TYPE", "SR SUB-TYPE"],
         "ZERO LABOUR FLAG": ["ZERO LABOR FLAG"],
@@ -336,7 +396,34 @@ const IMPORTANT_COLUMN_ALIASES = {
         "INSTANCE ID": ["Instance Id [Asset #]", "Instance Id", "Asset Number"],
         "SR NUMBER": ["SR NO", "SR #", "SERVICE REQUEST NUMBER"],
         "SR SUBTYPE": ["SR SUB TYPE", "SR SUB-TYPE"],
-        "SE TICKET NUM": ["SE TICKET NUMBER", "SE TICKET NO"]
+        "SE TICKET NUM": ["SE TICKET NUMBER", "SE TICKET NO"],
+        "SR TASK START DATE": ["TASK START DATE", "SR TASK START DATE & TIME",
+            "SR TASK START DATETIME"],
+        "SR TASK END DATE": ["TASK END DATE", "SR TASK END DATE & TIME",
+            "SR TASK END DATETIME", "SR TASK CLOSED DATE"]
+    },
+    "CDI Detail Report": {
+        "SR NUMBER": ["SR NO", "SR #", "SERVICE REQUEST NUMBER", "Service Request No."],
+        "BRANCH NAME": ["SD BRANCH NAME", "BRANCH"],
+        "X TECHNICIAN ID": ["TECHNICIAN ID", "X TECHNICIAN CODE"],
+        "X TECHNICIAN NAME": ["TECHNICIAN NAME"],
+        "Overall Experience": ["OVERALL EXPERIENCE RATING", "OVERALL EXP"],
+        "ACTIVITY END DATE": ["ACTIVITY END DATE & TIME", "ACTIVITY END DATETIME"]
+    },
+    "EFSR Report": {
+        "Service Request No.": ["Service Request No", "Service Request Number",
+            "Service Request #", "SR NUMBER", "SR No."],
+        "Appointment Number": ["Appointment No", "Appointment No.", "Appointment #",
+            "Appointment Id", "Appointment ID", "Appt Number", "Appt No",
+            "Task Number", "Task No"],
+        "Task Assigned Date & Time": ["Task Assigned Date", "Task Assign Date",
+            "Task Assigned Date and Time"],
+        "Task End Date": ["Task End Date & Time", "Task End Date and Time",
+            "Task Ended Date", "Task Completion Date"],
+        "SD Branch Code": ["SD Branch Id", "BRANCH ID", "Branch Code"],
+        "SR Closed Date": ["SR Close Date", "SR Closed Date & Time", "SR Closure Date"],
+        "Service Engineer Name": ["Service Engineer", "SE Name"],
+        "Service Engineer UID": ["Service Engineer Uid", "SE UID", "SE Ticket Num"]
     },
     "Regular Bandhan Customers Report": {
         "Genset Number": ["Genset No", "Engine No"],
@@ -353,7 +440,8 @@ const IMPORTANT_COLUMN_ALIASES = {
     },
     "LMS Data for ERP": {
         "SD Branch Code": ["BRANCH ID"],
-        "Service Engineer": ["Service Engineer Name"],
+        "SD Branch Name": ["BRANCH NAME"],
+        "Service Engineer Name": ["Service Engineer"],
         "Tele Caller": ["Tele-Caller Name", "Tele Caller Name"],
         "Quotation Approval Date": ["Quotation Approved Date"],
         "KVA Rating": ["kVA Rating"]
@@ -894,9 +982,11 @@ const Import = () => {
                                             className={`absolute right-2 sm:right-2.5 top-1/2 -translate-y-1/2 h-3 w-3 sm:h-3.5 sm:w-3.5 pointer-events-none transition-transform ${fileTypeMenuOpen ? 'rotate-180' : ''}`}
                                             style={{ color: selectedFileType ? 'var(--erp-accent)' : '#9CA3AF' }}
                                         />
+                                        {/* Capped height so the list stays compact — every file type
+                                            is still reachable by scrolling inside the menu. */}
                                         {fileTypeMenuOpen && (
-                                            <div className="absolute left-0 right-0 top-full z-30 bg-white border border-gray-200 rounded-lg shadow-lg">
-                                                {FILE_TYPES.map(type => (
+                                            <div className="absolute left-0 right-0 top-full z-30 bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto overscroll-contain">
+                                                {FILE_TYPES_SORTED.map(type => (
                                                     <button
                                                         key={type}
                                                         type="button"

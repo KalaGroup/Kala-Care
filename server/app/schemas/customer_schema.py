@@ -526,6 +526,7 @@ class LMSDataBase(BaseModel):
     sic_code: Optional[str] = None
     sic_code_type: Optional[str] = None
     labour_invoice_number: Optional[str] = None
+    labour_invoice_amount: Optional[float] = None
     part_invoice_amount: Optional[float] = None
     part_invoice_number: Optional[str] = None
     lead_source: Optional[str] = None
