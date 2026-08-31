@@ -45,7 +45,7 @@ const EmployeeProductivity = () => {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [showRangePicker, setShowRangePicker] = useState(false);
-  const [activePeriod, setActivePeriod] = useState('last_month');   // default period
+  const [activePeriod, setActivePeriod] = useState('current_month');   // default period
   const [pickStart, setPickStart] = useState(null);           // calendar Date objects
   const [pickEnd, setPickEnd] = useState(null);
   const fyNow = (() => { const d = new Date(); return d.getMonth() + 1 >= 4 ? d.getFullYear() : d.getFullYear() - 1; })();
@@ -91,14 +91,17 @@ const EmployeeProductivity = () => {
     return [f, t];
   };
 
-  // LAST MONTH is the default period — applied once, as soon as the data
+  // CURRENT MONTH is the default period — applied once, as soon as the data
   // arrives (the calendar is pre-selected with it too, so Apply works without
-  // picking twice). Anchored on the last data day, like the other presets.
+  // picking twice), and it computes the SAME range the preset of that name does:
+  // the 1st of the newest month that carries data, through the last data day.
+  // Anchored on the DATA and not the wall clock, like every other preset here —
+  // otherwise a page whose last upload was a while back would open on a month
+  // with nothing in it.
   useEffect(() => {
     if (!dataRange.max) return;
-    const d = new Date(dataRange.max + 'T00:00:00');
-    let f = isoOf(new Date(d.getFullYear(), d.getMonth() - 1, 1));
-    let t = isoOf(new Date(d.getFullYear(), d.getMonth(), 0));
+    let f = `${dataRange.max.slice(0, 8)}01`;
+    let t = dataRange.max;
     [f, t] = clampToData(f, t);
     setFromDate((cur) => cur || f);
     setToDate((cur) => cur || t);

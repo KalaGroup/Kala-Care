@@ -4,7 +4,7 @@ import { useState, useEffect, lazy, Suspense } from 'react';
 
 import Navbar from './components/Navbar';
 // PMS route guards — module access + the AOP & Master view/edit right.
-import { canAccessPms, canViewAop } from './utils/pagePermission';
+import { canViewAop, canAccessPmsPage, canAccessQuotationTracker } from './utils/pagePermission';
 // Follows the user across pages while a background upload is still running.
 import UploadGuard from './components/UploadGuard';
 // Login is eager: it is the first screen an unauthenticated user sees, so we
@@ -35,6 +35,8 @@ const MOMTracking = lazy(routeImporters['/mom-tracking']);
 const ApprovalApplication = lazy(routeImporters['/approval-application']);
 const SalseANDFinance = lazy(routeImporters['/sales-finance']);
 const KnowledgeBook = lazy(routeImporters['/knowledge-book']);
+// Open Quotation Tracker — branch-wise service quotation vs invoicing summary.
+const OpenQuotationTracker = lazy(routeImporters['/open-quotation-tracker']);
 //added by nik
 const MaintenanceSchedule = lazy(routeImporters['/maintenance-schedule']);
 const MaintenanceReports = lazy(routeImporters['/maintenance-reports']);
@@ -43,6 +45,10 @@ const AOPMaster = lazy(routeImporters['/aop-master']);
 const SalesLabourReport = lazy(routeImporters['/sales-labour-report']);
 const EmployeeProductivity = lazy(routeImporters['/employee-productivity']);
 const SRAllocation = lazy(routeImporters['/sr-allocation']);
+// SE Performance — the Annexure I commitment & accountability matrix.
+const SEPerformance = lazy(routeImporters['/se-performance']);
+// Training Report — the service engineers' skill / training master.
+const TrainingReport = lazy(routeImporters['/training-report']);
 // Annual Reports — the yearly sheets (Service Penetration, AMC & Bandhan
 // Projection, ...), one page with a report picker.
 const AnnualReports = lazy(routeImporters['/annual-reports']);
@@ -59,6 +65,7 @@ const ROUTE_PREFETCHERS = [
   routeImporters['/customers'],
   routeImporters['/campaigns'],
   routeImporters['/knowledge-book'],
+  routeImporters['/open-quotation-tracker'],
   routeImporters['/expense'],
   routeImporters['/expense-dashboard'],
   routeImporters['/maintenance-schedule'],
@@ -70,6 +77,8 @@ const ROUTE_PREFETCHERS = [
   routeImporters['/sales-labour-report'],
   routeImporters['/employee-productivity'],
   routeImporters['/sr-allocation'],
+  routeImporters['/se-performance'],
+  routeImporters['/training-report'],
   routeImporters['/annual-reports'],
   routeImporters['/welcome-letter'],
   routeImporters['/import'],
@@ -322,6 +331,17 @@ function Layout() {
         </ProtectedRoute>
       } />
 
+      {/* Open Quotation Tracker - Master Admin, plus any user granted the page
+          from Profile (can_access_quotation_tracker) */}
+      <Route path="/open-quotation-tracker" element={
+        <ProtectedRoute
+          allowedRoles={['master_admin', 'branch_admin', 'employee']}
+          customCheck={canAccessQuotationTracker}
+        >
+          <OpenQuotationTracker />
+        </ProtectedRoute>
+      } />
+
       {/* MODIFIED: Expense Page - With branch check for employees */}
       <Route path="/expense" element={
         <ProtectedRoute
@@ -364,7 +384,8 @@ function Layout() {
       } />
 
       {/* PMS Pages — Master Admin, plus any user granted "PMS Access" from
-          Profile. AOP & Master additionally needs its own right (view/edit). */}
+          Profile, narrowed by the per-page list set there (PMS Pages).
+          AOP & Master is outside that list: it has its own right (view/edit). */}
       <Route path="/aop-master" element={
         <ProtectedRoute customCheck={canViewAop}>
           <AOPMaster />
@@ -372,25 +393,37 @@ function Layout() {
       } />
 
       <Route path="/sales-labour-report" element={
-        <ProtectedRoute customCheck={canAccessPms}>
+        <ProtectedRoute customCheck={(u) => canAccessPmsPage('sales_labour', u)}>
           <SalesLabourReport />
         </ProtectedRoute>
       } />
 
       <Route path="/employee-productivity" element={
-        <ProtectedRoute customCheck={canAccessPms}>
+        <ProtectedRoute customCheck={(u) => canAccessPmsPage('employee_productivity', u)}>
           <EmployeeProductivity />
         </ProtectedRoute>
       } />
 
+      <Route path="/se-performance" element={
+        <ProtectedRoute customCheck={(u) => canAccessPmsPage('se_performance', u)}>
+          <SEPerformance />
+        </ProtectedRoute>
+      } />
+
       <Route path="/sr-allocation" element={
-        <ProtectedRoute customCheck={canAccessPms}>
+        <ProtectedRoute customCheck={(u) => canAccessPmsPage('sr_allocation', u)}>
           <SRAllocation />
         </ProtectedRoute>
       } />
 
+      <Route path="/training-report" element={
+        <ProtectedRoute customCheck={(u) => canAccessPmsPage('training', u)}>
+          <TrainingReport />
+        </ProtectedRoute>
+      } />
+
       <Route path="/annual-reports" element={
-        <ProtectedRoute customCheck={canAccessPms}>
+        <ProtectedRoute customCheck={(u) => canAccessPmsPage('annual', u)}>
           <AnnualReports />
         </ProtectedRoute>
       } />

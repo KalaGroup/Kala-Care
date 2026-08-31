@@ -15,7 +15,29 @@ export const XL = {
   HEAD: 'E8F3FC',             // header cells
   ROW_A: 'FBFDFF', ROW_B: 'F1F8FE',
   REGION: '5E8FC2',           // MH / KA totals (white text)
+  // The branch-group ladder (Service Load and Response), mirroring the screen's
+  // --pms-sel / --pms-grp-b / --pms-type so a printed sheet reads like the page.
+  SUBTOT: 'BFDCF7',           // a group's Sub Total — heads its own rows
+  BAND: 'E1EFFB',             // the branches inside that group, one flat tone
+  TYPE: 'E4F0FB',             // the 'not mapped to a head' balancing row
   LINE: '9FC0DF',             // every border
+
+  /* ---- the SCORED grids (percentages judged against an AOP) --------------
+     On those rows the cell carries the verdict, so the ROW has to stay light:
+     a white-on-blue Total would print its tone underneath white text and hide
+     it. These four are the screen's --pms-grptot / --pms-subtot / --pms-grp-b /
+     --pms-band-a, so a printed page reads like the page it came from. */
+  SC_TOT: 'CBE1F5',           // a scored Total / Grand Total / Overall row
+  SC_REGION: 'DCEBF9',        // a scored MH / KA row
+  SC_GROUP: 'E1EFFB',         // a scored Sub Total, heading its branches
+  SC_BAND: 'FFFFFF',          // those branches themselves
+
+  /* How a scored cell did against its own AOP — the same three tints the
+     screen uses, deliberately outside the blue family so the blue says which
+     BLOCK a row is in and the tint says how it DID. */
+  OK: 'CDECCD', OK_INK: '12401F',        // met the AOP
+  NEAR: 'FBF0BD', NEAR_INK: '4A3C05',    // within 5 points of it
+  MISS: 'FBD9B5', MISS_INK: '6B3405',    // more than 5 points short
 };
 
 export const loadExcelJS = async () => {
@@ -32,10 +54,13 @@ export const F_CNT = '#,##0;-#,##0;"-"';
 /* A sheet with the ERP band already written.
    cols   [{ width }] — one per column, in order
    title  the text of the blue band (row 1)
+   book   an EXISTING workbook to add this sheet to; omit for a fresh one. A
+          report that prints as several sheets (Service Load and Response) hands
+          the same book back in, so one file carries all of them.
    Returns { wb, ws, put, r } where `put(row, col, value, opts)` writes one
    bordered cell and `r` is the first free row. */
-export const newSheet = (ExcelJS, name, title, cols) => {
-  const wb = new ExcelJS.Workbook();
+export const newSheet = (ExcelJS, name, title, cols, book = null) => {
+  const wb = book || new ExcelJS.Workbook();
   wb.creator = 'KALA Care Global LLP';
   const ws = wb.addWorksheet(name, {
     pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },

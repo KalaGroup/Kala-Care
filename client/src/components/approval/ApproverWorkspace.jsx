@@ -7,7 +7,7 @@ import { Search, Inbox, ListChecks, FileText } from 'lucide-react';
 import { getApplications, errText } from './approvalApi';
 import {
     ApplicationsTable, ApplicationDetailModal, CreateApplicationModal,
-    SummaryCards, TypeTabs, STATUS_META, statusLabel, BRAND,
+    SummaryCards, TypeTabs, STATUS_META, statusLabel, BRAND, canCreatorDelete,
 } from './ApprovalShared';
 import ApprovalReports from './ApprovalReports';
 
@@ -137,7 +137,9 @@ export default function ApproverWorkspace({ pendingStatus, pendingLabel, headerA
                 <ApplicationDetailModal
                     app={selected}
                     canAct={selected.can_act === true}
-                    canDelete={false}
+                    /* an L2..L4 approver filing their OWN NFA gets the same
+                       edit / delete rights as any other creator */
+                    canDelete={canCreatorDelete(selected, user.user_id)}
                     onClose={() => setSelected(null)}
                     onChanged={load}
                     onEditResubmit={(a) => { setSelected(null); setEditDraft(a); }}

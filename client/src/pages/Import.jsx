@@ -35,11 +35,14 @@ const FILE_TYPES = [
     "Pulse Quotation - Service Only",
     "Regular Bandhan Customers Report",
     "LMS Data for ERP",
+    "LMS Data from Insia",
     "Open SR Load Report",
     "MaxTTR - Oil Change SR Zero Labour Flag",
     "Response Time & MaxTTR Details",
     "CDI Detail Report",
-    "EFSR Report"
+    "EFSR Report",
+    "AMC Agreement Expiry Planner",
+    "All Invoice Detailed Report"
 ];
 
 // Display names differing from the backend file type (none right now — the
@@ -165,6 +168,41 @@ const FILE_TYPE_COLUMNS = {
         "IsExpired", "Payment Updated Month", "Pulse Instance ID", "New Price Applicable",
         "Quotation Type", "First PM Date", "Agreement start date"
     ],
+    // Full header list of the real export. Only the six in
+    // FILE_TYPE_IMPORTANT_COLUMNS are stored in their own DB fields; the other
+    // fifteen ride along as dynamic columns.
+    "AMC Agreement Expiry Planner": [
+        "ZONE NAME", "SD ID", "SD NAME", "BRANCH ID", "BRANCH NAME",
+        "AGREEMENT NUMBER", "AGREEMENT NAME", "AGREEMENT TYPE", "AGREEMENT STATUS",
+        "AGREEMENT START DATE", "AGREEMENT END DATE", "NUMBER OF AGREEMENT YEARS",
+        "SEGMENT", "INSTANCE ID", "APPLICATION CODE", "ENGINE SERIAL NO",
+        "ENGINE MODEL", "ACCOUNT NAME", "CUSTOMER NAME", "CUSTOMER PHONE NUMBER",
+        "INSTALLATION SITE ADDRESS"
+    ],
+    // Second LMS layout: the same lead export WITHOUT an Instance ID. Only the
+    // seven columns in FILE_TYPE_IMPORTANT_COLUMNS are stored in their own DB
+    // fields; the other nineteen ride along as dynamic columns.
+    "LMS Data from Insia": [
+        "LEAD NUMBER", "LEAD CREATED DATE", "MODE OF LEAD CREATION",
+        "LEAD RAISED BY", "LEAD RAISED FOR", "SD NAME", "SD ID", "BRANCH NAME",
+        "BRANCH ID", "PRODUCT LIST", "PRODUCT TYPE", "LEAD ASSIGNED TO",
+        "LEAD STATUS", "ACCOUNT ID", "ACCOUNT NAME", "ZONE", "LEAD SR NUMBER",
+        "ENGINE MODEL", "KVA RATING", "SERVICE ENGINEER NAME",
+        "TELE CALLER NAME", "QUOTATION NUMBER", "QUOTATION SUBMIT DATE",
+        "QUOTATION APPROVAL DATE", "ORDER NUMBER", "ORDER CREATION DATE"
+    ],
+    // Full header list of the real export (29 columns). Only the ten in
+    // FILE_TYPE_IMPORTANT_COLUMNS are stored in their own DB fields; the other
+    // nineteen ride along as dynamic columns.
+    "All Invoice Detailed Report": [
+        "ZONE NAME", "SD ID", "SD NAME", "BRANCH ID", "BRANCH NAME", "SEGMENT",
+        "INSTANCE ID", "APPLICATION CODE", "ENGINE SERIAL NUMBER", "ACCOUNT NAME",
+        "SR NUMBER", "SR TYPE", "SR SUBTYPE", "SR CLOSE DATE", "INVOICE SEGMENT",
+        "INVOICE TYPE", "INVOICE NUMBER", "INVOICE DATE", "INVOICE STATUS",
+        "INVOICE CANCEL REASON", "INVOICE CANCEL DATE", "INVOICE AMOUNT",
+        "TOTAL NET TAXABLE AMOUNT", "TOTAL DISCOUNT AMOUNT", "CGST AMOUNT",
+        "SGST AMOUNT", "IGST AMOUNT", "UGST AMOUNT", "TOTAL FRIEGHT AMOUNT"
+    ],
     "LMS Data for ERP": [
         "Lead Number", "Lead Created Date", "Lead Raised By", "Lead Status",
         "Lead Raised For", "Lead Assigned To", "SD Code", "SD Name",
@@ -232,13 +270,18 @@ const FILE_TYPE_COLUMNS = {
     // CDI Detail Report / EFSR Report list ONLY their fixed columns — every
     // other header in those files is imported automatically as dynamic data.
     "CDI Detail Report": [
-        "SR NUMBER", "BRANCH NAME", "X TECHNICIAN ID", "X TECHNICIAN NAME",
-        "CDI CATEGORY", "Overall Experience", "ACTIVITY END DATE"
+        "ASSET NUMBER", "SR NUMBER", "BRANCH NAME", "X TECHNICIAN ID",
+        "X TECHNICIAN NAME", "CDI CATEGORY", "Overall Experience",
+        "ACTIVITY END DATE", "X ACCOUNT NAME", "FEEDBACK TKN CUST NAME",
+        "FEEDBACK TKN CUST NUM"
     ],
     "EFSR Report": [
-        "SD Branch Code", "Service Request No.", "Appointment Number", "SR Type",
+        "Instance ID", "SD Branch Code", "Service Request No.",
+        "Appointment Number", "SR Type",
         "Task Assigned Date & Time", "Task End Date", "SR Closed Date",
-        "SR Status", "Service Engineer Name", "Service Engineer UID"
+        "SR Status", "Service Engineer Name", "Service Engineer UID",
+        "Account", "Installation Site Address", "Customer Name",
+        "Customer contact number"
     ]
 };
 
@@ -247,7 +290,14 @@ const FILE_TYPE_COLUMNS = {
 // without them. Mirrors the backend's critical-column validation exactly.
 // ============================================================================
 const FILE_TYPE_REQUIRED_COLUMNS = {
-    "AMC Population Report": ["INSTANCE ID", "AGREEMENT NUMBER"],
+    // AGREEMENT TYPE decides what the AMC & Bandhan Projection report counts (a
+    // D/BAMC type or not), AGREEMENT START DATE puts it in a month, and the
+    // import itself FILTERS on AGREEMENT STATUS to keep one Active row per
+    // genset. Without any of the three the file must not be accepted: the import
+    // would fail on the status column, and a file missing type or start date
+    // would load and leave that report silently empty.
+    "AMC Population Report": ["INSTANCE ID", "AGREEMENT NUMBER", "AGREEMENT TYPE",
+                              "AGREEMENT STATUS", "AGREEMENT START DATE"],
     // ASSET OPERATIONAL STATUS decides Service Penetration's population — an
     // "Inactive" asset is retired and stays out of the installed base.
     "Asset Detailed Report": ["ASSET NUMBER", "ENGINE SERIAL NO", "ASSET OPERATIONAL STATUS"],
@@ -271,10 +321,16 @@ const FILE_TYPE_REQUIRED_COLUMNS = {
     // SR TASK END DATE (added 2026-08-19) is the attendance date Employee
     // Productivity counts 'Days present on Task end' on — without it that column
     // and every Productivity figure read zero, so the upload is blocked.
+    // RESPONSE TIME RANGE IN HRS + MaxTTR on SR Closed in hrs (added
+    // 2026-08-21) are the two columns the Service Load and Response sheet reads
+    // its 4 Hrs / 24 Hrs / 48 Hrs percentages from, verbatim. A file without
+    // them makes those three tabs read 0% for every branch, which looks exactly
+    // like nobody meeting the SLA — so the upload is blocked instead.
     "Response Time & MaxTTR Details": [
         "BRANCH ID", "BRANCH NAME", "INSTANCE ID", "SR NUMBER", "SR TYPE",
         "SEGMENT", "SR OPEN DATE", "SR TASK END DATE", "SR CLOSE DATE",
-        "SE NAME", "SE TICKET NUM"
+        "SE NAME", "SE TICKET NUM",
+        "RESPONSE TIME RANGE IN HRS", "Response Time", "MaxTTR on SR Closed in hrs"
     ],
     // Only the record key is mandatory — the other fixed columns are warned
     // about (important), never blocking.
@@ -283,7 +339,28 @@ const FILE_TYPE_REQUIRED_COLUMNS = {
     // Assigned Date & Time, so all three are mandatory; the SR number stays
     // required because every row is displayed and grouped by it.
     "EFSR Report": ["Service Request No.", "Appointment Number",
-        "Service Engineer UID", "Task Assigned Date & Time"]
+        "Service Engineer UID", "Task Assigned Date & Time"],
+    // Both halves of the record key, plus the date the planner exists for.
+    // INSTANCE ID alone loses 19.8% of the real export (a genset renews) and
+    // AGREEMENT NUMBER alone loses 1.4% (one agreement covers a fleet).
+    "AMC Agreement Expiry Planner": ["INSTANCE ID", "AGREEMENT NUMBER",
+        "AGREEMENT END DATE"],
+    // Only the record key is mandatory — the other six fixed columns are
+    // warned about (important), never blocking.
+    "LMS Data from Insia": ["LEAD NUMBER"],
+    // INVOICE NUMBER is the record key; the other six are every column the
+    // Open Quotation Tracker reads. Without INVOICE DATE no row lands in a
+    // period, without STATUS the cancelled lines count as real business, without
+    // SEGMENT the OTC lines flood the service figures, without TYPE nothing
+    // splits into labour and parts, without AMOUNT every value reads zero, and
+    // without BRANCH ID / BRANCH NAME no row can be placed on a branch — each
+    // of which looks like a real number rather than a missing column.
+    // INSTANCE ID and ACCOUNT NAME are deliberately NOT required: the file's OTC
+    // and Agreement lines legitimately have no genset.
+    "All Invoice Detailed Report": [
+        "INVOICE NUMBER", "INVOICE DATE", "INVOICE STATUS", "INVOICE SEGMENT",
+        "INVOICE TYPE", "INVOICE AMOUNT", "BRANCH ID", "BRANCH NAME"
+    ]
 };
 
 // ============================================================================
@@ -293,6 +370,25 @@ const FILE_TYPE_REQUIRED_COLUMNS = {
 // is missing the upload still proceeds but the user is warned. Every other
 // column is dynamic: imported automatically as extra data.
 // ============================================================================
+// Columns a REPORT counts rows on directly, rather than merely storing, mapped
+// to what that column IS in the report. They are NOT styled apart in the
+// important-columns list — every chip there is drawn the same — they are named
+// in the note under it instead, one sentence per report.
+const REPORT_COUNTED_COLUMNS = {
+    // The entire month column of Annual Reports -> AMC & Bandhan Projection,
+    // across all four Bandhan files.
+    "PaymentUpdateDateTime": "the month column of Annual Reports \u2192 AMC & Bandhan Projection",
+    "Payment Update Date Time": "the month column of Annual Reports \u2192 AMC & Bandhan Projection",
+    // Open Quotation Tracker: a quotation is counted on each amount that is above
+    // zero and the same column is summed for its value, so these two columns ARE
+    // the quote half of that report.
+    "Labor Amount": "the Labour Quote columns of the Open Quotation Tracker",
+    "Parts Amount": "the Part Quote columns of the Open Quotation Tracker",
+    // ... and these are its invoice half.
+    "INVOICE TYPE": "the labour / part split of the Open Quotation Tracker",
+    "INVOICE AMOUNT": "the Invoice Amount columns of the Open Quotation Tracker",
+};
+
 const FILE_TYPE_IMPORTANT_COLUMNS = {
     "AMC Population Report": [
         "INSTANCE ID", "AGREEMENT STATUS", "AGREEMENT NUMBER", "AGREEMENT NAME",
@@ -310,29 +406,61 @@ const FILE_TYPE_IMPORTANT_COLUMNS = {
         "ASSET NUMBER", "ENGINE SERIAL NO", "BRANCH ID", "LAST OIL CHANGE DATE",
         "LAST OIL CHANGE SR TYPE", "LAST SR CLOSE DATE", "LAST CLOSED SR NUMBER",
         "LAST SR TYPE", "LAST SR SUBTYPE", "LAST SERVICE HRS",
-        "ACCOUNT NAME", "CONTACT PHONE NUMBER"
+        // ACCOUNT NAME / CONTACT PHONE NUMBER / INSTALLATION SITE ADDRESS are
+        // what this file contributes to the customer master.
+        "ACCOUNT NAME", "CONTACT PHONE NUMBER", "INSTALLATION SITE ADDRESS"
     ],
+    // PaymentUpdateDateTime is the month column of Annual Reports ->
+    // AMC & Bandhan Projection: that column counts the rows of these four files
+    // whose payment timestamp falls in the month being read. A file that arrives
+    // without it imports fine and leaves the sheet's month empty, which is
+    // exactly the kind of silence worth a warning.
     "Anubandhan Plus Quotes Report": [
         "Pulse Instance ID", "EngineNo", "QuotationRefNo", "CompanyName",
-        "MobileNo", "EmailId", "City", "CreatedDateTime"
+        "MobileNo", "EmailId", "State", "City", "Location",
+        "CreatedDateTime", "Status", "PaymentUpdateDateTime"
     ],
+    // PaymentUpdateDateTime is the month column of Annual Reports ->
+    // AMC & Bandhan Projection: that column counts the rows of these four files
+    // whose payment timestamp falls in the month being read. A file that arrives
+    // without it imports fine and leaves the sheet's month empty, which is
+    // exactly the kind of silence worth a warning.
     "Anubandhan Quotes Report": [
         "Pulse Instance ID", "EngineNo", "QuotationRefNo", "CompanyName",
-        "MobileNo", "EmailId", "City", "CreatedDateTime"
+        "MobileNo", "EmailId", "State", "City", "Location",
+        "CreatedDateTime", "Status", "PaymentUpdateDateTime"
     ],
+    // PaymentUpdateDateTime is the month column of Annual Reports ->
+    // AMC & Bandhan Projection: that column counts the rows of these four files
+    // whose payment timestamp falls in the month being read. A file that arrives
+    // without it imports fine and leaves the sheet's month empty, which is
+    // exactly the kind of silence worth a warning.
     "BandhanPlus Quotes Report": [
         "Pulse Instance ID", "EngineNo", "QuotationRefNo", "CompanyName",
-        "MobileNo", "EmailId", "City", "CreatedDateTime"
+        "MobileNo", "EmailId", "State", "City", "Location",
+        "CreatedDateTime", "Status", "PaymentUpdateDateTime"
     ],
+    // Service Dealer / Labor Amount / Parts Amount are the quote half of the
+    // Open Quotation Tracker: the dealer string carries the branch (this
+    // file has no branch id column at all), and a row counts as a labour
+    // quotation when Labor Amount is above zero and as a part quotation when
+    // Parts Amount is. Creation Date is what puts it in the period.
     "Pulse Quotation - Service Only": [
         "Instance Id", "Quote ID", "Account", "Account/Contact Phone Number",
         "Account/Contact Primary Email", "Installation Site Address",
-        "Creation Date", "Total Amount"
+        "Creation Date", "Service Dealer", "Labor Amount", "Parts Amount",
+        "Total Amount"
     ],
+    // This file spells the payment stamp with spaces; see the note above.
+    // City is listed under the name the file and the importer both use, not as
+    // the "Billing City" / "DG City" pair it used to be: import_regular_bandhan
+    // reads a single row.get('City') into one `city` column, so the pair drew
+    // two chips for one field and neither of them matched a real header. The
+    // older spellings stay accepted as aliases.
     "Regular Bandhan Customers Report": [
         "Pulse Instance ID", "Genset Number", "Quotation Ref No.", "Name",
         "Mobile", "Email", "Billing Location", "DG Location",
-        "Billing City", "DG City"
+        "State", "City", "Status", "Payment Update Date Time"
     ],
     "LMS Data for ERP": [
         "Instance ID", "Lead Number", "SD Branch Code", "SD Branch Name",
@@ -341,7 +469,7 @@ const FILE_TYPE_IMPORTANT_COLUMNS = {
         "Lead Raised By", "Lead Raised For", "SR Type", "SR Sub Type",
         "KVA Rating", "Service Engineer Name",
         "Service Engineer UID", "Part Invoice Amount", "Labour Invoice Amount",
-        "Tele Caller", "Quotation Number",
+        "Tele Caller", "Quotation Type", "Quotation Number",
         "Quotation Submit Date", "Quotation Approval Date", "Order Number"
     ],
     "Open SR Load Report": [
@@ -362,16 +490,50 @@ const FILE_TYPE_IMPORTANT_COLUMNS = {
     "Response Time & MaxTTR Details": [
         "BRANCH ID", "BRANCH NAME", "INSTANCE ID", "SR NUMBER", "SR TYPE",
         "SEGMENT", "SR OPEN DATE", "SR TASK END DATE", "SR CLOSE DATE",
-        "SE NAME", "SE TICKET NUM"
+        "SE NAME", "SE TICKET NUM",
+        // ACCOUNT NAME is the customer name this file contributes.
+        "ACCOUNT NAME",
+        "RESPONSE TIME RANGE IN HRS", "Response Time", "MaxTTR on SR Closed in hrs"
     ],
     "CDI Detail Report": [
-        "SR NUMBER", "BRANCH NAME", "X TECHNICIAN ID", "X TECHNICIAN NAME",
-        "CDI CATEGORY", "Overall Experience", "ACTIVITY END DATE"
+        // ASSET NUMBER is the genset key — the relation to the customers table
+        "ASSET NUMBER", "SR NUMBER", "BRANCH NAME", "X TECHNICIAN ID",
+        "X TECHNICIAN NAME", "CDI CATEGORY", "Overall Experience",
+        "ACTIVITY END DATE", "X ACCOUNT NAME", "FEEDBACK TKN CUST NAME",
+        "FEEDBACK TKN CUST NUM"
     ],
     "EFSR Report": [
-        "SD Branch Code", "Service Request No.", "Appointment Number", "SR Type",
+        // Instance ID is the relation to the customers table
+        "Instance ID", "SD Branch Code", "Service Request No.",
+        "Appointment Number", "SR Type",
         "Task Assigned Date & Time", "Task End Date", "SR Closed Date",
-        "SR Status", "Service Engineer Name", "Service Engineer UID"
+        "SR Status", "Service Engineer Name", "Service Engineer UID",
+        "Account", "Installation Site Address", "Customer Name",
+        "Customer contact number"
+    ],
+    // The seven fixed columns of the second LMS layout. LEAD NUMBER is the
+    // record key and LEAD SR NUMBER is the relation to the customers table:
+    // this file has no Instance ID, so the SR the lead was raised on is what
+    // resolves a lead to a genset. Everything else in the file is dynamic.
+    "LMS Data from Insia": [
+        "LEAD NUMBER", "LEAD CREATED DATE", "BRANCH ID", "ACCOUNT NAME",
+        "LEAD SR NUMBER", "SERVICE ENGINEER NAME", "ORDER CREATION DATE"
+    ],
+    // The four fields the app reads plus AGREEMENT END DATE (what the planner
+    // is for) and AGREEMENT NUMBER (the second half of the record key).
+    // Everything else in the file is dynamic.
+    "AMC Agreement Expiry Planner": [
+        "INSTANCE ID", "AGREEMENT NUMBER", "BRANCH ID", "ACCOUNT NAME",
+        "INSTALLATION SITE ADDRESS", "AGREEMENT END DATE"
+    ],
+    // INVOICE NUMBER is the record key and INSTANCE ID is the relation to the
+    // customers table — carried only by this file's Service lines, since the OTC
+    // and Agreement lines have no genset. The rest are what the Open Quotation
+    // Tracker reads. Everything else in the file is dynamic.
+    "All Invoice Detailed Report": [
+        "INVOICE NUMBER", "INSTANCE ID", "BRANCH ID", "BRANCH NAME",
+        "ACCOUNT NAME", "INVOICE DATE", "INVOICE STATUS", "INVOICE SEGMENT",
+        "INVOICE TYPE", "INVOICE AMOUNT"
     ]
 };
 
@@ -400,9 +562,18 @@ const IMPORTANT_COLUMN_ALIASES = {
         "SR TASK START DATE": ["TASK START DATE", "SR TASK START DATE & TIME",
             "SR TASK START DATETIME"],
         "SR TASK END DATE": ["TASK END DATE", "SR TASK END DATE & TIME",
-            "SR TASK END DATETIME", "SR TASK CLOSED DATE"]
+            "SR TASK END DATETIME", "SR TASK CLOSED DATE"],
+        "RESPONSE TIME RANGE IN HRS": ["RESPONSE TIME RANGE IN HOURS"],
+        "MaxTTR on Task Closed in hrs": ["MAXTTR ON TASK CLOSED IN HOURS"],
+        "MaxTTR on SR Closed in hrs": ["MAXTTR ON SR CLOSED IN HOURS"]
     },
     "CDI Detail Report": {
+        "ASSET NUMBER": ["INSTANCE ID", "Instance Id [Asset #]", "Instance Id"],
+        "X ACCOUNT NAME": ["ACCOUNT NAME", "ACCOUNT"],
+        "FEEDBACK TKN CUST NAME": ["FEEDBACK TAKEN CUSTOMER NAME",
+            "FEEDBACK TKN CUSTOMER NAME"],
+        "FEEDBACK TKN CUST NUM": ["FEEDBACK TAKEN CUSTOMER NUMBER",
+            "FEEDBACK TKN CUST NUMBER"],
         "SR NUMBER": ["SR NO", "SR #", "SERVICE REQUEST NUMBER", "Service Request No."],
         "BRANCH NAME": ["SD BRANCH NAME", "BRANCH"],
         "X TECHNICIAN ID": ["TECHNICIAN ID", "X TECHNICIAN CODE"],
@@ -411,6 +582,14 @@ const IMPORTANT_COLUMN_ALIASES = {
         "ACTIVITY END DATE": ["ACTIVITY END DATE & TIME", "ACTIVITY END DATETIME"]
     },
     "EFSR Report": {
+        "Instance ID": ["INSTANCE ID", "Instance Id [Asset #]", "Instance Id",
+            "Asset Number"],
+        "Account": ["Account Name", "ACCOUNT NAME"],
+        "Installation Site Address": ["INSTALLATION SITE ADDRESS",
+            "Installation Address", "Site Address"],
+        "Customer Name": ["CUSTOMER NAME"],
+        "Customer contact number": ["Customer Contact Number",
+            "CUSTOMER CONTACT NUMBER", "Customer contact no"],
         "Service Request No.": ["Service Request No", "Service Request Number",
             "Service Request #", "SR NUMBER", "SR No."],
         "Appointment Number": ["Appointment No", "Appointment No.", "Appointment #",
@@ -430,13 +609,46 @@ const IMPORTANT_COLUMN_ALIASES = {
         "Name": ["Company Name"],
         "Mobile": ["Mobile No", "Mobile Number"],
         "Email": ["Email Id", "Email ID"],
-        // Location source is Billing/DG Location; Billing/DG City is the
-        // fallback — any one of the group counts as present.
+        // Location source is Billing/DG Location — any one of the group counts
+        // as present.
         "Billing Location": ["Location", "DG Location"],
         "DG Location": ["Location", "Billing Location"],
-        "Billing City": ["City", "DG City"],
-        "DG City": ["City", "Billing City"],
+        // Older exports of this file named the city column Billing/DG City.
+        "City": ["Billing City", "DG City"],
         "Quotation Ref No.": ["Quotation Ref No", "QuotationRefNo"]
+    },
+    "AMC Agreement Expiry Planner": {
+        "INSTANCE ID": ["Instance Id [Asset #]", "Instance Id", "Asset Number"],
+        "AGREEMENT NUMBER": ["AGREEMENT NO", "AGREEMENT #"],
+        "AGREEMENT END DATE": ["AGREEMENT EXPIRY DATE", "EXPIRY DATE",
+            "AGREEMENT END DT"],
+        "ACCOUNT NAME": ["ACCOUNT"],
+        "BRANCH ID": ["SD BRANCH CODE", "BRANCH CODE"],
+        "INSTALLATION SITE ADDRESS": ["INSTALLATION ADDRESS", "SITE ADDRESS"]
+    },
+    "LMS Data from Insia": {
+        // The ERP layout of the same report spells these differently.
+        "LEAD NUMBER": ["Lead Number", "LEAD NO", "LEAD #"],
+        "LEAD CREATED DATE": ["Lead Created Date", "LEAD CREATION DATE",
+            "LEAD CREATED DATE & TIME"],
+        "BRANCH ID": ["SD Branch Code", "SD BRANCH CODE", "BRANCH CODE"],
+        "ACCOUNT NAME": ["Account Name", "ACCOUNT", "CUSTOMER NAME"],
+        "LEAD SR NUMBER": ["Service Request Number", "SR NUMBER", "SR NO",
+            "LEAD SR NO", "LEAD SERVICE REQUEST NUMBER"],
+        "SERVICE ENGINEER NAME": ["Service Engineer", "SE NAME"],
+        "ORDER CREATION DATE": ["Order Creation Date", "ORDER DATE",
+            "ORDER CREATED DATE"]
+    },
+    "All Invoice Detailed Report": {
+        "INSTANCE ID": ["Instance Id [Asset #]", "Instance Id", "ASSET NUMBER"],
+        "INVOICE NUMBER": ["INVOICE NO", "INVOICE NO.", "INVOICE #"],
+        "INVOICE DATE": ["INVOICE DATE & TIME", "INVOICE DATETIME"],
+        "INVOICE AMOUNT": ["INVOICE VALUE", "TOTAL INVOICE AMOUNT"],
+        "INVOICE TYPE": ["INVOICE LINE TYPE"],
+        "INVOICE SEGMENT": ["INVOICE BUSINESS SEGMENT"],
+        "BRANCH ID": ["SD BRANCH CODE", "BRANCH CODE"],
+        "BRANCH NAME": ["SD BRANCH NAME"],
+        "ACCOUNT NAME": ["ACCOUNT", "CUSTOMER NAME"]
     },
     "LMS Data for ERP": {
         "SD Branch Code": ["BRANCH ID"],
@@ -448,10 +660,136 @@ const IMPORTANT_COLUMN_ALIASES = {
     }
 };
 
+// What the picker, the drop zone and the upload button all accept. The BACKEND
+// already reads .xlsx, legacy .xls, the HTML-table exports some portals name
+// ".xls", and CSV/TSV — this list was the only thing turning a CSV away, which
+// is the format several of the portal reports come out as.
+const ACCEPTED_EXTENSIONS = ['.xlsx', '.xls', '.csv', '.tsv', '.txt'];
+const ACCEPT_ATTR = ACCEPTED_EXTENSIONS.join(',');
+const ACCEPT_LABEL = '.xlsx, .xls, .csv';
+const isAcceptedFile = (name) =>
+    ACCEPTED_EXTENSIONS.some((ext) => String(name || '').toLowerCase().endsWith(ext));
+
 // "engine serial no." / "ENGINE  SERIAL NO" / "EngineSerialNo" all become
 // "engineserialno" — spacing, case and punctuation never block an import.
 const tightHeader = (name) =>
     String(name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// A real workbook announces itself in its first bytes; everything else that
+// reaches this page is text (CSV / TSV, or an HTML table saved as .xls).
+const ZIP_MAGIC = [0x50, 0x4b, 0x03, 0x04];                           // .xlsx / .xlsm
+const OLE2_MAGIC = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];  // legacy .xls
+const startsWithMagic = (bytes, magic) => magic.every((b, i) => bytes[i] === b);
+
+// Decode an upload to text. The BOM decides, and here it is the whole problem:
+// the ERP exports a "csv" that is actually UTF-16, TAB separated, and the
+// browser build of SheetJS cannot decode that on its own — it needs the
+// optional codepage table, which is not bundled, so XLSX.read threw and the
+// page could only say "Failed to load file preview". TextDecoder is native.
+const decodeUpload = (bytes) => {
+    let encoding = 'utf-8';
+    if (bytes[0] === 0xff && bytes[1] === 0xfe) encoding = 'utf-16le';
+    else if (bytes[0] === 0xfe && bytes[1] === 0xff) encoding = 'utf-16be';
+    let text = new TextDecoder(encoding).decode(bytes);
+    // U+FFFD scattered through it means it was never UTF-8: the portals also
+    // emit windows-1252 for the odd rupee sign or long dash.
+    if (encoding === 'utf-8') {
+        const bad = (text.match(/\uFFFD/g) || []).length;
+        if (bad > 0 && bad > text.length / 1000) {
+            text = new TextDecoder('windows-1252').decode(bytes);
+        }
+    }
+    return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;      // strip BOM
+};
+
+// ---- Excel serial dates -------------------------------------------------
+// A date cell the portal exported with GENERAL formatting is just a number:
+// "days since 1899-12-30". The Open SR export does this for SR Due Date and
+// Appointment Date, so the preview used to show 46368 / 43990.22916666666
+// where the user expects a date. Mirrors excel_serial_to_datetime() in
+// server/app/controllers/import_controller.py, including the narrow window
+// (1902..2173) that keeps an ID or an amount from being read as a date.
+const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30);
+const SERIAL_MIN = 1000;
+const SERIAL_MAX = 100000;
+
+const excelSerialToDate = (value) => {
+    if (value === null || value === undefined || value instanceof Date) return null;
+    let serial;
+    if (typeof value === 'number') {
+        serial = value;
+    } else {
+        const text = String(value).trim();
+        if (!/^\d{4,6}(\.\d+)?$/.test(text)) return null;   // a real date has separators
+        serial = Number(text);
+    }
+    if (!Number.isFinite(serial) || serial < SERIAL_MIN || serial > SERIAL_MAX) return null;
+    // Read back in UTC below, so the browser's own timezone never shifts the day.
+    return new Date(EXCEL_EPOCH_MS + Math.round(serial * 86400) * 1000);
+};
+
+// Only a column that CALLS ITSELF a date may have a bare number shown as one.
+// "update"/"updated" is stripped first: it is the one common word containing
+// "date" that is not one. Kept in step with _looks_like_date_header() server side.
+const looksLikeDateHeader = (name) =>
+    /(date|expiry|dob)/i.test(String(name ?? '').replace(/update(?:d(?!ate))?/gi, ''));
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const pad2 = (n) => String(n).padStart(2, '0');
+
+// dd-MMM-yyyy, with the clock only when the cell actually carries one.
+const formatSheetDate = (d) => {
+    const day = d.getUTCDate(), mon = d.getUTCMonth(), year = d.getUTCFullYear();
+    const h = d.getUTCHours(), m = d.getUTCMinutes(), sec = d.getUTCSeconds();
+    const stamp = `${pad2(day)}-${MONTHS[mon]}-${year}`;
+    return (h || m || sec) ? `${stamp} ${pad2(h)}:${pad2(m)}` : stamp;
+};
+
+// What one preview cell shows. `header` decides whether a bare number is a date.
+const formatPreviewCell = (value, header) => {
+    if (value === null || value === undefined || value === '') return '-';
+    if (value instanceof Date) {
+        // cellDates gave us a real date; SheetJS builds it in local time.
+        return formatSheetDate(new Date(Date.UTC(
+            value.getFullYear(), value.getMonth(), value.getDate(),
+            value.getHours(), value.getMinutes(), value.getSeconds()
+        )));
+    }
+    if (looksLikeDateHeader(header)) {
+        const asDate = excelSerialToDate(value);
+        if (asDate) return formatSheetDate(asDate);
+    }
+    return String(value);
+};
+
+// The delimiter that splits this file's own rows CONSISTENTLY — a mirror of
+// _pick_separator in the backend importer, so the preview shows exactly what
+// the server will read. Each candidate is scored on how many of the first rows
+// share the file's modal field count; a wrong separator scores badly on both.
+const pickSeparator = (text) => {
+    const lines = text.split(/\r\n|\r|\n/).filter((l) => l.trim()).slice(0, 50);
+    if (!lines.length) return ',';
+    let best = null;
+    let bestScore = null;
+    [',', ';', '\t', '|'].forEach((sep) => {
+        const widths = {};
+        lines.forEach((l) => {
+            const n = l.split(sep).length;
+            widths[n] = (widths[n] || 0) + 1;
+        });
+        const width = Object.keys(widths).map(Number).filter((w) => w >= 2)
+            .sort((a, b) => (widths[b] - widths[a]) || (b - a))[0];
+        if (!width) return;                       // this separator never appears
+        const score = [widths[width], width];
+        if (!bestScore || score[0] > bestScore[0]
+            || (score[0] === bestScore[0] && score[1] > bestScore[1])) {
+            best = sep;
+            bestScore = score;
+        }
+    });
+    return best || ',';                           // genuinely single-column
+};
 
 const Import = () => {
     const [files, setFiles] = useState([]);
@@ -540,7 +878,26 @@ const Import = () => {
             reader.onload = (e) => {
                 try {
                     const data = new Uint8Array(e.target.result);
-                    const workbook = XLSX.read(data, { type: 'array' });
+                    // A workbook goes to SheetJS as bytes; anything else is
+                    // decoded here and handed over as TEXT with its own
+                    // separator, so neither encoding nor delimiter depends on a
+                    // sniff that can throw.
+                    const isWorkbook = startsWithMagic(data, ZIP_MAGIC)
+                        || startsWithMagic(data, OLE2_MAGIC);
+                    let workbook;
+                    if (isWorkbook) {
+                        // cellDates: a date-formatted cell comes back as a real
+                        // Date instead of its serial number. Cells the export
+                        // left as General are still numbers -- formatPreviewCell
+                        // converts those, by header name.
+                        workbook = XLSX.read(data, { type: 'array', cellDates: true });
+                    } else {
+                        const text = decodeUpload(data);
+                        if (!text.trim()) throw new Error('File is empty');
+                        workbook = XLSX.read(text, {
+                            type: 'string', FS: pickSeparator(text), raw: true,
+                        });
+                    }
 
                     // Get first sheet
                     const firstSheetName = workbook.SheetNames[0];
@@ -754,11 +1111,11 @@ const Import = () => {
             const droppedFiles = Array.from(e.dataTransfer.files);
             // Check file size
             const maxSize = 100 * 1024 * 1024; // 100MB
-            const validFiles = droppedFiles.filter(file => file.size <= maxSize &&
-                (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')));
+            const validFiles = droppedFiles.filter(file => file.size <= maxSize
+                && isAcceptedFile(file.name));
 
             if (validFiles.length !== droppedFiles.length) {
-                toast.error('Some files exceed the 100MB size limit or are not Excel files');
+                toast.error(`Some files exceed the 100MB size limit or are not ${ACCEPT_LABEL} files`);
             }
 
             setFiles(validFiles);
@@ -778,8 +1135,8 @@ const Import = () => {
         if (!selectedFileType) { toast.error('Please select a file type'); return; }
 
         const file = files[0];
-        if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
-            toast.error('Please select a valid Excel file (.xlsx or .xls)');
+        if (!isAcceptedFile(file.name)) {
+            toast.error(`Please select a valid report file (${ACCEPT_LABEL})`);
             return;
         }
         if (filePreview) {
@@ -1047,6 +1404,18 @@ const Import = () => {
                                         <div className="min-w-full">
                                             {(() => {
                                                 const importantCols = FILE_TYPE_IMPORTANT_COLUMNS[selectedFileType] || [];
+                                                // Every chip is drawn the same; the columns a report
+                                                // COUNTS on are called out in the note below instead,
+                                                // so the list itself reads as one flat set.
+                                                // {report sentence -> the columns of THIS file it counts}
+                                                const countedByReport = importantCols.reduce((acc, col) => {
+                                                    const hit = Object.keys(REPORT_COUNTED_COLUMNS)
+                                                        .find(c => tightHeader(c) === tightHeader(col));
+                                                    if (!hit) return acc;
+                                                    const what = REPORT_COUNTED_COLUMNS[hit];
+                                                    (acc[what] = acc[what] || []).push(col.toUpperCase());
+                                                    return acc;
+                                                }, {});
                                                 return (
                                                     <>
                                                         <div className="text-[10px] sm:text-xs text-black mb-1 font-medium">
@@ -1057,7 +1426,7 @@ const Import = () => {
                                                                 {importantCols.map((col, idx) => (
                                                                     <span
                                                                         key={idx}
-                                                                        className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-gray-100 text-black border border-gray-200"
+                                                                        className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-mono border bg-gray-100 text-black border-gray-200"
                                                                     >
                                                                         {col.toUpperCase()}
                                                                     </span>
@@ -1067,6 +1436,10 @@ const Import = () => {
                                                         <div className="text-[10px] sm:text-[11px] text-gray-600 mt-1.5 leading-snug">
                                                             Column names can be spelled in any case, spacing or punctuation (e.g. "engine serial no." is accepted).
                                                             Every other column in the file is imported automatically as a dynamic column.
+                                                            {Object.entries(countedByReport).map(([what, cols]) => (
+                                                                <span key={what}> {cols.join(', ')} {cols.length > 1 ? 'are' : 'is'} read
+                                                                    by a report: {what}.</span>
+                                                            ))}
                                                         </div>
                                                     </>
                                                 );
@@ -1107,7 +1480,7 @@ const Import = () => {
                                     <input
                                         id="file-input"
                                         type="file"
-                                        accept=".xlsx,.xls"
+                                        accept={ACCEPT_ATTR}
                                         onChange={handleFileChange}
                                         className="hidden"
                                         disabled={busy}
@@ -1147,7 +1520,7 @@ const Import = () => {
                                                     Drag and drop your file here, or click to browse
                                                 </p>
                                                 <p className="mt-0.5 text-[10px] text-black">
-                                                    Supports: .xlsx, .xls (Max: 100MB)
+                                                    Supports: {ACCEPT_LABEL} (Max: 100MB)
                                                 </p>
                                             </div>
                                         )}
@@ -1291,9 +1664,10 @@ const Import = () => {
                                                                 key={colIndex}
                                                                 className="px-1.5 sm:px-2 py-1 sm:py-1.5 border-r border-gray-200 last:border-r-0 whitespace-nowrap text-black"
                                                             >
-                                                                {row && row[colIndex] !== undefined && row[colIndex] !== null
-                                                                    ? String(row[colIndex])
-                                                                    : '-'}
+                                                                {formatPreviewCell(
+                                                                    row ? row[colIndex] : null,
+                                                                    filePreview.headers[colIndex]
+                                                                )}
                                                             </td>
                                                         ))}
                                                     </tr>

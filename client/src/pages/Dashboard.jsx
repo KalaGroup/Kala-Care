@@ -59,6 +59,19 @@ const MASTER_ADMIN_ID = import.meta.env.VITE_MASTER_ADMIN_ID;
 // Constants moved outside component to prevent recreation on every render
 const FLAG_ORDER = ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7'];
 
+// A drive has TWO completed counts and they are not interchangeable:
+//
+//   driveCompletedRecords — every follow-up row with status 'completed'. Used ONLY to
+//     rebuild Total Assets: an asset is dropped from campaign.asset_numbers the moment
+//     it is completed, so the completed rows are what put it back into the total.
+//   driveCompletedAssets  — assets whose LATEST follow-up is completed. This is what we
+//     DISPLAY, because every other status column here (WIP/Followups/Rejected/NC) is a
+//     latest-status count and so is the "C" tile on the summary card. Using the record
+//     count made a re-opened asset show up in two columns at once, so the columns no
+//     longer added up to Attended and the table's total disagreed with the card.
+const driveCompletedRecords = (c) => c?.completed_count || c?.total_completed_followups || c?.completed || 0;
+const driveCompletedAssets = (c) => c?.completed_in_latest ?? driveCompletedRecords(c);
+
 const BRANCH_ORDER_LIST = [
     'HO', '420435_1', '420435_2', '420435_3', '420435_4', '420435_5',
     '420435_6', '420435_7', '420435_8', '420435_9', '420435_10',
@@ -308,8 +321,8 @@ const Dashboard = () => {
         return {
             labels: campaignPerformance.map(campaign => {
                 const remaining = campaign.asset_numbers_count || 0;
-                const completed = campaign.completed_count || campaign.total_completed_followups || campaign.completed || 0;
-                const total = remaining + completed;
+                // Total = remaining + completed RECORDS (completed assets left asset_numbers)
+                const total = remaining + driveCompletedRecords(campaign);
                 const campaignName = campaign.campaign_name.length > 12
                     ? campaign.campaign_name.substring(0, 10) + '...'
                     : campaign.campaign_name;
@@ -353,7 +366,7 @@ const Dashboard = () => {
                 },
                 {
                     label: 'Completed',
-                    data: campaignPerformance.map(c => c.completed_count || c.total_completed_followups || c.completed || 0),
+                    data: campaignPerformance.map(c => driveCompletedAssets(c)),
                     backgroundColor: 'rgba(34, 197, 94, 0.85)',
                     borderColor: '#16a34a',
                     borderWidth: 1, borderRadius: 4, barPercentage: 0.7, categoryPercentage: 0.8
@@ -372,7 +385,7 @@ const Dashboard = () => {
                     c.rescheduled_count || 0,
                     c.rejected_count || 0,
                     c.not_connected_count || 0,
-                    c.completed_count || c.total_completed_followups || c.completed || 0
+                    driveCompletedAssets(c)
                 );
                 if (m > maxValue) maxValue = m;
             }
@@ -846,14 +859,15 @@ const Dashboard = () => {
 
     // Totals for the Drive Success stat cards — computed in ONE pass instead of
     // ~10 separate filter/reduce scans over campaignPerformance on every render.
-    // Values are byte-for-byte identical to the previous inline computations.
     const campaignSuccessTotals = useMemo(() => {
         let activeCount = 0;
         let attendedTotal = 0, attendedActive = 0, attendedInactive = 0;
         let completedTotal = 0, completedActive = 0, completedInactive = 0;
         for (const c of campaignPerformance) {
             const attended = c.attended_customers || 0;
-            const completed = c.completed_count || c.total_completed_followups || c.completed || 0;
+            // Latest-status count so this card equals the sum of the table's Completed
+            // column, and so Avg. Success Rate (completed / attended) can't exceed 100%.
+            const completed = driveCompletedAssets(c);
             attendedTotal += attended;
             completedTotal += completed;
             if (c.status === 'active') {
@@ -911,8 +925,10 @@ const Dashboard = () => {
                     bValue = b.total_customers || 0;
                     break;
                 case 'completed_count':
-                    aValue = a.completed_count || 0;
-                    bValue = b.completed_count || 0;
+                    // Sort on the value the column actually renders (a.completed_count is
+                    // absent from this payload, so this used to compare 0 against 0)
+                    aValue = driveCompletedAssets(a);
+                    bValue = driveCompletedAssets(b);
                     break;
                 case 'not_connected_count':
                     aValue = a.not_connected_count || 0;
@@ -2226,7 +2242,9 @@ const Dashboard = () => {
                 'Followups': campaign.rescheduled_count || 0,
                 'Rejected': campaign.rejected_count || 0,
                 'NC': campaign.not_connected_count || 0,
-                'Completed': campaign.completed_count || 0,
+                // completed_count is not in this endpoint's payload — this exported 0 for
+                // every drive until it was pointed at the same value the table shows.
+                'Completed': driveCompletedAssets(campaign),
                 'Success %': campaign.success_percentage || 0
             };
 
@@ -5281,12 +5299,13 @@ const Dashboard = () => {
                                                     const flagBreakdown = campaign.flag_breakdown || {};
                                                     const remaining = campaign.asset_numbers_count || 0;
                                                     const attended = campaign.attended_customers || 0;
-                                                    const completed = campaign.completed_count || campaign.total_completed_followups || campaign.completed || 0;
+                                                    const completed = driveCompletedAssets(campaign);
                                                     const wip = campaign.wip_count || 0;
                                                     const rescheduled = campaign.rescheduled_count || 0;
                                                     const rejected = campaign.rejected_count || 0;
                                                     const notConnected = campaign.not_connected_count || 0;
-                                                    const totalCustomers = (remaining + completed);
+                                                    // Total stays on the record count — see driveCompletedRecords
+                                                    const totalCustomers = (remaining + driveCompletedRecords(campaign));
                                                     const remaining2 = (totalCustomers - attended);
                                                     const successPercentage = campaign.success_percentage || 0;
                                                     const createdByName = campaign.created_by_name || 'N/A';

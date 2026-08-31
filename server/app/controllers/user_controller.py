@@ -3,6 +3,7 @@ from app.models.user_model import User, UserRole
 from app.schemas.user_schema import UserCreate, UserUpdate, UserProfileUpdate, UserRoleUpdate
 from passlib.context import CryptContext
 from fastapi import HTTPException, status
+import json
 import os
 from dotenv import load_dotenv
 
@@ -26,11 +27,180 @@ INITIAL_ADMIN_BRANCH = os.getenv("INITIAL_ADMIN_BRANCH", "HO")
 INITIAL_ADMIN_BRANCH_NAME = os.getenv("INITIAL_ADMIN_BRANCH_NAME", "Head Office")
 INITIAL_ADMIN_PASSWORD = os.getenv("INITIAL_ADMIN_PASSWORD")
 
-# Who may grant AOP & Master rights — and who always holds them. Mirrors the
-# client's VITE_PMS_AOP_ADMIN_IDS; the initial admin is always included.
+# Who may grant PMS and AOP & Master rights — and who always holds them all.
+# Every other Master Admin manages employees as before but cannot hand out PMS
+# Access, the PMS pages, the Annual Reports sheets or AOP & Master rights.
+# Mirrors the client's VITE_PMS_AOP_ADMIN_IDS; the initial admin is always
+# included.
 AOP_RIGHTS_ADMIN_IDS = {
     u.strip() for u in os.getenv("AOP_RIGHTS_ADMIN_IDS", INITIAL_ADMIN_ID).split(",") if u.strip()
 } | {INITIAL_ADMIN_ID}
+
+# The REPORT pages inside PMS, in menu order. Which of these a user gets is
+# stored in users.pms_pages as a JSON list of these keys; keep this list in step
+# with PMS_PAGES in client/src/utils/pagePermission.js and with the page= each
+# endpoint passes to _require_pms_page in app/routes/pms_routes.py.
+# AOP & Master is deliberately NOT here — it has its own aop_access / aop_tabs.
+PMS_PAGE_KEYS = (
+    "sales_labour",           # Sales & Labour Report (and its file uploads)
+    "employee_productivity",  # Employee Productivity
+    "sr_allocation",          # SR Allocation Report
+    "se_performance",         # SE Performance (Annexure I commitment matrix)
+    "training",               # Training Report
+    "annual",                 # Annual Reports
+)
+
+
+def pms_pages_list(user: User):
+    """users.pms_pages as a clean list of page keys, or None.
+
+    None means NO per-page restriction was ever set (the column is NULL, or its
+    contents are unreadable) — then PMS Access opens every report page, exactly
+    as it did before per-page rights existed. An empty list is the opposite: no
+    report page was ticked, so the user only has whatever AOP rights they hold."""
+    raw = getattr(user, "pms_pages", None)
+    if raw is None or raw == "":
+        return None
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, list):
+        return None
+    return [k for k in PMS_PAGE_KEYS if k in data]     # menu order, deduped
+
+
+def can_open_pms_page(user: User, page: str = None) -> bool:
+    """May this user open one PMS report page? page=None asks about any page.
+
+    The Master Admin and the PMS Access flag open the module; the per-page list
+    then narrows it. AOP & Master is not routed through here."""
+    if user.user_id in AOP_RIGHTS_ADMIN_IDS:
+        return True                       # the rights admins always hold every page
+    role = user.role.value if hasattr(user.role, "value") else str(user.role)
+    if not (role == UserRole.MASTER_ADMIN.value or bool(user.can_access_pms)):
+        return False
+    pages = pms_pages_list(user)
+    if pages is None:
+        return True                       # no per-page list = every page
+    if page is None:
+        return len(pages) > 0
+    return page in pages
+
+
+# The report SHEETS of the Annual Reports page, in the order its picker lists
+# them. Which of these a user gets is stored in users.annual_tabs as a JSON list
+# of these keys; keep this list in step with ANNUAL_TABS in
+# client/src/utils/pagePermission.js and with the tab= each endpoint passes to
+# _require_annual_tab in app/routes/pms_routes.py. These sheets only read, so
+# the right is show / don't show — there is no 'edit' level (what they print is
+# typed in AOP & Master, which carries its own view/edit rights).
+ANNUAL_TAB_KEYS = (
+    "service_penetration",    # Service Penetration
+    "amc_bandhan",            # AMC & Bandhan Projection (both of its own tabs)
+    "cdi",                    # Customer Delight Index (CDI)
+    "service_load",           # Service Load and Response
+)
+
+
+def annual_tabs_list(user: User):
+    """users.annual_tabs as a clean list of tab keys, or None.
+
+    None means NO per-sheet restriction was ever set (the column is NULL, or its
+    contents are unreadable) — then the Annual Reports page shows every sheet,
+    exactly as it did before per-sheet rights existed. An empty list is the
+    opposite: no sheet was ticked, so the page has nothing to show."""
+    raw = getattr(user, "annual_tabs", None)
+    if raw is None or raw == "":
+        return None
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, list):
+        return None
+    return [k for k in ANNUAL_TAB_KEYS if k in data]    # page order, deduped
+
+
+def can_open_annual_tab(user: User, tab: str = None) -> bool:
+    """May this user open one sheet of the Annual Reports page? tab=None asks
+    about the page as a whole (any sheet at all).
+
+    The 'annual' PMS page opens the page; the per-sheet list then narrows it."""
+    if not can_open_pms_page(user, "annual"):
+        return False
+    if user.user_id in AOP_RIGHTS_ADMIN_IDS:
+        return True                       # the rights admins always hold every sheet
+    tabs = annual_tabs_list(user)
+    if tabs is None:
+        return True                       # no per-sheet list = every sheet
+    if tab is None:
+        return len(tabs) > 0
+    return tab in tabs
+
+
+# The tabs of the AOP & Master page, in the order they appear there. Rights are
+# stored per tab in users.aop_tabs as {tab_key: 'view'|'edit'}; keep this list in
+# step with AOP_TABS in client/src/utils/pagePermission.js and with the tab= each
+# endpoint passes to _require_aop in app/routes/pms_routes.py.
+AOP_TAB_KEYS = (
+    "targets",      # Target Master
+    "srtypes",      # SR Type Master (Sales and Labour)
+    "mxtypes",      # SR Type Master (MaxTTR)
+    "eftypes",      # SR Type Master (EFSR)
+    "leadcats",     # Lead Category Master
+    "cditargets",   # CDI Target Master
+    "amctargets",   # AMC & Bandhan AOP
+    "sltypes",      # SR Type Master (Service Load)
+    "sltargets",    # Service Load AOP
+)
+
+_AOP_RANK = {"none": 0, "view": 1, "edit": 2}
+
+
+def aop_tabs_map(user: User):
+    """users.aop_tabs as a clean {tab_key: 'view'|'edit'} dict, or None.
+
+    None means NO per-tab restriction was ever set (the column is NULL, or its
+    contents are unreadable) — then every tab runs at the user's overall
+    aop_access level, exactly as it did before per-tab rights existed. An empty
+    dict is the opposite: the admin ticked no tab at all, so none is visible."""
+    raw = getattr(user, "aop_tabs", None)
+    if raw is None or raw == "":
+        return None
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return {
+        k: str(v).lower() for k, v in data.items()
+        if k in AOP_TAB_KEYS and str(v).lower() in ("view", "edit")
+    }
+
+
+def aop_level_for_tab(user: User, tab: str = None) -> str:
+    """Effective 'none' | 'view' | 'edit' for one tab of the AOP & Master page.
+
+    tab=None asks about the page as a whole: the best level held on any tab."""
+    if user.user_id in AOP_RIGHTS_ADMIN_IDS:
+        return "edit"                      # rights admins always hold everything
+    base = (user.aop_access or "none").lower()
+    if base not in ("view", "edit"):
+        return "none"
+    tabs = aop_tabs_map(user)
+    if tabs is None:
+        return base                        # no per-tab map = whole page at base
+    if not tabs:
+        return "none"                      # map set, but no tab ticked
+    if tab is None:
+        best = max(tabs.values(), key=lambda v: _AOP_RANK[v])
+        return best if _AOP_RANK[best] <= _AOP_RANK[base] else base
+    level = tabs.get(tab, "none")
+    # A tab can never outrank the overall right.
+    return level if _AOP_RANK[level] <= _AOP_RANK[base] else base
+
 
 class UserController:
     _admin_initialized = False
@@ -564,6 +734,14 @@ class UserController:
                 detail="Unknown page — expected 'part_detail', 'mom', 'approval' or 'pms'"
             )
 
+        # PMS — and everything inside it — is handed out only by the PMS & AOP
+        # rights admins (AOP_RIGHTS_ADMIN_IDS), not by every Master Admin.
+        if page == "pms" and admin.user_id not in AOP_RIGHTS_ADMIN_IDS:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not allowed to grant PMS rights"
+            )
+
         employee = db.query(User).filter(User.id == employee_id).first()
         if not employee:
             raise HTTPException(
@@ -581,14 +759,122 @@ class UserController:
             employee.can_access_part_detail = allowed
         elif page == "approval":
             employee.can_access_approval = allowed
+        elif page == "quotation_tracker":
+            employee.can_access_quotation_tracker = allowed
         elif page == "pms":
             employee.can_access_pms = allowed
             # Hiding PMS hides everything inside it — drop AOP rights too, so a
             # re-granted user does not silently get the old AOP level back.
             if not allowed:
                 employee.aop_access = "none"
+                employee.aop_tabs = None
+                employee.pms_pages = None
+                employee.annual_tabs = None
         else:
             employee.can_access_mom = allowed
+        db.commit()
+        db.refresh(employee)
+        return employee
+
+    @staticmethod
+    def set_pms_pages(db: Session, employee_id: int, admin_user_id: str, pages):
+        """Choose WHICH PMS report pages a user gets: a list of PMS_PAGE_KEYS.
+
+        pages=None clears the restriction, so PMS Access opens every report page
+        again (how it worked before per-page rights). An empty list hides them
+        all. AOP & Master is never part of this — it keeps its own rights.
+        Only the PMS & AOP rights admins may call it, same as the PMS Access
+        flag itself."""
+        admin = db.query(User).filter(User.user_id == admin_user_id).first()
+        if not admin or admin.user_id not in AOP_RIGHTS_ADMIN_IDS:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not allowed to grant PMS rights"
+            )
+
+        if pages is not None and not isinstance(pages, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="pages must be a list of PMS page keys"
+            )
+
+        for key in (pages or []):
+            if key not in PMS_PAGE_KEYS:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unknown PMS page '{key}'"
+                )
+        cleaned = [k for k in PMS_PAGE_KEYS if k in (pages or [])]   # menu order
+
+        employee = db.query(User).filter(User.id == employee_id).first()
+        if not employee:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Employee not found"
+            )
+
+        if not employee.can_access_pms:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Grant PMS Access first, then choose the pages"
+            )
+
+        # json.dumps([]) — "[]" — is stored deliberately: it means "no report
+        # page", which is not the same as NULL ("no per-page restriction").
+        employee.pms_pages = None if pages is None else json.dumps(cleaned)
+        # Nothing to scope per sheet once the Annual Reports page is hidden.
+        if pages is not None and "annual" not in cleaned:
+            employee.annual_tabs = None
+        db.commit()
+        db.refresh(employee)
+        return employee
+
+    @staticmethod
+    def set_annual_tabs(db: Session, employee_id: int, admin_user_id: str, tabs):
+        """Choose WHICH sheets of the Annual Reports page a user gets: a list of
+        ANNUAL_TAB_KEYS.
+
+        tabs=None clears the restriction, so the page shows every sheet again
+        (how it worked before per-sheet rights). An empty list hides them all —
+        the page itself is then dropped from the menu. The sheets only read, so
+        there is no view/edit level here. Same gate as the PMS pages above."""
+        admin = db.query(User).filter(User.user_id == admin_user_id).first()
+        if not admin or admin.user_id not in AOP_RIGHTS_ADMIN_IDS:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not allowed to grant PMS rights"
+            )
+
+        if tabs is not None and not isinstance(tabs, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="tabs must be a list of Annual Reports sheet keys"
+            )
+
+        for key in (tabs or []):
+            if key not in ANNUAL_TAB_KEYS:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unknown Annual Reports sheet '{key}'"
+                )
+        cleaned = [k for k in ANNUAL_TAB_KEYS if k in (tabs or [])]   # page order
+
+        employee = db.query(User).filter(User.id == employee_id).first()
+        if not employee:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Employee not found"
+            )
+
+        if not can_open_pms_page(employee, "annual"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Grant the Annual Reports page first, then choose the sheets"
+            )
+
+        # json.dumps([]) — "[]" — is stored deliberately: it means "no sheet at
+        # all", which is not the same as NULL ("no per-sheet restriction").
+        employee.annual_tabs = None if tabs is None else json.dumps(cleaned)
         db.commit()
         db.refresh(employee)
         return employee
@@ -630,6 +916,72 @@ class UserController:
         # AOP & Master lives inside PMS — granting it opens the module too.
         if level != "none":
             employee.can_access_pms = True
+        else:
+            employee.aop_tabs = None       # nothing to scope once the page is hidden
+        db.commit()
+        db.refresh(employee)
+        return employee
+
+    @staticmethod
+    def set_aop_tabs(db: Session, employee_id: int, admin_user_id: str, tabs):
+        """Set WHICH tabs of the AOP & Master page a user gets, and at which
+        level: {tab_key: 'none'|'view'|'edit'}. Tabs left out (or sent as
+        'none') are hidden for that user. Send tabs=None to clear the
+        restriction, so the whole page runs at their overall aop_access level
+        again (how it worked before per-tab rights).
+
+        Same gate as set_aop_access — only the AOP rights admins may call it."""
+        admin = db.query(User).filter(User.user_id == admin_user_id).first()
+        if not admin or admin.user_id not in AOP_RIGHTS_ADMIN_IDS:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not allowed to grant AOP & Master rights"
+            )
+
+        if tabs is not None and not isinstance(tabs, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="tabs must be an object of { tab: 'none'|'view'|'edit' }"
+            )
+
+        cleaned = {}
+        for key, value in (tabs or {}).items():
+            if key not in AOP_TAB_KEYS:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unknown AOP tab '{key}'"
+                )
+            level = str(value or "none").strip().lower()
+            if level not in ("none", "view", "edit"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unknown level '{value}' for tab '{key}'"
+                )
+            if level != "none":
+                cleaned[key] = level
+
+        employee = db.query(User).filter(User.id == employee_id).first()
+        if not employee:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Employee not found"
+            )
+
+        if employee.user_id in AOP_RIGHTS_ADMIN_IDS:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This user always keeps full AOP & Master rights"
+            )
+
+        if (employee.aop_access or "none") == "none":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Grant AOP & Master rights first, then choose the tabs"
+            )
+
+        # json.dumps({}) — "{}" — is stored deliberately: it means "no tab at
+        # all", which is not the same as NULL ("no per-tab restriction").
+        employee.aop_tabs = None if tabs is None else json.dumps(cleaned)
         db.commit()
         db.refresh(employee)
         return employee

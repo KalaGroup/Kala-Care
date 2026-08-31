@@ -96,6 +96,30 @@ INDEX_STATEMENTS = [
     END
     """,
 
+    # 2026-08-26: Part Detail Info — the master file's "Service schedules" column
+    # was never used. A part is bound to its service by Service Hours, the import
+    # stopped reading the column and the API stopped returning it, so the (always
+    # blank) maintenance_parts.schedule column goes too. Any index / default
+    # constraint on it must be dropped first.
+    """
+    IF EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.maintenance_parts') AND name = 'schedule')
+    BEGIN
+        DECLARE @mpix sysname, @mpdf sysname;
+        SELECT @mpix = i.name FROM sys.indexes i
+          JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+          JOIN sys.columns c ON c.object_id = i.object_id AND c.column_id = ic.column_id
+          WHERE i.object_id = OBJECT_ID('dbo.maintenance_parts') AND c.name = 'schedule'
+            AND i.is_primary_key = 0;
+        IF @mpix IS NOT NULL EXEC('DROP INDEX [' + @mpix + '] ON dbo.maintenance_parts');
+        SELECT @mpdf = dc.name FROM sys.default_constraints dc
+          JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id
+          WHERE dc.parent_object_id = OBJECT_ID('dbo.maintenance_parts') AND c.name = 'schedule';
+        IF @mpdf IS NOT NULL EXEC('ALTER TABLE dbo.maintenance_parts DROP CONSTRAINT [' + @mpdf + ']');
+        ALTER TABLE dbo.maintenance_parts DROP COLUMN schedule;
+    END
+    """,
+
     # IX_open_sr_load_reports_sr_due_date
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_open_sr_load_reports_sr_due_date' AND object_id = OBJECT_ID('dbo.open_sr_load_reports')) CREATE NONCLUSTERED INDEX IX_open_sr_load_reports_sr_due_date ON dbo.open_sr_load_reports (sr_due_date DESC);",
     # IX_letter_send_records_fy_format_type
@@ -351,6 +375,53 @@ INDEX_STATEMENTS = [
     "IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UQ_efsr_report_sr_uid' AND object_id = OBJECT_ID('dbo.efsr_report')) AND EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UQ_efsr_report_appt_uid_assigned' AND object_id = OBJECT_ID('dbo.efsr_report')) DROP INDEX UQ_efsr_report_sr_uid ON dbo.efsr_report;",
     # Loading existing rows during an import seeks on the appointment number.
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_efsr_appointment' AND object_id = OBJECT_ID('dbo.efsr_report')) CREATE NONCLUSTERED INDEX IX_efsr_appointment ON dbo.efsr_report (appointment_number) INCLUDE (service_engineer_uid, task_assigned_date);",
+    # --- AMC Agreement Expiry Planner: the upsert key is Instance Id +
+    #     Agreement Number. create_all builds this with the table, so on a fresh
+    #     database the guard makes it a no-op; it is here for a database whose
+    #     table was created before the index was declared.
+    #     Neither half is unique alone: a genset renews (19.8% of the real
+    #     export shares an instance id) and one agreement covers a fleet (1.4%
+    #     shares an agreement number). See the AMCExpiryPlanner docstring.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UQ_amc_expiry_planner_instance_agreement' AND object_id = OBJECT_ID('dbo.amc_expiry_planner')) CREATE UNIQUE NONCLUSTERED INDEX UQ_amc_expiry_planner_instance_agreement ON dbo.amc_expiry_planner (instance_id, agreement_number);",
+    # The two report tables gained an instance_id relation; the Customer
+    # page and the per-customer data hub both seek on it.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_cdi_detail_report_instance' AND object_id = OBJECT_ID('dbo.cdi_detail_report')) CREATE NONCLUSTERED INDEX IX_cdi_detail_report_instance ON dbo.cdi_detail_report (instance_id);",
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_efsr_report_instance' AND object_id = OBJECT_ID('dbo.efsr_report')) CREATE NONCLUSTERED INDEX IX_efsr_report_instance ON dbo.efsr_report (instance_id);",
+    # The Customer page lists this table soonest-expiry-first.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_amc_expiry_planner_end_date' AND object_id = OBJECT_ID('dbo.amc_expiry_planner')) CREATE NONCLUSTERED INDEX IX_amc_expiry_planner_end_date ON dbo.amc_expiry_planner (agreement_end_date) INCLUDE (instance_id, branch_id, account_name);",
+    # --- LMS Data from Insia: the upsert key is LEAD NUMBER alone. create_all builds the
+    #     unique index with the table, so on any database that gets the table
+    #     from this release the guard makes it a no-op; it is here for one whose
+    #     table was created before the index was declared.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UQ_lms_insia_lead_number' AND object_id = OBJECT_ID('dbo.lms_insia')) CREATE UNIQUE NONCLUSTERED INDEX UQ_lms_insia_lead_number ON dbo.lms_insia (lead_number);",
+    # This file has no genset column: instance_id is resolved from LEAD SR
+    # NUMBER at import time, and both the Customer page and the per-instance
+    # data hub then seek on it.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_lms_insia_instance' AND object_id = OBJECT_ID('dbo.lms_insia')) CREATE NONCLUSTERED INDEX IX_lms_insia_instance ON dbo.lms_insia (instance_id);",
+    # The import resolves every SR the file mentions back to an instance: the
+    # lookup seeks (sr number -> instance id) on each SR table.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_lms_insia_lead_sr' AND object_id = OBJECT_ID('dbo.lms_insia')) CREATE NONCLUSTERED INDEX IX_lms_insia_lead_sr ON dbo.lms_insia (lead_sr_number) INCLUDE (instance_id);",
+    # --- All Invoice Detailed Report: the upsert key is INVOICE NUMBER alone
+    #     and it really is unique (30,242 rows -> 30,242 numbers in the real
+    #     export). create_all builds this with the table, so on any database
+    #     that gets the table from this release the guard makes it a no-op.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UQ_all_invoice_report_invoice_number' AND object_id = OBJECT_ID('dbo.all_invoice_report')) CREATE UNIQUE NONCLUSTERED INDEX UQ_all_invoice_report_invoice_number ON dbo.all_invoice_report (invoice_number);",
+    # The Customer page and the per-instance data hub seek on the genset key
+    # (only the file's Service lines carry one).
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_all_invoice_report_instance' AND object_id = OBJECT_ID('dbo.all_invoice_report')) CREATE NONCLUSTERED INDEX IX_all_invoice_report_instance ON dbo.all_invoice_report (instance_id);",
+    # The Open Quotation Tracker is ONE grouped scan of this table per
+    # read: a period on invoice_date, narrowed to the uncancelled Service
+    # lines, grouped by branch and invoice type, summing invoice_amount. The
+    # covering index turns that into an index seek instead of a table scan.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_all_invoice_report_period' AND object_id = OBJECT_ID('dbo.all_invoice_report')) CREATE NONCLUSTERED INDEX IX_all_invoice_report_period ON dbo.all_invoice_report (invoice_date) INCLUDE (invoice_segment, invoice_status, invoice_type, branch_id, branch_name, invoice_amount);",
+    # The quote half of the same report groups the pulse quotations by
+    # creation_date -> service dealer. Pulse became one row per QUOTATION
+    # (it was one per genset), so this table is now several times larger and
+    # the period scan needs the index.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_pulse_quotations_period' AND object_id = OBJECT_ID('dbo.pulse_quotations')) CREATE NONCLUSTERED INDEX IX_pulse_quotations_period ON dbo.pulse_quotations (creation_date) INCLUDE (service_dealer, labor_amount, parts_amount);",
+    # The pulse upsert loads a file's existing rows by instance_id and then
+    # re-keys them on (instance_id, quote_id).
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_pulse_quotations_instance_quote' AND object_id = OBJECT_ID('dbo.pulse_quotations')) CREATE NONCLUSTERED INDEX IX_pulse_quotations_instance_quote ON dbo.pulse_quotations (instance_id, quote_id);",
 ]
 
 
@@ -377,6 +448,34 @@ def ensure_performance_indexes(engine):
 # re-upload. Idempotent: after the column exists, the whole entry is skipped.
 # ---------------------------------------------------------------------------
 COLUMN_STATEMENTS = [
+    # AMC & Bandhan Projection (Annual Reports): the counted figures the report
+    # now KEEPS, so a closed year stops decaying once it has been seen, and the
+    # best-month high-water mark it raises as branches beat it.
+    {
+        "name": "pms_amc_targets.prior_by",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_amc_targets') AND name = 'prior_by'",
+        "add": "ALTER TABLE dbo.pms_amc_targets ADD prior_by VARCHAR(50) NULL",
+    },
+    {
+        "name": "pms_amc_targets.prior_at",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_amc_targets') AND name = 'prior_at'",
+        "add": "ALTER TABLE dbo.pms_amc_targets ADD prior_at DATETIMEOFFSET NULL",
+    },
+    {
+        "name": "pms_amc_targets.prior_counted_nos",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_amc_targets') AND name = 'prior_counted_nos'",
+        "add": "ALTER TABLE dbo.pms_amc_targets ADD prior_counted_nos INT NULL",
+    },
+    {
+        "name": "pms_amc_targets.best_nos",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_amc_targets') AND name = 'best_nos'",
+        "add": "ALTER TABLE dbo.pms_amc_targets ADD best_nos INT NULL",
+    },
+    {
+        "name": "pms_amc_targets.best_month",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_amc_targets') AND name = 'best_month'",
+        "add": "ALTER TABLE dbo.pms_amc_targets ADD best_month VARCHAR(7) NULL",
+    },
     {
         # Note For Approval — extra TO recipients the creator attaches in the
         # submit box (the creator's own address is always a recipient anyway).
@@ -539,6 +638,75 @@ COLUMN_STATEMENTS = [
         "backfill": "UPDATE dbo.cdi_detail_report SET branch_name = LEFT(JSON_VALUE(extra_data, '$.\"BRANCH NAME\"'), 150) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
     },
     {
+        # CDI 'X ACCOUNT NAME' - the account the feedback is about; the file's customer name.
+        "name": "cdi_detail_report.x_account_name",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.cdi_detail_report') AND name = 'x_account_name'",
+        "add": "ALTER TABLE dbo.cdi_detail_report ADD x_account_name NVARCHAR(500) NULL",
+        "backfill": "UPDATE dbo.cdi_detail_report SET x_account_name = LEFT(JSON_VALUE(extra_data, '$.\"X ACCOUNT NAME\"'), 500) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        # CDI 'FEEDBACK TKN CUST NAME' - who answered the survey (reference only).
+        "name": "cdi_detail_report.feedback_customer_name",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.cdi_detail_report') AND name = 'feedback_customer_name'",
+        "add": "ALTER TABLE dbo.cdi_detail_report ADD feedback_customer_name NVARCHAR(500) NULL",
+        "backfill": "UPDATE dbo.cdi_detail_report SET feedback_customer_name = LEFT(JSON_VALUE(extra_data, '$.\"FEEDBACK TKN CUST NAME\"'), 500) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        # CDI 'FEEDBACK TKN CUST NUM' - the survey respondent's number (reference only).
+        "name": "cdi_detail_report.feedback_customer_number",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.cdi_detail_report') AND name = 'feedback_customer_number'",
+        "add": "ALTER TABLE dbo.cdi_detail_report ADD feedback_customer_number VARCHAR(50) NULL",
+        "backfill": "UPDATE dbo.cdi_detail_report SET feedback_customer_number = LEFT(JSON_VALUE(extra_data, '$.\"FEEDBACK TKN CUST NUM\"'), 50) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        # EFSR 'Account' - the account the task belongs to; feeds the customer master.
+        "name": "efsr_report.account",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.efsr_report') AND name = 'account'",
+        "add": "ALTER TABLE dbo.efsr_report ADD account NVARCHAR(500) NULL",
+        "backfill": "UPDATE dbo.efsr_report SET account = LEFT(JSON_VALUE(extra_data, '$.\"Account\"'), 500) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        # EFSR 'Installation Site Address' - where the genset sits; feeds the customer master.
+        "name": "efsr_report.installation_site_address",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.efsr_report') AND name = 'installation_site_address'",
+        "add": "ALTER TABLE dbo.efsr_report ADD installation_site_address NVARCHAR(MAX) NULL",
+        "backfill": "UPDATE dbo.efsr_report SET installation_site_address = JSON_VALUE(extra_data, '$.\"Installation Site Address\"') WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        # EFSR 'Customer Name' - the on-site contact for this visit (reference only).
+        "name": "efsr_report.customer_name",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.efsr_report') AND name = 'customer_name'",
+        "add": "ALTER TABLE dbo.efsr_report ADD customer_name NVARCHAR(500) NULL",
+        "backfill": "UPDATE dbo.efsr_report SET customer_name = LEFT(JSON_VALUE(extra_data, '$.\"Customer Name\"'), 500) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        # EFSR 'Customer contact number' - the on-site contact's number (reference only).
+        "name": "efsr_report.customer_contact_number",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.efsr_report') AND name = 'customer_contact_number'",
+        "add": "ALTER TABLE dbo.efsr_report ADD customer_contact_number VARCHAR(50) NULL",
+        "backfill": "UPDATE dbo.efsr_report SET customer_contact_number = LEFT(JSON_VALUE(extra_data, '$.\"Customer contact number\"'), 50) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        # CDI 'ASSET NUMBER' is the genset key - the SAME value the Asset
+        # files store as instance_id - so it is the relation from a CDI row to
+        # the customers table. It was always in the file but fell through to
+        # extra_data as a dynamic column; the backfill lifts every existing
+        # row's value out so the link is complete without a re-upload.
+        "name": "cdi_detail_report.instance_id",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.cdi_detail_report') AND name = 'instance_id'",
+        "add": "ALTER TABLE dbo.cdi_detail_report ADD instance_id VARCHAR(100) NULL",
+        "backfill": "UPDATE dbo.cdi_detail_report SET instance_id = LEFT(JSON_VALUE(extra_data, '$.\"ASSET NUMBER\"'), 100) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
+        # EFSR 'Instance ID' - the relation from an eFSR task row to the
+        # customers table. Present on 100% of the rows of every real export,
+        # but it used to land in extra_data as a dynamic column.
+        "name": "efsr_report.instance_id",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.efsr_report') AND name = 'instance_id'",
+        "add": "ALTER TABLE dbo.efsr_report ADD instance_id VARCHAR(100) NULL",
+        "backfill": "UPDATE dbo.efsr_report SET instance_id = LEFT(JSON_VALUE(extra_data, '$.\"Instance ID\"'), 100) WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1",
+    },
+    {
         # EFSR 'Task Assigned Date & Time' — the date an SR was ALLOCATED to the
         # engineer, which the Employee Productivity report's Allocate SR column
         # counts on. The file has always carried it as a dynamic column; rows
@@ -651,6 +819,33 @@ COLUMN_STATEMENTS = [
         "name": "users.aop_access",
         "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'aop_access'",
         "add": "ALTER TABLE dbo.users ADD aop_access NVARCHAR(10) NOT NULL CONSTRAINT DF_users_aop_access DEFAULT 'none'",
+    },
+    {
+        # WHICH PMS report pages a user gets: JSON list of page keys.
+        # NULL = every page. AOP & Master is not in here (see users.aop_tabs).
+        "name": "users.pms_pages",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'pms_pages'",
+        "add": "ALTER TABLE dbo.users ADD pms_pages NVARCHAR(1000) NULL",
+    },
+    {
+        # WHICH sheets of the Annual Reports page a user gets: JSON list of
+        # report keys. NULL = every sheet.
+        "name": "users.annual_tabs",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'annual_tabs'",
+        "add": "ALTER TABLE dbo.users ADD annual_tabs NVARCHAR(1000) NULL",
+    },
+    {
+        # WHICH AOP & Master tabs a user gets, and at which level:
+        # JSON {tab_key: 'view'|'edit'}. NULL = every tab at users.aop_access.
+        "name": "users.aop_tabs",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'aop_tabs'",
+        "add": "ALTER TABLE dbo.users ADD aop_tabs NVARCHAR(1000) NULL",
+    },
+    {
+        # Open Quotation Tracker page visibility, granted from Profile.
+        "name": "users.can_access_quotation_tracker",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'can_access_quotation_tracker'",
+        "add": "ALTER TABLE dbo.users ADD can_access_quotation_tracker BIT NOT NULL CONSTRAINT DF_users_can_access_quotation_tracker DEFAULT 0",
     },
     {
         # Employee email — approval notification emails go here
@@ -1025,6 +1220,25 @@ COLUMN_STATEMENTS = [
         "name": "response_time_maxttr.sr_task_end_date",
         "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.response_time_maxttr') AND name = 'sr_task_end_date'",
         "add": "ALTER TABLE dbo.response_time_maxttr ADD sr_task_end_date DATETIME NULL",
+    },
+    # ---- Training Report: CURRENT STATUS (Active / Inactive) ----
+    # The ninth fixed column. A file uploaded BEFORE the column existed kept it
+    # in extra_data, so the one-time backfill lifts it out and normalises the
+    # spelling the same way the importer does — the report shows who has left
+    # without waiting for a re-upload.
+    {
+        "name": "pms_training_records.current_status",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_training_records') AND name = 'current_status'",
+        "add": "ALTER TABLE dbo.pms_training_records ADD current_status NVARCHAR(30) NULL",
+        "backfill": (
+            "UPDATE dbo.pms_training_records SET current_status = CASE "
+            "WHEN UPPER(REPLACE(REPLACE(LTRIM(RTRIM(JSON_VALUE(extra_data, '$.\"CURRENT STATUS\"'))), ' ', ''), '-', '')) "
+            "     IN ('ACTIVE','WORKING','SERVING','A','YES','Y','1') THEN 'Active' "
+            "WHEN UPPER(REPLACE(REPLACE(LTRIM(RTRIM(JSON_VALUE(extra_data, '$.\"CURRENT STATUS\"'))), ' ', ''), '-', '')) "
+            "     IN ('INACTIVE','LEFT','RESIGNED','EXIT','EXITED','SEPARATED','TERMINATED','I','NO','N','0') THEN 'Inactive' "
+            "ELSE NULL END "
+            "WHERE extra_data IS NOT NULL AND ISJSON(extra_data) = 1"
+        ),
     },
 ]
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
@@ -7,7 +7,10 @@ import {
 } from '@heroicons/react/24/outline';
 import ServicePenetrationReport from '../components/ServicePenetrationReport';
 import AmcBandhanProjectionReport from '../components/AmcBandhanProjectionReport';
+import AmcMonthlyReport from '../components/AmcMonthlyReport';
 import CustomerDelightIndexReport from '../components/CustomerDelightIndexReport';
+import ServiceLoadResponseReport from '../components/ServiceLoadResponseReport';
+import { visibleAnnualTabs } from '../utils/pagePermission';
 
 // ============================================================================
 // PMS → Annual Reports
@@ -16,13 +19,27 @@ import CustomerDelightIndexReport from '../components/CustomerDelightIndexReport
 // the reporting period for all of them.
 //   Service Penetration      asset population by segment, from the Asset
 //                            Detailed master on COMMISSIONING DATE
-//   AMC & Bandhan Projection layout only for now — no figures wired up
+//   AMC & Bandhan Projection D/BAMC (Dealer + Bandhan) agreements per branch,
+//                            from the AMC Population Report on AGREEMENT START
+//                            DATE, against the AOP master's projection.
+//                            TWO TABS on one report: 'Projection' (per branch)
+//                            and 'AMC' (per agreement category, month by month
+//                            with the running month opened up by week) - the
+//                            same file read two ways, so one fetch each and no
+//                            second entry in the report picker. The strip is
+//                            rendered INSIDE the sheet's own header row, so the
+//                            report keeps one bar rather than two.
 //   Customer Delight Index   Promotor/Passive/Detractor feedback per branch,
 //                            from the CDI Detail Report on ACTIVITY END DATE
+//   Service Load & Response  SR load by type, productivity and the response /
+//                            MaxTTR compliance per branch, from the Response
+//                            Time & MaxTTR Details file on SR CLOSE DATE
 // Each report has its OWN source file, so each brings its own date range: the
 // period picker re-defaults to the financial year of whichever report is open.
-// Backend: GET /pms/report/annual/service-penetration, .../annual/cdi
-//          (PMS access)
+// Backend: GET /pms/report/annual/service-penetration, .../annual/cdi,
+//          .../annual/amc-bandhan, .../annual/amc-monthly, .../annual/service-load
+//          (PMS access). The AMC tab's AOP is set in AOP Master -> AMC & Bandhan
+//          AOP, and arrives in that payload.
 // ============================================================================
 
 const API = import.meta.env.VITE_BACKEND_URL;
@@ -47,67 +64,169 @@ const REPORTS = [
   { key: 'service_penetration', name: 'Service Penetration',
     sub: 'Asset population by segment' },
   { key: 'amc_bandhan', name: 'AMC & Bandhan Projection',
-    sub: 'Layout only — figures pending' },
+    sub: 'Dealer + Bandhan AMC vs AOP' },
   { key: 'cdi', name: 'Customer Delight Index (CDI)',
     sub: 'Feedback score per branch' },
+  { key: 'service_load', name: 'Service Load and Response',
+    sub: 'SR load, productivity, response %' },
 ];
 
-// Which payload each report reads. Only the CDI sheet has a source of its own;
-// the other two share the Service Penetration fetch.
+// Which payload each report reads. Service Penetration is fetched with the page;
+// the CDI and AMC sheets read files of their own and are fetched the first time
+// they are opened, then kept.
 const CDI_REPORT = 'cdi';
+const AMC_REPORT = 'amc_bandhan';
+const SVC_REPORT = 'service_load';
+
+// The AMC report is TWO sheets off one file, so they are TABS of that report
+// rather than two entries in the picker: 'which AMC sheet' is a smaller question
+// than 'which annual report', and both read the AMC Population Report.
+const AMC_TABS = [
+  { key: 'projection', name: 'Projection', sub: 'per branch, vs AOP' },
+  { key: 'monthly', name: 'AMC', sub: 'per category, month by month' },
+];
+
+// The financial years a payload's own file actually covers, newest first — no
+// empty years to pick. Both FY-picking sheets (CDI, Service Load) use it.
+// min_start / max_start where a payload has them: the AMC monthly sheet counts
+// expiries on the AGREEMENT END date, which runs years ahead of anything sold, so
+// its full span would offer financial years in which nothing was ever sold.
+const fyChoicesOf = (payload) => {
+  const lo = payload?.meta?.min_start || payload?.meta?.min_date;
+  const hi = payload?.meta?.max_start || payload?.meta?.max_date;
+  if (!lo || !hi) return [];
+  const out = [];
+  for (let y = fyOfIso(lo); y <= fyOfIso(hi); y += 1) out.push(y);
+  return out.reverse();
+};
+
+// Which file each report reads, for the 'no data yet' line in the hero.
+const SOURCE_FILE = {
+  [CDI_REPORT]: 'CDI Detail Report',
+  [AMC_REPORT]: 'AMC Population Report',
+  [SVC_REPORT]: 'Response Time & MaxTTR Details',
+  service_penetration: 'Asset Detailed',
+};
 
 const AnnualReports = () => {
   const [data, setData] = useState(null);
   const [cdi, setCdi] = useState(null);          // fetched the first time CDI is opened
+  const [amc, setAmc] = useState(null);          // ditto, AMC & Bandhan Projection
+  const [amc2, setAmc2] = useState(null);        // ditto, the AMC report's AMC tab
+  const [svc, setSvc] = useState(null);          // ditto, Service Load and Response
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [report, setReport] = useState(REPORTS[0].key);
+  // WHICH of the four sheets this user holds — granted per sheet in Profile
+  // (Annual Reports — Sheets), because one person is often given only their own
+  // report. The picker lists these and the page opens on the first of them, so
+  // a sheet the user does not hold is never even fetched (the server refuses it
+  // too). A user with no sheet at all never reaches this page: its menu item and
+  // route guard are already closed.
+  const myReports = useMemo(() => {
+    const keys = visibleAnnualTabs().map((t) => t.key);
+    return REPORTS.filter((r) => keys.includes(r.key));
+  }, []);
+  const [report, setReport] = useState((myReports[0] || REPORTS[0]).key);
   const [reportOpen, setReportOpen] = useState(false);
   // A period change costs no fetch, only a re-aggregation — but the user still
   // asked to SEE that the sheet is being rebuilt, so it runs behind the spinner.
   const [recalc, setRecalc] = useState(false);
   const rangeTimer = useRef(0);
 
-  // ---- CDI: one financial year, picked directly ----------------------------
+  // ---- CDI and Service Load: one financial year, picked directly -----------
   const [cdiFy, setCdiFy] = useState(null);
-  const [cdiFyOpen, setCdiFyOpen] = useState(false);
+  const [svcFy, setSvcFy] = useState(null);
+  const [fyPickOpen, setFyPickOpen] = useState(false);
 
-  // Only the years the feedback file actually covers — no empty years to pick.
-  const cdiFyChoices = (() => {
-    const lo = cdi?.meta?.min_date, hi = cdi?.meta?.max_date;
-    if (!lo || !hi) return [];
-    const out = [];
-    for (let y = fyOfIso(lo); y <= fyOfIso(hi); y += 1) out.push(y);
-    return out.reverse();                 // newest first — the usual pick
-  })();
+  // ---- AMC & Bandhan: only how far into the year to read ------------------
+  // The sheet is 'this year against its AOP', so the year is not a choice - the
+  // backend reports the one the agreements run to (meta.fy) and the page picks
+  // the month its YTD stops at. Nothing else here is a filter: a from/to range
+  // could only ever have moved that one month.
+  const [amcUpto, setAmcUpto] = useState('');        // 'YYYY-MM'
+  const [amcMonOpen, setAmcMonOpen] = useState(false);
+  const amcFy = amc?.meta?.fy ?? null;
 
-  // Default to the year the feedback ends in, the moment the payload lands.
+  // ---- which of the AMC report's two sheets is open ----------------------
+  // The AMC tab is a FULL financial year with the running month by week, so it
+  // picks a YEAR like the CDI sheet - not the Projection tab's 'how far in'
+  // month, which would say nothing about a sheet that already prints every
+  // month of the year as a column of its own.
+  const [amcTab, setAmcTab] = useState(AMC_TABS[0].key);
+  const [amc2Fy, setAmc2Fy] = useState(null);
+  const amcMonthly = report === AMC_REPORT && amcTab === 'monthly';
+
+  // The 12 'YYYY-MM' of a financial year, April first.
+  const fyMonths = (y) => Array.from({ length: 12 }, (_v, i) => {
+    const m = 4 + i;
+    return m <= 12 ? `${y}-${String(m).padStart(2, '0')}`
+      : `${y + 1}-${String(m - 12).padStart(2, '0')}`;
+  });
+  const monLabel = (m) => (m
+    ? new Date(`${m}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' })
+    : '');
+
+  // Open on the last month the agreements actually reach, inside that year.
+  useEffect(() => {
+    // the last month that actually HAS payments - the month column reads the
+    // quote files, so defaulting to a later agreement month would open the
+    // sheet on a month with nothing in it
+    const hi = amc?.meta?.pay_max_month || amc?.meta?.max_month;
+    if (!hi || amcFy === null || amcUpto) return;
+    const ms = fyMonths(amcFy);
+    setAmcUpto(hi < ms[0] ? ms[0] : (hi > ms[11] ? ms[11] : hi));
+  }, [amc, amcFy, amcUpto]);
+
+  // ---- the FY picker, shared by the two sheets that are ONE year wide ----
+  // Each keeps its own year: their files cover different spans, and switching
+  // report must not drag the other sheet onto a year its file never reached.
+  const FY_PICK = {
+    [CDI_REPORT]: { payload: cdi, fy: cdiFy, set: setCdiFy },
+    [SVC_REPORT]: { payload: svc, fy: svcFy, set: setSvcFy },
+  };
+  // The AMC report's AMC tab joins them - keyed on the TAB, not the report, so
+  // switching back to Projection hands the month picker straight back.
+  const fyPick = amcMonthly
+    ? { payload: amc2, fy: amc2Fy, set: setAmc2Fy }
+    : (FY_PICK[report] || null);
+  const fyPickChoices = fyChoicesOf(fyPick?.payload);
+
+  // Default to the year the file ends in, the moment the payload lands.
   useEffect(() => {
     if (cdi?.meta?.max_date && cdiFy === null) setCdiFy(fyOfIso(cdi.meta.max_date));
   }, [cdi, cdiFy]);
+  useEffect(() => {
+    if (svc?.meta?.max_date && svcFy === null) setSvcFy(fyOfIso(svc.meta.max_date));
+  }, [svc, svcFy]);
+  // The AMC tab opens on the RUNNING year, not the year the data ends in: the
+  // sheet is 'this year against its AOP', and its expiries already carry dates
+  // years ahead. meta.fy is that running year, read off today by the backend.
+  useEffect(() => {
+    if (amc2 && amc2.meta && amc2.meta.fy !== undefined && amc2.meta.fy !== null
+      && amc2Fy === null) setAmc2Fy(amc2.meta.fy);
+  }, [amc2, amc2Fy]);
 
-  const applyCdiFy = (y) => {
+  // A year change costs no fetch, only a re-aggregation — but on a full year
+  // that is real work, so it is applied one tick late: the spinner gets a frame
+  // to paint and the sheet is rebuilt exactly once.
+  const applyPickedFy = (y) => {
+    if (!fyPick) return;
     setRecalc(true);
     clearTimeout(rangeTimer.current);
     rangeTimer.current = setTimeout(() => {
-      setCdiFy(y);
+      fyPick.set(y);
       setRecalc(false);
     }, 160);
   };
 
-  // Reporting period — applied range (ISO) + the range-picker popover, the same
-  // control the Employee Productivity page uses.
+  // Reporting period. Service Penetration is the only sheet on this page that
+  // reads a from/to range at all — the other three each pick a financial year of
+  // their own — and it reads exactly ONE YEAR of it. So the control is a single
+  // date: the year ENDS on the day picked and starts the day after the same date
+  // a year earlier. Pick 31 Aug 26 and the sheet reads 1 Sep 25 → 31 Aug 26.
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [showRangePicker, setShowRangePicker] = useState(false);
-  const [activePeriod, setActivePeriod] = useState('fy');
-  const [pickStart, setPickStart] = useState(null);
-  const [pickEnd, setPickEnd] = useState(null);
-  const fyNow = (() => { const d = new Date(); return d.getMonth() + 1 >= 4 ? d.getFullYear() : d.getFullYear() - 1; })();
-  const [quickFy, setQuickFy] = useState(fyNow);
-  const [fyOpen, setFyOpen] = useState(false);
-  const fyChoices = [];
-  for (let y = fyNow - 5; y <= fyNow + 10; y++) fyChoices.push(y);
 
   // The page fetches once and hands the payload to the report, so switching
   // report or period never refetches.
@@ -127,7 +246,14 @@ const AnnualReports = () => {
     }
   }, []);
 
-  useEffect(() => { load(true); }, [load]);
+  // Service Penetration is the sheet this page-load fetch belongs to, so it only
+  // runs for a user who holds it — otherwise the request would 403 and paint the
+  // whole page with its error.
+  const hasSvcPen = myReports.some((r) => r.key === 'service_penetration');
+  useEffect(() => {
+    if (hasSvcPen) load(true);
+    else setLoading(false);
+  }, [load, hasSvcPen]);
 
   // The CDI sheet reads its own file, so it is fetched the first time it is
   // opened and then kept — switching reports never refetches either payload.
@@ -150,10 +276,76 @@ const AnnualReports = () => {
     if (report === CDI_REPORT && !cdi) loadCdi();
   }, [report, cdi, loadCdi]);
 
-  const active = report === CDI_REPORT ? cdi : data;
+  // The AMC & Bandhan sheet reads the AMC Population Report, so it too is
+  // fetched on first open and then kept.
+  const loadAmc = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${API}/pms/report/annual/amc-bandhan`, { headers: authHeaders() });
+      const d = await res.json();
+      if (!res.ok || !d.success) throw new Error(d.message || d.detail || 'Failed to load');
+      setAmc(d);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (report === AMC_REPORT && !amc) loadAmc();
+  }, [report, amc, loadAmc]);
+
+  // The AMC tab reads the same file through a different endpoint (per agreement
+  // category rather than per branch), so it is fetched the first time that TAB is
+  // opened and then kept - opening the report itself does not pay for it.
+  const loadAmc2 = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${API}/pms/report/annual/amc-monthly`, { headers: authHeaders() });
+      const d = await res.json();
+      if (!res.ok || !d.success) throw new Error(d.message || d.detail || 'Failed to load');
+      setAmc2(d);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (amcMonthly && !amc2) loadAmc2();
+  }, [amcMonthly, amc2, loadAmc2]);
+
+  // The Service Load sheet reads the Response Time & MaxTTR file — its own
+  // source, so it too is fetched on first open and then kept.
+  const loadSvc = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${API}/pms/report/annual/service-load`, { headers: authHeaders() });
+      const d = await res.json();
+      if (!res.ok || !d.success) throw new Error(d.message || d.detail || 'Failed to load');
+      setSvc(d);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (report === SVC_REPORT && !svc) loadSvc();
+  }, [report, svc, loadSvc]);
+
+  const PAYLOAD = { [CDI_REPORT]: cdi, [AMC_REPORT]: amc, [SVC_REPORT]: svc };
+  const active = amcMonthly ? amc2 : (report in PAYLOAD ? PAYLOAD[report] : data);
+  // min_start / max_start where the payload has them - see fyChoicesOf above.
   const dataRange = {
-    min: active?.meta?.min_date || null,
-    max: active?.meta?.max_date || null,
+    min: active?.meta?.min_start || active?.meta?.min_date || null,
+    max: active?.meta?.max_start || active?.meta?.max_date || null,
   };
 
   const clampToData = (from, to) => {
@@ -164,99 +356,75 @@ const AnnualReports = () => {
     return [f, t];
   };
 
-  // These are ANNUAL sheets, so the default period is the FINANCIAL YEAR the
-  // data ends in — not last month, which would read as an almost empty page.
-  // Re-applied whenever the range changes, which is exactly when a report with
-  // its OWN source file is opened: an asset commissioned in 1998 must not leave
-  // the CDI sheet sitting on a period its feedback file has never covered.
+  // The twelve months ENDING on a given day: the day after the same date a year
+  // before, through that day. 31 Aug 26 → 1 Sep 25 … 31 Aug 26, which is 365
+  // days, not 366 — a year of service is the year up TO the date, and counting
+  // 1 Sep both years would put one day in two consecutive reports.
+  const yearEnding = (isoEnd) => {
+    const d = new Date(isoEnd + 'T00:00:00');
+    // +1 day BEFORE -1 year, not after: on 29 Feb the other order lands on
+    // 2 Mar (JS rolls a non-existent 29 Feb over) and the window comes out a
+    // day short of a year. This way round every window is a full 365 — 366 when
+    // it holds a 29 Feb.
+    d.setDate(d.getDate() + 1);
+    d.setFullYear(d.getFullYear() - 1);
+    return isoOf(d);
+  };
+
+  // The default is the year ending on the LAST DAY THE DATA REACHES — the newest
+  // full year the file can actually answer for. Re-applied whenever the range
+  // changes, which is exactly when a report with its own source file is opened.
   useEffect(() => {
     if (!dataRange.max) return;
-    const d = new Date(dataRange.max + 'T00:00:00');
-    const fy = d.getMonth() + 1 >= 4 ? d.getFullYear() : d.getFullYear() - 1;
-    const [f, t] = clampToData(`${fy}-04-01`, `${fy + 1}-03-31`);
-    setQuickFy(fy);
+    const [f, t] = clampToData(yearEnding(dataRange.max), dataRange.max);
     setFromDate(f);
     setToDate(t);
-    setPickStart(new Date(f + 'T00:00:00'));
-    setPickEnd(new Date(t + 'T00:00:00'));
-    setActivePeriod('fy');
   }, [dataRange.min, dataRange.max]);   // eslint-disable-line react-hooks/exhaustive-deps
-
-  const QUICK_OPTIONS = [
-    { key: 'fy', label: 'Financial Year' },
-    { key: 'today', label: 'Today' },
-    { key: 'yesterday', label: 'Yesterday' },
-    { key: 'last_week', label: 'Last Week' },
-    { key: 'current_month', label: 'Current Month' },
-    { key: 'last_month', label: 'Last Month' },
-    { key: 'last_quarter', label: 'Last Quarter' },
-    { key: 'last_6m', label: 'Last 6 Months' },
-    { key: 'full', label: 'Full Data' },
-  ];
 
   // EVERY period control lands here. The reports re-aggregate their raw payload
   // on the spot — no refetch — but on a full financial year that is real work,
   // so the new range is applied one tick LATE: the spinner gets a frame to paint
   // first, and the table is rebuilt exactly once, with the new dates.
-  const applyRange = (f, t, key) => {
+  const applyRange = (f, t) => {
     setRecalc(true);
-    setActivePeriod(key);
     setShowRangePicker(false);
     clearTimeout(rangeTimer.current);      // a newer pick always wins
     rangeTimer.current = setTimeout(() => {
       setFromDate(f);
       setToDate(t);
-      setPickStart(new Date(f + 'T00:00:00'));
-      setPickEnd(new Date(t + 'T00:00:00'));
       setRecalc(false);
     }, 160);
   };
 
-  const applyQuick = (key) => {
-    if (!dataRange.max) return;
-    if (key === 'fy') { applyFy(quickFy); return; }
-    const max = dataRange.max;
-    const d = new Date(max + 'T00:00:00');
-    let from = max.slice(0, 8) + '01', to = max;
-    if (key === 'today' || key === 'yesterday' || key === 'last_week') {
-      const now = new Date();
-      now.setHours(0, 0, 0, 0);
-      if (key === 'today') {
-        from = to = isoOf(now);
-      } else if (key === 'yesterday') {
-        const y = new Date(now); y.setDate(y.getDate() - 1);
-        from = to = isoOf(y);
-      } else {
-        const mon = new Date(now);
-        mon.setDate(mon.getDate() - ((now.getDay() + 6) % 7));
-        const lastMon = new Date(mon); lastMon.setDate(lastMon.getDate() - 7);
-        const lastSun = new Date(mon); lastSun.setDate(lastSun.getDate() - 1);
-        from = isoOf(lastMon); to = isoOf(lastSun);
-      }
-    } else if (key === 'last_month') {
-      from = isoOf(new Date(d.getFullYear(), d.getMonth() - 1, 1));
-      to = isoOf(new Date(d.getFullYear(), d.getMonth(), 0));
-    } else if (key === 'last_quarter') from = isoOf(new Date(d.getFullYear(), d.getMonth() - 3, d.getDate() + 1));
-    else if (key === 'last_6m') from = isoOf(new Date(d.getFullYear(), d.getMonth() - 6, d.getDate() + 1));
-    else if (key === 'full') from = dataRange.min || max;
-    const [f, t] = clampToData(from, to);
-    applyRange(f, t, key);
+  // One click on the calendar IS the period — there is nothing left to confirm
+  // once the end date is known, so there is no Apply button to press.
+  const applyYearEnd = (d) => {
+    if (!d) return;
+    const end = isoOf(d);
+    const [f, t] = clampToData(yearEnding(end), end);
+    applyRange(f, t);
   };
 
-  const applyFy = (y) => {
-    if (!dataRange.max) return;
-    setQuickFy(y);
-    const [f, t] = clampToData(`${y}-04-01`, `${y + 1}-03-31`);
-    applyRange(f, t, 'fy');
-  };
+  const cur = REPORTS.find((r) => r.key === report) || myReports[0] || REPORTS[0];
 
-  const applyCustomRange = () => {
-    if (!pickStart || !pickEnd) return;
-    const [f, t] = clampToData(isoOf(pickStart), isoOf(pickEnd));
-    applyRange(f, t, 'custom');
-  };
-
-  const cur = REPORTS.find((r) => r.key === report) || REPORTS[0];
+  // The AMC report's two sheets, as a segmented control. It is handed DOWN into
+  // whichever sheet is open and rendered inside that sheet's own header row -
+  // a strip of its own above the sheet gave the one report two header bars. A
+  // segment rather than an underlined tab for the same reason: on a shared row
+  // it has to read as a control, not as the row's heading.
+  const amcTabStrip = report !== AMC_REPORT ? null : (
+    <div className="pms-seg flex items-center p-0.5 rounded-lg bg-gray-200/70">
+      {AMC_TABS.map((t) => (
+        <button key={t.key} type="button" onClick={() => setAmcTab(t.key)}
+          title={t.sub}
+          className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+            t.key === amcTab ? 'pms-seg-on bg-white shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+          style={t.key === amcTab ? { color: themeColor } : {}}>
+          {t.name}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <div className="min-h-screen font-sans">
@@ -278,11 +446,11 @@ const AnnualReports = () => {
                 <h1 className="text-lg sm:text-xl font-bold leading-tight">Annual Reports</h1>
                 <p className="text-[11px] text-white/70 leading-tight">
                   {dataRange.max
-                    ? <>{cur.name} · {report === CDI_REPORT ? 'feedback' : 'asset'} data
+                    ? <>{cur.name} · {SOURCE_FILE[report] || 'source'} data
                       {' '}{fmtDayYr(dataRange.min)} → {fmtDayYr(dataRange.max)}</>
                     : ((loading || !active) ? 'Loading…'
-                      : `No data yet — upload the ${report === CDI_REPORT
-                        ? 'CDI Detail Report' : 'Asset Detailed'} file on the Data Upload page`)}
+                      : `No data yet — upload the ${SOURCE_FILE[report] || 'source'}`
+                        + ' file on the Data Upload page')}
                 </p>
               </div>
             </div>
@@ -301,7 +469,7 @@ const AnnualReports = () => {
                 {reportOpen && (
                   <div className="absolute z-50 left-0 right-0 top-full pt-2">
                     <div className="bg-white rounded-xl shadow-xl border border-gray-200 p-1">
-                      {REPORTS.map((r) => (
+                      {myReports.map((r) => (
                         <button key={r.key} type="button"
                           onClick={() => { setReport(r.key); setReportOpen(false); }}
                           className={`block w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
@@ -320,29 +488,72 @@ const AnnualReports = () => {
 
               {/* ---- the CDI sheet is ONE FINANCIAL YEAR wide, so it picks a
                    year, not a from/to range: a range picker would leave "which
-                   FY is this?" to be inferred from the dates. ---- */}
-              {report === CDI_REPORT ? (
-                <div className="relative w-[190px] max-w-full"
-                  onMouseEnter={() => setCdiFyOpen(true)}
-                  onMouseLeave={() => setCdiFyOpen(false)}>
-                  <button onClick={() => setCdiFyOpen(!cdiFyOpen)} disabled={!cdi}
+                   FY is this?" to be inferred from the dates. The AMC sheet is
+                   the same animal plus one thing - how far into that year its
+                   YTD runs - so it picks a YEAR and a MONTH. ---- */}
+              {report === AMC_REPORT && !amcMonthly ? (
+                /* One control: how far into the year to read. The year itself is
+                   not a choice — the sheet is this year against its AOP. */
+                <div className="relative w-[220px] max-w-full"
+                  onMouseEnter={() => setAmcMonOpen(true)}
+                  onMouseLeave={() => setAmcMonOpen(false)}>
+                  <button onClick={() => setAmcMonOpen(!amcMonOpen)} disabled={!amc}
                     className="w-full flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-white shadow-md hover:bg-white/90 disabled:opacity-50 transition-all"
                     style={{ color: themeColor }}>
                     <CalendarDaysIcon className="h-3.5 w-3.5 flex-shrink-0" />
-                    <span className="truncate">FY {cdiFy}–{String(cdiFy + 1).slice(2)}</span>
-                    <ChevronDownIcon className={`h-3 w-3 flex-shrink-0 transition-transform ${cdiFyOpen ? 'rotate-180' : ''}`} />
+                    <span className="truncate">YTD to {monLabel(amcUpto) || '—'}</span>
+                    <ChevronDownIcon className={`h-3 w-3 flex-shrink-0 transition-transform ${amcMonOpen ? 'rotate-180' : ''}`} />
                   </button>
-                  {cdiFyOpen && (
+                  {amcMonOpen && amcFy !== null && (
+                    <div className="absolute z-50 left-0 right-0 top-full pt-2">
+                      <div className="bg-white rounded-xl shadow-xl border border-gray-200 p-1 max-h-72 overflow-y-auto">
+                        <p className="px-2.5 py-1 text-[10px] text-gray-400">
+                          FY {amcFy}–{String(amcFy + 1).slice(2)} · F{String(amcFy + 1).slice(-2)}
+                        </p>
+                        {fyMonths(amcFy).map((m, i) => (
+                          <button key={m} type="button"
+                            onClick={() => { setAmcMonOpen(false); setAmcUpto(m); }}
+                            className={`block w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
+                              m === amcUpto ? 'text-white' : 'text-gray-700 hover:bg-gray-50'}`}
+                            style={m === amcUpto ? { backgroundColor: themeColor } : {}}>
+                            <span className="font-semibold">{monLabel(m)}</span>
+                            <span className={`block text-[10px] ${m === amcUpto ? 'text-white/70' : 'text-gray-400'}`}>
+                              {i === 11 ? 'the full year' : `Apr–${monLabel(m).slice(0, 3)} · ${i + 1} month${i ? 's' : ''}`}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : fyPick ? (
+                /* CDI and Service Load are ONE FINANCIAL YEAR wide, so they
+                   pick a year rather than a from/to range: a range picker would
+                   leave "which FY is this?" to be inferred from the dates. */
+                <div className="relative w-[190px] max-w-full"
+                  onMouseEnter={() => setFyPickOpen(true)}
+                  onMouseLeave={() => setFyPickOpen(false)}>
+                  <button onClick={() => setFyPickOpen(!fyPickOpen)} disabled={!fyPick.payload}
+                    className="w-full flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-white shadow-md hover:bg-white/90 disabled:opacity-50 transition-all"
+                    style={{ color: themeColor }}>
+                    <CalendarDaysIcon className="h-3.5 w-3.5 flex-shrink-0" />
+                    <span className="truncate">
+                      {fyPick.fy === null ? 'Financial year'
+                        : `FY ${fyPick.fy}–${String(fyPick.fy + 1).slice(2)}`}
+                    </span>
+                    <ChevronDownIcon className={`h-3 w-3 flex-shrink-0 transition-transform ${fyPickOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {fyPickOpen && (
                     <div className="absolute z-50 left-0 right-0 top-full pt-2">
                       <div className="bg-white rounded-xl shadow-xl border border-gray-200 p-1 max-h-60 overflow-y-auto">
-                        {cdiFyChoices.map((y) => (
+                        {fyPickChoices.map((y) => (
                           <button key={y} type="button"
-                            onClick={() => { setCdiFyOpen(false); applyCdiFy(y); }}
+                            onClick={() => { setFyPickOpen(false); applyPickedFy(y); }}
                             className={`block w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
-                              y === cdiFy ? 'text-white' : 'text-gray-700 hover:bg-gray-50'}`}
-                            style={y === cdiFy ? { backgroundColor: themeColor } : {}}>
+                              y === fyPick.fy ? 'text-white' : 'text-gray-700 hover:bg-gray-50'}`}
+                            style={y === fyPick.fy ? { backgroundColor: themeColor } : {}}>
                             <span className="font-semibold">FY {y}–{String(y + 1).slice(2)}</span>
-                            <span className={`block text-[10px] ${y === cdiFy ? 'text-white/70' : 'text-gray-400'}`}>
+                            <span className={`block text-[10px] ${y === fyPick.fy ? 'text-white/70' : 'text-gray-400'}`}>
                               Apr {y} – Mar {y + 1}
                             </span>
                           </button>
@@ -352,123 +563,66 @@ const AnnualReports = () => {
                   )}
                 </div>
               ) : (
-              <div className="relative w-[280px] max-w-full"
-                onMouseEnter={() => dataRange.max && setShowRangePicker(true)}
-                onMouseLeave={() => { if (!fyOpen) setShowRangePicker(false); }}>
-                <button onClick={() => { setFyOpen(false); setShowRangePicker(!showRangePicker); }} disabled={!dataRange.max}
-                  className="w-full flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-white shadow-md hover:bg-white/90 disabled:opacity-50 transition-all"
-                  style={{ color: themeColor }}>
-                  <CalendarDaysIcon className="h-3.5 w-3.5 flex-shrink-0" />
-                  <span className="truncate">
-                    {fromDate && toDate ? `${fmtDayYr(fromDate)} → ${fmtDayYr(toDate)}` : 'Select period'}
-                  </span>
-                  <ChevronDownIcon className={`h-3 w-3 flex-shrink-0 transition-transform ${showRangePicker ? 'rotate-180' : ''}`} />
-                </button>
+                /* ONE date, and the year ends on it. The preset list this
+                   replaced offered Today / Last Week / Last Quarter on a sheet
+                   that is only meaningful over a full year — every one of them
+                   printed a penetration figure nobody could act on. */
+                <div className="relative w-[250px] max-w-full"
+                  onMouseEnter={() => dataRange.max && setShowRangePicker(true)}
+                  onMouseLeave={() => setShowRangePicker(false)}>
+                  <button onClick={() => setShowRangePicker(!showRangePicker)} disabled={!dataRange.max}
+                    className="w-full flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-white shadow-md hover:bg-white/90 disabled:opacity-50 transition-all"
+                    style={{ color: themeColor }}>
+                    <CalendarDaysIcon className="h-3.5 w-3.5 flex-shrink-0" />
+                    <span className="truncate">
+                      {toDate ? `Year to ${fmtDayYr(toDate)}` : 'Select year end'}
+                    </span>
+                    <ChevronDownIcon className={`h-3 w-3 flex-shrink-0 transition-transform ${showRangePicker ? 'rotate-180' : ''}`} />
+                  </button>
 
-                {showRangePicker && (
-                  <div className="absolute z-50 left-0 right-0 sm:left-auto sm:right-0 top-full pt-2">
-                    <div className="sm:w-[440px] max-w-[92vw] bg-white rounded-xl shadow-xl border border-gray-200 text-gray-800">
-                      <div className="p-3 max-h-[75vh] overflow-y-auto">
-                        <div className="flex flex-col sm:flex-row gap-4">
-                          <div className="sm:w-[34%]">
-                            <h3 className="text-xs font-semibold text-gray-800 mb-2 text-center">Quick Select</h3>
-                            <div className="space-y-1.5 w-full">
-                              {QUICK_OPTIONS.map((o) => (o.key === 'fy' ? (
-                                <div key={o.key} className="relative">
-                                  <button type="button"
-                                    onClick={() => setFyOpen((v) => !v)}
-                                    className={`w-full relative pl-2 pr-6 py-1.5 rounded-lg text-xs font-medium transition-all text-center ${activePeriod === 'fy'
-                                      ? 'text-white'
-                                      : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200'}`}
-                                    style={activePeriod === 'fy' ? { backgroundColor: themeColor } : {}}>
-                                    FY {quickFy}–{String(quickFy + 1).slice(2)}
-                                    <ChevronDownIcon className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 transition-transform ${fyOpen ? 'rotate-180' : ''} ${activePeriod === 'fy' ? 'text-white' : 'text-gray-500'}`} />
-                                  </button>
-                                  {fyOpen && (
-                                    <div className="mt-1 max-h-36 overflow-y-auto bg-white border border-gray-200 rounded-lg">
-                                      {fyChoices.map((y) => (
-                                        <button key={y} type="button"
-                                          ref={y === quickFy ? (el) => {
-                                            if (el && el.parentElement) {
-                                              el.parentElement.scrollTop = Math.max(0,
-                                                el.offsetTop - el.parentElement.clientHeight / 2);
-                                            }
-                                          } : undefined}
-                                          onClick={() => { setFyOpen(false); applyFy(y); }}
-                                          className={`block w-full px-2 py-1.5 text-xs text-center hover:bg-gray-100 ${
-                                            y === quickFy ? 'font-semibold text-white' : 'text-gray-700'}`}
-                                          style={y === quickFy ? { backgroundColor: themeColor } : {}}>
-                                          FY {y}–{String(y + 1).slice(2)}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <button key={o.key} onClick={() => applyQuick(o.key)}
-                                  className={`w-full px-2 py-1.5 rounded-lg text-xs font-medium transition-all text-center ${activePeriod === o.key
-                                    ? 'text-white'
-                                    : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200'}`}
-                                  style={activePeriod === o.key ? { backgroundColor: themeColor } : {}}>
-                                  {o.label}
-                                </button>
-                              )))}
-                            </div>
-                          </div>
-
-                          <div className="sm:w-[66%]">
-                            <h3 className="text-xs font-semibold text-gray-800 mb-2 text-center">Custom Range</h3>
-                            <div className="flex gap-2 mb-2">
-                              <div className="flex-1">
-                                <label className="block text-[11px] text-gray-500 mb-0.5 text-center">Start Date</label>
-                                <div className={`px-1.5 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-center truncate ${
-                                  pickStart ? 'font-semibold text-gray-900' : 'text-gray-400'}`}>
-                                  {pickStart ? pickStart.toLocaleDateString('en-GB') : 'Not selected'}
-                                </div>
-                              </div>
-                              <div className="flex-1">
-                                <label className="block text-[11px] text-gray-500 mb-0.5 text-center">End Date</label>
-                                <div className={`px-1.5 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-center truncate ${
-                                  pickEnd ? 'font-semibold text-gray-900' : 'text-gray-400'}`}>
-                                  {pickEnd ? pickEnd.toLocaleDateString('en-GB') : 'Not selected'}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="border border-gray-200 rounded-lg p-1 bg-gray-50/50 flex justify-center">
-                              <DatePicker
-                                selected={pickStart}
-                                onChange={(dates) => { const [s, e] = dates; setPickStart(s); setPickEnd(e); }}
-                                startDate={pickStart}
-                                endDate={pickEnd}
-                                selectsRange
-                                inline
-                                showMonthDropdown
-                                showYearDropdown
-                                dropdownMode="select"
-                                minDate={dataRange.min ? new Date(dataRange.min + 'T00:00:00') : undefined}
-                                maxDate={dataRange.max ? new Date(dataRange.max + 'T00:00:00') : undefined}
-                                calendarClassName="custom-calendar"
-                                dateFormat="dd/MM/yyyy"
-                              />
-                            </div>
-                            <div className="flex gap-2 mt-2.5">
-                              <button onClick={() => setShowRangePicker(false)}
-                                className="flex-1 px-2 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-xs font-medium">
-                                Cancel
-                              </button>
-                              <button onClick={applyCustomRange} disabled={!pickStart || !pickEnd}
-                                className="flex-1 px-2 py-1.5 text-white rounded-lg hover:opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium"
-                                style={{ backgroundColor: themeColor }}>
-                                Apply
-                              </button>
-                            </div>
-                          </div>
+                  {showRangePicker && (
+                    <div className="absolute z-50 left-0 right-0 sm:left-auto sm:right-0 top-full pt-2">
+                      <div className="sm:w-[300px] max-w-[92vw] bg-white rounded-xl shadow-xl border border-gray-200 text-gray-800 p-3">
+                        <h3 className="text-xs font-semibold text-gray-800 text-center">
+                          Last day of the year
+                        </h3>
+                        {/* what the pick MEANS, before it is made — the whole
+                            point of the control is the year it derives. */}
+                        <p className="mt-0.5 mb-2 text-[10.5px] text-center text-gray-500">
+                          {fromDate && toDate ? (
+                            <>reading <b className="text-gray-800">{fmtDayYr(fromDate)} → {fmtDayYr(toDate)}</b></>
+                          ) : 'the twelve months ending on the day you pick'}
+                        </p>
+                        {/* dropdownMode is 'scroll', not 'select': a native
+                            <select> renders its list outside the page and no CSS
+                            can bound it, so on the asset master — whose
+                            commissioning dates reach back years — the year list
+                            ran off the popover. react-datepicker's own dropdown
+                            is a plain div the stylesheet can cap (see
+                            .custom-calendar in index.css). */}
+                        <div className="border border-gray-200 rounded-lg p-1 bg-gray-50/50 flex justify-center">
+                          <DatePicker
+                            selected={toDate ? new Date(toDate + 'T00:00:00') : null}
+                            onChange={applyYearEnd}
+                            inline
+                            showMonthDropdown
+                            showYearDropdown
+                            scrollableYearDropdown
+                            yearDropdownItemNumber={8}
+                            dropdownMode="scroll"
+                            minDate={dataRange.min ? new Date(dataRange.min + 'T00:00:00') : undefined}
+                            maxDate={dataRange.max ? new Date(dataRange.max + 'T00:00:00') : undefined}
+                            calendarClassName="custom-calendar"
+                            dateFormat="dd/MM/yyyy"
+                          />
                         </div>
+                        <p className="mt-2 text-[10px] text-center text-gray-400">
+                          Data runs {fmtDayYr(dataRange.min)} → {fmtDayYr(dataRange.max)}
+                        </p>
                       </div>
                     </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -489,8 +643,12 @@ const AnnualReports = () => {
             </div>
           ) : report === CDI_REPORT ? (
             <CustomerDelightIndexReport data={cdi} fy={cdiFy} />
-          ) : report === 'amc_bandhan' ? (
-            <AmcBandhanProjectionReport data={data} periodTo={toDate} />
+          ) : report === SVC_REPORT ? (
+            <ServiceLoadResponseReport data={svc} fy={svcFy} />
+          ) : amcMonthly ? (
+            <AmcMonthlyReport data={amc2} fy={amc2Fy} tabs={amcTabStrip} />
+          ) : report === AMC_REPORT ? (
+            <AmcBandhanProjectionReport data={amc} upto={amcUpto} tabs={amcTabStrip} />
           ) : (
             <ServicePenetrationReport data={data} periodFrom={fromDate} periodTo={toDate} />
           )}

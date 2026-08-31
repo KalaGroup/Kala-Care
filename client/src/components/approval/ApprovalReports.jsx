@@ -13,7 +13,7 @@ import { X, BarChart3, RotateCcw, Search, FileSpreadsheet } from 'lucide-react';
 import { getApplications, errText } from './approvalApi';
 import {
     ApplicationsTable, ApplicationDetailModal, TypeTabs,
-    STATUS_META, statusLabel, BRAND, typeLabel, catLabel, fmtDate,
+    STATUS_META, statusLabel, BRAND, typeLabel, catLabel, fmtDate, canCreatorDelete,
 } from './ApprovalShared';
 import { richToTextNoTables } from './richText';
 
@@ -287,7 +287,11 @@ export default function ApprovalReports({ onClose, initialStatus = '', title = '
                        waiting on THIS user is approvable right here — the
                        server's can_act flag stays the only gate. */
                     <ApplicationDetailModal
-                        app={selected} canAct={allowAct && selected.can_act === true} canDelete={false}
+                        app={selected} canAct={allowAct && selected.can_act === true}
+                        /* the creator can still withdraw their own untouched NFA
+                           from here; editing is done from the main views, which
+                           carry the form */
+                        canDelete={canCreatorDelete(selected, user.user_id)}
                         onClose={() => setSelected(null)} onChanged={refresh}
                     />
                 )}

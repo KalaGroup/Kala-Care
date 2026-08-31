@@ -24,7 +24,10 @@ from app.models.pms_model import (
     PmsBranchTarget, PmsHoliday, PmsSrTypeMapping, PmsUploadBatch,
     PmsSalesRecord, PmsMonthSettings, PmsHead, PmsSeUid,
     PmsLeadCategory, PmsLeadRaisedForMap, PmsMaxttrHead, PmsMaxttrSrTypeMap,
-    PmsEfsrHead, PmsEfsrSrTypeMap, PmsCdiTarget,
+    PmsEfsrHead, PmsEfsrSrTypeMap, PmsCdiTarget, PmsAmcTarget,
+    PmsAmcCategoryTarget, PmsQuoteCityBranch,
+    PmsServiceLoadHead, PmsServiceLoadSrTypeMap, PmsServiceLoadTarget,
+    PmsServiceLoadPctTarget, PmsServiceLoadManual, PmsServiceLoadSeCount,
 )
 from app.models.user_model import User, UserRole, UserBranchAccess
 from app.time_utils import now_ist
@@ -49,6 +52,37 @@ ERP_BRANCHES = [
     ("KA", "420435_13", "Gulbarga"),
     ("KA", "420435_14", "Bijapur"),
 ]
+
+# KOEL's OWN corporate cover. It is the one agreement type the dealership does
+# not sell, so the AMC & Bandhan Projection sheet keeps it off the branch rows
+# and gives it a row of its own under the total.
+KOEL_AGREEMENT_TYPE = "KOEL Agreement"
+
+# ---------------- QUOTE CITY -> BRANCH ------------------------------------- #
+# The four Bandhan QUOTE files are KOEL's, and their branch column knows KOEL's
+# structure rather than this dealership's - so the AMC & Bandhan Projection sheet
+# places a paid quote on a branch by the customer's CITY.
+#
+# Which city belongs to which branch is TYPED by the business, in AOP Master ->
+# AMC & Bandhan AOP -> the City Master table (PmsQuoteCityBranch). It is not
+# derived here and it is never guessed: an earlier version filled the list in
+# from district geography and was wrong in ways nobody could see from the report.
+# A city nobody has mapped yet goes to the Unmapped Branch row and is named under
+# the table, so it reads as a job to do rather than as a wrong number.
+
+
+def _quote_city_key(city) -> str:
+    """A city's identity: letters and digits only, upper case. So 'Ch. Sambhaji
+    Nagar', 'CH SAMBHAJINAGAR' and 'Chhatrapati-Sambhajinagar' cannot become
+    three separate territories in the master."""
+    return re.sub(r"[^A-Z0-9]+", "", str(city or "").upper())
+
+
+def _quote_city_map(db: Session) -> dict:
+    """{city key -> branch id}, as the business has mapped it."""
+    return {c.city_key: c.branch_id
+            for c in db.query(PmsQuoteCityBranch).all() if c.branch_id}
+
 
 # ---------------- SR TYPE -> HEAD DEFAULTS (given by business) -------------- #
 
@@ -203,6 +237,49 @@ DEFAULT_MAXTTR_SR_HEADS = {
     "Courtesy Visit": "Courtesy Visit",
     "DG Commissioning": "Others",
 }
+
+# ---- SERVICE LOAD SR TYPE -> HEAD (Annual: Service Load and Response) ------
+# A THIRD grouping of the same MaxTTR SR Type column, and deliberately not a
+# reuse of DEFAULT_MAXTTR_SR_HEADS: that one folds CSP into Warranty and Dealer
+# AMC into AMC because Employee Productivity reports six heads, while the
+# Service Load sheet prints CSP and Dealer AMC as rows of their own. Same file,
+# two legitimate breakdowns — see PmsServiceLoadHead.
+SERVICE_LOAD_HEAD_CHOICES = ["CSP", "Post Warranty", "Warranty", "KOEL AMC",
+                             "Dealer AMC", "Courtesy Visit", "Others"]
+
+DEFAULT_SERVICE_LOAD_SR_HEADS = {
+    "CSP": "CSP",
+    "Paid CSP": "CSP",
+    "WG DG CSP": "CSP",
+    "Post Warranty": "Post Warranty",
+    "Warranty": "Warranty",
+    "Extended Warranty": "Warranty",
+    "Line Rejection": "Warranty",
+    "Campaign": "Warranty",
+    "Revalidation": "Warranty",
+    "KOEL AMC": "KOEL AMC",
+    "KOEL Bandhan": "KOEL AMC",
+    "KOEL Bandhan Plus": "KOEL AMC",
+    "Bandhan Premium": "KOEL AMC",
+    "KOEL Anubandh": "KOEL AMC",
+    "KOEL Anubandhan Plus": "KOEL AMC",
+    "Dealer AMC": "Dealer AMC",
+    "Courtesy Visit": "Courtesy Visit",
+    "DG Commissioning": "Others",
+    "Commercial": "Others",
+    "RECD Kit": "Others",
+    "POT": "Others",
+    "Job Work": "Others",
+}
+
+# The sheet's percentage rows and the AOP figures they are measured against.
+SERVICE_LOAD_METRICS = ("productivity", "resp4", "closed24", "closed48",
+                        "ftr", "fvr")
+
+# FTR / FVR are the two rows of the sheet nothing in any upload can produce, so
+# they are TYPED — an actual percentage per month and per cumulative year, next
+# to the AOP target the rest of the sheet is measured against.
+SERVICE_LOAD_MANUAL_METRICS = ("ftr", "fvr")
 
 # ---------------- FLEXIBLE HEADER MATCHING ---------------------------------- #
 # Same philosophy as the customer Import module: headers are matched on their
@@ -674,17 +751,27 @@ def import_file(db: Session, contents: bytes, filename: str, record_type: str,
     }
 
 
+# pms_upload_batches is shared with the Training Report, which files its own
+# uploads under record_type 'training'. Both of the calls below are the Sales &
+# Labour page's, so they stay on ITS two types — clearing that page's data must
+# not delete the training audit trail (its rows point at those batch ids).
+_SALES_TYPES = ("part", "labour")
+
+
 def clear_all_data(db: Session):
     """Wipe every uploaded sales row + upload batch (targets, SR map and
     saved reports are kept). Used to re-import everything from scratch."""
     rows = db.query(PmsSalesRecord).delete(synchronize_session=False)
-    batches = db.query(PmsUploadBatch).delete(synchronize_session=False)
+    batches = (db.query(PmsUploadBatch)
+               .filter(PmsUploadBatch.record_type.in_(_SALES_TYPES))
+               .delete(synchronize_session=False))
     db.commit()
     return {"success": True, "deleted_rows": rows, "deleted_batches": batches}
 
 
 def list_batches(db: Session, limit: int = 50):
     rows = (db.query(PmsUploadBatch)
+            .filter(PmsUploadBatch.record_type.in_(_SALES_TYPES))
             .order_by(PmsUploadBatch.id.desc()).limit(limit).all())
     return [{
         "id": b.id, "record_type": b.record_type, "file_name": b.file_name,
@@ -735,6 +822,48 @@ _VERSION_SQL = text("""
            (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(name)), 0) FROM dbo.pms_lead_categories),
            (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(fy, scope, scope_key, target_pct)), 0)
               FROM dbo.pms_cdi_targets),
+           (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(fy, branch_id, proj_nos, prior_nos)), 0)
+              FROM dbo.pms_amc_targets),
+           -- Annual Reports: the AMC sheet ships its per-category AOP inside the
+           -- cached payload, so editing one in the AOP master has to move the
+           -- fingerprint or the sheet would keep serving the old target.
+           (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(fy, row_key, aop_nos)), 0)
+              FROM dbo.pms_amc_category_targets),
+           (SELECT COUNT(*) FROM dbo.pms_amc_category_targets),
+           -- The City Master decides which branch a paid quote lands on, so
+           -- mapping a city has to rebuild the AMC & Bandhan Projection sheet.
+           (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(city_key, branch_id)), 0)
+              FROM dbo.pms_quote_city_branch),
+           (SELECT COUNT(*) FROM dbo.pms_quote_city_branch),
+           -- The AMC sheet's Expired and Renewed rows are counted straight out
+           -- of the Expiry Planner, which is UPSERTED on instance + agreement
+           -- number: a re-upload that only moves end dates changes neither the
+           -- row count nor MAX(id), so the last update has to be tracked too.
+           (SELECT COUNT(*) FROM dbo.amc_expiry_planner),
+           (SELECT ISNULL(MAX(id), 0) FROM dbo.amc_expiry_planner),
+           (SELECT ISNULL(CONVERT(VARCHAR(30), MAX(updated_at), 126), '')
+              FROM dbo.amc_expiry_planner),
+           -- Annual Reports: AMC & Bandhan Projection counts the AMC Population
+           -- Report, which is UPSERTED on INSTANCE ID - a re-upload that only
+           -- moves gensets onto their renewed agreement changes neither the row
+           -- count nor MAX(id), so the last update has to be tracked as well.
+           (SELECT COUNT(*) FROM dbo.amc_agreements),
+           (SELECT ISNULL(MAX(id), 0) FROM dbo.amc_agreements),
+           (SELECT ISNULL(CONVERT(VARCHAR(30), MAX(updated_at), 126), '') FROM dbo.amc_agreements),
+           -- The four BANDHAN QUOTE files: the AMC sheet's KOEL Bandhan rows are
+           -- counted from these, on PAYMENT UPDATE DATE TIME. They are UPSERTED on
+           -- the quote's own id, so a re-upload that only fills a payment date in
+           -- on rows that already existed moves neither the count nor MAX(id) -
+           -- exactly the trap the amc_agreements line above documents, and it
+           -- matters more here, because filling that date in IS the sale.
+           (SELECT COUNT(*) FROM dbo.anubandhan_quotes),
+           (SELECT ISNULL(CONVERT(VARCHAR(30), MAX(updated_at), 126), '') FROM dbo.anubandhan_quotes),
+           (SELECT COUNT(*) FROM dbo.anubandhan_plus_quotes),
+           (SELECT ISNULL(CONVERT(VARCHAR(30), MAX(updated_at), 126), '') FROM dbo.anubandhan_plus_quotes),
+           (SELECT COUNT(*) FROM dbo.regular_bandhan),
+           (SELECT ISNULL(CONVERT(VARCHAR(30), MAX(updated_at), 126), '') FROM dbo.regular_bandhan),
+           (SELECT COUNT(*) FROM dbo.bandhan_plus_quotes),
+           (SELECT ISNULL(CONVERT(VARCHAR(30), MAX(updated_at), 126), '') FROM dbo.bandhan_plus_quotes),
            (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(holiday_date, region)), 0) FROM dbo.pms_holidays),
            (SELECT COUNT(*) FROM dbo.pms_holidays),
            (SELECT COUNT(*) FROM dbo.response_time_maxttr),
@@ -748,6 +877,18 @@ _VERSION_SQL = text("""
            (SELECT ISNULL(CONVERT(VARCHAR(30), MAX(updated_at), 126), '') FROM dbo.response_time_maxttr),
            (SELECT COUNT(*) FROM dbo.lms_data),
            (SELECT ISNULL(MAX(id), 0) FROM dbo.lms_data),
+           -- LMS is UPSERTED on LEAD NUMBER, and Employee Productivity now reads
+           -- its QUOTATION TYPE too (OTC quotes are out of Spare Conv. Amount):
+           -- a re-upload that only corrects that column on rows that already
+           -- exist moves neither the count nor MAX(id).
+           (SELECT ISNULL(CONVERT(VARCHAR(30), MAX(updated_at), 126), '') FROM dbo.lms_data),
+           -- 'LMS Data from Insia' carries the ORDER CREATION DATE the two
+           -- Conv. Amount columns are dated on. Upserted on LEAD NUMBER, so a
+           -- re-upload that only fills that date in on existing leads has to
+           -- move the fingerprint as well.
+           (SELECT COUNT(*) FROM dbo.lms_insia),
+           (SELECT ISNULL(MAX(id), 0) FROM dbo.lms_insia),
+           (SELECT ISNULL(CONVERT(VARCHAR(30), MAX(updated_at), 126), '') FROM dbo.lms_insia),
            (SELECT COUNT(*) FROM dbo.efsr_report),
            (SELECT ISNULL(MAX(id), 0) FROM dbo.efsr_report),
            -- EFSR is UPSERTED on (SR NUMBER, SERVICE ENGINEER UID), so a re-upload
@@ -768,7 +909,39 @@ _VERSION_SQL = text("""
            -- was SUM(is_active); that flag is gone (no more soft delete), so the
            -- fingerprint tracks the last upsert instead — an import that only
            -- UPDATES rows changes neither the count nor MAX(id).
-           (SELECT ISNULL(CONVERT(VARCHAR(30), MAX(updated_at), 126), '') FROM dbo.open_sr_load_reports)
+           (SELECT ISNULL(CONVERT(VARCHAR(30), MAX(updated_at), 126), '') FROM dbo.open_sr_load_reports),
+           -- Training Report: upserted on UID + SKILL + TRAINING DATE +
+           -- CATEGORY, so a re-upload that only corrects values on rows that
+           -- already exist moves neither the count nor MAX(id).
+           (SELECT COUNT(*) FROM dbo.pms_training_records),
+           (SELECT ISNULL(MAX(id), 0) FROM dbo.pms_training_records),
+           (SELECT ISNULL(CONVERT(VARCHAR(30), MAX(updated_at), 126), '') FROM dbo.pms_training_records),
+           -- and the manually typed leavers, which the training payload lays
+           -- over the file's CURRENT STATUS: marking one engineer as left
+           -- touches no imported row at all, so without this the page would
+           -- keep serving them as Active out of the cache.
+           (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(uid_no, status, left_on)), 0)
+              FROM dbo.pms_training_status_overrides),
+           (SELECT COUNT(*) FROM dbo.pms_training_status_overrides),
+           -- the typed FTR / FVR figures of the Service Load sheet
+           (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(metric, period, value)), 0)
+              FROM dbo.pms_service_load_manual),
+           (SELECT COUNT(*) FROM dbo.pms_service_load_manual),
+           -- and its typed SE headcount per branch
+           (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(branch_id, se_count)), 0)
+              FROM dbo.pms_service_load_se_count),
+           (SELECT COUNT(*) FROM dbo.pms_service_load_se_count),
+           -- Annual Reports: Service Load and Response. Its three masters are
+           -- CHECKSUM_AGG'd like every other small master, so re-heading one SR
+           -- Type or editing one monthly AOP figure rebuilds the sheet at once.
+           (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(name)), 0) FROM dbo.pms_service_load_heads),
+           (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(sr_type, head)), 0) FROM dbo.pms_service_load_sr_type_map),
+           (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(target_month, branch_id, sr_target)), 0)
+              FROM dbo.pms_service_load_targets),
+           (SELECT COUNT(*) FROM dbo.pms_service_load_targets),
+           (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(fy, metric, scope, scope_key, target_value)), 0)
+              FROM dbo.pms_service_load_pct_targets),
+           (SELECT COUNT(*) FROM dbo.pms_service_load_pct_targets)
 """)
 
 
@@ -1266,42 +1439,250 @@ def save_targets_year(db: Session, fy_start: int, rows: list, user_id: str,
             **get_targets_year_payload(db, fy_start)}
 
 
-# ---------------- SR TYPE MASTER ------------------------------------------- #
+# ---------------- HEAD MASTER (shared by the four SR Type masters) ---------- #
+# ONE list of heads, four mappings. The Sales & Labour, MaxTTR, EFSR and Service
+# Load masters each keep their OWN sr_type -> head mapping — the same SR Type is
+# legitimately grouped differently by different reports — but the list of heads
+# they pick from is common: add or delete a head in any of the four tabs and the
+# other three follow.
+#
+# WHY FOUR TABLES STILL EXIST: each report prints its heads in ITS OWN order (the
+# Service Load sheet leads with CSP, Employee Productivity with Warranty), so
+# every master keeps its own row order. _sync_head_master() keeps the four tables
+# in step name-for-name — a head added anywhere is APPENDED to the other three,
+# never reordering what is already there — and delete_head_common() removes a
+# name from all four at once.
+#
+# A head no SR Type in a master maps to is NOT a column / row of that master's
+# report — see _report_heads(). That is what keeps the shared list from opening
+# an empty 'CSP' column in Employee Productivity or an 'OTC Order' row on the
+# Service Load sheet: the MAPPING decides what a report prints, not membership
+# of the head list.
 
-def list_heads(db: Session):
-    """Head master rows (seeded with the five default heads on first use)."""
-    if db.query(PmsHead).count() == 0:
-        for h in HEAD_CHOICES:
-            db.add(PmsHead(name=h, created_by="system"))
+SR_HEAD_MASTERS = [
+    # key,           label,                               AOP tab,   head model,         mapping model,           defaults,                  sr_type len
+    ("sales",        "SR Type Master (Sales and Labour)", "srtypes", PmsHead,            PmsSrTypeMapping,        HEAD_CHOICES,              120),
+    ("maxttr",       "SR Type Master (MaxTTR)",           "mxtypes", PmsMaxttrHead,      PmsMaxttrSrTypeMap,      MAXTTR_HEAD_CHOICES,       200),
+    ("efsr",         "SR Type Master (EFSR)",             "eftypes", PmsEfsrHead,        PmsEfsrSrTypeMap,        EFSR_HEAD_CHOICES,         200),
+    ("service_load", "SR Type Master (Service Load)",     "sltypes", PmsServiceLoadHead, PmsServiceLoadSrTypeMap, SERVICE_LOAD_HEAD_CHOICES, 200),
+]
+
+SR_MASTER_BY_KEY = {m[0]: m for m in SR_HEAD_MASTERS}
+
+
+def _head_key(name) -> str:
+    """Heads compare on their squashed upper-case form, so 'KOEL  amc' and
+    'KOEL AMC' can never become two heads."""
+    return re.sub(r"\s+", " ", str(name or "").strip()).upper()
+
+
+def _sync_head_master(db: Session):
+    """Make the four head tables carry the same set of names.
+
+    Seeds an empty table from its own defaults, then appends to every table any
+    name the other three (or their own mappings) already carry. Appending only —
+    the order a report prints its heads in is the order of ITS table."""
+    present = {}          # master key -> {head keys it already has}
+    union = {}            # head key -> display name (first seen wins)
+    for key, _label, _tab, HeadModel, MapModel, defaults, _ln in SR_HEAD_MASTERS:
+        rows = db.query(HeadModel).order_by(HeadModel.id).all()
+        if not rows:
+            for h in defaults:
+                db.add(HeadModel(name=h, created_by="system"))
+            db.commit()
+            rows = db.query(HeadModel).order_by(HeadModel.id).all()
+        present[key] = {_head_key(r.name) for r in rows}
+        for r in rows:
+            union.setdefault(_head_key(r.name), r.name)
+        # a head already mapped but missing from the list would leave that SR
+        # Type showing a value its own dropdown does not offer — pull it in too
+        for (h,) in (db.query(MapModel.head)
+                     .filter(MapModel.head.isnot(None), MapModel.head != "")
+                     .distinct().all()):
+            if _head_key(h):
+                union.setdefault(_head_key(h), str(h).strip())
+
+    added = 0
+    for key, _label, _tab, HeadModel, _M, _d, _ln in SR_HEAD_MASTERS:
+        for hk, name in union.items():
+            if hk not in present[key]:
+                db.add(HeadModel(name=name[:60], created_by="system"))
+                added += 1
+    if added:
         db.commit()
-    rows = db.query(PmsHead).order_by(PmsHead.id).all()
-    return [{"id": h.id, "name": h.name} for h in rows]
 
 
-def add_head(db: Session, name: str, user_id: str):
+def list_heads_for(db: Session, master_key: str):
+    """The shared head list, in the order THIS master prints them."""
+    _sync_head_master(db)
+    HeadModel = SR_MASTER_BY_KEY[master_key][3]
+    return [{"id": h.id, "name": h.name}
+            for h in db.query(HeadModel).order_by(HeadModel.id).all()]
+
+
+def add_head_common(db: Session, name: str, user_id: str, master_key: str):
+    """Add a head to ALL FOUR SR Type masters at once."""
     name = (_clean_str(name, 60) or "").strip()
     if not name:
         return {"success": False, "message": "Head name is required"}
-    exists = db.query(PmsHead).filter(PmsHead.name.ilike(name)).first()
-    if exists:
-        return {"success": False, "message": f"Head “{exists.name}” already exists"}
-    db.add(PmsHead(name=name, created_by=user_id))
+    _sync_head_master(db)
+    hk = _head_key(name)
+    for _k, _label, _tab, HeadModel, _M, _d, _ln in SR_HEAD_MASTERS:
+        for row in db.query(HeadModel).all():
+            if _head_key(row.name) == hk:
+                return {"success": False,
+                        "message": f"Head “{row.name}” already exists"}
+    for _k, _label, _tab, HeadModel, _M, _d, _ln in SR_HEAD_MASTERS:
+        db.add(HeadModel(name=name, created_by=user_id))
     db.commit()
-    return {"success": True, "items": list_heads(db)}
+    return {"success": True, "items": list_heads_for(db, master_key),
+            "message": f"Head “{name}” added to all four SR Type masters"}
+
+
+def delete_head_common(db: Session, head_id: int, master_key: str):
+    """Remove a head from ALL FOUR masters — refused while ANY of them still
+    maps an SR Type to it, with the message naming where it is still in use."""
+    _sync_head_master(db)
+    HeadModel = SR_MASTER_BY_KEY[master_key][3]
+    row = db.query(HeadModel).filter(HeadModel.id == head_id).first()
+    if not row:
+        return {"success": False, "message": "Head not found"}
+    name, hk = row.name, _head_key(row.name)
+
+    used = []
+    for _k, label, _tab, _H, MapModel, _d, _ln in SR_HEAD_MASTERS:
+        n = sum(1 for (h,) in db.query(MapModel.head)
+                .filter(MapModel.head.isnot(None), MapModel.head != "").all()
+                if _head_key(h) == hk)
+        if n:
+            used.append(f"{label} ({n})")
+    if used:
+        return {"success": False,
+                "message": f"“{name}” is still mapped in "
+                           f"{', '.join(used)} — clear those first"}
+
+    for _k, _label, _tab, HeadModel2, _M, _d, _ln in SR_HEAD_MASTERS:
+        for r in db.query(HeadModel2).all():
+            if _head_key(r.name) == hk:
+                db.delete(r)
+    db.commit()
+    return {"success": True, "items": list_heads_for(db, master_key),
+            "message": f"Head “{name}” removed from all four SR Type masters"}
+
+
+def _report_heads(db: Session, master_key: str):
+    """The heads a report prints, in its own master's order: the ones some SR
+    Type in THAT master actually maps to.
+
+    The head list is shared by the four masters, so membership alone cannot
+    decide a report's columns — a head only Service Load uses would otherwise
+    open an empty column in Employee Productivity. A head that IS mapped but has
+    no rows in the data still prints (an empty column is the honest answer
+    there); one nothing maps to does not."""
+    _k, _label, _tab, HeadModel, MapModel, _d, _ln = SR_MASTER_BY_KEY[master_key]
+    rows = db.query(HeadModel).order_by(HeadModel.id).all()
+    if not rows:                                   # fresh DB — seed, then read
+        _sync_head_master(db)
+        rows = db.query(HeadModel).order_by(HeadModel.id).all()
+    used = {_head_key(h) for (h,) in
+            db.query(MapModel.head)
+            .filter(MapModel.head.isnot(None), MapModel.head != "").distinct().all()
+            if _head_key(h)}
+    return [h.name for h in rows if _head_key(h.name) in used]
+
+
+# ---------------- THE SAME SR TYPE IN MORE THAN ONE MASTER ------------------ #
+# 'Bandhan Premium' is in all four masters; 'RECD Kit' only in EFSR. Mapping it
+# in one tab and then having to hunt for it in the others is how the four drift
+# apart, so a save OFFERS to carry the head across — and only offers: nothing is
+# written until the user ticks it, and a master that does not already have that
+# SR Type is never listed (this links what exists, it never creates rows).
+
+def _sr_key(s) -> str:
+    return re.sub(r"\s+", " ", str(s or "").strip()).upper()
+
+
+def cross_check_sr_types(db: Session, source: str, items: list):
+    """Which OTHER masters carry the SR Types just saved in `source`, and what
+    head each one holds today. Read-only — this is the offer, not the write."""
+    if source not in SR_MASTER_BY_KEY:
+        return {"success": False, "message": "Unknown SR Type master"}
+
+    wanted = {}
+    for it in items or []:
+        sr = re.sub(r"\s+", " ", str((it or {}).get("sr_type") or "").strip())
+        if sr:
+            wanted[_sr_key(sr)] = {"sr_type": sr,
+                                   "head": (_clean_str((it or {}).get("head"), 60) or "")}
+    if not wanted:
+        return {"success": True, "matches": []}
+
+    found = {}
+    for key, label, tab, _H, MapModel, _d, _ln in SR_HEAD_MASTERS:
+        if key == source:
+            continue
+        for row in db.query(MapModel).all():
+            k = _sr_key(row.sr_type)
+            if k not in wanted:
+                continue
+            cur = (row.head or "").strip()
+            if _head_key(cur) == _head_key(wanted[k]["head"]):
+                continue                      # already agrees — nothing to offer
+            found.setdefault(k, []).append({
+                "master": key, "label": label, "tab": tab,
+                "sr_type": row.sr_type, "current_head": cur,
+            })
+
+    matches = [{"sr_type": wanted[k]["sr_type"], "head": wanted[k]["head"],
+                "targets": t} for k, t in found.items()]
+    matches.sort(key=lambda m: m["sr_type"].upper())
+    return {"success": True, "matches": matches}
+
+
+def apply_cross_sr_types(db: Session, targets: list, user_id: str,
+                         allowed_masters=None):
+    """Copy a head onto the SAME SR Type in another master. Only rows that
+    already exist are touched, and only in masters the caller may edit."""
+    applied = 0
+    by_master, blocked = {}, set()
+    for t in targets or []:
+        key = str((t or {}).get("master") or "")
+        m = SR_MASTER_BY_KEY.get(key)
+        sr = re.sub(r"\s+", " ", str((t or {}).get("sr_type") or "").strip())
+        if not m or not sr:
+            continue
+        if allowed_masters is not None and key not in allowed_masters:
+            blocked.add(m[1])
+            continue
+        MapModel = m[4]
+        head = _clean_str((t or {}).get("head"), 60)
+        row = next((r for r in db.query(MapModel).all()
+                    if _sr_key(r.sr_type) == _sr_key(sr)), None)
+        if not row:
+            continue                          # gone since the offer was made
+        row.head = head
+        row.updated_by = user_id
+        applied += 1
+        by_master[m[1]] = by_master.get(m[1], 0) + 1
+    if applied:
+        db.commit()
+    return {"success": True, "applied": applied, "by_master": by_master,
+            "blocked": sorted(blocked)}
+
+
+# ---------------- SR TYPE MASTER (SALES AND LABOUR) ------------------------- #
+
+def list_heads(db: Session):
+    """Head master rows — the list shared by the four SR Type masters."""
+    return list_heads_for(db, "sales")
+
+
+def add_head(db: Session, name: str, user_id: str):
+    return add_head_common(db, name, user_id, "sales")
 
 
 def delete_head(db: Session, head_id: int):
-    row = db.query(PmsHead).filter(PmsHead.id == head_id).first()
-    if not row:
-        return {"success": False, "message": "Head not found"}
-    used = (db.query(PmsSrTypeMapping)
-            .filter(PmsSrTypeMapping.head == row.name).count())
-    if used:
-        return {"success": False,
-                "message": f"“{row.name}” is used by {used} SR type(s) — remap them first"}
-    db.delete(row)
-    db.commit()
-    return {"success": True, "items": list_heads(db)}
+    return delete_head_common(db, head_id, "sales")
 
 
 def _seed_sr_defaults(db: Session):
@@ -1379,38 +1760,17 @@ def reset_sr_types(db: Session, user_id: str):
 # SR Type column — this is what the Employee Productivity report groups by.
 
 def list_maxttr_heads(db: Session):
-    if db.query(PmsMaxttrHead).count() == 0:
-        for h in MAXTTR_HEAD_CHOICES:
-            db.add(PmsMaxttrHead(name=h, created_by="system"))
-        db.commit()
-    return [{"id": h.id, "name": h.name}
-            for h in db.query(PmsMaxttrHead).order_by(PmsMaxttrHead.id).all()]
+    """The shared head list, in the order the Employee Productivity report
+    prints its SR Type columns."""
+    return list_heads_for(db, "maxttr")
 
 
 def add_maxttr_head(db: Session, name: str, user_id: str):
-    name = (_clean_str(name, 60) or "").strip()
-    if not name:
-        return {"success": False, "message": "Head name is required"}
-    exists = db.query(PmsMaxttrHead).filter(PmsMaxttrHead.name.ilike(name)).first()
-    if exists:
-        return {"success": False, "message": f"Head “{exists.name}” already exists"}
-    db.add(PmsMaxttrHead(name=name, created_by=user_id))
-    db.commit()
-    return {"success": True, "items": list_maxttr_heads(db)}
+    return add_head_common(db, name, user_id, "maxttr")
 
 
 def delete_maxttr_head(db: Session, head_id: int):
-    row = db.query(PmsMaxttrHead).filter(PmsMaxttrHead.id == head_id).first()
-    if not row:
-        return {"success": False, "message": "Head not found"}
-    used = (db.query(func.count(PmsMaxttrSrTypeMap.id))
-            .filter(PmsMaxttrSrTypeMap.head == row.name).scalar()) or 0
-    if used:
-        return {"success": False,
-                "message": f"“{row.name}” is mapped to {used} SR type(s) — clear those first"}
-    db.delete(row)
-    db.commit()
-    return {"success": True, "items": list_maxttr_heads(db)}
+    return delete_head_common(db, head_id, "maxttr")
 
 
 def _seed_maxttr_sr_defaults(db: Session):
@@ -1487,38 +1847,16 @@ def reset_maxttr_sr_types(db: Session, user_id: str):
 # Drives the 'Allocate SR' SR Type split of the Employee Productivity report.
 
 def list_efsr_heads(db: Session):
-    if db.query(PmsEfsrHead).count() == 0:
-        for h in EFSR_HEAD_CHOICES:
-            db.add(PmsEfsrHead(name=h, created_by="system"))
-        db.commit()
-    return [{"id": h.id, "name": h.name}
-            for h in db.query(PmsEfsrHead).order_by(PmsEfsrHead.id).all()]
+    """The shared head list, in the order the EFSR / Allocate SR columns print."""
+    return list_heads_for(db, "efsr")
 
 
 def add_efsr_head(db: Session, name: str, user_id: str):
-    name = (_clean_str(name, 60) or "").strip()
-    if not name:
-        return {"success": False, "message": "Head name is required"}
-    exists = db.query(PmsEfsrHead).filter(PmsEfsrHead.name.ilike(name)).first()
-    if exists:
-        return {"success": False, "message": f"Head “{exists.name}” already exists"}
-    db.add(PmsEfsrHead(name=name, created_by=user_id))
-    db.commit()
-    return {"success": True, "items": list_efsr_heads(db)}
+    return add_head_common(db, name, user_id, "efsr")
 
 
 def delete_efsr_head(db: Session, head_id: int):
-    row = db.query(PmsEfsrHead).filter(PmsEfsrHead.id == head_id).first()
-    if not row:
-        return {"success": False, "message": "Head not found"}
-    used = (db.query(func.count(PmsEfsrSrTypeMap.id))
-            .filter(PmsEfsrSrTypeMap.head == row.name).scalar()) or 0
-    if used:
-        return {"success": False,
-                "message": f"“{row.name}” is mapped to {used} SR type(s) — clear those first"}
-    db.delete(row)
-    db.commit()
-    return {"success": True, "items": list_efsr_heads(db)}
+    return delete_head_common(db, head_id, "efsr")
 
 
 def _seed_efsr_sr_defaults(db: Session):
@@ -1935,6 +2273,117 @@ def list_se_uids(db: Session, branch_names=None):
              "in_maxttr": bool(r.src_maxttr), "in_lms": bool(r.src_lms),
              "in_efsr": bool(r.src_efsr)}
             for r in db.query(PmsSeUid).order_by(PmsSeUid.se_name).all()]
+
+
+def se_performance_roster(db: Session):
+    """The SE Performance report's roster — REAL branches and REAL engineers.
+
+    Branches are the AOP master's plus the static ERP list (the same set the SE
+    UID Master pins an engineer to), each carrying its region so the report can
+    split MH from KA. Engineers come from the SE UID MASTER itself, because that
+    is where the business maintains the roster; a row with no branch pinned is
+    skipped, since every row of the report has to sit under a branch.
+
+    Alongside each engineer this also returns what the TRAINING REPORT already
+    knows about him — employee ticket number, hire date, and the skills he has
+    been through with their dates. That is master data the business has
+    uploaded, not a counted figure, so the report shows it as it stands.
+
+    EVERY OTHER FIGURE ON THE PAGE IS GENERATED CLIENT-SIDE FOR NOW. The
+    counting rules for the twelve commitments are not agreed yet, so nothing
+    here touches an import table; when they are, this is the function that grows
+    them and the front end stops generating.
+    """
+    from app.models.pms_model import PmsTrainingRecord
+
+    regions = {b: r for r, b, _n in ERP_BRANCHES}
+    for bid, reg in (db.query(PmsBranchTarget.branch_id, PmsBranchTarget.region)
+                     .distinct().all()):
+        b = _norm_branch_id(bid)
+        if b and (reg or "").strip():
+            regions[b] = reg.strip().upper()
+
+    branches = [dict(b, region=regions.get(b["branch_id"], "MH"))
+                for b in se_uid_branches(db)]
+    known = {b["branch_id"] for b in branches}
+
+    # ---- what the Training Report knows, keyed STRICTLY BY UID ------------
+    # NOTE: the EMPLOYEE CODE is deliberately NOT taken from here. The Training
+    # Report's EMPLOYEE TICKET NUMBER is that file's own reference and the
+    # business does not recognise it as the engineer's employee code, so
+    # printing it on a performance report put a number on the page that reads
+    # as an id but is not the one anybody uses. The report shows a dash instead.
+    # When the SE UID Master gains an employee-code column, read it there and
+    # set `code` from it — that is the only change needed.
+    # It was also matching on letters-only name, to fill in engineers whose SE
+    # UID Master row has no UID yet. That is how one man's employee ticket
+    # number lands on another man's report: two engineers share a name, or a
+    # name is spelled the same in two files, and the report then shows a real
+    # number that belongs to somebody else. A UID is the identity here; where
+    # there is none, the report shows a dash and the SE UID Master is the place
+    # to fix it.
+    hired, trainings = {}, {}
+
+    for r in db.query(PmsTrainingRecord).all():
+        uid = (r.uid_no or "").strip()
+        if not uid:
+            continue
+        if r.hire_date and uid not in hired:
+            hired[uid] = r.hire_date.isoformat()
+        skill = (r.skill or "").strip()
+        if not skill:
+            continue
+        extra = {}
+        if r.extra_data:
+            try:
+                extra = json.loads(r.extra_data) or {}
+            except Exception:
+                extra = {}
+        cat = date = ""
+        for k, v in extra.items():
+            kk = _tight(k)
+            if kk == "category" and not cat:
+                cat = str(v or "").strip()
+            elif kk == "trainingdate" and not date:
+                date = str(v or "").strip()[:10]
+        trainings.setdefault(uid, {})
+        cur = trainings[uid].get(skill)
+        if cur is None:
+            trainings[uid][skill] = {"cats": [cat] if cat else [], "date": date}
+        else:
+            if cat and cat not in cur["cats"]:
+                cur["cats"].append(cat)
+            if date > (cur["date"] or ""):
+                cur["date"] = date
+
+    engineers = []
+    for r in db.query(PmsSeUid).order_by(PmsSeUid.se_name).all():
+        bid = _norm_branch_id(r.branch_id or "")
+        if bid not in known:
+            continue
+        uids = _uid_list(r.se_uid)
+        uid = uids[0] if uids else ""
+        name = (r.se_name or "").strip()
+
+        # Nothing here is invented and nothing is guessed. The hire date and the
+        # training hang off the engineer's own UID; no UID means no claim, and
+        # the report prints a dash. The employee code has no source at all yet
+        # (see the note above). `key` is the report's own internal handle,
+        # never shown.
+        tr = trainings.get(uid, {}) if uid else {}
+        engineers.append({
+            "key": "row%d" % r.id,
+            "id": r.id,
+            "uid": uid,
+            "name": name,
+            "branch_id": bid,
+            "code": "",          # see the note above — no source for it yet
+            "hired": (hired.get(uid) or "") if uid else "",
+            "trainings": sorted(
+                ([sk, " · ".join(v["cats"]), v["date"]] for sk, v in tr.items()),
+                key=lambda t: t[2], reverse=True),
+        })
+    return {"success": True, "branches": branches, "engineers": engineers}
 
 
 def se_uid_payload(db: Session, user_id: str = None, sync: bool = False):
@@ -2881,9 +3330,69 @@ def _working_days_master(db: Session):
     return {"months": months, "universal": universal}
 
 
-def employee_productivity_data(db: Session):
-    """Cached wrapper — see _employee_productivity_data."""
-    return _cached(db, ("emp_prod",), lambda: _employee_productivity_data(db))
+# ---------------- BRANCH SCOPE (who sees which branches) ------------------- #
+# Employee Productivity and SR Allocation are branch-wise reports, and a user
+# only gets the branches they belong to: the branch on their Profile plus every
+# branch ticked in their branch access list (a Branch Admin often has several).
+# The Master Admin, and ANY user carrying the HO branch, see the whole report —
+# HO is the head office, so its people read every branch. Resolved from the DB
+# in the routes (never from the client-supplied role header) and applied HERE,
+# on the payload, so a scoped user cannot reach another branch's figures by
+# calling the endpoint directly.
+#
+# Both payloads share one shape — branches / branch_ids / branch_regions /
+# groups, employees[{n,u,b}] carrying a branch index, and record rows whose
+# FIRST element is an employee (or, for a few, a branch) index — so one filter
+# serves both: drop the branches that are out of scope, drop the employees and
+# rows that hang off them, and renumber what is left.
+
+def _scope_report_to_branches(data, allowed, emp_keys=(), branch_keys=()):
+    """The report payload cut down to `allowed` branch ids (None = everything)."""
+    if allowed is None or not data or not data.get("success"):
+        return data
+    ok = {_norm_branch_id(b) for b in allowed if str(b or "").strip()}
+    branch_ids = data.get("branch_ids") or []
+    keep = [i for i, b in enumerate(branch_ids) if b in ok]
+    if len(keep) == len(branch_ids):
+        return data                      # nothing to hide — the cached payload
+    b_map = {old: new for new, old in enumerate(keep)}
+    regions = data.get("branch_regions") or []
+    out = dict(data)
+    out["branches"] = [(data.get("branches") or [])[i] for i in keep]
+    out["branch_ids"] = [branch_ids[i] for i in keep]
+    out["branch_regions"] = [regions[i] for i in keep] if regions else []
+    # A group keeps only its visible branches; a group left with none goes.
+    out["groups"] = [m for m in ([b_map[b] for b in g if b in b_map]
+                                 for g in (data.get("groups") or [])) if m]
+    emps = data.get("employees") or []
+    keep_e = [i for i, e in enumerate(emps) if e.get("b") in b_map]
+    e_map = {old: new for new, old in enumerate(keep_e)}
+    out["employees"] = [dict(emps[i], b=b_map[emps[i]["b"]]) for i in keep_e]
+    for k in emp_keys:
+        rows = data.get(k)
+        if rows is not None:
+            out[k] = [[e_map[r[0]]] + list(r[1:]) for r in rows if r[0] in e_map]
+    for k in branch_keys:                # rows keyed on a BRANCH, not a person
+        rows = data.get(k)
+        if rows is not None:
+            out[k] = [[b_map[r[0]]] + list(r[1:]) for r in rows if r[0] in b_map]
+    return out
+
+
+# The record arrays of each report, by what their first element indexes.
+EP_EMP_RECORDS = ("sr_records", "lead_records", "conv_records",
+                  "present_records", "allocate_records", "cdi_records")
+EP_BRANCH_RECORDS = ("other_conv_records",)
+SRAR_EMP_RECORDS = ("alloc_records", "close_records")
+SRAR_BRANCH_RECORDS = ("open_records",)
+
+
+def employee_productivity_data(db: Session, allowed_branches=None):
+    """Cached wrapper — see _employee_productivity_data. `allowed_branches`
+    (None = every branch) scopes the payload to the caller's branches."""
+    data = _cached(db, ("emp_prod",), lambda: _employee_productivity_data(db))
+    return _scope_report_to_branches(data, allowed_branches,
+                                     EP_EMP_RECORDS, EP_BRANCH_RECORDS)
 
 
 def _employee_productivity_data(db: Session):
@@ -2933,16 +3442,37 @@ def _employee_productivity_data(db: Session):
                          on LEAD CREATED DATE, split by 'Lead Raised For'
                          through the Lead Category Master
       Conv. Amounts   -> those leads' PART INVOICE AMOUNT (Spare) and LABOUR
-                         INVOICE AMOUNT (Labour)
+                         INVOICE AMOUNT (Labour), dated on the ORDER's own
+                         creation date, NOT the lead's. The date lives only in
+                         'LMS Data from Insia' (lms_insia), looked up per LEAD
+                         NUMBER: a lead with no order there, or whose ORDER
+                         CREATION DATE is blank / '0' / 'N/A', contributes no
+                         amount at all. Spare additionally EXCLUDES rows whose
+                         LMS QUOTATION TYPE is 'OTC Quotation'. The lead COUNTS
+                         above are untouched by any of this - they stay on LEAD
+                         CREATED DATE and stay engineer-attributed.
+      Other Conv.     -> its own PAIR of columns holding the conversions that
+                         belong to NO engineer: the lead carries no Service
+                         Engineer UID, or a UID the SE UID Master does not know.
+                         Those amounts used to be dropped, which is most of the
+                         money (61 of 75 matched leads in a real August window).
+                         Kept per BRANCH, never as an engineer row - an 'Other'
+                         pseudo-engineer would be counted in every branch's SE
+                         headcount and hand it a phantom engineer's working
+                         days. Prints on branch / total rows only, and is summed
+                         into the Grand Total.
 
     The payload stays RAW per-day records — sr_records[[empIdx, isoDate,
     headIdx, count]], allocate_records[[empIdx, isoDate, efsrHeadIdx, count]],
-    lead_records[[empIdx, isoDate, catIdx, count, spare, labour]] and
+    lead_records[[empIdx, isoLeadCreatedDate, catIdx, count]],
+    conv_records[[empIdx, isoOrderCreationDate, spare, labour]],
+    other_conv_records[[BRANCHIdx, isoOrderCreationDate, spare, labour]] and
     present_records[[empIdx, isoTaskEndDate]] — so the period / week
     windowing, branch rollups and every derived figure are recomputed
     client-side without a refetch."""
     from app.models.customer_model import (ResponseTimeMaxTTR, LMSData,
-                                           EFSRReport, CDIDetailReport)
+                                           EFSRReport, CDIDetailReport,
+                                           LMSInsia)
 
     usable = (ResponseTimeMaxTTR.sr_close_date.isnot(None),
               ResponseTimeMaxTTR.se_name.isnot(None),
@@ -2957,7 +3487,7 @@ def _employee_productivity_data(db: Session):
 
 
     # ---- SR TYPE -> head (SR TYPE MASTER (MAXTTR)) ------------------------
-    heads = [h["name"] for h in list_maxttr_heads(db)]
+    heads = _report_heads(db, "maxttr")
     head_idx = {h: i for i, h in enumerate(heads)}
     sr_head = {}
     for m in db.query(PmsMaxttrSrTypeMap).all():
@@ -2974,7 +3504,7 @@ def _employee_productivity_data(db: Session):
         return head_idx[h]
 
     # ---- EFSR SR TYPE -> head ('SR Type Master (EFSR)') --------------------
-    efsr_heads = [h["name"] for h in list_efsr_heads(db)]
+    efsr_heads = _report_heads(db, "efsr")
     efsr_idx = {h: i for i, h in enumerate(efsr_heads)}
     efsr_map = {}
     for m in db.query(PmsEfsrSrTypeMap).all():
@@ -3113,22 +3643,54 @@ def _employee_productivity_data(db: Session):
                 return hit
         return cands[0]
 
+    # ---- 'Other' — conversions that belong to no engineer -------------------
+    # A lead with NO Service Engineer UID (61 of the 75 matched leads in a real
+    # August window) still converted, and the money still belongs to its BRANCH.
+    # Dropping it made the two amount columns read a fraction of the truth.
+    #
+    # It is kept per BRANCH, NOT as an engineer row: an 'Other' pseudo-engineer
+    # (the first cut, 2026-08-25) landed in the roster, so every branch header
+    # counted one SE too many and the branch gained a phantom engineer's working
+    # days. As its own record stream it stays out of the roster entirely and
+    # prints in its own pair of columns, on branch and total rows only.
+    other_convs = {}                     # (branch, iso ORDER date) -> [spare, labour]
+
+    # ---- ORDER CREATION DATE ('LMS Data from Insia', keyed on LEAD NUMBER) -
+    # The two Conv. Amount columns are dated on the ORDER, not on the lead: an
+    # order raised in August against a July lead is August conversion. That date
+    # exists only in the second LMS file, so it is looked up per LEAD NUMBER.
+    # A blank / '0' / 'N/A' ORDER CREATION DATE parses to NULL at import time,
+    # so those rows are filtered out here and the lead simply has no order date.
+    order_date_of = {}
+    for lead_no, ordered in (db.query(LMSInsia.lead_number,
+                                      LMSInsia.order_creation_date)
+                             .filter(LMSInsia.lead_number.isnot(None),
+                                     LMSInsia.order_creation_date.isnot(None))
+                             .all()):
+        okey = (lead_no or "").strip().upper()
+        if okey and okey not in order_date_of:
+            order_date_of[okey] = (ordered.date() if isinstance(ordered, datetime)
+                                   else ordered)
+
     # ---- LEADS (LMS file, keyed on SERVICE ENGINEER UID) -------------------
+    # The UID / created-date filters are gone from the QUERY on purpose: a lead
+    # with neither still carries a conversion that belongs to its branch. The
+    # lead COUNTS below are still gated on a UID the SE UID Master resolves, so
+    # the count columns hold exactly the population they always did — only the
+    # two amount columns see the wider set, through their 'Other' sub-column.
     lead_rows = (db.query(LMSData.lead_number, LMSData.service_engineer_uid,
                           LMSData.service_engineer_name, LMSData.branch_id,
                           LMSData.branch_name, LMSData.lead_created_date,
                           LMSData.lead_raised_for, LMSData.part_invoice_amount,
-                          LMSData.labour_invoice_amount)
-                 .filter(LMSData.service_engineer_uid.isnot(None),
-                         LMSData.service_engineer_uid != "",
-                         LMSData.lead_created_date.isnot(None))
+                          LMSData.labour_invoice_amount, LMSData.quotation_type)
                  .all())
 
-    leads = {}                           # (emp, iso created date, cat) -> [n, spare, labour]
+    leads = {}                           # (emp, iso created date, cat) -> lead count
+    convs = {}                           # (emp, iso ORDER creation date) -> [spare, labour]
     seen_leads = set()                   # lead numbers already counted (unique)
     unlinked_leads = 0
     for i, (lead_no, uid, se_name, l_bid, l_bname, created, raised_for,
-            part_amt, lab_amt) in enumerate(lead_rows):
+            part_amt, lab_amt, qtype) in enumerate(lead_rows):
         lkey = (lead_no or "").strip().upper() or f"#row{i}"
         if lkey in seen_leads:
             continue
@@ -3141,26 +3703,54 @@ def _employee_productivity_data(db: Session):
         for t in tights_of_uid.get(ukey, []):
             cands.extend(by_tight_key.get(t, []))
         ei = _pick(cands, bi_lms)
-        if ei is None:
+        if ei is None and ukey:
             label = name_of_uid.get(ukey)
-            if not label:
-                # This UID is in no master row — the lead cannot be attributed.
-                # Surfaced as meta.unlinked_leads so the master can be fixed.
+            if label:
+                # Known engineer with no SRs of their own — give them a row.
+                ei = _employee(label, _place(label, l_bid))
+            else:
+                # This UID is in no master row — the lead cannot be attributed
+                # to an engineer. Surfaced as meta.unlinked_leads so the master
+                # can be fixed; its MONEY still reaches the branch, below.
                 unlinked_leads += 1
-                continue
-            # Known engineer with no SRs of their own — give them a row.
-            ei = _employee(label, _place(label, l_bid))
 
-        d = created.date() if isinstance(created, datetime) else created
-        ci = lead_cat_of(raised_for)
-        slot = leads.setdefault((ei, d.isoformat(), ci), [0, 0.0, 0.0])
-        slot[0] += 1
-        slot[1] += _parse_amount(part_amt)
-        slot[2] += _parse_amount(lab_amt)
-        if min_d is None or d < min_d:
-            min_d = d
-        if max_d is None or d > max_d:
-            max_d = d
+        # COUNTS stay on LEAD CREATED DATE, and stay engineer-attributed: this
+        # is the same population the count columns always had.
+        if ei is not None and created is not None:
+            d = created.date() if isinstance(created, datetime) else created
+            ci = lead_cat_of(raised_for)
+            lk = (ei, d.isoformat(), ci)
+            leads[lk] = leads.get(lk, 0) + 1
+            if min_d is None or d < min_d:
+                min_d = d
+            if max_d is None or d > max_d:
+                max_d = d
+
+        # AMOUNTS are dated on the ORDER instead — a lead with no order in
+        # 'LMS Data from Insia' converts to nothing and is skipped entirely.
+        od = order_date_of.get(lkey)
+        if od is None:
+            continue
+        # An OTC quote is an over-the-counter sale, not this engineer's
+        # conversion, so it is out of the SPARE column. Labour is unaffected.
+        spare = 0.0 if _tight(qtype) == "OTCQUOTATION" else _parse_amount(part_amt)
+        labour = _parse_amount(lab_amt)
+        if spare or labour:
+            if ei is not None:
+                slot = convs.setdefault((ei, od.isoformat()), [0.0, 0.0])
+            else:
+                # No engineer -> the BRANCH's 'Other' pair of columns, never the bin.
+                bi_other = _branch(_norm_branch_id(l_bid), l_bname)
+                slot = other_convs.setdefault((bi_other, od.isoformat()), [0.0, 0.0])
+            slot[0] += spare
+            slot[1] += labour
+            # The order can fall outside every other file's window, so the
+            # page's calendar has to stretch to cover it — otherwise the
+            # conversion would be clipped out of every selectable period.
+            if min_d is None or od < min_d:
+                min_d = od
+            if max_d is None or od > max_d:
+                max_d = od
 
     # ---- ALLOCATE SR (EFSR Report, matched on SERVICE ENGINEER UID) --------
     # Counted on TASK ASSIGNED DATE — the date the SR was given to the
@@ -3223,14 +3813,15 @@ def _employee_productivity_data(db: Session):
             max_d = d
 
     # Nothing anywhere -> an empty payload the client renders as "no data".
-    if not rows and not leads and not allocs and not cdis:
+    if not rows and not leads and not convs and not other_convs and not allocs and not cdis:
         return {"success": True,
                 "meta": {"min_date": None, "max_date": None,
                          "unlinked_leads": unlinked_leads},
                 "branches": [], "branch_ids": [], "branch_regions": [],
                 "groups": [], "employees": [], "heads": heads,
                 "lead_categories": lead_cats, "efsr_heads": efsr_heads,
-                "sr_records": [], "lead_records": [], "present_records": [],
+                "sr_records": [], "lead_records": [], "conv_records": [],
+                "other_conv_records": [], "present_records": [],
                 "allocate_records": [], "cdi_records": [],
                 "working_days": _working_days_master(db)}
 
@@ -3282,8 +3873,12 @@ def _employee_productivity_data(db: Session):
                       for b in branch_ids]
 
     sr_records = sorted([ei, ds, hi, n] for (ei, ds, hi), n in counts.items())
-    lead_records = sorted([ei, ds, ci, v[0], round(v[1], 2), round(v[2], 2)]
-                          for (ei, ds, ci), v in leads.items())
+    lead_records = sorted([ei, ds, ci, n] for (ei, ds, ci), n in leads.items())
+    conv_records = sorted([ei, ds, round(v[0], 2), round(v[1], 2)]
+                          for (ei, ds), v in convs.items())
+    # Keyed on the BRANCH index, not an employee index — see other_convs.
+    other_conv_records = sorted([bi, ds, round(v[0], 2), round(v[1], 2)]
+                                for (bi, ds), v in other_convs.items())
     present_records = sorted([ei, ds] for ei, ds in present)
     allocate_records = sorted([ei, ds, hi, n] for (ei, ds, hi), n in allocs.items())
     cdi_records = sorted([ei, ds, b, n] for (ei, ds, b), n in cdis.items())
@@ -3299,15 +3894,20 @@ def _employee_productivity_data(db: Session):
             "employees": employees, "heads": heads,
             "lead_categories": lead_cats, "efsr_heads": efsr_heads,
             "sr_records": sr_records, "lead_records": lead_records,
+            "conv_records": conv_records,
+            "other_conv_records": other_conv_records,
             "present_records": present_records,
             "allocate_records": allocate_records,
             "cdi_records": cdi_records,
             "working_days": _working_days_master(db)}
 
 
-def sr_allocation_data(db: Session):
-    """Cached wrapper — see _sr_allocation_data."""
-    return _cached(db, ("sr_alloc",), lambda: _sr_allocation_data(db))
+def sr_allocation_data(db: Session, allowed_branches=None):
+    """Cached wrapper — see _sr_allocation_data. `allowed_branches`
+    (None = every branch) scopes the payload to the caller's branches."""
+    data = _cached(db, ("sr_alloc",), lambda: _sr_allocation_data(db))
+    return _scope_report_to_branches(data, allowed_branches,
+                                     SRAR_EMP_RECORDS, SRAR_BRANCH_RECORDS)
 
 
 def _sr_allocation_data(db: Session):
@@ -3351,7 +3951,7 @@ def _sr_allocation_data(db: Session):
                                            OpenSRLoadReport, Customer)
 
     # ---- SR TYPE -> head ('SR Type Master (EFSR)') -------------------------
-    heads = [h["name"] for h in list_efsr_heads(db)]
+    heads = _report_heads(db, "efsr")
     head_idx = {h: i for i, h in enumerate(heads)}
     head_map = {}
     for m in db.query(PmsEfsrSrTypeMap).all():
@@ -3586,6 +4186,358 @@ def _sr_allocation_data(db: Session):
             "employees": employees, "heads": heads,
             "alloc_records": alloc_records, "close_records": close_records,
             "open_records": open_records}
+
+
+
+# ---------------- SE DRILL-DOWN: the rows behind ONE engineer's figures ----- #
+# Both reports print COUNTS per engineer; clicking the SE name opens the rows
+# those counts were made of. Neither function is cached: the payload is one
+# engineer over one period, it is only ever fetched on a click, and it must
+# reflect the table the moment it is opened.
+#
+# The engineer is addressed exactly the way each report groups its rows, so a
+# popup can never show a different population than the cell that opened it:
+#   Employee Productivity  letters-only SE NAME **+ branch** (an engineer with
+#                          rows in two branches is two report rows)
+#   SR Allocation          letters-only engineer name alone (the report resolves
+#                          every UID through the SE UID Master first, then keeps
+#                          ONE row per person across their branches)
+
+def _period_bounds(d_from, d_to):
+    """The two ISO strings as dates, either side optional."""
+    def _p(v):
+        if not v:
+            return None
+        try:
+            return datetime.strptime(str(v)[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return None
+    return _p(d_from), _p(d_to)
+
+
+def _as_day(v):
+    return v.date() if isinstance(v, datetime) else v
+
+
+def _iso_dt(v):
+    return v.isoformat() if v is not None else None
+
+
+def _extra_of(raw):
+    """An import row's DYNAMIC columns - every column of the source file that
+    has no field of its own, kept as {original header: value} JSON. The popup
+    prints them after the fixed ones, so the drill-down shows the whole row as
+    the file delivered it and not only the part the report reads."""
+    if not raw:
+        return {}
+    try:
+        d = json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def ep_se_records(db: Session, name: str, branch_id: str = "",
+                  d_from: str = "", d_to: str = "", allowed_branches=None):
+    """Employee Productivity -> the CLOSE SR rows behind one engineer.
+
+    Every 'Response Time & MaxTTR Details' row (response_time_maxttr, one row
+    per SR NUMBER) that the report counted for this engineer in this period:
+    it has a SR CLOSE DATE inside the period, an SE NAME that squashes to the
+    engineer's, and a BRANCH ID that folds to the report row's branch.
+
+    That is the same rule as _employee_productivity_data, so len(records) is
+    the engineer's 'Total SR' for the period and the per-head tallies are its
+    SR Type split. The SR Type head comes from the 'SR Type Master (MaxTTR)' —
+    the master this report uses, NOT the EFSR one."""
+    from app.models.customer_model import ResponseTimeMaxTTR
+
+    lo, hi = _period_bounds(d_from, d_to)
+    want_name = _tight(_name_key(name or ""))
+    want_branch = _norm_branch_id(branch_id) or ""
+    # The caller's branch scope (None = every branch, see
+    # _scope_report_to_branches): the popup must never be a way to read an SR
+    # of a branch the report itself would not have shown this user.
+    scope = (None if allowed_branches is None
+             else {_norm_branch_id(b) for b in allowed_branches
+                   if str(b or "").strip()})
+
+    # ---- SR TYPE -> head, the MaxTTR master ---------------------------------
+    sr_head = {}
+    for m in db.query(PmsMaxttrSrTypeMap).all():
+        if m.sr_type:
+            sr_head[_tight(m.sr_type)] = (m.head or "").strip()
+
+    # ---- branch labels, and the same 'unknown code -> one bucket' fold ------
+    aop_name = {}
+    for t in db.query(PmsBranchTarget.branch_id, PmsBranchTarget.branch_name).distinct():
+        bid = _norm_branch_id(t[0])
+        if bid and t[1] and bid not in aop_name:
+            aop_name[bid] = t[1].strip()
+    erp_name = {b: n for _r, b, n in ERP_BRANCHES}
+    known = set(aop_name) | set(erp_name)
+
+    def _fold(bid):
+        bid = _norm_branch_id(bid) or ""
+        return bid if bid in known else UNMAPPED_BRANCH_ID
+
+    # The engineer is a LETTERS-ONLY name, which SQL cannot match — but the
+    # file's distinct spellings of it can be resolved first (114 names in a
+    # 45k-row table) and handed to an IN(), so the popup reads a handful of
+    # indexed rows instead of the whole period. Over the remote link that is
+    # the difference between a click and a wait.
+    spellings = [n for (n,) in db.query(distinct(ResponseTimeMaxTTR.se_name))
+                 .filter(ResponseTimeMaxTTR.se_name.isnot(None),
+                         ResponseTimeMaxTTR.se_name != "").all()
+                 if _tight(_name_key(n)) == want_name]
+    if not spellings:
+        return {"success": True, "name": name, "branch_id": want_branch,
+                "period": {"from": d_from, "to": d_to},
+                "total": 0, "heads": [], "extra_columns": [], "records": []}
+
+    q = db.query(ResponseTimeMaxTTR).filter(
+        ResponseTimeMaxTTR.sr_close_date.isnot(None),
+        ResponseTimeMaxTTR.se_name.in_(spellings))
+    if lo:
+        q = q.filter(ResponseTimeMaxTTR.sr_close_date >= datetime.combine(lo, datetime.min.time()))
+    if hi:
+        q = q.filter(ResponseTimeMaxTTR.sr_close_date < datetime.combine(hi + timedelta(days=1),
+                                                                         datetime.min.time()))
+
+    records, heads, extra_cols = [], {}, []
+    for r in q.all():
+        if _tight(_name_key(r.se_name)) != want_name:
+            continue
+        if want_branch and _fold(r.branch_id) != _fold(want_branch):
+            continue
+        if scope is not None and _fold(r.branch_id) not in scope:
+            continue
+        head = sr_head.get(_tight(r.sr_type or "")) or HEAD_UNMAPPED
+        heads[head] = heads.get(head, 0) + 1
+        bid = _norm_branch_id(r.branch_id)
+        extra = _extra_of(r.extra_data)
+        for k in extra:
+            if k not in extra_cols:
+                extra_cols.append(k)
+        records.append({
+            "sr_number": r.sr_number,
+            "instance_id": r.instance_id,
+            "account": r.account_name,
+            "branch": (aop_name.get(bid) or erp_name.get(bid)
+                       or (r.branch_name or "").strip() or bid or UNMAPPED_BRANCH_NAME),
+            "branch_id": bid,
+            "zone": r.zone_name,
+            "asm_name": r.asm_name,
+            "sd_id": r.sd_id,
+            "sd_name": r.sd_name,
+            "sr_type": r.sr_type,
+            "sr_subtype": r.sr_subtype,
+            "head": head,
+            "segment": r.segment,
+            "product_segment": r.product_segment,
+            "goem_oem": r.goem_oem,
+            "application_code": r.application_code,
+            "engine_no": r.engine_serial_no,
+            "sr_open_date": _iso_dt(r.sr_open_date),
+            "task_start_date": _iso_dt(r.sr_task_start_date),
+            "task_end_date": _iso_dt(r.sr_task_end_date),
+            "close_date": _iso_dt(r.sr_close_date),
+            "response_range": r.response_time_range_in_hrs,
+            "response_time": r.response_time,
+            "maxttr_task_hrs": r.maxttr_on_task_closed_in_hrs,
+            "maxttr_sr_hrs": r.maxttr_on_sr_closed_in_hrs,
+            "remarks": r.engineer_remarks,
+            "se_name": r.se_name,
+            "se_ticket": r.se_ticket_num,
+            "extra": extra,
+        })
+
+    records.sort(key=lambda x: (x["close_date"] or "", x["sr_number"] or ""))
+    return {"success": True, "name": name, "branch_id": want_branch,
+            "period": {"from": d_from, "to": d_to},
+            "total": len(records),
+            "heads": sorted(heads.items(), key=lambda kv: (-kv[1], kv[0])),
+            "extra_columns": extra_cols, "records": records}
+
+
+def srar_engineer_in_branches(db: Session, name: str, allowed_branches) -> bool:
+    """May a caller scoped to `allowed_branches` open this engineer's SR
+    Allocation drill-down? (None = every branch, so always yes.)
+
+    SR Allocation keeps ONE row per person across their branches, so the popup
+    carries no branch of its own — the answer is the branch the report itself
+    put the engineer in, read straight off the (cached) report payload so the
+    popup can never disagree with the table that opened it."""
+    if allowed_branches is None:
+        return True
+    data = sr_allocation_data(db)
+    ids = data.get("branch_ids") or []
+    ok = {_norm_branch_id(b) for b in allowed_branches if str(b or "").strip()}
+    want = _tight(_name_key(name or ""))
+    for e in data.get("employees") or []:
+        if _tight(_name_key(e.get("n") or "")) != want:
+            continue
+        bi = e.get("b")
+        return isinstance(bi, int) and 0 <= bi < len(ids) and ids[bi] in ok
+    return False
+
+
+def srar_se_records(db: Session, name: str, d_from: str = "", d_to: str = ""):
+    """SR Allocation -> the ALLOCATED and CLOSED rows behind one engineer.
+
+    Every EFSR appointment row (one row per dispatch — Appointment Number + SE
+    UID + Task Assigned Date) of this engineer that touches the period on
+    EITHER of its two dates, each one TAGGED with which of the report's two
+    counts it fell into and why:
+
+      both        assigned AND finished inside the period — counts once in
+                  Allocated and once in Closed
+      carry_in    finished inside the period but assigned BEFORE it — counts in
+                  CLOSED ONLY. This is what makes Closed exceed Allocated.
+      carry_out   assigned inside the period, finished AFTER it — counts in
+                  ALLOCATED ONLY
+      open        assigned inside the period, never finished — ALLOCATED ONLY
+
+    so  Allocated = both + carry_out + open,  Closed = both + carry_in,  and
+    Closed - Allocated = carry_in - (carry_out + open) is visible row by row.
+
+    The engineer is resolved the way _sr_allocation_data resolves them: the SE
+    UID Master turns the row's SERVICE ENGINEER UID into the canonical name, and
+    a UID the master does not know keeps the file's own SE NAME. So this popup
+    covers every UID the report folded into that one engineer row."""
+    from app.models.customer_model import EFSRReport
+
+    lo, hi = _period_bounds(d_from, d_to)
+    want_name = _tight(_name_key(name or ""))
+
+    # ---- SE UID MASTER (UID -> canonical name), same as the report ----------
+    name_of_uid = {}
+    for m in db.query(PmsSeUid).all():
+        for u in _uid_list(m.se_uid):
+            name_of_uid.setdefault(u.upper(), m.se_name)
+
+    # ---- SR TYPE -> head, the EFSR master -----------------------------------
+    head_map = {}
+    for m in db.query(PmsEfsrSrTypeMap).all():
+        if m.sr_type:
+            head_map[_tight(m.sr_type)] = (m.head or "").strip()
+
+    # Which UIDs the report folded into this ONE engineer row. Resolved from the
+    # file's own (UID, SE NAME) pairs — a few dozen — exactly the way the report
+    # resolves them, so a mastered engineer with two UIDs and an unmastered one
+    # carrying only a file name both come out right. The UIDs then go into an
+    # IN() with the date window, so the popup reads a handful of indexed rows
+    # rather than the whole EFSR table.
+    uids = []
+    for uid, se_nm in (db.query(EFSRReport.service_engineer_uid,
+                                EFSRReport.service_engineer_name)
+                       .filter(EFSRReport.service_engineer_uid.isnot(None),
+                               EFSRReport.service_engineer_uid != "")
+                       .distinct().all()):
+        ukey = (uid or "").strip().upper()
+        label = name_of_uid.get(ukey) or (se_nm or "").strip() or ukey
+        if _tight(_name_key(label)) == want_name and uid not in uids:
+            uids.append(uid)
+    if not uids:
+        return {"success": True, "name": name,
+                "period": {"from": d_from, "to": d_to},
+                "allocated": 0, "closed": 0, "difference": 0,
+                "tally": {"both": 0, "carry_in": 0, "carry_out": 0, "open": 0},
+                "heads_allocated": [], "heads_closed": [],
+                "extra_columns": [], "records": []}
+
+    q = db.query(EFSRReport).filter(
+        EFSRReport.service_engineer_uid.in_(uids),
+        sa_or(EFSRReport.task_assigned_date.isnot(None),
+              EFSRReport.task_end_date.isnot(None)))
+    # A row is of interest when EITHER date lands in the window — that is what
+    # makes carry-in (closed here, assigned earlier) and carry-out (assigned
+    # here, closed later) both reachable from one query.
+    if lo or hi:
+        a_c = [EFSRReport.task_assigned_date.isnot(None)]
+        c_c = [EFSRReport.task_end_date.isnot(None)]
+        if lo:
+            lo_dt = datetime.combine(lo, datetime.min.time())
+            a_c.append(EFSRReport.task_assigned_date >= lo_dt)
+            c_c.append(EFSRReport.task_end_date >= lo_dt)
+        if hi:
+            hi_dt = datetime.combine(hi + timedelta(days=1), datetime.min.time())
+            a_c.append(EFSRReport.task_assigned_date < hi_dt)
+            c_c.append(EFSRReport.task_end_date < hi_dt)
+        q = q.filter(sa_or(sa_and(*a_c), sa_and(*c_c)))
+    rows = q.all()
+
+    def _in(d):
+        if d is None:
+            return False
+        return (lo is None or d >= lo) and (hi is None or d <= hi)
+
+    records, extra_cols = [], []
+    tally = {"both": 0, "carry_in": 0, "carry_out": 0, "open": 0}
+    heads_a, heads_c = {}, {}
+    for r in rows:
+        ukey = (r.service_engineer_uid or "").strip().upper()
+        label = name_of_uid.get(ukey) or (r.service_engineer_name or "").strip() or ukey
+        if _tight(_name_key(label)) != want_name:
+            continue
+        ad, ed = _as_day(r.task_assigned_date), _as_day(r.task_end_date)
+        a_in, c_in = _in(ad), _in(ed)
+        if not a_in and not c_in:
+            continue                     # this row is outside the period entirely
+        if a_in and c_in:
+            tag = "both"
+        elif c_in:
+            tag = "carry_in"             # closed here, allocated in an earlier period
+        elif ed is None:
+            tag = "open"                 # allocated here, still not finished
+        else:
+            tag = "carry_out"            # allocated here, finished after the period
+        tally[tag] += 1
+        head = head_map.get(_tight(r.sr_type or "")) or HEAD_UNMAPPED
+        if a_in:
+            heads_a[head] = heads_a.get(head, 0) + 1
+        if c_in:
+            heads_c[head] = heads_c.get(head, 0) + 1
+        extra = _extra_of(r.extra_data)
+        for k in extra:
+            if k not in extra_cols:
+                extra_cols.append(k)
+        records.append({
+            "appointment_no": r.appointment_number,
+            "sr_number": r.service_request_no,
+            "instance_id": r.instance_id,
+            "account": r.account,
+            "customer_name": r.customer_name,
+            "customer_contact": r.customer_contact_number,
+            "site": r.installation_site_address,
+            "branch_code": r.sd_branch_code,
+            "sr_type": r.sr_type,
+            "head": head,
+            "sr_status": r.sr_status,
+            "se_uid": r.service_engineer_uid,
+            "se_name": r.service_engineer_name,
+            "assigned_date": _iso_dt(r.task_assigned_date),
+            "end_date": _iso_dt(r.task_end_date),
+            "sr_closed_date": _iso_dt(r.sr_closed_date),
+            "days": (ed - ad).days if (ad and ed) else None,
+            "allocated_in": a_in,
+            "closed_in": c_in,
+            "tag": tag,
+            "extra": extra,
+        })
+
+    records.sort(key=lambda x: (x["assigned_date"] or x["end_date"] or "",
+                                x["appointment_no"] or ""))
+    allocated = tally["both"] + tally["carry_out"] + tally["open"]
+    closed = tally["both"] + tally["carry_in"]
+    return {"success": True, "name": name,
+            "period": {"from": d_from, "to": d_to},
+            "allocated": allocated, "closed": closed,
+            "difference": closed - allocated,
+            "tally": tally,
+            "heads_allocated": sorted(heads_a.items(), key=lambda kv: (-kv[1], kv[0])),
+            "heads_closed": sorted(heads_c.items(), key=lambda kv: (-kv[1], kv[0])),
+            "extra_columns": extra_cols, "records": records}
 
 
 # ---------------- ANNUAL REPORTS ------------------------------------------- #
@@ -4078,3 +5030,1674 @@ def save_cdi_targets(db: Session, fy_start: int, items: list, user_id: str):
     db.commit()
     return {"success": True, "saved": saved, "removed": removed,
             **list_cdi_targets(db, fy_start)}
+
+
+# ============================================================================
+# ANNUAL REPORTS -> AMC & BANDHAN PROJECTION
+# ============================================================================
+# D/BAMC = DEALER AMC + BANDHAN AMC. The AMC Population Report carries seven
+# AGREEMENT TYPEs and only some of them are this report's business:
+#
+#   counted    KOEL Bandhan / KOEL Bandhan Plus / Bandhan Premium   (BAMC)
+#              KOEL Anubandhan Plus / KOEL Anubandhan IV+           (BAMC too -
+#                                     added 2026-08-20 on the business's word)
+#              Dealer Agreement                                     (DAMC)
+#   left out   KOEL Agreement        - KOEL's own agreement, not the dealer's
+#
+# Only ACTIVE agreements count (AGREEMENT STATUS) - a cancelled or lapsed row is
+# not business done. Every row in the file carries 'Active' today, so this
+# changes no number now; it stops a future file from quietly adding one.
+#
+# The type split is not a guess. Counted this way on AGREEMENT START DATE, Apr-Jun
+# 2026 comes to 357 against the 358 the business's own sheet prints; counting
+# every type gives 543, and dropping Dealer Agreement gives 355. The Anubandhan
+# pair is 14 rows and none fall in that window, so the tie-up is unaffected.
+#
+# WHAT THIS CAN AND CANNOT COUNT. amc_agreements is a SNAPSHOT keyed on INSTANCE
+# ID: one row per genset, always its LATEST agreement, upserted on every upload.
+# So a renewal OVERWRITES the agreement it replaced and a closed year's sales
+# leak away month by month - FY26 counts 937 from today's file against the 1,353
+# the business closed it with, and reading last_agreement_* (one step back) only
+# recovers 1,086. The CURRENT year's actuals are sound; a CLOSED year's are not,
+# which is exactly why 'F26 ACT' is typed into the AOP master (PmsAmcTarget)
+# rather than counted here.
+DBAMC_TYPES = ["KOEL Bandhan", "KOEL Bandhan Plus", "Bandhan Premium",
+               "KOEL Anubandhan Plus", "KOEL Anubandhan IV+",
+               "Dealer Agreement"]
+# Matched on letters and digits only, so spacing or case in the file cannot drop
+# an agreement out of the count.
+_DBAMC_KEYS = {re.sub(r"[^A-Z0-9]+", "", t.upper()) for t in DBAMC_TYPES}
+
+
+def _dbamc_key(agreement_type) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", str(agreement_type or "").upper())
+
+
+def _is_active(status) -> bool:
+    """AGREEMENT STATUS is 'Active'. Read loosely (case and spacing), so only a
+    genuinely different status - Cancelled, Expired - is left out."""
+    return re.sub(r"[^A-Z]+", "", str(status or "").upper()) == "ACTIVE"
+
+
+def _amc_targets_map(db: Session) -> dict:
+    """Every saved AMC AOP row as {'fy|branch': {proj, prior}} - flat, so one
+    payload covers whichever financial year the report lands on."""
+    out = {}
+    for t in db.query(PmsAmcTarget).all():
+        bid = _norm_branch_id(t.branch_id)
+        if not bid:
+            continue
+        out["{}|{}".format(t.fy, bid)] = {
+            "proj": t.proj_nos,
+            # The ONLY figure the last-FY column prints. Empty until set - the
+            # counted one below is offered in the master, never printed by itself.
+            "prior": t.prior_nos,
+            "prior_by": t.prior_by,
+            "prior_at": t.prior_at.isoformat() if t.prior_at else None,
+            "best": t.best_nos,
+        }
+    return out
+
+
+def annual_amc_bandhan_data(db: Session):
+    """Cached wrapper - see _annual_amc_bandhan_data."""
+    return _cached(db, ("annual_amc_bandhan",),
+                   lambda: _annual_amc_bandhan_data(db))
+
+
+def _annual_amc_bandhan_data(db: Session):
+    """'AMC & Bandhan Projection' (Annual Reports).
+
+    TWO SOURCES, because the sheet asks two different questions, and one file
+    cannot answer both.
+
+    1. LIVE AMC - 'F27 YTD ACT AMC NOS'. From the AMC Population Report: every
+       agreement stamped Active, of every type EXCEPT 'KOEL Agreement', which is
+       KOEL's own cover and gets a row of its own under the total. A POPULATION,
+       so NO date filter of any kind applies - not the financial year, not the
+       month picked, and not the agreement's own end date. That last one is
+       deliberate: filtering on it read 2,077 against the 2,088 Active rows the
+       business counts in the file itself.
+
+    2. THE MONTH'S BUSINESS - the last column. From the four Bandhan QUOTE
+       files (Anubandhan Plus, Anubandhan, Bandhan Plus, Regular Bandhan), on
+       PAYMENT UPDATE DATE AND TIME, one row per quote, branch wise. A month's
+       business is money received, not cover starting - and this is the source
+       that ties up: Mar-26 145, Apr-26 105, Jun-26 104 against the business's
+       own 144 / 108 / 106, where the agreements' start months are 15-30 out.
+       This is the ONLY column the month picker moves.
+
+    The two ship differently, because they answer differently. The population is
+    ONE NUMBER per branch (active_nos) - it has no month, so there is no series
+    to ship. The payments ship as RAW MONTHLY COUNTS, pay_records
+    [[branchIdx, 'YYYY-MM', count]], so the report re-reads any month without a
+    refetch. A quote never paid has no month to sit in and is reported in meta
+    rather than dropped silently.
+
+    THE OTHER THREE COLUMNS CANNOT BE COUNTED AT ALL. Last year's actual, the AOP
+    projection and the year's best month all ride along in `targets`, from the
+    AOP master - every one of them a figure the business asserts. Nothing here
+    seeds, raises or back-fills any of them.
+
+    Branch rows are the KALA branches in master order (MH block, then KA), the
+    same list the Service Penetration sheet builds, so a branch with nothing in
+    the period still gets its row."""
+    from app.models.customer_model import (AMCAgreement, AnubandhanPlusQuote,
+                                            AnubandhanQuote, BandhanPlusQuote,
+                                            RegularBandhan)
+
+    # ---- branch rows: the master list, MH then KA --------------------------
+    aop_name, aop_region = {}, {}
+    for t in db.query(PmsBranchTarget.branch_id, PmsBranchTarget.branch_name,
+                      PmsBranchTarget.region).distinct():
+        bid = _norm_branch_id(t[0])
+        if not bid or bid == "HO":
+            continue
+        if t[1] and bid not in aop_name:
+            aop_name[bid] = t[1].strip()
+        if t[2] and bid not in aop_region:
+            aop_region[bid] = t[2].strip().upper()
+    erp_region = {b: r for r, b, _n in ERP_BRANCHES}
+    erp_name = {b: n for _r, b, n in ERP_BRANCHES}
+
+    branch_idx, branches, branch_ids = {}, [], []
+
+    def _branch(bid):
+        bid = _norm_branch_id(bid) or ""
+        if bid not in aop_name and bid not in erp_name:
+            bid = UNMAPPED_BRANCH_ID
+        if bid not in branch_idx:
+            branch_idx[bid] = len(branches)
+            branches.append(aop_name.get(bid) or erp_name.get(bid)
+                            or UNMAPPED_BRANCH_NAME)
+            branch_ids.append(bid)
+        return branch_idx[bid]
+
+    for _r, b, _n in ERP_BRANCHES:
+        _branch(b)
+    for b in sorted(set(aop_name) - set(branch_idx), key=_branch_sort_key):
+        _branch(b)
+
+    # ---- the agreements ----------------------------------------------------
+    # ~2,400 rows today, so the type filter and the month bucketing are done in
+    # Python: SQL Server would have to be told how to fold 'KOEL  Bandhan' onto
+    # 'KOEL Bandhan', which is exactly what _dbamc_key already does.
+    rows = db.query(AMCAgreement.branch_id, AMCAgreement.agreement_type,
+                    AMCAgreement.agreement_end_date,
+                    AMCAgreement.agreement_status).all()
+
+    # THE AMC COLUMN IS A POPULATION, NOT A PERIOD: how many agreements is this
+    # branch actually covering. ONE test, and no date filter of ANY kind - not
+    # the financial year, not the month picked above, and not the agreement's own
+    # end date:
+    #
+    #   AGREEMENT STATUS is Active     the ERP has not cancelled it
+    #
+    # An earlier version also required AGREEMENT END DATE >= today, which read
+    # 2,077 against the 2,088 Active rows the business counts in the file itself.
+    # Those 11 are stamped Active with an end date already past, and the business
+    # counts them: ACTIVE is the ERP's own word for it, and second-guessing it
+    # here made the column disagree with the file anyone would check it against.
+    # The tally rides along in meta.active_past_end so the disagreement inside
+    # the file is still visible - it is just no longer acted on.
+    #
+    # Every agreement TYPE counts - the column is AMC, not D/BAMC - EXCEPT
+    # 'KOEL Agreement', which gets a row of its own under the total. It is KOEL's
+    # own corporate cover, sold by KOEL rather than by any branch of this
+    # dealership, so putting it on a branch would credit that branch with
+    # business it did not do. It is counted OVERALL instead, and the GRAND TOTAL
+    # under it adds the two back together - so the sheet still ends on the whole
+    # live population, with the part the branches own shown separately.
+    # The type mix rides along in meta.by_type so the total can still be broken
+    # down whichever way.
+    today = now_ist().date()
+    active = {}                        # branchIdx -> live agreements
+    by_type = {}                       # agreement type -> rows counted
+    not_active = 0
+    expired = 0
+    counted = 0
+    koel_active = 0                    # 'KOEL Agreement' rows, company-wide
+    for bid, atype, end, status in rows:
+        if not _is_active(status):
+            not_active += 1            # cancelled by the ERP
+            continue
+        e = end.date() if isinstance(end, datetime) else end
+        if e is not None and e < today:
+            expired += 1               # Active, but its end date has passed:
+                                       # COUNTED, only tallied - see above
+        label = str(atype or "").strip() or "(blank)"
+        by_type[label] = by_type.get(label, 0) + 1
+        if _dbamc_key(atype) == _dbamc_key(KOEL_AGREEMENT_TYPE):
+            koel_active += 1           # its own row, not any branch's
+            continue
+        bi = _branch(bid)
+        active[bi] = active.get(bi, 0) + 1
+        counted += 1
+
+    # ---- the MONTH column: the four Bandhan quote files -------------------
+    # A month's business is a PAYMENT, not an agreement start, and the payment
+    # lives in the quote files - Anubandhan Plus, Anubandhan, Bandhan Plus and
+    # Regular Bandhan - on their PAYMENT UPDATE DATE AND TIME. One row per
+    # quote, counted branch wise.
+    #
+    # A different source from the agreements above ON PURPOSE, and it is the one
+    # that ties up: on payment-update month these four files give Mar-26 145,
+    # Apr-26 105, Jun-26 104 against the business's own 144 / 108 / 106, while
+    # the agreements' start-date months are 15-30 out. It also does not decay -
+    # a quote row is history, one per quote, where amc_agreements keeps only
+    # each genset's LATEST agreement.
+    #
+    # NO STATUS FILTER: payment_update_date_time is only ever stamped when a
+    # payment is processed, so the column IS the filter. Narrowing it to
+    # 'Payment Success' drops the refunds and short payments the business still
+    # counts, and fits its numbers worse (139 / 100 / 100).
+    #
+    # THE BRANCH COMES FROM THE CITY, not from the row's branch_id: these files
+    # are KOEL's, and their branch column knows KOEL's structure rather than this
+    # dealership's. The city -> branch list is TYPED by the business in the AOP
+    # master's City Master; a city nobody has mapped yet goes to the Unmapped
+    # Branch row and is named in meta.pay_unmapped_cities - never guessed.
+    city_branch = _quote_city_map(db)
+    pay = {}                           # (branchIdx, 'YYYY-MM') -> n
+    pay_rows = 0
+    pay_no_date = 0
+    pay_unmapped = {}                  # city -> paid quotes it could not place
+    pay_min = pay_max = None
+    for model in (AnubandhanPlusQuote, AnubandhanQuote,
+                  BandhanPlusQuote, RegularBandhan):
+        for city, when in db.query(model.city,
+                                   model.payment_update_date_time).all():
+            pay_rows += 1
+            d = when.date() if isinstance(when, datetime) else when
+            if d is None:
+                pay_no_date += 1       # never paid: no month to count it in
+                continue
+            m = "{:04d}-{:02d}".format(d.year, d.month)
+            b = city_branch.get(_quote_city_key(city))
+            if b is None:
+                label = str(city or "").strip() or "(blank)"
+                pay_unmapped[label] = pay_unmapped.get(label, 0) + 1
+            key = (_branch(b if b else UNMAPPED_BRANCH_ID), m)
+            pay[key] = pay.get(key, 0) + 1
+            if pay_min is None or m < pay_min:
+                pay_min = m
+            if pay_max is None or m > pay_max:
+                pay_max = m
+    pay_records = sorted([bi, m, n] for (bi, m), n in pay.items())
+
+    branch_regions = [aop_region.get(b) or erp_region.get(b) or "MH"
+                      for b in branch_ids]
+
+    # ONE financial year, and it is always the CURRENT one - read off today, not
+    # off the data. The sheet is 'this year against its AOP', so it must open on
+    # the running year even in the first days of April when no agreement has
+    # started yet; deriving it from the last agreement month would have kept the
+    # report a year behind until the first upload of the new year landed.
+    fy = today.year if today.month >= 4 else today.year - 1
+
+    # Keep what was counted. Writing inside a read is deliberate and safe here:
+    # this builder only runs when the underlying data has actually changed (see
+    # _cached), which is exactly when a stored figure could need moving.
+
+
+    def _first(m):
+        return "{}-01".format(m) if m else None
+
+    def _last(m):
+        if not m:
+            return None
+        y, mm = int(m[:4]), int(m[5:7])
+        return "{}-{:02d}".format(m, calendar.monthrange(y, mm)[1])
+
+    # The month picker walks the PAYMENT months, so the reported span is theirs:
+    # the agreements no longer carry one, having no date filter of their own.
+    return {"success": True,
+            "meta": {"min_date": _first(pay_min), "max_date": _last(pay_max),
+                     "min_month": pay_min, "max_month": pay_max,
+                     "fy": fy,
+                     "counted": counted,
+                     "not_active": not_active,
+                     # Active rows whose end date has already passed. COUNTED in
+                     # the column - this is a tally, not a filter.
+                     "active_past_end": expired,
+                     "as_on": today.isoformat(),
+                     "agreement_rows": len(rows),
+                     "by_type": by_type,
+                     # the month column's own source and span
+                     "pay_min_month": pay_min, "pay_max_month": pay_max,
+                     "pay_rows": pay_rows, "pay_no_date": pay_no_date,
+                     "pay_files": ["Anubandhan Plus", "Anubandhan",
+                                   "Bandhan Plus", "Regular Bandhan"],
+                     # cities the territory list has never been told about, so a
+                     # missing territory reads as a number to chase
+                     "pay_unmapped_cities": pay_unmapped,
+                     # how many cities the business has mapped so far, so the
+                     # report can say 'nobody has filled the City Master in yet'
+                     # rather than looking simply broken
+                     "cities_mapped": len(city_branch),
+                     "koel_agreement_type": KOEL_AGREEMENT_TYPE},
+            "branches": branches, "branch_ids": branch_ids,
+            "branch_regions": branch_regions,
+            # live agreements per branch - the AMC column. One number each: no
+            # month series, because no date filter applies to it.
+            "active_nos": [active.get(i, 0) for i in range(len(branch_ids))],
+            # live 'KOEL Agreement' rows - its own row under the total, because
+            # KOEL sells them, not any branch of this dealership
+            "koel_active": koel_active,
+            # quote PAYMENTS by payment-update month - the month column
+            "pay_records": pay_records,
+            "targets": _amc_targets_map(db)}
+
+
+
+# ---------------- AOP MASTER: QUOTE CITY MASTER ---------------- #
+
+def list_quote_cities(db: Session):
+    """Every city the four Bandhan quote files mention, with how much business
+    sits on it and the branch it has been mapped to.
+
+    The list is built FROM THE FILES, not typed: the business picks a branch for
+    each city rather than having to know which cities the files contain. Cities
+    with the most PAID quotes come first, and unmapped ones come before mapped
+    ones - so the rows worth doing something about are at the top.
+
+    ~5,500 quote rows in total, so the grouping is done in Python: the four
+    tables would otherwise need four GROUP BYs folded together on a key SQL
+    Server would have to be taught (see _quote_city_key)."""
+    from app.models.customer_model import (AnubandhanPlusQuote, AnubandhanQuote,
+                                           BandhanPlusQuote, RegularBandhan)
+
+    agg = {}
+    for model in (AnubandhanPlusQuote, AnubandhanQuote,
+                  BandhanPlusQuote, RegularBandhan):
+        for city, paid_at in db.query(model.city,
+                                      model.payment_update_date_time).all():
+            key = _quote_city_key(city)
+            if not key:
+                continue                 # a blank city cannot be mapped to anything
+            row = agg.setdefault(key, {"key": key,
+                                       "name": str(city or "").strip(),
+                                       "rows": 0, "paid": 0})
+            row["rows"] += 1
+            if paid_at is not None:
+                row["paid"] += 1
+
+    saved = {c.city_key: c for c in db.query(PmsQuoteCityBranch).all()}
+    # A city that has been mapped but no longer appears in any file still shows,
+    # so a mapping can be corrected or cleared after a file changes.
+    for key, c in saved.items():
+        agg.setdefault(key, {"key": key, "name": c.city_name or key,
+                             "rows": 0, "paid": 0})
+
+    out = []
+    for key, row in agg.items():
+        c = saved.get(key)
+        out.append({**row,
+                    "branch_id": c.branch_id if c else None,
+                    "by": c.updated_by if c else None})
+    out.sort(key=lambda r: (r["branch_id"] is not None, -r["paid"], -r["rows"],
+                            r["name"]))
+
+    branches = _profile_branches(db)
+    for bid, name, region in db.query(PmsBranchTarget.branch_id,
+                                      PmsBranchTarget.branch_name,
+                                      PmsBranchTarget.region).distinct():
+        b = _norm_branch_id(bid)
+        if not b or b == "HO":
+            continue
+        info = branches.setdefault(b, {"region": None, "name": None})
+        if name:
+            info["name"] = name.strip()
+        if region:
+            info["region"] = region.strip().upper()
+
+    return {"cities": out,
+            "branches": [{"key": b,
+                          "name": (info.get("name") or b),
+                          "region": (info.get("region") or "MH").upper()}
+                         for b, info in sorted(branches.items(),
+                                               key=lambda kv: _branch_sort_key(kv[0]))],
+            "mapped": sum(1 for r in out if r["branch_id"]),
+            "unmapped": sum(1 for r in out if not r["branch_id"]),
+            "unmapped_paid": sum(r["paid"] for r in out if not r["branch_id"])}
+
+
+def save_quote_cities(db: Session, items: list, user_id: str):
+    """Upsert the City Master. A city whose branch is cleared is DELETED rather
+    than kept with an empty branch - the report treats 'no row' and 'no branch'
+    identically, and one of the two states would only ever confuse."""
+    saved_rows = {c.city_key: c for c in db.query(PmsQuoteCityBranch).all()}
+    valid = set(_profile_branches(db))
+    for t in db.query(PmsBranchTarget.branch_id).distinct():
+        b = _norm_branch_id(t[0])
+        if b and b != "HO":
+            valid.add(b)
+
+    saved = removed = 0
+    for it in items or []:
+        key = _quote_city_key(it.get("city_key") or it.get("key"))
+        if not key:
+            continue
+        bid = _norm_branch_id(str(it.get("branch_id") or "").strip()[:60])
+        row = saved_rows.get(key)
+        if not bid:
+            if row:
+                db.delete(row)
+                del saved_rows[key]
+                removed += 1
+            continue
+        if bid not in valid:
+            continue                     # a branch the ERP does not have
+        if not row:
+            row = PmsQuoteCityBranch(city_key=key)
+            db.add(row)
+            saved_rows[key] = row
+        row.city_name = (str(it.get("city_name") or it.get("name") or "").strip()
+                         or key)[:120]
+        row.branch_id = bid
+        row.updated_by = user_id
+        saved += 1
+
+    db.commit()
+    return {"success": True, "saved": saved, "removed": removed,
+            **list_quote_cities(db)}
+
+
+# ---------------- AOP MASTER: AMC & BANDHAN TARGETS ---------------- #
+
+def list_amc_targets(db: Session, fy_start: int):
+    """The AMC & Bandhan AOP tab: one row per branch, carrying the financial
+    year's projection and the PREVIOUS year's actual. The branch list is built
+    exactly like the CDI tab's, so the two masters can never disagree about
+    which branches exist."""
+    branches = {b: dict(info) for b, info in _profile_branches(db).items()}
+    for bid, name, region in db.query(PmsBranchTarget.branch_id,
+                                      PmsBranchTarget.branch_name,
+                                      PmsBranchTarget.region).distinct():
+        bid = _norm_branch_id(bid)
+        if not bid or bid == "HO":
+            continue
+        info = branches.setdefault(bid, {"region": None, "name": None})
+        if name:
+            info["name"] = name.strip()
+        if region:
+            info["region"] = region.strip().upper()
+
+    saved = {_norm_branch_id(t.branch_id): t
+             for t in db.query(PmsAmcTarget).filter(PmsAmcTarget.fy == fy_start).all()}
+
+    rows = []
+    for b, info in sorted(branches.items(), key=lambda kv: _branch_sort_key(kv[0])):
+        t = saved.get(b)
+        rows.append({"key": b,
+                     "name": info.get("name") or b,
+                     "region": (info.get("region") or "MH").upper(),
+                     "proj_nos": t.proj_nos if t else None,
+                     "prior_nos": t.prior_nos if t else None,
+                     "prior_by": t.prior_by if t else None,
+                     "prior_at": (t.prior_at.isoformat() if t and t.prior_at else None),
+                     "best_nos": t.best_nos if t else None})
+    return {"fy": fy_start, "items": rows,
+            "categories": _amc_category_rows(db, fy_start)}
+
+
+def _amc_category_rows(db: Session, fy_start: int) -> list:
+    """The tab's SECOND table: the AOP of each row of the Annual Reports' AMC
+    sheet. The rows are AGREEMENT CATEGORIES, not branches, so the figures are
+    not a sum of the branch table above - see PmsAmcCategoryTarget.
+
+    Each row carries `counted_prior`, the same category counted over the PREVIOUS
+    financial year, offered as the box's placeholder so a target can be set
+    against what the year before actually did. It understates a closed year (a
+    renewal has overwritten the row its sale was counted on), which is why it is
+    only ever a hint and never the figure the sheet prints."""
+    saved = {t.row_key: t for t in db.query(PmsAmcCategoryTarget)
+             .filter(PmsAmcCategoryTarget.fy == fy_start).all()}
+    counted = _amc_category_counts(db, "{}-04-01".format(fy_start - 1),
+                                   "{}-03-31".format(fy_start))
+    out = []
+    for row in AMC_SHEET_ROWS:
+        t = saved.get(row["key"])
+        parts = row.get("of", []) if row["counted"] == "sum" else [row["key"]]
+        out.append({"key": row["key"], "name": row["name"],
+                    "aop_nos": t.aop_nos if t else None,
+                    "aop_by": t.updated_by if t else None,
+                    "counted_prior": sum(counted.get(k, 0) for k in parts)})
+    return out
+
+
+def _amc_category_counts(db: Session, first_day: str, last_day: str) -> dict:
+    """{series -> rows counted} over an inclusive date span, by exactly the rules
+    the AMC sheet counts by. Only used to offer a placeholder in the AOP master,
+    so it reads the same file rather than duplicating the sheet's arithmetic."""
+    data = annual_amc_monthly_data(db)
+    out = {}
+    for si, day, n in data.get("records", []):
+        if first_day <= day <= last_day:
+            name = data["series"][si]
+            out[name] = out.get(name, 0) + n
+    return out
+
+
+def save_amc_targets(db: Session, fy_start: int, items: list, user_id: str,
+                    categories: list = None):
+    """Upsert the FY's AMC & Bandhan AOP rows - the branch table, and the
+    per-category table beside it. A row whose figures are ALL blank is DELETED -
+    the report then shows a dash rather than a target of 0, the same rule the CDI
+    targets follow."""
+    existing = {_norm_branch_id(t.branch_id): t
+                for t in db.query(PmsAmcTarget).filter(PmsAmcTarget.fy == fy_start).all()}
+    saved = removed = 0
+
+    def _nos(raw):
+        """A whole number of agreements, or None. Negative is meaningless here,
+        while 0 is a real target ('this branch sells none'), so 0 is kept."""
+        if raw in (None, ""):
+            return None
+        try:
+            return max(0, int(round(float(raw))))
+        except (TypeError, ValueError):
+            return None
+
+    for it in items or []:
+        bid = _norm_branch_id(str(it.get("key") or "").strip()[:60])
+        if not bid:
+            continue
+        proj, prior = _nos(it.get("proj_nos")), _nos(it.get("prior_nos"))
+        best = _nos(it.get("best_nos"))
+        row = existing.get(bid)
+
+        # Nothing left in the row: it goes. All three figures are the AOP
+        # master's own - nothing is counted or kept behind them - so there is
+        # nothing left to preserve.
+        if proj is None and prior is None and best is None:
+            if row:
+                db.delete(row)
+                del existing[bid]
+                removed += 1
+            continue
+        if not row:
+            row = PmsAmcTarget(fy=fy_start, branch_id=bid, created_by=user_id)
+            db.add(row)
+            existing[bid] = row
+        row.proj_nos = proj
+        # Stamp WHO put last year's figure there, and when - it is the one number
+        # on the sheet that is asserted rather than counted, so it carries its
+        # author. Unchanged value, unchanged stamp.
+        if prior != row.prior_nos:
+            row.prior_nos = prior
+            row.prior_by = None if prior is None else user_id
+            row.prior_at = None if prior is None else now_ist()
+        # The best month is asserted too - the business knows what its best
+        # month was. Nothing raises or lowers it but a person typing here.
+        row.best_nos = best
+        row.updated_by = user_id
+        saved += 1
+
+    # ---- the per-category AOP table (the AMC sheet's rows) ----------------
+    # Only keys the sheet actually prints are accepted: a stray one would create
+    # a target no row could ever show.
+    valid = {r["key"] for r in AMC_SHEET_ROWS}
+    cat = {t.row_key: t for t in db.query(PmsAmcCategoryTarget)
+           .filter(PmsAmcCategoryTarget.fy == fy_start).all()}
+    for it in categories or []:
+        key = str(it.get("key") or "").strip()[:40]
+        if key not in valid:
+            continue
+        nos = _nos(it.get("aop_nos"))
+        row = cat.get(key)
+        if nos is None:
+            if row:
+                db.delete(row)
+                del cat[key]
+                removed += 1
+            continue
+        if not row:
+            row = PmsAmcCategoryTarget(fy=fy_start, row_key=key)
+            db.add(row)
+            cat[key] = row
+        if row.aop_nos != nos:
+            row.updated_by = user_id
+        row.aop_nos = nos
+        saved += 1
+
+    db.commit()
+    return {"success": True, "saved": saved, "removed": removed,
+            **list_amc_targets(db, fy_start)}
+
+
+# ============================================================================
+# ANNUAL REPORTS -> AMC  (the monthly sheet, second tab of the AMC report)
+# ----------------------------------------------------------------------------
+# One row per AGREEMENT CATEGORY, and - unlike every other annual sheet - it
+# reads SIX files, because the business counts each row where that row is
+# actually recorded:
+#
+#   KOEL Bandhan MH / KA      the FOUR BANDHAN QUOTE FILES (Anubandhan,
+#                             Anubandhan Plus, Bandhan, Bandhan Plus), counted on
+#                             PAYMENT UPDATE DATE TIME and split on the quote's
+#                             own STATE column. A Bandhan sale is a PAID QUOTE,
+#                             and the quote files are where the payment lands -
+#                             the AMC Population Report only picks the agreement
+#                             up once it has been cut, which is later and, for a
+#                             closed year, lossy (see below).
+#   KOEL Bandhan Total        those two added up
+#   KALA AMC                  AMC Population Report, ACTIVE 'Dealer Agreement'
+#                             on AGREEMENT START DATE - the dealership's own AMC
+#   KOEL Corporate AMC        the same, ACTIVE 'KOEL Agreement'
+#   AMC Expired During Month  the AMC AGREEMENT EXPIRY PLANNER, on AGREEMENT
+#                             END DATE - the file that exists to say what is
+#                             running out and when
+#   AMC Renewed During Month  those SAME expiring agreements, matched by INSTANCE
+#                             ID into the four quote files - against the SAME
+#                             filtered records the Bandhan rows count: PAYMENT
+#                             UPDATE DATE TIME set AND STATUS 'Payment Success'.
+#                             Counted in the month the old cover EXPIRES, so the
+#                             two rows read as a pair - N ran out, M of those N
+#                             came back
+#   Live AMC (KOEL+KALA)      KOEL Bandhan + KALA AMC
+#
+# The sheet is ONE financial year: AOP, that year's cumulative, one column per
+# month, and the WORKING month opened up into its Mon-Sun weeks (that is what the
+# business's 'Week-2 / Week-3' columns are). The payload is RAW PER-DAY, so every
+# column is re-aggregated in the browser with no refetch.
+#
+# CLOSED YEARS ARE NOT SHOWN, and that is deliberate for the AMC-Population rows.
+# That file is a SNAPSHOT keyed on INSTANCE ID: one row per genset, always its
+# LATEST agreement, so a renewal OVERWRITES the agreement it replaced and a
+# closed year's sales leak away month by month. A column that wrong is worse than
+# no column, so the sheet prints only the RUNNING year. (The quote files behind
+# the Bandhan rows do NOT decay - a paid quote stays a paid quote - but the sheet
+# keeps one column set for every row rather than showing history for some rows
+# and not others.)
+#
+# The one figure that cannot be counted is the AOP, and it is not typed on the
+# sheet either: it belongs to the AOP master like every other target, in the
+# second table of its AMC & Bandhan AOP tab (PmsAmcCategoryTarget).
+#
+# The per-type tallies ride along in meta.type_counts, and any agreement type
+# this mapping does not know lands in meta.unmapped_types rather than being
+# dropped silently: the mapping was inferred from the business's own sheet, so
+# the file has to be able to say when a new type shows up.
+
+# ---- the AMC POPULATION rows: which AGREEMENT TYPE feeds which row --------
+# A type appears in at most one row. The Bandhan family is NOT here: those rows
+# are counted from the quote files instead (AMC_QUOTE_TABLES below), so a Bandhan
+# agreement in the population file is deliberately left uncounted by this sheet -
+# it would be the same sale a second time, on a later date.
+AMC_ROW_TYPES = {
+    # The dealership's own AMC, sold under its own paper.
+    "kala_amc": ["Dealer Agreement"],
+    # KOEL's own corporate agreement - the one type the AMC & Bandhan Projection
+    # sheet leaves out, because it is not the dealer's business done. It IS a row
+    # here.
+    "koel_corp": ["KOEL Agreement"],
+}
+# The Bandhan family, kept for the payload's meta so the sheet can say which
+# types the quote files are standing in for.
+AMC_BANDHAN_TYPES = ["KOEL Bandhan", "KOEL Bandhan Plus", "Bandhan Premium",
+                     "KOEL Anubandhan Plus", "KOEL Anubandhan IV+"]
+
+# ---- the BANDHAN rows: the four quote files ------------------------------
+# All four share one shape (state / payment_update_date_time), so one loop reads
+# them all. A row counts ONCE, in the month its PAYMENT UPDATE landed - a quote
+# with no payment update has not been bought and is not a sale, which is the only
+# filter the count needs.
+AMC_QUOTE_TABLES = [
+    ("Anubandhan Quotes Report", "anubandhan_quotes"),
+    ("Anubandhan Plus Quotes Report", "anubandhan_plus_quotes"),
+    ("Regular Bandhan Customers Report", "regular_bandhan"),
+    ("BandhanPlus Quotes Report", "bandhan_plus_quotes"),
+]
+
+# The Bandhan family as match keys, so the population pass can tell 'counted
+# elsewhere' from 'a type nobody knows'.
+_AMC_BANDHAN_KEYS = {re.sub(r"[^A-Z0-9]+", "", t.upper()) for t in AMC_BANDHAN_TYPES}
+
+
+def _amc_key(value) -> str:
+    """Letters and digits only, upper case - so spacing or case in a file cannot
+    drop a row out of a count."""
+    return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
+
+
+def _state_is_ka(state) -> bool:
+    """The quote files carry a STATE, not a branch, so the Bandhan MH / KA split
+    is made on that. Karnataka is the only region the dealership works besides
+    Maharashtra, so anything that is not recognisably Karnataka falls to MH - the
+    home region - rather than being dropped: a state spelt in a new way must move
+    a sale between two rows, never out of both.
+
+    Matched on the text rather than an exact list because the four files are
+    exported by different systems ('Karnataka', 'KARNATAKA', 'Karnatak')."""
+    return "KARNATAK" in _amc_key(state) or _amc_key(state) == "KA"
+# Matched on letters and digits only, so spacing or case in the file cannot drop
+# an agreement out of a row.
+_AMC_ROW_OF_TYPE = {re.sub(r"[^A-Z0-9]+", "", t.upper()): row
+                    for row, types in AMC_ROW_TYPES.items() for t in types}
+
+# The sheet's rows, in print order. `counted` says how the row's numbers arrive:
+#   'series'  counted from the file, from the per-day series of the same name
+#   'sum'     added up from the rows named in `of` (a total)
+# EVERY row prints the month it happened in. Corporate AMC was briefly printed as
+# a running total, to match a business sheet that showed it that way; it reads as
+# a plain monthly count like the rest now (2026-08-22, on the business's word).
+AMC_SHEET_ROWS = [
+    {"key": "bandhan_total", "name": "KOEL Bandhan Total",
+     "counted": "sum", "of": ["bandhan_mh", "bandhan_kar"]},
+    {"key": "bandhan_mh", "name": "KOEL Bandhan MH", "counted": "series"},
+    {"key": "bandhan_kar", "name": "KOEL Bandhan KA", "counted": "series"},
+    {"key": "kala_amc", "name": "KALA AMC", "counted": "series"},
+    {"key": "koel_corp", "name": "KOEL Corporate AMC", "counted": "series"},
+    {"key": "expired", "name": "AMC Expired During the Month", "counted": "series"},
+    {"key": "renewed", "name": "AMC Renewed During the Month", "counted": "series"},
+    {"key": "live_total", "name": "Live AMC (KOEL+KALA) OVERALL", "counted": "sum",
+     "of": ["bandhan_mh", "bandhan_kar", "kala_amc"], "highlight": True},
+]
+
+# The per-day series the payload ships, in the order records[] indexes them.
+AMC_SERIES = ["bandhan_mh", "bandhan_kar", "kala_amc", "koel_corp",
+              "expired", "renewed"]
+
+
+def annual_amc_monthly_data(db: Session):
+    """Cached wrapper - see _annual_amc_monthly_data."""
+    return _cached(db, ("annual_amc_monthly",),
+                   lambda: _annual_amc_monthly_data(db))
+
+
+def _annual_amc_monthly_data(db: Session):
+    """'AMC' (Annual Reports, AMC report -> Monthly tab) - agreements per
+    category, per DAY.
+
+    records[[seriesIdx, 'YYYY-MM-DD', count]], seriesIdx indexing AMC_SERIES.
+    Per-day rather than per-month because the sheet opens its working month up
+    into Mon-Sun weeks, and a week does not divide into months.
+
+    FIVE files, each row counted where that row is actually recorded:
+
+      bandhan_mh / bandhan_kar   the four Bandhan QUOTE files, on PAYMENT UPDATE
+                                 DATE TIME, split on the quote's own STATE
+      kala_amc / koel_corp       AMC Population, ACTIVE, on AGREEMENT START DATE
+      expired                    the AMC Agreement Expiry Planner, on AGREEMENT
+                                 END DATE - the month the cover runs out
+      renewed                    those same rows, matched by INSTANCE ID into the
+                                 quote files' PULSE INSTANCE ID - against the
+                                 SAME records the Bandhan rows count, i.e. a
+                                 PAYMENT UPDATE DATE TIME set AND a STATUS of
+                                 'Payment Success'. Counted in the EXPIRY month,
+                                 not the payment month, so 'M of the N that
+                                 expired in April have renewed' reads straight
+                                 off the two rows
+    """
+    from app.models.customer_model import (AMCAgreement, AMCExpiryPlanner,
+                                           AnubandhanPlusQuote, AnubandhanQuote,
+                                           BandhanPlusQuote, RegularBandhan)
+
+    # branch_id is read but not split on: these rows are company-wide
+    # categories, and the only region split on the sheet (Bandhan MH / KA) comes
+    # from the quote files' STATE instead.
+    rows = db.query(AMCAgreement.branch_id, AMCAgreement.agreement_type,
+                    AMCAgreement.agreement_start_date,
+                    AMCAgreement.agreement_end_date,
+                    AMCAgreement.agreement_status,
+                    AMCAgreement.last_agreement_number).all()
+
+    si = {name: i for i, name in enumerate(AMC_SERIES)}
+    counts = {}                      # (seriesIdx, 'YYYY-MM-DD') -> n
+    type_counts = {}                 # every ACTIVE type seen -> rows
+    unmapped = {}                    # a type no row of this sheet counts
+    not_active = no_start = no_end = 0
+    renewed_rows = 0
+    # TWO spans, and the difference matters. `span` is every date the payload
+    # carries; `start_span` is only the SALES dates - payments and agreement
+    # starts. The expired and renewed rows are both dated on AGREEMENT END DATE,
+    # which runs YEARS ahead, so the FY picker is offered start_span instead.
+    span = {"lo": None, "hi": None}
+    start_span = {"lo": None, "hi": None}
+
+    def _d(v):
+        return v.date() if isinstance(v, datetime) else v
+
+    def _widen(box, iso):
+        if box["lo"] is None or iso < box["lo"]:
+            box["lo"] = iso
+        if box["hi"] is None or iso > box["hi"]:
+            box["hi"] = iso
+
+    def _add(series, day):
+        iso = day.isoformat()
+        key = (si[series], iso)
+        counts[key] = counts.get(key, 0) + 1
+        _widen(span, iso)
+        # Only the SALES series widen the span the FY picker is offered. Expiries
+        # and renewals are both dated on the AGREEMENT END DATE, which runs years
+        # ahead - offering those years would list financial years in which
+        # nothing was ever sold, only cover running out.
+        if series not in ("expired", "renewed"):
+            _widen(start_span, iso)
+
+    for _bid, atype, start, end, status, last_no in rows:
+        if not _is_active(status):
+            not_active += 1
+            continue
+        label = str(atype or "").strip() or "(blank)"
+        type_counts[label] = type_counts.get(label, 0) + 1
+        row_key = _AMC_ROW_OF_TYPE.get(re.sub(r"[^A-Z0-9]+", "",
+                                              str(atype or "").upper()))
+        # A Bandhan agreement has no CATEGORY row here - those rows are counted
+        # from the quote files, so counting the agreement too would be the same
+        # sale twice, on a later date. It is still a type this sheet KNOWS, and
+        # it still counts toward the expiry and renewal rows below. A type that
+        # is neither is genuinely unknown, and only that kind is flagged.
+        known = row_key is not None or _amc_key(atype) in _AMC_BANDHAN_KEYS
+        if not known:
+            unmapped[label] = unmapped.get(label, 0) + 1
+            continue
+
+        # Expiries are NOT counted here any more - the AMC Agreement Expiry
+        # Planner is the file that exists to answer that question, and this one
+        # is a snapshot whose end dates move as gensets renew. The tally is kept
+        # only to say how far the two files disagree.
+        e = _d(end)
+        if e is None:
+            no_end += 1
+
+        d = _d(start)
+        if d is None:
+            no_start += 1               # an agreement with no start date
+            continue
+        if row_key is not None:
+            _add(row_key, d)
+        # LAST AGREEMENT NUMBER used to drive the renewed row. It no longer does
+        # - only 239 of 2,504 rows still carry one, because the file keeps just a
+        # single step back - but the tally stays, as the measure of what that
+        # approach could ever have seen.
+        if str(last_no or "").strip():
+            renewed_rows += 1
+
+    # ---- EXPIRED and RENEWED: the Expiry Planner, matched to the quotes ---
+    # The AMC Agreement Expiry Planner is one row per genset per agreement, and
+    # AGREEMENT END DATE is what the whole file is for - so an expiry is simply a
+    # row of it, counted in the month its cover runs out.
+    #
+    # A RENEWAL is one of those same rows bought again, and 'bought' means EXACTLY
+    # what the KOEL Bandhan rows mean by it: the match is made against the SAME
+    # filtered quote records those rows count, not against the quote files at
+    # large. So a quote qualifies only when BOTH hold:
+    #
+    #   PAYMENT UPDATE DATE TIME is set   the money landed - the very test the
+    #                                     Bandhan rows above filter on
+    #   STATUS is 'Payment Success'       and it landed cleanly: a quote raised,
+    #                                     paid short, or refunded is not a renewal
+    #
+    # The genset is carried as PULSE INSTANCE ID (RegularBandhan keeps it in
+    # instance_id), which is what the expiring agreement's INSTANCE ID is matched
+    # against.
+    #
+    # The renewal is counted in the month the OLD COVER EXPIRES, not the month
+    # the payment landed. That keeps the two rows a pair the reader can divide:
+    # 'N ran out in April, M of those N have been bought again'. Counting it in
+    # the payment month would put the two halves of one story in different
+    # columns.
+    #
+    # A genset with SEVERAL expiring agreements counts once per agreement on both
+    # rows - the file's own key is instance + agreement number, and each
+    # agreement is its own piece of cover.
+    paid_instances = set()
+    for model, id_col in ((AnubandhanPlusQuote, "pulse_instance_id"),
+                          (AnubandhanQuote, "pulse_instance_id"),
+                          (BandhanPlusQuote, "pulse_instance_id"),
+                          # This file matches on Pulse Instance ID too; its
+                          # import lands it in instance_id (see RegularBandhan).
+                          (RegularBandhan, "instance_id")):
+        col = getattr(model, id_col)
+        for inst, status, paid_at in db.query(
+                col, model.status, model.payment_update_date_time).all():
+            if paid_at is None:
+                continue                 # never paid: not a Bandhan record either
+            if _amc_key(status) != "PAYMENTSUCCESS":
+                continue
+            key = str(inst or "").strip().upper()
+            if key:
+                paid_instances.add(key)
+
+    expiry_rows = 0
+    expiry_no_date = 0
+    renewed_matched = 0
+    for inst, end_at in db.query(AMCExpiryPlanner.instance_id,
+                                 AMCExpiryPlanner.agreement_end_date).all():
+        expiry_rows += 1
+        d = _d(end_at)
+        if d is None:
+            expiry_no_date += 1          # cannot be placed on the calendar
+            continue
+        _add("expired", d)
+        if str(inst or "").strip().upper() in paid_instances:
+            _add("renewed", d)
+            renewed_matched += 1
+
+    # ---- the BANDHAN rows: the four quote files ------------------------
+    # A PAID QUOTE is the sale, so the count is one per row that carries a
+    # PAYMENT UPDATE DATE TIME, in the month that payment landed. A quote with no
+    # payment update has not been bought and is simply not counted - no status
+    # filter is needed on top, and none is applied: `status` carries free text
+    # that differs between the four files, and reading it would drop sales on a
+    # wording change.
+    quote_rows = 0
+    quote_unpaid = 0
+    quote_by_file = {}
+    state_counts = {}
+    for label, table in AMC_QUOTE_TABLES:
+        try:
+            found = db.execute(text(
+                "SELECT state, payment_update_date_time FROM dbo.{}".format(table)
+            )).fetchall()
+        except Exception:
+            # A file nobody has uploaded yet has no table. It contributes
+            # nothing rather than failing the whole sheet - but the failed
+            # statement has to be rolled back first, or every query after it on
+            # this connection fails with it.
+            db.rollback()
+            quote_by_file[label] = None
+            continue
+        n_paid = 0
+        for st, paid_at in found:
+            quote_rows += 1
+            d = _d(paid_at)
+            if d is None:
+                quote_unpaid += 1
+                continue
+            key = (st or "").strip() or "(blank)"
+            state_counts[key] = state_counts.get(key, 0) + 1
+            _add("bandhan_kar" if _state_is_ka(st) else "bandhan_mh", d)
+            n_paid += 1
+        quote_by_file[label] = n_paid
+
+    records = sorted([s, day, n] for (s, day), n in counts.items())
+
+    # The RUNNING financial year, read off today rather than off the data: the
+    # sheet is 'this year against its AOP', so it must open on the running year
+    # even in the first days of April when nothing has started yet.
+    today = now_ist().date()
+    fy = today.year if today.month >= 4 else today.year - 1
+
+    return {"success": True,
+            "meta": {"min_date": span["lo"], "max_date": span["hi"],
+                     "min_start": start_span["lo"], "max_start": start_span["hi"],
+                     "today": today.isoformat(), "fy": fy,
+                     "agreement_rows": len(rows),
+                     "not_active": not_active,
+                     "no_start_date": no_start,
+                     # the Expiry Planner and its match into the quote files
+                     "expiry_rows": expiry_rows,
+                     "expiry_no_date": expiry_no_date,
+                     "renewed_matched": renewed_matched,
+                     "paid_instances": len(paid_instances),
+                     # what the OLD approach could have seen, kept for comparison:
+                     # AMC Population rows still carrying a last agreement number,
+                     # and rows whose end date is missing there
+                     "population_last_agreement_rows": renewed_rows,
+                     "population_no_end_date": no_end,
+                     "type_counts": type_counts,
+                     "unmapped_types": unmapped,
+                     "row_types": AMC_ROW_TYPES,
+                     "bandhan_types": AMC_BANDHAN_TYPES,
+                     "quote_rows": quote_rows,
+                     "quote_unpaid": quote_unpaid,
+                     "quote_by_file": quote_by_file,
+                     "quote_states": state_counts},
+            "series": AMC_SERIES,
+            "rows": AMC_SHEET_ROWS,
+            "records": records,
+            "aop": _amc_category_aop_map(db),
+            "dbamc_aop": _amc_branch_aop_totals(db)}
+
+
+def _amc_branch_aop_totals(db: Session) -> dict:
+    """{'fy' -> every branch's F<yy> PROJ AOP D/BAMC added up}.
+
+    This is what the AMC sheet's KCGL Total AMC table plans against: the company
+    figure is the SUM of the branch projections already kept in the first table
+    of the AOP master's AMC & Bandhan AOP tab, spread equally over the twelve
+    months. So the yearly plan is maintained in exactly one place - per branch,
+    where it is actually owned - and the KCGL row is derived from it rather than
+    typed a second time and left to drift.
+
+    Keyed by string because it crosses JSON, and the sheet looks it up by the
+    financial year the reader has picked.
+
+    A branch with no projection contributes nothing (rather than a zero), so a
+    part-filled year reads as the sum of what has been set."""
+    out = {}
+    for fy, proj in db.query(PmsAmcTarget.fy, PmsAmcTarget.proj_nos).all():
+        if proj is None:
+            continue
+        out[str(fy)] = out.get(str(fy), 0) + proj
+    return out
+
+
+def _amc_category_aop_map(db: Session) -> dict:
+    """Every per-category AOP as {'fy|row_key': {nos, by}} - flat, so one payload
+    covers whichever financial year the sheet lands on."""
+    return {"{}|{}".format(t.fy, t.row_key): {"nos": t.aop_nos, "by": t.updated_by}
+            for t in db.query(PmsAmcCategoryTarget).all()
+            if t.aop_nos is not None}
+
+
+def _amc_nos(raw):
+    """A whole number of agreements, or None. Negative is meaningless here,
+    while 0 is a real figure ('this row plans none'), so 0 is kept."""
+    if raw in (None, ""):
+        return None
+    try:
+        return max(0, int(round(float(raw))))
+    except (TypeError, ValueError):
+        return None
+
+
+# ============================================================================
+# ANNUAL REPORTS -> SERVICE LOAD AND RESPONSE
+# ----------------------------------------------------------------------------
+# ONE file: 'Response Time & MaxTTR Details' (response_time_maxttr). Everything
+# the sheet prints is counted on SR CLOSE DATE, per BRANCH ID:
+#
+#   Total Service Load Available   every SR of the period, whatever its type
+#   the breakdown rows             that same population split by the Service
+#                                  Load head master (CSP / Post Warranty /
+#                                  Warranty / KOEL AMC / Dealer AMC / ...)
+#   4 HRS RESPONSE %               SR TYPE 'Warranty', Response Time <= 4
+#   SR CLOSED WITHIN 24 / 48 HRS   SR TYPE 'Warranty',
+#                                  MaxTTR on SR Closed in hrs <= 24 / 48
+#                                  All three are scoped to that one SR TYPE, and
+#                                  a NEGATIVE duration is excluded from both the
+#                                  numerator and the denominator.
+#   FTR % / FVR %                  NOT counted — typed into AOP & Master, per
+#                                  month and per cumulative year, and printed as
+#                                  entered (see PmsServiceLoadManual)
+#   Productivity (Calls PP PD)     closures / (the branch's SE HEADCOUNT x its
+#                                  working days). The headcount is TYPED in the
+#                                  AOP master - the file only names engineers who
+#                                  closed something, which flatters a branch with
+#                                  anyone on leave. Working days are exact: days
+#                                  in the window, minus Sundays, minus the
+#                                  region's ticked holidays.
+#
+# WHY SR OPEN DATE IS NEVER USED (it is not a date input here at all, but the
+# same corruption explains the negative Response Times below): 8,721 of the
+# 45,279 rows in the live file
+# carry an SR OPEN DATE that falls AFTER their SR CLOSE DATE - always at
+# 00:00:00, i.e. the SCHEDULED date of a PM/planned SR that was closed early.
+# The file's own arithmetic turns those into a negative MaxTTR (-38, -298, -586)
+# and buckets them as '<=2 HRS (+30MIN BUFFER)'. So response and TTR are read
+# from the file's OWN columns and never recomputed from open -> close, and a
+# negative TTR counts as inside every window - closed before it was due is
+# compliant, which is exactly how the source file scores it. meta reports the
+# count so the number is never invisible.
+# ============================================================================
+
+
+def list_service_load_heads(db: Session):
+    """The shared head list, in the order the Service Load and Response sheet
+    prints its breakdown rows."""
+    return list_heads_for(db, "service_load")
+
+
+def add_service_load_head(db: Session, name: str, user_id: str):
+    return add_head_common(db, name, user_id, "service_load")
+
+
+def delete_service_load_head(db: Session, head_id: int):
+    return delete_head_common(db, head_id, "service_load")
+
+
+def _seed_service_load_sr_defaults(db: Session):
+    existing = {m.sr_type.lower() for m in db.query(PmsServiceLoadSrTypeMap).all()}
+    added = 0
+    for sr, head in DEFAULT_SERVICE_LOAD_SR_HEADS.items():
+        if sr.lower() not in existing:
+            db.add(PmsServiceLoadSrTypeMap(sr_type=sr, head=head, created_by="system"))
+            added += 1
+    if added:
+        db.commit()
+    return added
+
+
+def list_service_load_sr_types(db: Session):
+    if db.query(PmsServiceLoadSrTypeMap).count() == 0:
+        _seed_service_load_sr_defaults(db)
+    rows = (db.query(PmsServiceLoadSrTypeMap)
+            .order_by(PmsServiceLoadSrTypeMap.sr_type).all())
+    return [{"id": m.id, "sr_type": m.sr_type, "head": m.head} for m in rows]
+
+
+def save_service_load_sr_types(db: Session, items: list, user_id: str):
+    """Upsert the mapping. A head cleared to blank leaves that SR Type counting
+    in the sheet's 'all types' row while dropping out of every breakdown row -
+    which is how the printed sheet's gap between the two is reproduced."""
+    for it in items or []:
+        sr = _clean_str(it.get("sr_type"), 200)
+        if not sr:
+            continue
+        row = (db.query(PmsServiceLoadSrTypeMap)
+               .filter(PmsServiceLoadSrTypeMap.sr_type == sr).first())
+        if not row:
+            row = PmsServiceLoadSrTypeMap(sr_type=sr, created_by=user_id)
+            db.add(row)
+        row.head = _clean_str(it.get("head"), 60)
+        row.updated_by = user_id
+    db.commit()
+    return {"success": True, "items": list_service_load_sr_types(db)}
+
+
+def sync_service_load_sr_types(db: Session, user_id: str):
+    """Pull the distinct SR Type values out of the uploaded MaxTTR file."""
+    from app.models.customer_model import ResponseTimeMaxTTR
+    _seed_service_load_sr_defaults(db)
+    known = {m.sr_type.lower() for m in db.query(PmsServiceLoadSrTypeMap).all()}
+    defaults = {k.lower(): v for k, v in DEFAULT_SERVICE_LOAD_SR_HEADS.items()}
+    rows = (db.query(ResponseTimeMaxTTR.sr_type)
+            .filter(ResponseTimeMaxTTR.sr_type.isnot(None),
+                    ResponseTimeMaxTTR.sr_type != "")
+            .distinct().all())
+    added = 0
+    for (sr,) in rows:
+        sr = re.sub(r"\s+", " ", (sr or "").strip())[:200]
+        if sr and sr.lower() not in known:
+            db.add(PmsServiceLoadSrTypeMap(sr_type=sr, head=defaults.get(sr.lower()),
+                                           created_by=user_id))
+            known.add(sr.lower())
+            added += 1
+    db.commit()
+    return {"success": True, "added": added,
+            "items": list_service_load_sr_types(db)}
+
+
+def reset_service_load_sr_types(db: Session, user_id: str):
+    for sr, head in DEFAULT_SERVICE_LOAD_SR_HEADS.items():
+        row = (db.query(PmsServiceLoadSrTypeMap)
+               .filter(PmsServiceLoadSrTypeMap.sr_type == sr).first())
+        if row:
+            row.head = head
+            row.updated_by = user_id
+        else:
+            db.add(PmsServiceLoadSrTypeMap(sr_type=sr, head=head, created_by=user_id))
+    db.commit()
+    return {"success": True, "items": list_service_load_sr_types(db)}
+
+
+# ---------------- the report ------------------------------------------------ #
+
+# ALL THREE compliance percentages are measured on ONE column, 'Response Time',
+# counted on SR CLOSE DATE — the business's own definition of the sheet. Nothing
+# else feeds them: not the RESPONSE TIME RANGE IN HRS bucket (it is only this
+# same number pre-binned; the two agreed on all 45,279 live rows), and not
+# MaxTTR ON SR CLOSED IN HRS, which measures time to CLOSE rather than time to
+# RESPOND. Deriving the elapsed time from the timestamps instead was tried and
+# withdrawn: SR OPEN DATE is a SCHEDULED date on planned work, so open -> close
+# is not a service level on 42% of the file.
+_RT_HRS = "TRY_CONVERT(FLOAT, REPLACE(response_time, '''', ''))"
+# Time to CLOSE, which is what the 24 / 48-hour rows measure.
+_TTR_HRS = "TRY_CONVERT(FLOAT, REPLACE(maxttr_on_sr_closed_in_hrs, '''', ''))"
+# Every compliance percentage is scoped to this SR TYPE. It is the literal value
+# in the file, not the report's 'Warranty' HEAD (which also gathers Line
+# Rejection, Campaign, Revalidation and Extended Warranty) — the business names
+# the SR type.
+_WARRANTY = "r.sr_type = 'Warranty'"
+
+_SERVICE_LOAD_SQL = """
+    SELECT r.branch_id                                       AS branch_id,
+           CAST(r.sr_close_date AS DATE)                     AS d,
+           r.sr_type                                         AS sr_type,
+           COUNT(*)                                          AS n,
+           -- THE THREE COMPLIANCE MEASURES ARE SCOPED TO SR TYPE 'Warranty'
+           -- and read TWO different columns:
+           --   4 HRS RESPONSE      Response Time            <= 4
+           --   CLOSED IN 24 / 48   MaxTTR on SR Closed hrs  <= 24 / 48
+           -- Response time and time-to-close are different measures, and the
+           -- business scores the first on one column and the last two on the
+           -- other. A NEGATIVE value in either is excluded from BOTH halves —
+           -- it is planned work closed before its scheduled date, so there is no
+           -- duration to score — which is why each measure carries its own
+           -- denominator rather than dividing by the SR count.
+           SUM(CASE WHEN {w} AND {rt} BETWEEN 0 AND 4 THEN 1 ELSE 0 END)  AS r4,
+           SUM(CASE WHEN {w} AND {rt} >= 0 THEN 1 ELSE 0 END)             AS r4_den,
+           SUM(CASE WHEN {w} AND {tt} BETWEEN 0 AND 24 THEN 1 ELSE 0 END) AS c24,
+           SUM(CASE WHEN {w} AND {tt} BETWEEN 0 AND 48 THEN 1 ELSE 0 END) AS c48,
+           SUM(CASE WHEN {w} AND {tt} >= 0 THEN 1 ELSE 0 END)             AS tt_den,
+           SUM(CASE WHEN {w} THEN 1 ELSE 0 END)                           AS warranty_n,
+           SUM(CASE WHEN {w} AND ({rt} < 0 OR {tt} < 0) THEN 1 ELSE 0 END) AS neg_ttr,
+           SUM(CASE WHEN {w} AND ({rt} IS NULL OR {tt} IS NULL)
+                    THEN 1 ELSE 0 END)                                    AS no_ttr
+      FROM dbo.response_time_maxttr r
+     WHERE r.sr_close_date IS NOT NULL
+     GROUP BY r.branch_id, CAST(r.sr_close_date AS DATE), r.sr_type
+""".replace("{rt}", _RT_HRS).replace("{tt}", _TTR_HRS).replace("{w}", _WARRANTY)
+
+def annual_service_load_data(db: Session):
+    """Cached wrapper - see _annual_service_load_data."""
+    return _cached(db, ("annual_service_load",),
+                   lambda: _annual_service_load_data(db))
+
+
+def _annual_service_load_data(db: Session):
+    """'Service Load and Response' (Annual Reports) - the RESPONSE TIME & MaxTTR
+    DETAILS file and only it, counted on SR CLOSE DATE per BRANCH ID.
+
+    Aggregated in SQL down to (branch, day, SR type) and folded to heads here,
+    because the DB is remote: 45k rows become ~12k records, and the page then
+    derives the FY cumulatives, the month columns, the working month's weeks and
+    every region rollup from those without a refetch - the same contract the CDI
+    and Employee Productivity payloads use.
+
+    records[[branchIdx, isoCloseDate, headIdx, n,
+             within4hrs, scorableFor4hrs, closed24, closed48, scorableForClose,
+             warrantySRs]]
+        the counts AND their three SLA numerators travel together, so the sheet
+        can score any row-set - one head, a few, or all of them - without asking
+        the server for another cut. headIdx -1 is the 'no head' bucket.
+    The file's SE NAME is deliberately NOT read: productivity divides by the
+    branch's TYPED headcount (PmsServiceLoadSeCount), because the file only names
+    engineers who closed something and that flatters any branch with a person on
+    leave. That also keeps 22k engineer-day triples out of the payload.
+    """
+    from app.models.customer_model import ResponseTimeMaxTTR
+
+    # ---- branch identity: every AOP / ERP branch gets a row, MH then KA -----
+    aop_name, aop_region = {}, {}
+    for t in db.query(PmsBranchTarget.branch_id, PmsBranchTarget.branch_name,
+                      PmsBranchTarget.region).distinct():
+        bid = _norm_branch_id(t[0])
+        if not bid:
+            continue
+        if t[1] and bid not in aop_name:
+            aop_name[bid] = t[1].strip()
+        if t[2] and bid not in aop_region:
+            aop_region[bid] = t[2].strip().upper()
+    erp_region = {b: r for r, b, _n in ERP_BRANCHES}
+    erp_name = {b: n for _r, b, n in ERP_BRANCHES}
+
+    branch_idx, branches, branch_ids = {}, [], []
+
+    def _branch(bid):
+        """A branch code no KALA master knows is not a branch - the MaxTTR file
+        carries another dealer's code on a handful of rows and one row was enough
+        to grow a ghost column in the Employee Productivity report. Such codes
+        fold into the single Unmapped Branch bucket and are reported in meta."""
+        bid = _norm_branch_id(bid) or ""
+        if bid not in aop_name and bid not in erp_name:
+            bid = UNMAPPED_BRANCH_ID
+        if bid not in branch_idx:
+            branch_idx[bid] = len(branches)
+            branches.append(aop_name.get(bid) or erp_name.get(bid)
+                            or UNMAPPED_BRANCH_NAME)
+            branch_ids.append(bid)
+        return branch_idx[bid]
+
+    for _r, b, _n in ERP_BRANCHES:
+        _branch(b)
+    # Parbhani (420435_7) is an AOP master branch the ERP list has never carried;
+    # every other master-only branch gets its row too, in natural order.
+    for b in sorted(set(aop_name) - set(branch_idx), key=_branch_sort_key):
+        _branch(b)
+
+    # ---- SR TYPE -> head ('SR Type Master (Service Load)') -----------------
+    heads = _report_heads(db, "service_load")
+    head_idx = {h: i for i, h in enumerate(heads)}
+    sr_head = {}
+    if db.query(PmsServiceLoadSrTypeMap).count() == 0:
+        _seed_service_load_sr_defaults(db)
+    for m in db.query(PmsServiceLoadSrTypeMap).all():
+        if m.sr_type:
+            sr_head[_tight(m.sr_type)] = (m.head or "").strip()
+
+    unmapped_types = {}                  # SR Type with no head -> its row count
+
+    def _head_of(sr_type):
+        """Index of the head an SR Type reports under, or None when it has no
+        head - those rows still count in the sheet's 'all types' row, and the
+        difference is printed as its own line rather than quietly dropped."""
+        h = sr_head.get(_tight(sr_type or ""))
+        if not h:
+            return None
+        if h not in head_idx:            # a head added after the master was read
+            head_idx[h] = len(heads)
+            heads.append(h)
+        return head_idx[h]
+
+    # ---- one grouped aggregate over the whole file --------------------------
+    rows = db.execute(text(_SERVICE_LOAD_SQL)).fetchall()
+
+    # (branchIdx, iso date, headIdx-or--1) -> [n, r4, c24, c48]
+    cells = {}
+    min_d = max_d = None
+    counted = no_ttr_rows = neg_ttr_rows = unmapped_branch_rows = 0
+    for (bid, d, sr_type, n, r4, r4_den, c24, c48, tt_den, warranty_n,
+         neg_ttr, no_ttr) in rows:
+        d = d.date() if isinstance(d, datetime) else d
+        if d is None:
+            continue
+        n = int(n or 0)
+        bi = _branch(bid)
+        if branch_ids[bi] == UNMAPPED_BRANCH_ID:
+            unmapped_branch_rows += n
+        hi = _head_of(sr_type)
+        if hi is None:
+            key = str(sr_type or "").strip() or "(blank)"
+            unmapped_types[key] = unmapped_types.get(key, 0) + n
+        ds = d.isoformat()
+        # -1 is the 'no head' bucket: it never gets a breakdown row, only the
+        # 'all types' row and the balancing line under the Total.
+        acc = cells.setdefault((bi, ds, -1 if hi is None else hi),
+                               [0, 0, 0, 0, 0, 0, 0])
+        acc[0] += n
+        acc[1] += int(r4 or 0)
+        acc[2] += int(r4_den or 0)
+        acc[3] += int(c24 or 0)
+        acc[4] += int(c48 or 0)
+        acc[5] += int(tt_den or 0)
+        acc[6] += int(warranty_n or 0)
+        counted += n
+        no_ttr_rows += int(no_ttr or 0)
+        neg_ttr_rows += int(neg_ttr or 0)
+        if min_d is None or d < min_d:
+            min_d = d
+        if max_d is None or d > max_d:
+            max_d = d
+
+    records = sorted([bi, ds, hi] + v for (bi, ds, hi), v in cells.items())
+
+    branch_regions = [aop_region.get(b) or erp_region.get(b) or "MH"
+                      for b in branch_ids]
+
+    # ---- branch groups, the same ones Employee Productivity and SR Allocation
+    # collapse their first column by. Shipped so this sheet groups branches
+    # identically instead of inventing a second grouping of the same branches;
+    # a branch in no group gets a group of its own and so stays a plain row.
+    groups, grouped = [], set()
+    for g in EPR_BRANCH_GROUPS:
+        members = [branch_idx[b] for b in g if b in branch_idx]
+        if members:
+            groups.append(members)
+            grouped.update(members)
+    for bi in range(len(branches)):
+        if bi not in grouped:
+            groups.append([bi])
+
+    no_date_rows = int(db.query(func.count(ResponseTimeMaxTTR.id))
+                       .filter(ResponseTimeMaxTTR.sr_close_date.is_(None))
+                       .scalar() or 0)
+
+    return {"success": True,
+            "meta": {"min_date": min_d.isoformat() if min_d else None,
+                     "max_date": max_d.isoformat() if max_d else None,
+                     "counted_rows": counted,
+                     "no_date_rows": no_date_rows,
+                     "unmapped_branch_rows": unmapped_branch_rows,
+                     # SR Types the head master does not place: {type: rows}
+                     "unmapped_types": dict(sorted(unmapped_types.items(),
+                                                   key=lambda kv: -kv[1])),
+                     # a Response Time that is not a number at all - it can
+                     # satisfy no window, so it only ever sits in the denominator
+                     "no_ttr_rows": no_ttr_rows,
+                     # a NEGATIVE Response Time: planned work finished before its
+                     # scheduled open date. Inside every window, which is how the
+                     # source file scores it too
+                     "neg_ttr_rows": neg_ttr_rows,
+                     "no_ftr_rows": 0},
+            "heads": heads,
+            "branches": branches, "branch_ids": branch_ids,
+            "branch_regions": branch_regions, "groups": groups,
+            "records": records,
+            "working_days": _working_days_master(db),
+            # Exact working days need the calendar, not just the monthly total:
+            # a WEEK column containing 15 Aug has to lose that day, which a
+            # month-level number cannot express.
+            "holidays": {rg: sorted(d.isoformat() for d in days)
+                         for rg, days in _holiday_sets(db).items()},
+            "se_counts": _service_load_se_count_map(db),
+            "targets": _service_load_targets_map(db),
+            "pct_targets": _service_load_pct_targets_map(db),
+            "manual": _service_load_manual_map(db)}
+
+
+# ---------------- AOP MASTER: SERVICE LOAD AOP ----------------------------- #
+
+def _service_load_targets_map(db: Session) -> dict:
+    """Every saved monthly SR-closure target as {'YYYY-MM|branch_id': nos}. The
+    sheet sums these itself - by branch for a branch row's AOP, by region for
+    MH / KA, across everything for Total, and by month for the
+    'Service Request Closure (Nos.)' strip - so one flat map covers whichever FY
+    the page lands on."""
+    return {"{}|{}".format(t.target_month, t.branch_id): t.sr_target
+            for t in db.query(PmsServiceLoadTarget).all()
+            if t.sr_target is not None}
+
+
+def _service_load_pct_targets_map(db: Session) -> dict:
+    """The percentage / ratio AOPs as {'fy|metric|scope|key': value}. These
+    cannot be summed, so each row of the sheet carries its own - the same reason
+    PmsCdiTarget is keyed on a (scope, scope_key) pair."""
+    return {"{}|{}|{}|{}".format(t.fy, t.metric, t.scope, t.scope_key):
+            t.target_value
+            for t in db.query(PmsServiceLoadPctTarget).all()
+            if t.target_value is not None}
+
+
+def _service_load_se_count_map(db: Session) -> dict:
+    """{branch_id: SE headcount} — the productivity denominator. A branch with
+    no row is absent, and the sheet shows a dash for it rather than a figure
+    divided by a guess."""
+    return {r.branch_id: r.se_count
+            for r in db.query(PmsServiceLoadSeCount).all()
+            if r.se_count}
+
+
+def list_service_load_se_counts(db: Session):
+    """The SE Headcount grid of the Service Load AOP tab, over the same branch
+    list the other grids use so the tabs can never show different branches."""
+    rows = _service_load_branch_list(db)
+    saved = _service_load_se_count_map(db)
+    for r in rows:
+        r["se_count"] = saved.get(r["key"])
+    return {"items": rows}
+
+
+def save_service_load_se_counts(db: Session, items: list, user_id: str):
+    """Upsert the headcounts. A blank DELETES the row: 'nobody has told us' and
+    'this branch has no engineers' are different statements, and only the second
+    would justify printing a number."""
+    existing = {r.branch_id: r for r in db.query(PmsServiceLoadSeCount).all()}
+    saved = removed = 0
+    for it in items or []:
+        bid = _norm_branch_id(it.get("key") or it.get("branch_id"))
+        if not bid:
+            continue
+        n = _as_int_or_none(it.get("se_count"))
+        if n is not None and (n < 0 or n > 999):
+            continue
+        row = existing.get(bid)
+        if n is None:
+            if row is not None:
+                db.delete(row)
+                existing.pop(bid, None)
+                removed += 1
+            continue
+        if row is None:
+            row = PmsServiceLoadSeCount(branch_id=bid, created_by=user_id)
+            db.add(row)
+            existing[bid] = row
+        row.se_count = n
+        row.updated_by = user_id
+        saved += 1
+    db.commit()
+    return {"success": True, "saved": saved, "removed": removed,
+            **list_service_load_se_counts(db)}
+
+
+def _service_load_manual_map(db: Session) -> dict:
+    """The TYPED FTR / FVR figures as {'metric|period': value}.
+
+    period is either a month ('2026-07') or a whole financial year ('FY2026',
+    meaning Apr 2026 - Mar 2027), so the sheet can look a cell up by what it
+    covers no matter which year is picked at the top. Keys are absolute rather
+    than relative ('two years back') for exactly that reason."""
+    return {"{}|{}".format(m.metric, m.period): m.value
+            for m in db.query(PmsServiceLoadManual).all()
+            if m.value is not None}
+
+
+def list_service_load_manual(db: Session, fy_start: int):
+    """The FTR / FVR tab of the Service Load AOP master: the three cumulative
+    years the sheet prints and the twelve months of the picked year."""
+    periods = (["FY{}".format(fy_start - 2), "FY{}".format(fy_start - 1),
+                "FY{}".format(fy_start)] + _fy_months(fy_start))
+    saved = {(m.metric, m.period): m.value
+             for m in db.query(PmsServiceLoadManual)
+             .filter(PmsServiceLoadManual.period.in_(periods)).all()}
+    return {"fy": fy_start, "periods": periods,
+            "metrics": list(SERVICE_LOAD_MANUAL_METRICS),
+            "values": {m: {p: saved.get((m, p)) for p in periods}
+                       for m in SERVICE_LOAD_MANUAL_METRICS}}
+
+
+def save_service_load_manual(db: Session, fy_start: int, items: list, user_id: str):
+    """Upsert the typed figures. A blank value DELETES its row, so the sheet
+    shows a dash rather than 0% for a month nobody has filled in."""
+    periods = set(["FY{}".format(fy_start - 2), "FY{}".format(fy_start - 1),
+                   "FY{}".format(fy_start)] + _fy_months(fy_start))
+    existing = {(m.metric, m.period): m
+                for m in db.query(PmsServiceLoadManual)
+                .filter(PmsServiceLoadManual.period.in_(list(periods))).all()}
+    saved = removed = 0
+    for it in items or []:
+        metric = str(it.get("metric") or "").strip().lower()
+        period = str(it.get("period") or "").strip()[:10]
+        if metric not in SERVICE_LOAD_MANUAL_METRICS or period not in periods:
+            continue
+        val = _as_num_or_none(it.get("value"))
+        if val is not None and (val < 0 or val > 100):
+            continue                      # a percentage, and nothing else
+        row = existing.get((metric, period))
+        if val is None:
+            if row is not None:
+                db.delete(row)
+                existing.pop((metric, period), None)
+                removed += 1
+            continue
+        if row is None:
+            row = PmsServiceLoadManual(metric=metric, period=period,
+                                       created_by=user_id)
+            db.add(row)
+            existing[(metric, period)] = row
+        row.value = val
+        row.updated_by = user_id
+        saved += 1
+    db.commit()
+    return {"success": True, "saved": saved, "removed": removed,
+            **list_service_load_manual(db, fy_start)}
+
+
+def _service_load_branch_list(db: Session):
+    """The branch rows of the Service Load AOP tab. Same list the Target Master
+    tab uses, with its saved name and region winning, so the tabs can never show
+    different branches."""
+    branches = {b: dict(info) for b, info in _profile_branches(db).items()}
+    for bid, name, region in db.query(PmsBranchTarget.branch_id,
+                                      PmsBranchTarget.branch_name,
+                                      PmsBranchTarget.region).distinct():
+        bid = _norm_branch_id(bid)
+        if not bid or bid == "HO":
+            continue
+        info = branches.setdefault(bid, {"region": None, "name": None})
+        if name:
+            info["name"] = name.strip()
+        if region:
+            info["region"] = region.strip().upper()
+    return [{"key": b,
+             "name": info.get("name") or b,
+             "region": (info.get("region") or "MH").upper()}
+            for b, info in sorted(branches.items(),
+                                  key=lambda kv: _branch_sort_key(kv[0]))]
+
+
+def _fy_months(fy_start: int):
+    """The twelve 'YYYY-MM' of a financial year, April first."""
+    return ["{:04d}-{:02d}".format(fy_start if m <= 12 else fy_start + 1,
+                                   m if m <= 12 else m - 12)
+            for m in range(4, 16)]
+
+
+def list_service_load_targets(db: Session, fy_start: int):
+    """The Service Load AOP tab: a month x branch grid of SR-closure targets,
+    plus the percentage / productivity AOPs per report row."""
+    months = _fy_months(fy_start)
+    rows = _service_load_branch_list(db)
+
+    saved = {(t.target_month, t.branch_id): t.sr_target
+             for t in db.query(PmsServiceLoadTarget)
+             .filter(PmsServiceLoadTarget.target_month.in_(months)).all()}
+    for r in rows:
+        r["months"] = {m: saved.get((m, r["key"])) for m in months}
+
+    pct = {(t.metric, t.scope, t.scope_key): t.target_value
+           for t in db.query(PmsServiceLoadPctTarget)
+           .filter(PmsServiceLoadPctTarget.fy == fy_start).all()}
+
+    def _pct_block(scope, key):
+        return {m: pct.get((m, scope, key)) for m in SERVICE_LOAD_METRICS}
+
+    return {
+        "fy": fy_start,
+        "months": months,
+        "metrics": list(SERVICE_LOAD_METRICS),
+        "items": rows,
+        "branch_pct": {r["key"]: _pct_block("branch", r["key"]) for r in rows},
+        "region_pct": {rg: _pct_block("region", rg) for rg in ("MH", "KA")},
+        "overall_pct": _pct_block("overall", "ALL"),
+    }
+
+
+def _as_int_or_none(raw):
+    try:
+        return None if raw in (None, "") else int(round(float(raw)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_num_or_none(raw):
+    try:
+        return None if raw in (None, "") else round(float(raw), 3)
+    except (TypeError, ValueError):
+        return None
+
+
+def save_service_load_targets(db: Session, fy_start: int, items: list,
+                              pct_items: list, user_id: str):
+    """Upsert the FY's Service Load AOP. A blank / non-numeric value DELETES its
+    row, so the sheet shows no AOP for it rather than a target of zero - the same
+    rule the CDI and AMC target tabs follow."""
+    months = set(_fy_months(fy_start))
+    existing = {(t.target_month, t.branch_id): t
+                for t in db.query(PmsServiceLoadTarget)
+                .filter(PmsServiceLoadTarget.target_month.in_(list(months))).all()}
+    saved = removed = 0
+    for it in items or []:
+        bid = _norm_branch_id(it.get("key"))
+        month = str(it.get("month") or "").strip()[:7]
+        if not bid or month not in months:
+            continue
+        nos = _as_int_or_none(it.get("sr_target"))
+        row = existing.get((month, bid))
+        if nos is None:
+            if row is not None:
+                db.delete(row)
+                existing.pop((month, bid), None)
+                removed += 1
+            continue
+        if row is None:
+            row = PmsServiceLoadTarget(target_month=month, branch_id=bid,
+                                       created_by=user_id)
+            db.add(row)
+            existing[(month, bid)] = row
+        row.sr_target = nos
+        row.updated_by = user_id
+        saved += 1
+
+    pct_existing = {(t.metric, t.scope, t.scope_key): t
+                    for t in db.query(PmsServiceLoadPctTarget)
+                    .filter(PmsServiceLoadPctTarget.fy == fy_start).all()}
+    for it in pct_items or []:
+        metric = str(it.get("metric") or "").strip().lower()
+        scope = str(it.get("scope") or "").strip().lower()
+        if metric not in SERVICE_LOAD_METRICS or scope not in CDI_TARGET_SCOPES:
+            continue
+        key = str(it.get("key") or "").strip()[:60]
+        if scope == "branch":
+            key = _norm_branch_id(key)
+        elif scope == "region":
+            key = key.upper()
+        else:
+            key = "ALL"
+        if not key:
+            continue
+        val = _as_num_or_none(it.get("target_value"))
+        row = pct_existing.get((metric, scope, key))
+        if val is None:
+            if row is not None:
+                db.delete(row)
+                pct_existing.pop((metric, scope, key), None)
+                removed += 1
+            continue
+        if row is None:
+            row = PmsServiceLoadPctTarget(fy=fy_start, metric=metric, scope=scope,
+                                          scope_key=key, created_by=user_id)
+            db.add(row)
+            pct_existing[(metric, scope, key)] = row
+        row.target_value = val
+        row.updated_by = user_id
+        saved += 1
+
+    db.commit()
+    return {"success": True, "saved": saved, "removed": removed,
+            **list_service_load_targets(db, fy_start)}

@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { ArrowUpTrayIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { canExportExcel } from '../utils/exportPermission';
 import { THEME, GRID, HScrollBox, MultiSelect, SingleSelect, FilterRow } from './reportChrome';
+import SEDetailModal from './SEDetailModal';
 
 /* ----------------------------------------------------------------------------
    SR Allocation — PMS report, same layout language as Employee Productivity.
@@ -87,6 +88,14 @@ const SPLITS = [{ v: 'alloc', t: 'Allocated' }, { v: 'close', t: 'Closed' },
 const PCT_MODES = [{ v: 'off', t: 'Off' }, { v: 'total', t: 'Total only' },
   { v: 'all', t: 'Every column' }];
 
+// HOW DEEP the tree is opened, as one control instead of the old two-state
+// button. 'se' is exactly what 'Expand all' did — every group and branch down
+// to the ENGINEER rows; 'type' goes ONE level further and opens every
+// engineer's row-wise SR Type bifurcation with them. Individual arrows still
+// work on top of whatever the dropdown set.
+const EXPANDS = [{ v: 'none', t: 'None' }, { v: 'se', t: 'SE wise' },
+  { v: 'type', t: 'SR Type wise' }];
+
 // Pinned-column widths (must match the sticky left offsets below). Branch Name
 // and SE Name are deliberately TIGHT — both ellipsize and carry the full text in
 // their tooltip, so the room goes to the data columns instead.
@@ -128,6 +137,10 @@ const SRAllocationReport = ({ periodFrom, periodTo, preloaded }) => {
   const [monthSel, setMonthSel] = useState(() => new Set());   // 'YYYY-MM'
   const [brSel, setBrSel] = useState(() => new Set());         // branch indices
   const [seSel, setSeSel] = useState(() => new Set());         // employee indices
+  // The SE name opens the drill-down: the engineer's own ALLOCATED and CLOSED
+  // rows for the period, each tagged carry-in / carry-out — the records the two
+  // numbers on this row were counted from. The arrow stays the SR Type toggle.
+  const [seDetail, setSeDetail] = useState(null);
   const [query, setQuery] = useState('');
   const [openGroups, setOpenGroups] = useState(() => new Set());
   const [openBranches, setOpenBranches] = useState(() => new Set());
@@ -370,6 +383,26 @@ const SRAllocationReport = ({ periodFrom, periodTo, preloaded }) => {
     .map((x) => x.g);
   const allVisible = visibleGroups.flat();
   const anyOpen = openGroups.size > 0 || openBranches.size > 0 || openSE.size > 0;
+  // The Expand dropdown READS the tree, so a hand-clicked arrow moves it too:
+  // any SR Type rows on screen -> 'SR Type wise', anything else open -> 'SE
+  // wise', nothing open -> 'None'.
+  const expandLevel = openSE.size ? 'type' : (anyOpen ? 'se' : 'none');
+  // ...and WRITES it. 'type' opens only the engineers that HAVE SR Type rows —
+  // an engineer with none has no arrow, so putting it in the set would leave a
+  // phantom open row nothing renders.
+  const setExpand = (v) => {
+    if (v === 'none') {
+      setOpenGroups(new Set());
+      setOpenBranches(new Set());
+      setOpenSE(new Set());
+      return;
+    }
+    setOpenGroups(new Set(visibleGroups.map((_g, i) => i)));
+    setOpenBranches(new Set(allVisible));
+    setOpenSE(v === 'type'
+      ? new Set(allVisible.flatMap((bi) => seOf(bi)).filter((ei) => headsOf(ei).length > 0))
+      : new Set());
+  };
   const grand = sumBranches(allVisible);
 
   // ---- cells ---------------------------------------------------------------
@@ -620,7 +653,13 @@ const SRAllocationReport = ({ periodFrom, periodTo, preloaded }) => {
           <span className={`inline-block w-2.5 shrink-0 text-[8px] text-gray-600 transition-transform ${
             opt.arrow ? 'rotate-90' : ''}`}>▶</span>
         )}
-        <span className="truncate" title={name || undefined}>{name || Z}</span>
+        {/* The NAME opens the records behind the row; the rest of the cell (and
+            the arrow) stays the SR Type toggle, so one click never does both. */}
+        <span className={`truncate ${opt.onName ? 'cursor-pointer underline decoration-dotted underline-offset-2 hover:decoration-solid' : ''}`}
+          title={opt.onName ? `${name} — click for the allocated / closed records` : (name || undefined)}
+          onClick={opt.onName ? (ev) => { ev.stopPropagation(); opt.onName(); } : undefined}>
+          {name || Z}
+        </span>
       </div>
     </td>,
   ] : []);
@@ -727,7 +766,9 @@ const SRAllocationReport = ({ periodFrom, periodTo, preloaded }) => {
           i === 0 && openCell(`b${bi}`, span, brBg, openOf(bi)),
           ...uidNameCells(employees[ei].u, employees[ei].n, `b${bi}e${ei}`, bg,
             { arrow: hs.length ? opened : undefined,
-              onClick: hs.length ? () => toggleSE(ei) : undefined }),
+              onClick: hs.length ? () => toggleSE(ei) : undefined,
+              onName: () => setSeDetail({ name: employees[ei].n,
+                uid: employees[ei].u, branch: shortBranch(branches[employees[ei].b]) }) }),
         ], { trClass: hilite ? 'font-semibold' : undefined }));
         // ROW-WISE SR Type bifurcation, one entity per type the engineer has.
         if (opened) {
@@ -1201,31 +1242,18 @@ const SRAllocationReport = ({ periodFrom, periodTo, preloaded }) => {
             SEARCH BOX when they would spill (see index.css) — watch = everything
             that changes the row's WIDTH: the granularity (which tick filter is
             shown), the split ('% Closed' exists on Both only), a label growing
-            ('Expand all' -> 'Collapse all'), a count replacing 'All'. */}
-        <FilterRow watch={`${gran}-${split}-${pctMode}-${anyOpen}-${exporting}`
+            (Expand: None -> SR Type wise), a count replacing 'All'. */}
+        <FilterRow watch={`${gran}-${split}-${pctMode}-${expandLevel}-${exporting}`
           + `-${brSel.size}-${seSel.size}-${weekSel.size}-${daySel.size}-${monthSel.size}`}>
+          {/* ONE control for the whole tree, three depths:
+                None          everything folded back — the old 'Collapse all'
+                SE wise       every group and branch open down to the ENGINEER
+                              rows — the old 'Expand all'
+                SR Type wise  that, plus every engineer's row-wise SR Type
+                              bifurcation opened underneath them
+              Individual arrows keep working on top of it and move the label. */}
+          <SingleSelect label="Expand" items={EXPANDS} value={expandLevel} onChange={setExpand} />
           {/* Column granularity — Day / Week / Month */}
-          {/* One toggle for the whole tree: it reads the state, so it says
-              Collapse while anything is open and Expand while everything is shut.
-              It opens groups and branches down to the ENGINEER rows (an engineer's own SR Type rows stay on their own arrow). */}
-          <button onClick={() => {
-            if (anyOpen) {
-              setOpenGroups(new Set());
-              setOpenBranches(new Set());
-              setOpenSE(new Set());
-            } else {
-              setOpenGroups(new Set(visibleGroups.map((_g, i) => i)));
-              setOpenBranches(new Set(allVisible));
-            }
-          }}
-            title={anyOpen ? 'Fold every group and branch back'
-              : 'Open every group and branch down to the engineer rows'}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-              anyOpen ? 'text-white border-[#2f3192]' : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'}`}
-            style={anyOpen ? { backgroundColor: THEME } : {}}>
-            <span className={`text-[8px] transition-transform ${anyOpen ? 'rotate-90' : ''}`}>▶</span>
-            {anyOpen ? 'Collapse all' : 'Expand all'}
-          </button>
           <SingleSelect label="Columns" items={GRANS} value={gran} onChange={setGranPick} />
           {/* What the date columns carry — the two totals are always both shown */}
           <SingleSelect label="Date split" items={SPLITS} value={split} onChange={setSplit} />
@@ -1428,6 +1456,14 @@ const SRAllocationReport = ({ periodFrom, periodTo, preloaded }) => {
         </div>
 
       </div>
+
+      {/* The engineer's own records — opened from the SE name, bounded by the
+          SAME period the table is showing so its totals match the row. */}
+      {seDetail && (
+        <SEDetailModal mode="srar" name={seDetail.name} uid={seDetail.uid}
+          branch={seDetail.branch} from={start} to={end}
+          onClose={() => setSeDetail(null)} />
+      )}
     </div>
   );
 };

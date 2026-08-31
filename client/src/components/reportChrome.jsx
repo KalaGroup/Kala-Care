@@ -34,9 +34,18 @@ export const GRID = {
   region: 'var(--pms-region)',           // MH / KA region totals (white text)
   grand: 'var(--pms-grand)',             // Grand Total (ERP blue)
   type: 'var(--pms-type)',               // SR Type block (SR Allocation)
+  typed: 'var(--pms-typed)',             // a TYPED column's header (AOP /
+                                         // target), so it reads apart from
+                                         // the counted ones in both themes
   sel: 'var(--pms-sel)',                 // an SE row that is OPEN / picked in
                                          // the SE filter — the strongest tint in
                                          // the block, so it heads its own rows
+  // Performance against the AOP, for the percentage grids. Deliberately outside
+  // the blue family: the blue tints say WHICH BLOCK a row belongs to, and a cell
+  // has to be able to say how it DID without arguing with that.
+  ok: 'var(--pms-ok)', okInk: 'var(--pms-ok-ink)',           // met the target
+  near: 'var(--pms-near)', nearInk: 'var(--pms-near-ink)',   // within 5 points
+  miss: 'var(--pms-miss)', missInk: 'var(--pms-miss-ink)',   // further short
   line: 'var(--pms-line)',               // the grid hairline
   div: 'var(--pms-div)',                 // section dividers / frozen-block edge
 };

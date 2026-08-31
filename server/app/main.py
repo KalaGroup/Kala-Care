@@ -24,6 +24,7 @@ from app.controllers.edit_customer_controller import EditCustomerController
 
 from app.routes import (
     customer_routes,
+    customer_bulk_export_routes,
     import_routes,
     campaign_routes,
     engagement_routes,
@@ -51,7 +52,8 @@ from app.routes import (
     mom_routes,
     approval_routes,
     pms_routes,
-    welcome_letter_routes
+    welcome_letter_routes,
+    quotation_tracker_routes
 )
 
 # ---------------- LOAD ENV ---------------- #
@@ -86,6 +88,7 @@ os.makedirs(BANNER_DIR, exist_ok=True)
 # create_all creates any table that does not exist yet; it NEVER alters an
 # existing table. Schema changes to existing tables (new columns, key/index
 # changes) are applied manually via databaseSQl.txt in SSMS.
+from sqlalchemy.exc import OperationalError
 from app.performance_indexes import (
     ensure_performance_indexes, ensure_schema, ensure_table_renames
 )
@@ -98,8 +101,29 @@ except Exception as e:
     print(f"[table-rename] skipped: {e}")
 
 print("Creating/Updating database tables...")
-Base.metadata.create_all(bind=engine)
-print("Tables created/updated successfully!")
+try:
+    Base.metadata.create_all(bind=engine)
+    print("Tables created/updated successfully!")
+except OperationalError as e:
+    # The app cannot run without its database, so this still aborts startup —
+    # but the raw SQLAlchemy traceback is ~200 lines that never once name the
+    # server being dialled. Say what was tried, and why it failed, first.
+    from app import config as _cfg
+    _bar = "=" * 72
+    print(f"\n{_bar}\nSTARTUP FAILED - cannot reach the database\n{_bar}")
+    print(f"  server   : {_cfg.DB_CONFIG['server']!r}")
+    print(f"  database : {_cfg.DB_CONFIG['database']!r}")
+    print(f"  user     : {_cfg.DB_CONFIG['username']!r}")
+    print(f"  driver   : {_cfg.DB_CONFIG['driver']!r}")
+    print(f"\n  {type(e.orig).__name__}: {e.orig}")
+    print("\n  These come from DB_SERVER / DB_NAME / DB_USER / DB_PASSWORD in")
+    print("  server/.env. Common causes:")
+    print("    - 08001 'Server is not found' -> wrong DB_SERVER. A NAMED instance")
+    print(r"      needs its instance name, e.g. localhost\SQLEXPRESS not localhost")
+    print("    - 28000 'Login failed'        -> wrong DB_USER / DB_PASSWORD, or the")
+    print("      instance is Windows-auth only / the sa login is disabled")
+    print(_bar + "\n")
+    raise SystemExit(1)
 
 # Ensure performance indexes for the hot list/dashboard queries. Idempotent
 # (IF NOT EXISTS) — after the first run this is a fast no-op on every startup.
@@ -340,6 +364,10 @@ app.add_middleware(
 
 # ---------------- ROUTES ---------------- #
 
+# Registered BEFORE customer_routes: FastAPI matches in registration order,
+# and /customers/{customer_id} in that router would otherwise swallow
+# /customers/bulk-export.
+app.include_router(customer_bulk_export_routes.router, prefix="/api")
 app.include_router(customer_routes.router, prefix="/api")
 app.include_router(import_routes.router, prefix="/api")
 app.include_router(campaign_routes.router, prefix="/api/v1")
@@ -369,6 +397,7 @@ app.include_router(mom_routes.router, prefix="/api")
 app.include_router(approval_routes.router, prefix="/api")
 app.include_router(pms_routes.router, prefix="/api")
 app.include_router(welcome_letter_routes.router, prefix="/api")
+app.include_router(quotation_tracker_routes.router, prefix="/api")
 
 # ---------------- ROOT ---------------- #
 

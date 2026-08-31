@@ -333,6 +333,18 @@ class BandhanPlusQuote(Base):
 
 
 class PulseQuotation(Base):
+    """'Pulse Quotation - Service Only' import - ONE ROW PER QUOTATION.
+
+    The record key is the pair Instance Id + Quote ID. It was the Instance Id
+    alone until 2026-08-27, which stored a single quotation per genset and
+    discarded the rest; the Open Quotation Tracker counts quotations, so the
+    grain had to be the quotation. Rows come back newest first, so the [0] the
+    Drive pages read is now the genset's LATEST quote.
+
+    service_dealer / labor_amount / parts_amount are the three columns that
+    report's quote half is built from: the dealer string carries the branch
+    (this file has no branch id column at all), and a row counts as a labour
+    quote when labor_amount > 0 and as a part quote when parts_amount > 0."""
     __tablename__ = "pulse_quotations"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -750,9 +762,20 @@ class CDIDetailReport(Base):
     id = Column(Integer, primary_key=True, index=True)
     sr_number = Column(String(200), index=True, nullable=False)
 
+    # Relation to the customers table. The file spells it ASSET NUMBER —
+    # the same genset key the Asset files store as instance_id — so a CDI
+    # row belongs to a customer exactly like every other import.
+    instance_id = Column(String(100), index=True, nullable=True)
     x_technician_id = Column(String(200), nullable=True, index=True)
     x_technician_name = Column(String(500), nullable=True)
     cdi_category = Column(String(200), nullable=True)
+    # The account the feedback is about — this file's customer name, and what
+    # the import contributes to the customer master.
+    x_account_name = Column(String(500), nullable=True, index=True)
+    # Who actually answered the survey. NOT the account's own contact, so it is
+    # stored for reference but never written to the customer master.
+    feedback_customer_name = Column(String(500), nullable=True)
+    feedback_customer_number = Column(String(50), nullable=True)
     # The ERP branch the feedback belongs to. This file is the ONE PMS import
     # that carries no BRANCH ID, only the branch NAME - the Customer Delight
     # Index report resolves it back to a branch id against the names the other
@@ -818,6 +841,10 @@ class EFSRReport(Base):
     # first column — one appointment is one dispatch of one engineer to a job.
     appointment_number = Column(String(200), index=True, nullable=True)
 
+    # Relation to the customers table. The file carries 'Instance ID' on
+    # every row; it used to fall through to extra_data as a dynamic column.
+    instance_id = Column(String(100), index=True, nullable=True)
+
     sd_branch_code = Column(String(100), nullable=True, index=True)
     sr_type = Column(String(200), nullable=True)
     # When the SR was ALLOCATED to the engineer — the date the Employee
@@ -835,8 +862,183 @@ class EFSRReport(Base):
     service_engineer_name = Column(String(500), nullable=True, index=True)
     service_engineer_uid = Column(String(100), nullable=True, index=True)
 
+    # The account this task belongs to, and where the genset sits. Both are on
+    # every row and are what the import contributes to the customer master.
+    account = Column(String(500), nullable=True, index=True)
+    installation_site_address = Column(Text, nullable=True)
+    # The on-site contact for THIS visit (~80% of rows) — reference only, never
+    # written to the customer master.
+    customer_name = Column(String(500), nullable=True)
+    customer_contact_number = Column(String(50), nullable=True)
+
     # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
     extra_data = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=now_ist)
     updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
+
+
+class AMCExpiryPlanner(Base):
+    """'AMC Agreement Expiry Planner' import — the agreements coming up for
+    renewal, one row per genset per agreement.
+
+    LINKED to the customers table (not standalone): every row carries an
+    INSTANCE ID, so the import fills the customer master's name / location /
+    branch the same way the other instance-keyed files do.
+
+    The key is the COMBINATION Instance Id + Agreement Number. Measured on the
+    real 1,572-row export:
+      INSTANCE ID alone       1,261 unique -> 311 rows (19.8%) lost. A genset
+                              renews, so it legitimately has several agreements.
+      AGREEMENT NUMBER alone  1,550 unique ->  22 rows lost. One agreement can
+                              cover a FLEET: 600550273 spans 4 gensets,
+                              600504669 spans 5.
+      the pair                1,572 unique ->   0 rows lost.  <- this key.
+
+    Fixed columns are the ones the app reads — Instance Id, Branch Id, Account
+    Name, Installation Site Address, Agreement End Date, plus Agreement Number
+    because it is half the record key. Every other column of the file (Zone
+    Name, SD Id/Name, Branch Name, Agreement Name/Type/Status/Start Date,
+    Number of Agreement Years, Segment, Application Code, Engine Serial No,
+    Engine Model, Customer Name, Customer Phone Number, ...) is DYNAMIC and
+    kept as JSON in extra_data. Shown on the Customer page."""
+    __tablename__ = "amc_expiry_planner"
+    __table_args__ = (
+        Index('UQ_amc_expiry_planner_instance_agreement',
+              'instance_id', 'agreement_number', unique=True),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    instance_id = Column(String(100), index=True, nullable=False)
+    # Second half of the record key — one agreement can cover several gensets,
+    # so it is not unique on its own.
+    agreement_number = Column(String(200), index=True, nullable=True)
+
+    branch_id = Column(String(100), nullable=True, index=True)
+    account_name = Column(String(500), nullable=True, index=True)
+    installation_site_address = Column(Text, nullable=True)
+    # What the whole file is FOR: when the agreement runs out.
+    agreement_end_date = Column(DateTime, nullable=True, index=True)
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
+
+
+class LMSInsia(Base):
+    """'LMS Data from Insia' import - the branch LMS lead export, one row per LEAD NUMBER.
+
+    A SECOND LMS layout, imported alongside 'LMS Data for ERP' into its own
+    table. It carries the same lead columns but NO Instance Id, so it cannot
+    key a genset directly: the relation to the customers table is resolved from
+    LEAD SR NUMBER against the SR the lead was raised on (Open SR Load Report,
+    MaxTTR - Oil Change SR Zero Labour Flag, Response Time & MaxTTR Details,
+    EFSR Report) and stored in instance_id. A row whose SR is in none of those
+    tables yet keeps a null instance_id and picks one up on the next upload,
+    once the SR file has been loaded.
+
+    LEAD NUMBER is the record key: ONE row per lead, upserted on re-import
+    (blank cells never wipe existing data, extra_data is merged). When the same
+    lead appears more than once in a file the FIRST row wins - the real export
+    repeats a lead once per PRODUCT LIST / PRODUCT TYPE line (310 leads, 466
+    extra rows out of 2,576), and in 301 of those 310 leads those two columns
+    are the ONLY thing that differs. QUOTATION NUMBER differs in 7 of them and
+    ORDER NUMBER in 5; every other column is identical across a lead's rows.
+
+    Fixed columns are the seven the app reads. Every other column of the file
+    (MODE OF LEAD CREATION, LEAD RAISED BY / FOR, SD NAME, SD ID, BRANCH NAME,
+    PRODUCT LIST, PRODUCT TYPE, LEAD ASSIGNED TO, LEAD STATUS, ACCOUNT ID,
+    ZONE, ENGINE MODEL, KVA RATING, TELE CALLER NAME, QUOTATION NUMBER,
+    QUOTATION SUBMIT DATE, QUOTATION APPROVAL DATE, ORDER NUMBER) is DYNAMIC
+    and kept as JSON in extra_data. Shown on the Customer page."""
+    __tablename__ = "lms_insia"
+    __table_args__ = (
+        Index('UQ_lms_insia_lead_number', 'lead_number', unique=True),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    lead_number = Column(String(200), index=True, nullable=False)
+
+    # Relation to the customers table, resolved from lead_sr_number - this file
+    # carries no genset key of its own.
+    instance_id = Column(String(100), index=True, nullable=True)
+
+    lead_created_date = Column(DateTime, nullable=True, index=True)
+    branch_id = Column(String(100), nullable=True, index=True)
+    account_name = Column(String(500), nullable=True, index=True)
+    lead_sr_number = Column(String(200), nullable=True, index=True)
+    service_engineer_name = Column(String(500), nullable=True, index=True)
+    order_creation_date = Column(DateTime, nullable=True, index=True)
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
+
+
+class AllInvoiceReport(Base):
+    """'All Invoice Detailed Report' import - every service / OTC / agreement
+    invoice LINE the ERP raised, one row per INVOICE NUMBER.
+
+    LINKED to the customers table on INSTANCE ID, but only the Service lines
+    carry one: measured on the real 30,242-row export, all 14,419 Service rows
+    have an Instance Id and all 15,747 OTC + 76 Agreement rows have none (OTC is
+    counter sale - no genset). Rows without one import UNLINKED rather than being
+    dropped, or half the file would never land.
+
+    INVOICE NUMBER is the record key and it is genuinely unique: 30,242 rows ->
+    30,242 distinct numbers, zero duplicates. One row per invoice, upserted on
+    re-import (blank cells never wipe existing data, extra_data is merged).
+
+    Fixed columns are the nine the app reads plus INVOICE NUMBER, the key.
+    Every other column of the file (Zone Name, SD Id/Name, Segment, Application
+    Code, Engine Serial Number, SR Number/Type/Subtype, SR Close Date, Invoice
+    Cancel Reason/Date, the tax and discount amounts, ...) is DYNAMIC and kept
+    as JSON in extra_data. Shown on the Customer page.
+
+    The Open Quotation Tracker reads this table's invoice half:
+    invoice_date in the period, invoice_status <> 'Cancelled' (185 rows in the
+    export), invoice_segment = 'Service', split into labour / part rows by
+    invoice_type ('Labor' / 'Parts') and summed on invoice_amount."""
+    __tablename__ = "all_invoice_report"
+    __table_args__ = (
+        Index('UQ_all_invoice_report_invoice_number', 'invoice_number', unique=True),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    # The record key.
+    invoice_number = Column(String(200), index=True, nullable=False)
+
+    # The genset key - the relation to the customers table. NULL on the OTC and
+    # Agreement lines, which have no genset at all.
+    instance_id = Column(String(100), index=True, nullable=True)
+
+    branch_id = Column(String(100), nullable=True, index=True)
+    branch_name = Column(String(500), nullable=True, index=True)
+    account_name = Column(String(500), nullable=True, index=True)
+
+    invoice_date = Column(DateTime, nullable=True, index=True)
+    # 'New' | 'Invoiced' | 'Cancelled' - the report drops the cancelled lines.
+    invoice_status = Column(String(100), nullable=True, index=True)
+    # 'Service' | 'OTC' | 'Agreement' - the report keeps Service only.
+    invoice_segment = Column(String(100), nullable=True, index=True)
+    # 'Labor' | 'Parts' - what splits the report's labour and part columns.
+    invoice_type = Column(String(100), nullable=True, index=True)
+    invoice_amount = Column(Float, nullable=True)
+
+    # Dynamic columns: any file column not mapped above is kept as JSON {header: value}
+    extra_data = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
+
+
+class _SrClosureFlagFile:
+    """Shared shape of the two SR-closure flag files — see SrClosedUnderFtr.
+
+    Documentation only; each model spells its own columns out so the table
+    definitions stay readable on their own.
+    """

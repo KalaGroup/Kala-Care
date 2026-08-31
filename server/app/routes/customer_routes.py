@@ -1515,6 +1515,202 @@ async def bulk_delete_efsr_report(
     return controller.bulk_delete_efsr_report(request.ids)
 
 
+# ==================== LMS Data from Insia Endpoints ====================
+# Second LMS layout, keyed on LEAD NUMBER. The file carries no genset column,
+# so instance_id is resolved from LEAD SR NUMBER during the import.
+
+@router.get("/lms-insia/export")
+async def export_lms_insia(
+    user_id: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    """Export LMS Data from Insia to CSV - checks if user has export permission"""
+    check_export_permission(user_id, db)
+
+    controller = CustomerController(db)
+    rows = controller.get_lms_insia(skip=0, limit=None)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    if rows:
+        headers = list(rows[0].keys())
+        writer.writerow(headers)
+        for r in rows:
+            writer.writerow([r.get(h) for h in headers])
+    output.seek(0)
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=lms_insia_export.csv"}
+    )
+
+
+@router.get("/lms-insia/")
+async def get_lms_insia(
+    response: Response,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=-1),  # Allow -1 for all records
+    search: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get all LMS Data from Insia rows with pagination (use limit=-1 for all records)"""
+    controller = CustomerController(db)
+
+    total_count = controller.get_lms_insia_count(search)
+    response.headers["X-Total-Count"] = str(total_count)
+
+    actual_limit = None if limit == -1 else limit
+    return controller.get_lms_insia(skip, actual_limit, search)
+
+
+@router.delete("/lms-insia/{record_id}", response_model=MessageResponse)
+async def delete_lms_insia(record_id: int, db: Session = Depends(get_db)):
+    """Delete one LMS Data from Insia row"""
+    controller = CustomerController(db)
+    return controller.delete_lms_insia(record_id)
+
+
+@router.post("/lms-insia/bulk-delete", response_model=MessageResponse)
+async def bulk_delete_lms_insia(
+    request: BulkDeleteRequest,
+    db: Session = Depends(get_db)
+):
+    """Delete multiple LMS Data from Insia rows"""
+    controller = CustomerController(db)
+    return controller.bulk_delete_lms_insia(request.ids)
+
+
+# ==================== AMC Agreement Expiry Planner Endpoints ====================
+# Instance-linked table — the import also tops up the customers master.
+
+@router.get("/amc-expiry-planner/export")
+async def export_amc_expiry_planner(
+    user_id: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    """Export AMC Agreement Expiry Planner to CSV - checks if user has export permission"""
+    check_export_permission(user_id, db)
+
+    controller = CustomerController(db)
+    rows = controller.get_amc_expiry_planner(skip=0, limit=None)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    if rows:
+        headers = list(rows[0].keys())
+        writer.writerow(headers)
+        for r in rows:
+            writer.writerow([r.get(h) for h in headers])
+    output.seek(0)
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=amc_expiry_planner_export.csv"}
+    )
+
+
+@router.get("/amc-expiry-planner/")
+async def get_amc_expiry_planner(
+    response: Response,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=-1),  # Allow -1 for all records
+    search: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get all AMC Agreement Expiry Planner rows with pagination (use limit=-1 for all records)"""
+    controller = CustomerController(db)
+
+    total_count = controller.get_amc_expiry_planner_count(search)
+    response.headers["X-Total-Count"] = str(total_count)
+
+    actual_limit = None if limit == -1 else limit
+    return controller.get_amc_expiry_planner(skip, actual_limit, search)
+
+
+@router.delete("/amc-expiry-planner/{record_id}", response_model=MessageResponse)
+async def delete_amc_expiry_planner(record_id: int, db: Session = Depends(get_db)):
+    """Delete one AMC Agreement Expiry Planner row"""
+    controller = CustomerController(db)
+    return controller.delete_amc_expiry_planner(record_id)
+
+
+@router.post("/amc-expiry-planner/bulk-delete", response_model=MessageResponse)
+async def bulk_delete_amc_expiry_planner(
+    request: BulkDeleteRequest,
+    db: Session = Depends(get_db)
+):
+    """Delete multiple AMC Agreement Expiry Planner rows"""
+    controller = CustomerController(db)
+    return controller.bulk_delete_amc_expiry_planner(request.ids)
+
+
+# ==================== All Invoice Detailed Report Endpoints ====================
+# Instance-linked table — only its Service lines carry an Instance Id.
+
+@router.get("/all-invoice-report/export")
+async def export_all_invoice_report(
+    user_id: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    """Export All Invoice Detailed Report to CSV - checks if user has export permission"""
+    check_export_permission(user_id, db)
+
+    controller = CustomerController(db)
+    rows = controller.get_all_invoice_report(skip=0, limit=None)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    if rows:
+        headers = list(rows[0].keys())
+        writer.writerow(headers)
+        for r in rows:
+            writer.writerow([r.get(h) for h in headers])
+    output.seek(0)
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=all_invoice_report_export.csv"}
+    )
+
+
+@router.get("/all-invoice-report/")
+async def get_all_invoice_report(
+    response: Response,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=-1),  # Allow -1 for all records
+    search: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get all All Invoice Detailed Report rows with pagination (use limit=-1 for all records)"""
+    controller = CustomerController(db)
+
+    total_count = controller.get_all_invoice_report_count(search)
+    response.headers["X-Total-Count"] = str(total_count)
+
+    actual_limit = None if limit == -1 else limit
+    return controller.get_all_invoice_report(skip, actual_limit, search)
+
+
+@router.delete("/all-invoice-report/{record_id}", response_model=MessageResponse)
+async def delete_all_invoice_report(record_id: int, db: Session = Depends(get_db)):
+    """Delete one All Invoice Detailed Report row"""
+    controller = CustomerController(db)
+    return controller.delete_all_invoice_report(record_id)
+
+
+@router.post("/all-invoice-report/bulk-delete", response_model=MessageResponse)
+async def bulk_delete_all_invoice_report(
+    request: BulkDeleteRequest,
+    db: Session = Depends(get_db)
+):
+    """Delete multiple All Invoice Detailed Report rows"""
+    controller = CustomerController(db)
+    return controller.bulk_delete_all_invoice_report(request.ids)
+
+
 # ==================== Data Retrieval by Instance ID ====================
 
 @router.get("/instance/{instance_id}/amc-agreements", response_model=List[AMCAgreement])
@@ -1668,7 +1864,10 @@ async def get_all_table_counts(
         "open_sr_data": controller.get_open_sr_data_count(),
         "response_time_maxttr": controller.get_response_time_maxttr_count(),
         "cdi_detail_report": controller.get_cdi_detail_report_count(),
-        "efsr_report": controller.get_efsr_report_count()
+        "efsr_report": controller.get_efsr_report_count(),
+        "amc_expiry_planner": controller.get_amc_expiry_planner_count(),
+        "lms_insia": controller.get_lms_insia_count(),
+        "all_invoice_report": controller.get_all_invoice_report_count()
     }
     
     return counts    

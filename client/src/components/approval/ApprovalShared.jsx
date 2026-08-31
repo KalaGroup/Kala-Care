@@ -90,6 +90,21 @@ export const statusLabel = (status) => {
 export const catLabel = (v) => CATEGORY_OPTIONS.find(o => o.value === v)?.label || v;
 export const typeLabel = (v) => TYPE_OPTIONS.find(o => o.value === v)?.label || v;
 
+/* An NFA is the creator's to change only while NOBODY has approved it yet —
+   once a level acts, the figures behind that approval must stay put. Chains
+   vary per employee, so "no action recorded" is the real test, not the status.
+   Any creator from L1 to L4 gets these rights on their own record. */
+export const isUntouched = (app) => !!app &&
+    !app.l2_action_by && !app.l3_action_by && !app.l4_action_by && !app.l5_action_by;
+
+export const canCreatorEdit = (app, userId) => !!app && app.created_by === userId &&
+    (app.status === 'draft' || app.status === 'rejected'
+        || (String(app.status).startsWith('pending') && isUntouched(app)));
+
+export const canCreatorDelete = (app, userId) => !!app && app.created_by === userId &&
+    (app.status === 'draft'
+        || (String(app.status).startsWith('pending') && isUntouched(app)));
+
 export const fmtAmount = (v) =>
     (v === null || v === undefined || v === '') ? '—'
         : `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -678,8 +693,10 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
     if (!app) return null;
 
     const isExpense = app.request_type === 'expense';
-    // a rejected record can be corrected + resubmitted by its creator
-    const canResubmit = app.status === 'rejected' && app.created_by === me.user_id && !!onEditResubmit;
+    // the creator may correct a rejected record OR a pending one nobody has
+    // approved yet; the button says which it is
+    const canResubmit = !!onEditResubmit && canCreatorEdit(app, me.user_id) && app.status !== 'draft';
+    const editLabel = app.status === 'rejected' ? 'Edit & Resubmit' : 'Edit NFA';
 
     // Result-mail recipients as ADDRESSES — the server builds these with the
     // same rules send_result_email uses, so the box shows what will really be
@@ -1039,14 +1056,14 @@ export function ApplicationDetailModal({ app, canAct, canDelete, onClose, onChan
                     <div className="flex flex-wrap justify-end gap-2 pt-1">
                         {canResubmit && (
                             <button onClick={() => onEditResubmit(app)} disabled={busy}
-                                className="mr-auto inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
                                 style={{ background: BRAND }}>
-                                <FileText size={13} /> Edit &amp; Resubmit
+                                <FileText size={13} /> {editLabel}
                             </button>
                         )}
                         {canEditApprovers && (
                             <button onClick={doEditApprovers} disabled={busy}
-                                className="mr-auto inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
                                 style={{ background: BRAND }}
                                 title="Change who approves this NFA from its current level onward">
                                 <UserCog size={13} /> Edit Approvers
@@ -1488,7 +1505,9 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
                 <div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-5 max-sm:px-3 py-3 rounded-t-2xl text-white" style={{ background: BRAND }}>
                     <span className="font-semibold text-sm flex items-center gap-2 min-w-0">
                         <FileText size={16} /> {draft
-                            ? (draft.status === 'rejected' ? `Edit & Resubmit — ${draft.app_no || ''}` : 'Edit Draft Application')
+                            ? (draft.status === 'rejected' ? `Edit & Resubmit — ${draft.app_no || ''}`
+                                : draft.status === 'draft' ? 'Edit Draft Application'
+                                    : `Edit NFA — ${draft.app_no || ''}`)
                             : title}
                     </span>
                     <button onClick={handleClose} className="p-1.5 rounded-lg bg-white hover:bg-white/90 transition flex-shrink-0" style={{ color: '#2f3192' }}><X size={15} /></button>
@@ -1763,13 +1782,17 @@ export function CreateApplicationModal({ onClose, onCreated, lockedType = null, 
                         {draft && draft.status !== 'rejected' && (
                             <button type="button" onClick={handleDeleteDraft} disabled={saving}
                                 className="mr-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 disabled:opacity-50">
-                                <Trash2 size={13} /> Delete Draft
+                                <Trash2 size={13} /> {draft.status === 'draft' ? 'Delete Draft' : 'Delete NFA'}
                             </button>
                         )}
-                        <button type="button" onClick={handleSaveDraft} disabled={saving}
-                            className="px-4 py-2 rounded-lg text-xs font-semibold border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
-                            {saving ? 'Saving…' : 'Save as Draft'}
-                        </button>
+                        {/* An already-filed NFA cannot go back to being a draft,
+                            so the option only shows for new records and drafts. */}
+                        {(!draft || draft.status === 'draft') && (
+                            <button type="button" onClick={handleSaveDraft} disabled={saving}
+                                className="px-4 py-2 rounded-lg text-xs font-semibold border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
+                                {saving ? 'Saving…' : 'Save as Draft'}
+                            </button>
+                        )}
                         <button type="submit" disabled={saving}
                             className="px-5 py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-50"
                             style={{ background: BRAND }}>

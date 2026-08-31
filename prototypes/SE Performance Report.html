@@ -1,0 +1,2708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kala Care — Service Engineer Performance Commitment Matrix (EPR 7.0)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ===========================================================================
+   EPR 7.0 — Employee Productivity rebuilt as the ANNEXURE-I
+   "Service Engineer Performance Commitment & Accountability Matrix".
+
+   The old report answered "how much did the engineer do".  This one answers
+   "did the engineer keep the 12 commitments he signed", per engineer, with
+   a score, a grade and a printable copy of the signed form.
+
+   COLOUR THEME — deliberately NOT a prototype palette.  Every colour below is
+   copied from the live application:
+     hero / brand ......... #2f3192 -> #23255f   (EmployeeProductivity.jsx)
+     grid ................. the --pms-* light-blue ladder (index.css)
+     met / near / missed .. --pms-ok / --pms-near / --pms-miss
+   The html.dark block re-points the same variables exactly as index.css does,
+   so the theme switch shows what the real page looks like in dark mode.
+   =========================================================================== */
+
+:root{
+  /* ---- app chrome ---- */
+  --brand:#2f3192; --brand-d:#23255f;
+  --page:#f1f5f9; --card:#ffffff; --ink:#111827; --ink-2:#374151; --muted:#6b7280;
+  --edge:#e5e7eb; --edge-2:#d1d5db; --soft:#f9fafb;
+  --shadow:0 1px 2px rgba(16,24,40,.04), 0 8px 24px rgba(16,24,40,.06);
+  --font-sans:'Inter','Segoe UI',Arial,sans-serif;
+
+  /* ---- PMS grid palette (index.css :root) ---- */
+  --pms-head:#e8f3fc;
+  --pms-row-a:#fbfdff;
+  --pms-row-b:#f1f8fe;
+  --pms-band-a:#ffffff;
+  --pms-band-b:#eaf4fd;
+  --pms-grp-a:#f0f8fe;
+  --pms-grp-b:#e1effb;
+  --pms-subtot:#dcebf9;
+  --pms-grptot:#cbe1f5;
+  --pms-region:#5e8fc2;
+  --pms-grand:#23255f;
+  --pms-type:#e4f0fb;
+  --pms-sel:#bfdcf7;
+  --pms-line:#9fc0df;
+  --pms-line-v:#6f9dc9;
+  --pms-div:#6e9bc7;
+  --pms-typed:#fff9c4;
+  --pms-ok:#cdeccd;      --pms-ok-ink:#12401f;
+  --pms-near:#fbf0bd;    --pms-near-ink:#4a3c05;
+  --pms-miss:#fbd9b5;    --pms-miss-ink:#6b3405;
+  --pms-hover:#cbe4fb;
+  --pms-edge-shadow:rgba(20,32,28,.22);
+}
+html.dark{
+  --page:#0b1017; --card:#111820; --ink:#e6edf5; --ink-2:#c2ced9; --muted:#8b9bab;
+  --edge:#26313d; --edge-2:#33404e; --soft:#131b24;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.45);
+  --pms-head:#1c2c3e;
+  --pms-row-a:#121820;
+  --pms-row-b:#17202b;
+  --pms-band-a:#0f141a;
+  --pms-band-b:#18232f;
+  --pms-grp-a:#141d27;
+  --pms-grp-b:#1b2733;
+  --pms-subtot:#20303f;
+  --pms-grptot:#27394b;
+  --pms-region:#2f5375;
+  --pms-grand:#1b1d4a;
+  --pms-type:#182636;
+  --pms-sel:#274763;
+  --pms-line:#3a4756;
+  --pms-line-v:#55697f;
+  --pms-div:#4a5a6e;
+  --pms-typed:#3b3417;
+  --pms-ok:#1d3a24;      --pms-ok-ink:#b7e6bf;
+  --pms-near:#3b3413;    --pms-near-ink:#ecd97a;
+  --pms-miss:#402612;    --pms-miss-ink:#f0b98a;
+  --pms-hover:#26384c;
+  --pms-edge-shadow:rgba(0,0,0,.6);
+}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--page);color:var(--ink);font-family:var(--font-sans);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1500px;margin:0 auto;padding:12px 20px 48px}
+@media(max-width:820px){.wrap{padding:10px 10px 32px}}
+
+/* ---------------- hero header (copied from the live page) ---------------- */
+.hero{position:relative;border-radius:16px;padding:12px 20px;margin-bottom:12px;color:#fff;
+      background:linear-gradient(120deg,var(--brand) 0%,var(--brand-d) 100%)}
+.hero .deco{position:absolute;inset:0;overflow:hidden;border-radius:16px;pointer-events:none}
+.hero .deco i{position:absolute;border-radius:50%;display:block}
+.hero .deco i:nth-child(1){right:-32px;top:-40px;width:128px;height:128px;background:rgba(255,255,255,.07)}
+.hero .deco i:nth-child(2){right:64px;bottom:-48px;width:96px;height:96px;background:rgba(255,255,255,.05)}
+.hero .row{position:relative;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+.hero .idn{display:flex;align-items:center;gap:10px}
+.hero .badge{height:36px;width:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.15)}
+.hero h1{font-size:19px;font-weight:700;margin:0;line-height:1.2;letter-spacing:-.01em}
+.hero .sub{font-size:11px;color:rgba(255,255,255,.72);line-height:1.3;margin-top:1px}
+.tmp{display:inline-block;font-size:9px;letter-spacing:.08em;border:1px solid rgba(255,255,255,.5);border-radius:5px;padding:1px 6px;margin-left:8px;vertical-align:2px;font-weight:600}
+.hero .acts{display:flex;align-items:center;gap:8px}
+.hbtn{border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.12);color:#fff;border-radius:9px;
+      padding:7px 11px;font:inherit;font-size:11.5px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.hbtn:hover{background:rgba(255,255,255,.22)}
+.hbtn.on{background:#fff;color:var(--brand-d);border-color:#fff;font-weight:600}
+
+/* period picker */
+.per{position:relative}
+.per-pop{display:none;position:absolute;right:0;top:calc(100% + 7px);z-index:60;background:var(--card);color:var(--ink);
+         border:1px solid var(--edge);border-radius:14px;box-shadow:var(--shadow);padding:12px;width:340px}
+.per.open .per-pop{display:block}
+.per-pop h4{margin:0 0 7px;font-size:11px;font-weight:700;color:var(--ink-2);text-align:center}
+.per-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.per-grid button{border:1px solid var(--edge);background:var(--soft);color:var(--ink-2);border-radius:8px;padding:6px 4px;font:inherit;font-size:11px;font-weight:500;cursor:pointer}
+.per-grid button:hover{background:var(--pms-head)}
+.per-grid button.on{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:600}
+.per-cust{display:flex;gap:6px;align-items:center;margin-top:9px;padding-top:9px;border-top:1px solid var(--edge)}
+.per-cust input{flex:1;min-width:0;font:inherit;font-size:11px;padding:6px 7px;border:1px solid var(--edge);border-radius:8px;background:var(--soft);color:var(--ink)}
+
+/* ---- the two dropdowns that are left: the hero's period picker and the
+   report's day / week / month picker. Both wear the same chrome. ---- */
+.btn{border:1px solid var(--edge-2);background:var(--card);color:var(--ink-2);border-radius:8px;padding:6px 10px;
+     font:inherit;font-size:11.5px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{border-color:var(--brand);color:var(--brand)}
+.btn.on{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:600}
+.i{width:14px;height:14px;flex:none;display:inline-block}
+.i.sm{width:11px;height:11px;opacity:.7;transition:transform .16s}
+.ms.on-open .i.sm{transform:rotate(180deg)}
+.per.open .i.sm{transform:rotate(180deg)}
+
+.ms{position:relative}
+.ms .cnt{font-size:10.5px;font-weight:700;color:var(--brand);font-variant-numeric:tabular-nums}
+.ms.on-open > .btn{border-color:var(--brand);color:var(--brand)}
+.ms-pop{display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:50;background:var(--card);border:1px solid var(--edge);
+        border-radius:11px;box-shadow:var(--shadow);min-width:196px;padding:8px}
+.ms.on-open .ms-pop{display:block}
+/* an invisible bridge across the gap, so crossing it does not count as leaving */
+.ms-pop::before,.per-pop::before{content:'';position:absolute;left:0;right:0;top:-9px;height:9px}
+.ms-list{max-height:none;overflow-y:auto}
+.pick-item{display:flex;align-items:flex-start;gap:8px;padding:6px 7px;border-radius:7px;cursor:pointer;font-size:11.5px;color:var(--ink-2)}
+.pick-item:hover{background:var(--pms-row-b)}
+.pick-item.on{background:var(--pms-sel);color:var(--ink);font-weight:600}
+.pick-item .tick{width:13px;flex:none;color:var(--brand);opacity:0;margin-top:1px}
+.pick-item.on .tick{opacity:1}
+html.dark .pick-item.on .tick{color:#9ec5ea}
+.pick-item .lbl{flex:1;min-width:0}
+.pick-item .sub{display:block;font-size:9.5px;font-weight:400;color:var(--muted);margin-top:1px;white-space:normal;line-height:1.3}
+
+/* ---------------- the explorer card ---------------- */
+.panel{background:var(--card);border:1px solid var(--edge);border-radius:14px;box-shadow:var(--shadow);padding:10px 14px;margin-bottom:11px}
+.panel h3{margin:0 0 9px;font-size:12px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:7px}
+.panel h3 .sm{font-size:10px;font-weight:500;color:var(--muted)}
+/* ---------------- performance explorer (the drill-down box) ---------------- */
+.pn-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;margin-bottom:8px}
+.crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:11px;margin-left:auto}
+.crumbs button{border:0;background:none;font:inherit;font-size:11px;color:var(--brand);cursor:pointer;padding:2px 5px;border-radius:6px}
+.crumbs button:hover{background:var(--pms-row-b)}
+.crumbs span{color:var(--muted)}
+.crumbs .cur{color:var(--ink);font-weight:600;padding:2px 5px}
+.pn-list{max-height:340px;overflow-y:auto;margin:0 -4px;padding:0 4px}
+/* the branch board: Maharashtra on the left, Karnataka on the right */
+.ex-cols{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:0 -4px;padding:0 4px;
+         align-items:start;max-height:460px;overflow-y:auto}
+@media(max-width:860px){.ex-cols{grid-template-columns:1fr;gap:12px}}
+.ex-h{display:flex;align-items:baseline;gap:8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;
+      font-weight:800;color:var(--brand-d);padding:0 6px 5px;border-bottom:2px solid var(--pms-div);margin-bottom:3px}
+html.dark .ex-h{color:#9ec5ea}
+.ex-h span{font-size:9.5px;text-transform:none;letter-spacing:0;font-weight:500;color:var(--muted);margin-left:auto}
+.ex-back{border:1px solid var(--edge-2);background:var(--card);color:var(--brand);border-radius:8px;
+         padding:4px 10px;font:inherit;font-size:11px;font-weight:600;cursor:pointer}
+.ex-back:hover{border-color:var(--brand);background:var(--pms-row-b)}
+
+/* ---- the sitemap tree ----------------------------------------------------
+   A branch unfolds its engineers underneath it on a connector line, so the
+   shape of the org stays on screen while you read one branch of it. */
+.pn-row.br{font-weight:600}
+.pn-row.br.open{background:var(--pms-band-b)}
+.pn-row.se .pn-rank{background:var(--pms-grp-b);font-size:9px}
+.pn-go.tw{transition:transform .16s}
+.pn-go.tw.open{transform:rotate(90deg);color:var(--brand)}
+.ex-kids{position:relative;margin:0 0 5px 12px;padding-left:15px}
+.ex-kids::before{content:'';position:absolute;left:0;top:0;bottom:0;width:1px;background:var(--pms-line-v);opacity:.55}
+.ex-kids > .pn-row{position:relative;border-bottom:0;padding-left:4px}
+.ex-kids > .pn-row::before{content:'';position:absolute;left:-15px;top:50%;width:12px;height:1px;
+  background:var(--pms-line-v);opacity:.55}
+/* the connector stops at the last engineer rather than running past him */
+.ex-kids > .pn-row:last-child::after{content:'';position:absolute;left:-15px;top:calc(50% + 1px);
+  bottom:-2px;width:1px;background:var(--card)}
+.ex-kids > .pn-row .pn-name b{font-weight:500}
+.pn-row{display:grid;grid-template-columns:26px 1fr 54px 96px 46px 26px 14px;gap:9px;align-items:center;
+        padding:5px 6px;border-radius:8px;font-size:11.5px;color:var(--ink-2);cursor:pointer;
+        border-bottom:1px solid var(--edge)}
+.pn-row:last-child{border-bottom:0}
+.pn-row:hover{background:var(--pms-row-b)}
+.pn-row.on{background:var(--pms-sel);color:var(--ink)}
+.pn-rank{width:22px;height:20px;border-radius:6px;background:var(--pms-grptot);color:var(--brand-d);
+         font-size:9.5px;font-weight:800;display:flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums}
+html.dark .pn-rank{color:#cfe0f0}
+.pn-row.top1 .pn-rank{background:var(--pms-ok);color:var(--pms-ok-ink)}
+.pn-row.bot1 .pn-rank{background:var(--pms-miss);color:var(--pms-miss-ink)}
+.pn-name{min-width:0;overflow:hidden}
+.pn-name b{font-weight:600;color:var(--ink);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pn-name span{display:block;font-size:9.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pn-met{font-size:10px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.pn-bar{height:8px;border-radius:3px;background:var(--pms-row-b);border:1px solid var(--pms-line);overflow:hidden;position:relative}
+.pn-bar i{position:absolute;left:0;top:0;bottom:0;display:block;border-radius:2px}
+.pn-score{text-align:right;font-weight:800;font-size:11px;font-variant-numeric:tabular-nums}
+.pn-go{width:12px;height:12px;color:var(--muted)}
+.pn-empty{font-size:11.5px;color:var(--muted);padding:14px 6px;text-align:center}
+
+/* ---------------- engineer detail (day / week / month + charts) ------------ */
+.detail{margin-top:12px;background:var(--card);border:1px solid var(--edge);border-radius:14px;
+        box-shadow:var(--shadow);overflow:hidden;scroll-margin-top:16px}
+.detail[hidden]{display:none}
+.dt-top{background:linear-gradient(120deg,var(--brand) 0%,var(--brand-d) 100%);color:#fff;
+        padding:11px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.dt-id h3{margin:0;font-size:15px;font-weight:700;letter-spacing:-.01em}
+.dt-id p{margin:1px 0 0;font-size:10.5px;color:rgba(255,255,255,.72)}
+/* an id is read digit by digit — it needs the contrast the prose around it does not */
+.dt-id p b{color:#fff;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.dt-kpis{display:flex;gap:16px;margin-left:auto;align-items:center}
+.dt-k{text-align:right}
+.dt-k .l{font-size:8.5px;text-transform:uppercase;letter-spacing:.07em;color:rgba(255,255,255,.6);font-weight:700}
+.dt-k .v{font-size:17px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums}
+.dt-body{padding:12px 14px 16px}
+.dt-empty{padding:34px 20px;text-align:center;color:var(--muted)}
+.dt-empty svg{width:34px;height:34px;color:var(--pms-line-v);margin-bottom:8px}
+.dt-empty b{display:block;font-size:13px;color:var(--ink);font-weight:600;margin-bottom:3px}
+.dt-empty span{font-size:11.5px}
+.dt-bar{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-bottom:11px}
+.dt-scope{font-size:10.5px;color:var(--muted)}
+/* The breakdown is TRANSPOSED: the periods run left to right across the head,
+   the metrics run top to bottom down the frozen first column, and the period
+   total is frozen against the right edge so it is readable at any scroll. */
+/* The breakdown scrolls sideways, often a long way — so the bar is mirrored
+   ABOVE the table as well: on a 31-day view the bottom bar is off the far end
+   of the screen by the time you need it. Bar and table share ONE frame, so the
+   two can never drift out of line and their borders cannot double up. */
+.dt-frame{border:1px solid var(--pms-line);border-radius:10px;overflow:hidden;margin-bottom:14px}
+.dt-topbar{overflow-x:auto;overflow-y:hidden;height:9px;background:var(--soft);
+           border-bottom:1px solid var(--pms-line)}
+.dt-topbar.hide{display:none}
+.dt-topbar > div{height:1px}
+/* The breakdown is its own scroll box — which is exactly what lets the header
+   row and the metric column stay put while you read across 31 days and down
+   through the bifurcations. */
+.dt-tblbox{overflow:auto;max-height:62vh}
+table.dt-t thead th{position:sticky;top:0;z-index:5}
+table.dt-t thead th.m{z-index:8}
+table.dt-t thead th.tot{z-index:7}
+table.dt-t thead th.m.tot{z-index:9}
+/* one thin bar everywhere the page scrolls */
+.dt-topbar,.dt-tblbox,.ex-cols,.ms-list,.pn-list{scrollbar-width:thin;scrollbar-color:var(--pms-line-v) transparent}
+.dt-topbar::-webkit-scrollbar,.dt-tblbox::-webkit-scrollbar,
+.ex-cols::-webkit-scrollbar,.ms-list::-webkit-scrollbar,.pn-list::-webkit-scrollbar{width:6px;height:6px}
+.dt-topbar::-webkit-scrollbar-thumb,.dt-tblbox::-webkit-scrollbar-thumb,
+.ex-cols::-webkit-scrollbar-thumb,.ms-list::-webkit-scrollbar-thumb,.pn-list::-webkit-scrollbar-thumb{
+  background:var(--pms-line-v);border-radius:6px}
+.dt-topbar::-webkit-scrollbar-track,.dt-tblbox::-webkit-scrollbar-track,
+.ex-cols::-webkit-scrollbar-track,.ms-list::-webkit-scrollbar-track,.pn-list::-webkit-scrollbar-track{background:transparent}
+table.dt-t{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%}
+table.dt-t th,table.dt-t td{padding:5px 7px;font-size:10.5px;white-space:nowrap;
+      box-shadow:inset -1px 0 0 var(--pms-line),inset 0 -1px 0 var(--pms-line)}
+table.dt-t thead th{background:var(--pms-head);color:var(--ink-2);font-size:9px;font-weight:700;
+      text-transform:uppercase;letter-spacing:.04em;text-align:center;line-height:1.25;min-width:52px}
+table.dt-t thead th b{display:block;font-size:10px;letter-spacing:0;color:var(--ink)}
+table.dt-t thead th span{display:block;font-size:8.5px;font-weight:500;color:var(--muted);text-transform:none;letter-spacing:0}
+table.dt-t th.m{position:sticky;left:0;z-index:4;text-align:left;width:186px;min-width:186px;
+      background:var(--pms-band-b);color:var(--ink);font-size:11px;font-weight:600;text-transform:none;letter-spacing:0;
+      box-shadow:inset -1px 0 0 var(--pms-div),inset 0 -1px 0 var(--pms-line),3px 0 6px -3px var(--pms-edge-shadow)}
+table.dt-t thead th.m{background:var(--pms-head);z-index:6}
+/* label and unit share one line, so eleven rows do not cost twenty-two lines
+   of height for nothing */
+table.dt-t th.m em{font-style:normal;font-size:9px;font-weight:400;color:var(--muted);margin-left:6px;white-space:nowrap}
+table.dt-t th.m em::before{content:'·';margin-right:6px;opacity:.6}
+table.dt-t td{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-2);background:var(--pms-row-a)}
+table.dt-t tbody tr:nth-child(even) td{background:var(--pms-row-b)}
+table.dt-t tbody tr:hover td{background:var(--pms-hover)}
+table.dt-t tbody tr:hover th.m{background:var(--pms-sel)}
+table.dt-t td.off,table.dt-t th.off{background:var(--pms-band-b);color:var(--muted)}
+table.dt-t .tot{position:sticky;right:0;z-index:5;background:var(--pms-subtot) !important;
+      font-weight:800;color:var(--ink);
+      box-shadow:inset 1px 0 0 var(--pms-div),inset 0 -1px 0 var(--pms-line),-3px 0 6px -3px var(--pms-edge-shadow)}
+table.dt-t thead th.tot{background:var(--pms-grptot) !important;z-index:7}
+table.dt-t thead th.cur{background:var(--pms-sel)}
+
+/* ---- charts ---------------------------------------------------------------
+   Palette: the data-viz reference instance, validated against THIS card's
+   surface (#ffffff light, #111820 dark) — all six checks pass in both modes.
+   Aqua is sub-3:1 on the light surface, which obliges relief: the breakdown
+   table above the charts is that relief, and every line also carries a direct
+   end label. Text never wears a series colour. */
+:root{
+  --viz-1:#2a78d6; --viz-2:#eb6834; --viz-3:#1baf7a;
+  --viz-ink:#111827; --viz-mut:#6b7280; --viz-grid:#e5e7eb; --viz-base:#c3c2b7; --viz-surf:#ffffff;
+  --viz-ok:#0ca30c; --viz-warn:#fab219; --viz-bad:#d03b3b;
+}
+html.dark{
+  --viz-1:#3987e5; --viz-2:#d95926; --viz-3:#199e70;
+  --viz-ink:#e6edf5; --viz-mut:#8b9bab; --viz-grid:#26313d; --viz-base:#383835; --viz-surf:#111820;
+}
+/* ---- expandable breakdown rows ---- */
+table.dt-t th.m{display:table-cell}
+table.dt-t th.m > span{display:inline-block;vertical-align:middle}
+table.dt-t tr.par.has th.m{cursor:pointer}
+table.dt-t tr.par.has th.m:hover{background:var(--pms-sel)}
+.dtc{width:10px;height:10px;color:var(--brand);transition:transform .16s;margin-right:5px;vertical-align:middle}
+.dtc.open{transform:rotate(90deg)}
+table.dt-t tr.kid th.m{padding-left:28px;background:var(--pms-grp-a);font-weight:400;font-size:10.5px;color:var(--ink-2)}
+table.dt-t tr.kid td{background:var(--pms-grp-a);font-size:10px;color:var(--ink-2)}
+table.dt-t tr.kid td.tot{background:var(--pms-grptot) !important;font-weight:700}
+table.dt-t tr.kid:hover td,table.dt-t tr.kid:hover th.m{background:var(--pms-hover)}
+table.dt-t td.mid{text-align:center}
+.pa-p{color:var(--pms-ok-ink);font-weight:800}
+.pa-a{color:var(--pms-miss-ink);font-weight:800}
+.pa-o{color:var(--muted);opacity:.5}
+
+/* ---- the short summary ---- */
+.sm-box{border:1px solid var(--edge);border-radius:11px;background:var(--soft);padding:11px 13px;margin-bottom:14px}
+.sm-box h4{margin:0 0 9px;font-size:11.5px;font-weight:700;color:var(--ink);display:flex;align-items:baseline;gap:8px}
+.sm-box h4 span{font-size:10px;font-weight:500;color:var(--muted)}
+.sm-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:10px}
+@media(max-width:760px){.sm-tiles{grid-template-columns:repeat(2,1fr)}}
+.sm-t{background:var(--card);border:1px solid var(--edge);border-radius:9px;padding:7px 10px}
+.sm-t .l{display:block;font-size:8.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
+.sm-t .v{display:block;font-size:17px;font-weight:800;line-height:1.2;color:var(--ink);font-variant-numeric:tabular-nums}
+.sm-t .h{display:block;font-size:9.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sm-say{margin:0;padding-left:16px;font-size:11.5px;line-height:1.65;color:var(--ink-2)}
+.sm-say li{margin-bottom:1px}
+.sm-say b{color:var(--ink);font-weight:600}
+
+.dt-charts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:900px){.dt-charts{grid-template-columns:1fr}}
+.ch{margin:0;border:1px solid var(--edge);border-radius:11px;padding:9px 11px 6px;background:var(--card);min-width:0}
+.ch figcaption{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;margin-bottom:6px}
+.ch-t{font-size:11.5px;font-weight:700;color:var(--ink)}
+.ch-s{font-size:9.5px;color:var(--muted)}
+.ch-lg{display:flex;flex-wrap:wrap;gap:9px;margin-left:auto;font-size:9.5px;color:var(--ink-2)}
+.ch-lg span{display:inline-flex;align-items:center;gap:4px}
+.ch-lg i{width:9px;height:9px;border-radius:3px;display:inline-block;flex:none}
+.ch svg{display:block;width:100%;height:auto}
+.ch svg text{font-family:var(--font-sans)}
+.ch-none{font-size:10.5px;color:var(--muted);padding:16px 0;text-align:center}
+footer{margin-top:14px;font-size:10.5px;color:var(--muted);text-align:center}
+
+/* ---------------- engineer scorecard modal (the printable Annexure-I) ----- */
+.mask{display:none;position:fixed;inset:0;z-index:100;background:rgba(10,16,24,.55);backdrop-filter:blur(2px);
+      align-items:flex-start;justify-content:center;padding:14px;overflow:hidden}
+.mask.open{display:flex}
+/* the signed matrix fills the screen and sits at the top; the two short panels
+   are centred, where a short dialogue belongs */
+.mask.mid{align-items:center}
+.mask.mid .sheet{max-width:660px}
+/* The sheet owns the height and its BODY does the scrolling, so the title bar
+   stays put instead of scrolling away from the numbers it names. */
+.sheet{background:#fff;color:#111827;width:100%;max-width:1040px;border-radius:14px;
+       box-shadow:0 24px 60px rgba(0,0,0,.35);overflow:hidden;
+       max-height:calc(100vh - 28px);display:flex;flex-direction:column}
+.sheet .sh-top{background:linear-gradient(120deg,var(--brand) 0%,var(--brand-d) 100%);color:#fff;
+       padding:9px 18px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex:none}
+.sheet .sh-top h2{margin:0;font-size:14px;font-weight:700;letter-spacing:-.01em}
+.sheet .sh-top .s2{font-size:10.5px;color:rgba(255,255,255,.75);margin-top:1px}
+.sh-x{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.14);color:#fff;border-radius:8px;padding:5px 10px;font:inherit;font-size:11.5px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.sh-x:hover{background:rgba(255,255,255,.26)}
+.sh-body{padding:12px 18px 20px;overflow-y:auto;flex:1 1 auto;min-height:0;
+         scrollbar-width:thin;scrollbar-color:var(--pms-line-v) transparent}
+.sh-body::-webkit-scrollbar{width:6px}
+.sh-body::-webkit-scrollbar-thumb{background:var(--pms-line-v);border-radius:6px}
+.sh-body::-webkit-scrollbar-track{background:transparent}
+.sh-id{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
+@media(max-width:640px){.sh-id{grid-template-columns:repeat(2,1fr)}}
+.sh-id .f{border:1px solid var(--pms-line);border-radius:8px;padding:5px 8px;background:#f7fbff}
+.sh-id .f .l{font-size:8.5px;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;font-weight:700}
+.sh-id .f .v{font-size:12px;font-weight:600;color:#111827;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sh-h{font-size:11.5px;font-weight:700;color:#111827;margin:12px 0 6px;padding-bottom:4px;border-bottom:1.5px solid #111827;display:flex;justify-content:space-between;align-items:baseline}
+.sh-h span{font-size:10px;font-weight:500;color:#6b7280}
+table.sh-t{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed}
+table.sh-t th,table.sh-t td{border:1px solid #9fc0df;padding:5px 7px;vertical-align:middle;
+  overflow-wrap:break-word;word-break:normal}
+/* table-layout:fixed reads its widths from the FIRST row, so they are declared
+   on the colgroup rather than on the tds — otherwise all six columns come out
+   equal and the KPI text paints over the Commitment column. */
+table.sh-t col.w-n{width:30px}
+table.sh-t col.w-c{width:118px}
+table.sh-t col.w-a{width:100px}
+table.sh-t col.w-p{width:54px}
+table.sh-t col.w-s{width:64px}
+table.sh-t th{background:#e8f3fc;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#374151;text-align:center}
+table.sh-t td.n{text-align:center;color:#6b7280;font-variant-numeric:tabular-nums}
+table.sh-t td.k{text-align:left;line-height:1.3}
+table.sh-t td.c{text-align:center;color:#374151;line-height:1.3}
+table.sh-t td.a{text-align:right;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.sh-t td.p{text-align:right;font-variant-numeric:tabular-nums}
+table.sh-t td.s{text-align:center;font-size:9px;font-weight:700;letter-spacing:.04em}
+.sh-ok{background:#cdeccd;color:#12401f}
+.sh-near{background:#fbf0bd;color:#4a3c05}
+.sh-miss{background:#fbd9b5;color:#6b3405}
+/* ---- the two-way document ---- */
+.sh-id{grid-template-columns:repeat(3,1fr)}
+@media(min-width:720px){.sh-id{grid-template-columns:repeat(6,1fr)}}
+.sh-id .f .v .vs{display:block;font-size:9px;font-weight:400;color:#6b7280;margin-top:1px}
+.sh-verdict{display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:center;
+     border:1px solid #9fc0df;border-left-width:5px;border-radius:10px;padding:11px 15px;margin-bottom:4px;background:#f7fbff}
+.sh-verdict.v-good{border-left-color:#0ca30c}
+.sh-verdict.v-warn{border-left-color:#fab219}
+.sh-verdict.v-bad{border-left-color:#d03b3b}
+@media(max-width:760px){.sh-verdict{grid-template-columns:1fr}}
+.sh-verdict .l{font-size:8.5px;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;font-weight:700}
+.sh-verdict .sc{text-align:center;padding-right:16px;border-right:1px solid #9fc0df}
+@media(max-width:760px){.sh-verdict .sc{border-right:0;border-bottom:1px solid #9fc0df;padding:0 0 8px;text-align:left}}
+.sh-verdict .big{font-size:30px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.sh-verdict .big span{font-size:14px}
+.sh-verdict .h{font-size:14px;font-weight:700;color:#111827;margin-top:1px}
+.sh-verdict .w{font-size:11px;color:#374151;margin-top:2px;line-height:1.5}
+.sh-verdict .vm{font-size:10.5px;color:#374151;line-height:1.65;white-space:nowrap}
+.sh-verdict .vm b{font-weight:700;color:#111827}
+.sh-2col{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+@media(max-width:760px){.sh-2col{grid-template-columns:1fr;gap:4px}}
+.sh-sub{font-size:10px;font-weight:700;color:#374151;margin:2px 0 5px;display:flex;gap:7px;align-items:baseline}
+.sh-sub em{font-style:normal;font-weight:400;font-size:9.5px;color:#6b7280}
+.sh-note{font-size:10.5px;color:#374151;background:#f7fbff;border:1px solid #9fc0df;border-radius:8px;padding:6px 9px;margin-top:6px}
+.sh-note b{color:#111827}
+table.sh-t .sub2{font-size:9px;color:#6b7280;margin-top:1px;font-weight:400}
+table.sh-t.stake td.k{text-align:left}
+table.sh-t.stake td.a{width:104px}
+table.sh-t.stake tr.tot td{background:#e8f3fc;font-weight:800;color:#111827}
+table.sh-t.act td.g{width:88px;text-align:center}
+table.sh-t.act td.k{text-align:left;font-size:10.5px}
+.tag{display:inline-block;font-size:8.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
+     border-radius:4px;padding:2px 6px}
+.tag.t-good{background:#cdeccd;color:#12401f}
+.tag.t-warn{background:#fbf0bd;color:#4a3c05}
+.tag.t-bad{background:#fbd9b5;color:#6b3405}
+.sh-none{font-size:10.5px;color:#6b7280;padding:9px 2px;font-style:italic}
+
+/* ---- the conversation: a headline, then one card per gap ---- */
+.sh-lede{display:flex;align-items:center;gap:16px;background:#f7fbff;border:1px solid #9fc0df;
+         border-radius:10px;padding:10px 15px;margin-bottom:9px}
+.sh-lede .ld-n{font-size:26px;font-weight:800;line-height:1;color:#6b3405;font-variant-numeric:tabular-nums;flex:none}
+.sh-lede .ld-t{font-size:11px;color:#374151;line-height:1.55}
+.sh-lede b{color:#111827;font-weight:700}
+.gaps{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media(max-width:820px){.gaps{grid-template-columns:1fr}}
+.gap{border:1px solid #9fc0df;border-radius:9px;padding:7px 10px 8px;background:#fff;break-inside:avoid}
+.gap .gh{display:flex;align-items:center;gap:7px;margin-bottom:3px}
+.gap .gn{width:17px;height:17px;border-radius:5px;background:#e8f3fc;color:#23255f;font-size:9.5px;
+         font-weight:800;display:flex;align-items:center;justify-content:center;flex:none}
+.gap .gt{font-size:11px;font-weight:700;color:#111827;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gap .gs{font-size:9.5px;color:#6b7280;margin-left:auto;white-space:nowrap;flex:none}
+.gap .gw{font-size:11.5px;font-weight:800;color:#6b3405;font-variant-numeric:tabular-nums;flex:none;min-width:56px;text-align:right}
+.gap .gb{font-size:10.5px;color:#374151;line-height:1.5}
+.gap .ga{font-size:10.5px;color:#111827;line-height:1.5;margin-top:3px;padding-top:3px;border-top:1px dashed #cfe0f0}
+.gap .ga b{color:#23255f}
+.sh-ask{font-size:10.5px;color:#374151;line-height:1.6;background:#eef7ee;border:1px solid #b7d9b7;
+        border-radius:9px;padding:8px 11px;margin-top:9px}
+.sh-ask b{color:#12401f}
+
+/* ---- the tick lists: a record, kept compact ---- */
+.chk{font-size:10.5px}
+.chk.two{columns:2;column-gap:26px}
+@media(max-width:640px){.chk.two{columns:1}}
+.chk.two label{break-inside:avoid}
+.chk.big{font-size:11.5px}
+.chk.big label{padding:4px 0}
+.chk.big input{width:15px;height:15px}
+.chk label em{font-style:normal;font-size:9.5px;color:#6b7280;margin-left:5px}
+.chk label{display:flex;gap:6px;align-items:center;padding:1.5px 0;color:#374151;cursor:pointer;line-height:1.35}
+.chk label:hover{color:#111827}
+.chk input{accent-color:#2f3192;width:13px;height:13px;flex:none;cursor:pointer}
+.chk span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chk.train label{cursor:default}
+.chk.train input{accent-color:#0ca30c}
+.chk.train b{margin-left:auto;font-size:9px;color:#6b7280;font-weight:600;flex:none;padding-left:8px}
+
+.sh-set{font-size:10px;color:#6b7280;margin:-3px 0 7px;display:flex;align-items:center;gap:5px}
+.sh-set b{color:#2f3192;font-weight:600}
+.sh-decl{font-size:10.5px;color:#374151;line-height:1.65;background:#f7fbff;border:1px solid #9fc0df;border-radius:8px;padding:9px 11px;margin-top:6px}
+.sh-score{display:flex;align-items:center;gap:12px;background:#f7fbff;border:1px solid #9fc0df;border-radius:10px;padding:9px 13px;margin-bottom:4px}
+.sh-score .big{font-size:27px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.sh-score .lbl{font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;font-weight:700}
+.sh-score .gcell{margin-left:auto;text-align:right}
+
+@media print{
+  /* The breakdown is wide by nature — a month is 31 columns — so the report
+     prints landscape and shrinks its own type rather than losing the right
+     hand side of the table off the page. */
+  @page{size:A4 landscape;margin:9mm}
+  body{background:#fff}
+  /* two print modes: the signed matrix (default) and the engineer's report */
+  .wrap,.hero,.bar,.card,.panel,footer{display:none !important}
+  body.print-detail .wrap{display:block !important}
+  body.print-detail .wrap > *{display:none !important}
+  body.print-detail .detail{display:block !important;border:0;box-shadow:none;margin:0}
+  body.print-detail .mask{display:none !important}
+  body.print-detail .dt-top .sh-x,body.print-detail .dt-topbar{display:none !important}
+  body.print-detail .dt-frame{overflow:visible}
+  body.print-detail .dt-tblbox{max-height:none;overflow:visible;border-radius:10px}
+  body.print-detail table.dt-t{width:100%;min-width:0;table-layout:fixed}
+  body.print-detail table.dt-t th,body.print-detail table.dt-t td{
+    padding:2px 3px;font-size:6.5pt;position:static}
+  body.print-detail table.dt-t th.m{width:96px;min-width:96px;max-width:96px;font-size:7pt;white-space:normal}
+  body.print-detail table.dt-t thead th{font-size:5.8pt;line-height:1.15}
+  body.print-detail table.dt-t thead th b{font-size:6.2pt}
+  body.print-detail .dt-charts{grid-template-columns:1fr 1fr}
+  body.print-detail .ch,body.print-detail .gap,body.print-detail .sm-box,
+  body.print-detail tr{break-inside:avoid}
+  .mask{display:block !important;position:static;background:none;padding:0;backdrop-filter:none}
+  .sheet{max-width:none;box-shadow:none;border-radius:0;max-height:none;display:block}
+  .sh-body{overflow:visible}
+  .sh-x{display:none}
+  .sheet .sh-top{background:#23255f !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============================ HERO ============================ -->
+  <header class="hero">
+    <div class="deco"><i></i><i></i></div>
+    <div class="row">
+      <div class="idn">
+        <div class="badge">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 20h5v-2a3 3 0 0 0-5.36-1.9M17 20H7m10 0v-2c0-.66-.13-1.3-.36-1.9m0 0A5 5 0 0 0 7.36 16.1M7 20H2v-2a3 3 0 0 1 5.36-1.9M7 20v-2c0-.66.13-1.3.36-1.9m0 0a5 5 0 0 1 9.28 0M15 7a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM7 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z"/>
+          </svg>
+        </div>
+        <div>
+          <h1>Employee Productivity — Performance Commitment Matrix<span class="tmp">TEMP DATA</span></h1>
+          <div class="sub">Annexure&nbsp;I · Service Engineer Performance Commitment &amp; Accountability · <span id="subPeriod">—</span></div>
+        </div>
+      </div>
+      <div class="acts">
+        <div class="per" id="perBox">
+          <button class="hbtn" id="perBtn"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg> <span id="perLbl">Last Month</span> <svg class="i sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+          <div class="per-pop">
+            <h4>Quick Select</h4>
+            <div class="per-grid" id="perGrid"></div>
+            <div class="per-cust">
+              <input type="date" id="pFrom"><span style="color:var(--muted)">–</span><input type="date" id="pTo">
+              <button class="btn on" id="pApply">Apply</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================ ENGINEER RANKING ============================ -->
+  <section class="panel" id="panel">
+    <div class="pn-head">
+      <h3>Performance explorer <span class="sm" id="pnHint"></span></h3>
+      <nav class="crumbs" id="crumbs"></nav>
+    </div>
+    <div class="pn-list" id="pnList"></div>
+  </section>
+
+  <!-- ===================== ENGINEER DETAIL REPORT ===================== -->
+  <section class="detail" id="detail"></section>
+
+  <footer id="footer"></footer>
+</div>
+
+<!-- ============================ SCORECARD MODAL ============================ -->
+<div class="mask" id="mask">
+  <div class="sheet" id="sheet"></div>
+</div>
+
+<script>
+/* ===========================================================================
+   1. THE COMMITMENT MODEL — Annexure I, transcribed
+   =========================================================================== */
+
+// dir: 'min'   -> at or above target is 100%
+//      'range' -> inside [lo,hi] is 100%, outside falls away proportionally
+// agg: how a branch / region / grand-total row rolls its engineers up
+const KPIS = [
+  {no:1,  key:'sr', perMonth:true,      name:'CSP/PW BD/CM together Min SR Count', short:'SR Count',        head:'SR Count',        unit:'nos',  fmt:'int',  target:60,      dir:'min',  commit:'Minimum 60 SR’s',       hint:'UW / Bandhan / PM / CM / BD', agg:'sum', sec:'vol',
+   src:'Response Time &amp; MaxTTR (SR close date) split by the SR Type Master (MaxTTR)', ready:'live', note:'Counted today as Close SR; the commitment needs only the 5 heads summed instead of all of them.'},
+  // --- reference columns, NOT commitments ---------------------------------
+  // Annexure I has 12 commitments and the score has to stay those 12, so these
+  // two carry info:true: no target, no met/near/missed paint, no weight, and no
+  // row on the printed matrix. They still roll up and sort like any column.
+  {no:null, sortNo:1.5, key:'prod', name:'Productivity — SR Close per Day Present', short:'Productivity',
+   head:'Product-<br>ivity', unit:'SR / day', fmt:'rate2', target:null, dir:null,
+   commit:'SR ÷ days present', hint:'closed SRs per day worked', agg:'derived', sec:'vol', info:true,
+   derive:v => (v.present ? v.sr / v.present : 0),
+   src:'Close SR ÷ days marked present', ready:'derive',
+   note:'Days present comes from the attendance marks, so there is no second paid-days figure to disagree with it. Computed at every level from that level’s OWN totals — a branch is its total SRs over its total days present, never the average of its engineers’ rates.'},
+
+  {no:2,  key:'spare', perMonth:true,   name:'Spare Parts Sales / Month',          short:'Spare Sales',     head:'Spare Sales',     unit:'₹', fmt:'amt', target:150000,  dir:'min',  commit:'Minimum ₹1,50,000',     hint:'part revenue booked by the engineer', agg:'sum', sec:'rev',
+   src:'LMS Part Invoice Amount (already the “Spare Conv. Amount” column) / Part Sale file', ready:'derive', note:'Live for LEAD-driven spares. Counter sales from the Part Sale file carry no SR number, so an engineer link has to be built through Instance ID + date.'},
+  {no:3,  key:'labour', perMonth:true,  name:'Labour Revenue Generation / Month',  short:'Labour Rev.',     head:'Labour Rev.',     unit:'₹', fmt:'amt', target:60000,   dir:'min',  commit:'Minimum ₹60,000',       hint:'labour value on SRs closed', agg:'sum', sec:'rev',
+   src:'Labour Revenue Detailed Report → SR NUMBER → MaxTTR SE NAME', ready:'derive', note:'The labour file has SR NUMBER and MaxTTR maps that SR to an engineer — exactly the join the report used before 2026-08.'},
+  {no:4,  key:'amcLead', perMonth:true, name:'AMC Lead Generation / Month',        short:'AMC Leads',       head:'AMC Leads',       unit:'nos',  fmt:'int',  target:5,       dir:'min',  commit:'Minimum 5 Leads',            hint:'LMS leads, category AMC', agg:'sum', sec:'lead',
+   src:'LMS lead numbers on SE UID (SE UID Master) + Lead Category Master → AMC', ready:'live', note:'Already a column of the report — the AMC bucket of Product Wise Lead Count.'},
+  {no:5,  key:'battery', perMonth:true, name:'Battery Sell / Month',               short:'Battery',         head:'Battery',         unit:'nos',  fmt:'int',  target:3,       dir:'min',  commit:'Minimum 3 Batteries',        hint:'converted battery leads', agg:'sum', sec:'lead',
+   src:'LMS + Lead Category Master → Battery', ready:'live', note:'Lead count is live; “sold” should count only leads with a part invoice amount, so the report must filter on conversion.'},
+  {no:12, key:'lms',     name:'Leads to be updated on LMS',         short:'LMS Update',      head:'LMS Update',      unit:'%',    fmt:'pct',  target:100,     dir:'min',  commit:'100%',                       hint:'leads raised vs leads eligible', agg:'avg', sec:'lead',
+   src:'LMS lead numbers vs SRs whose type qualifies for a lead', ready:'derive', note:'Needs an agreed rule for “eligible SR” before the denominator is trustworthy.'},
+  {no:6,  key:'first',   name:'First Site Reporting Daily',         short:'1st Site &lt;10 AM', head:'1st Site',     unit:'%',    fmt:'pct',  target:100,     dir:'min',  commit:'Before 10:00 AM',            hint:'% of days reporting before 10:00', agg:'avg', sec:'disc',
+   src:'eFSR on-site arrival time', ready:'new', note:'The EFSR Report carries Task Assigned and Task End date-times but no ARRIVAL stamp — the field has to come into the file (or from the mobile app) first.'},
+  {no:8,  key:'sfTask',  name:'Salesforce Task Closure Daily',      short:'SF Task Closure', head:'SF Task',        unit:'%',    fmt:'pct',  target:100,     dir:'min',  commit:'Before Leaving Site',        hint:'% of tasks closed on the visit day', agg:'avg', sec:'disc',
+   src:'EFSR Task End Date vs the visit date', ready:'derive', note:'Both stamps are already stored on efsr_report; “before leaving site” becomes “closed the same calendar day”.'},
+  {no:10, key:'attend',  name:'Attendance &amp; Discipline',        short:'Attendance',      head:'Attendance',      unit:'%',    fmt:'pct',  target:95,      dir:'min',  commit:'Minimum 95%',                hint:'days present ÷ working days', agg:'avg', sec:'disc',
+   src:'Days present on Task end ÷ Working Days (AOP working-days master)', ready:'live', note:'Both columns are already on the report; this is their ratio.'},
+  {no:7,  key:'closure', name:'SR / eFSR Closure Daily',            short:'SR Closure',      head:'SR Closure',      unit:'%',    fmt:'pct',  target:95,      dir:'min',  commit:'95% Within Timeline',        hint:'% closed inside MaxTTR', agg:'avg', sec:'qual',
+   src:'MaxTTR on SR Closed (hrs) against the SR type’s limit', ready:'derive', note:'The hours column is on every MaxTTR row; only the per-SR-type limit table is missing.'},
+  {no:9,  key:'cdi',     name:'Customer Satisfaction — CDI',   short:'CDI Rating',      head:'CDI',             unit:'/10',  fmt:'rate', target:9,       dir:'min',  commit:'Minimum 9/10 Rating',        hint:'engineer’s CDI rating', agg:'avg', sec:'qual',
+   src:'CDI Detail Report on X TECHNICIAN NAME', ready:'live', note:'The report shows the CDI % today. The 9/10 wording needs the file’s RATING column read as well as the P/D split.'},
+  {no:11, key:'wetPm',   name:'Min. Time Spent for Wet PM SR’s', short:'Wet PM Hrs',   head:'Wet PM Hrs',      unit:'hrs',  fmt:'hrs',  target:[1.5,2.0], dir:'range', commit:'1.5 to 2.0 Hrs',            hint:'avg on-site hours, Wet PM SRs', agg:'avg', sec:'qual',
+   src:'MaxTTR SR Task Start → SR Task End on Wet PM SR types', ready:'derive', note:'Both stamps exist on response_time_maxttr; the Wet split already comes from the SR Type Master.'},
+];
+
+// The 12 signed commitments — what the score, the grade and the printed
+// matrix are made of. The reference columns are deliberately outside it.
+KPIS.forEach(k=>{ if(k.sortNo===undefined) k.sortNo = k.no; });
+const COMMITMENTS = KPIS.filter(k=>!k.info);
+
+const SECTIONS = [
+  {key:'vol',  label:'Service Volume'},
+  {key:'rev',  label:'Revenue Generation'},
+  {key:'lead', label:'Lead Generation · LMS'},
+  {key:'disc', label:'Discipline · Response'},
+  {key:'qual', label:'Quality · Customer Delight'},
+];
+
+// Mandatory compliance — the tick list under the KPI table on the paper form.
+const COMPLY = [
+  'Uniform, ID Card & PPE Usage at all times',
+  'Proper Tool Kit Availability',
+  'Machine Health Check During Every Visit',
+  'Promote Spare Parts, Batteries, Coolant, Filters & AMC',
+  'Explain Work Done and Site Status to Customer',
+  'Maintain Professional Behaviour & Safety Standards',
+  'No Repeat Complaints Due to Poor Workmanship',
+  'Timely Response to Coordinator and Customer Communication',
+];
+
+/* ===========================================================================
+   2. THE REAL ROSTER — branches, branch groups and service engineers as the
+      system holds them:
+        BRANCHES / GROUPS  pms_controller.ERP_BRANCHES + EPR_BRANCH_GROUPS
+        RAW_SE             the Training Report (the SE UID Master's own source:
+                           UID NO, FULL NAME, EMPLOYEE TICKET NUMBER, BRANCH ID)
+                           filtered to the engineers the EFSR Report shows
+                           actually working SRs — 107 of them
+        SR Count           each engineer's REAL eFSR task load, scaled to a
+                           month. Every other KPI figure below is still
+                           generated (those commitments have no source yet) and
+                           is deterministic, so the sheet never reshuffles.
+   =========================================================================== */
+
+const BRANCHES = [
+  {id:'420435_1', name:'Ch.Sambhaji Nagar', region:'MH', grp:0},
+  {id:'420435_2', name:'Ahilyanagar', region:'MH', grp:1},
+  {id:'420435_3', name:'Beed', region:'MH', grp:1},
+  {id:'420435_4', name:'Nanded', region:'MH', grp:0},
+  {id:'420435_5', name:'Babhaleshwar', region:'MH', grp:1},
+  {id:'420435_6', name:'Latur', region:'MH', grp:1},
+  {id:'420435_7', name:'Parbhani', region:'MH', grp:0},
+  {id:'420435_8', name:'Hubli', region:'KA', grp:2},
+  {id:'420435_9', name:'Belagavi', region:'KA', grp:3},
+  {id:'420435_10', name:'Hospet', region:'KA', grp:4},
+  {id:'420435_11', name:'Ballari', region:'KA', grp:4},
+  {id:'420435_12', name:'Bagalkot', region:'KA', grp:4},
+  {id:'420435_13', name:'Gulbarga', region:'KA', grp:5},
+  {id:'420435_14', name:'Bijapur', region:'KA', grp:5},
+];
+// A branch group has no name in the system, so it takes its LEAD BRANCH's
+// name and lists the rest underneath — never an invented 'Group 1'.
+const GROUPS = [
+  {i:0, label:'Ch.Sambhaji Nagar', sub:'+ Nanded · Parbhani'},
+  {i:1, label:'Ahilyanagar', sub:'+ Beed · Babhaleshwar · Latur'},
+  {i:2, label:'Hubli', sub:'single branch'},
+  {i:3, label:'Belagavi', sub:'single branch'},
+  {i:4, label:'Hospet', sub:'+ Ballari · Bagalkot'},
+  {i:5, label:'Gulbarga', sub:'+ Bijapur'},
+];
+
+// [branch id, full name, SE UID, employee ticket, monthly SR count]
+const RAW_SE = [
+  ['420435_1','Ajay Lokhande','4204350022','535507230508',10],
+  ['420435_1','Akash Wagh','4204350220','530906260922',15],
+  ['420435_1','Ayan Shaikh','4204350186','531010250864',79],
+  ['420435_1','Datta Kamble','4204350024','534411210240',15],
+  ['420435_1','Ganesh Patthe','4204350023','535521230521',45],
+  ['420435_1','Habeeb Shaikh','4204350185','531010250857',58],
+  ['420435_1','Harshal Ingle','4204350187','531009250842',61],
+  ['420435_1','Kamlakar More','4204350088','534909250756',40],
+  ['420435_1','Kanhaiya Dube','4204350018','534906250258',62],
+  ['420435_1','Parvez Sayed','4204350015','534904255105',57],
+  ['420435_1','Sudhir Mhaslekar','4204350019','531006220533',88],
+  ['420435_10','Amjad Ali ABDULLAHKHADAR','4204350092','644212190116',64],
+  ['420435_10','Dadapeer Dadapeer','4204350201','730907260859',15],
+  ['420435_10','Dadapeer M','4204350095','734906250450',50],
+  ['420435_10','Jilan Shekshavali','4204350158','731009250848',71],
+  ['420435_10','Krishna kumar G','4204350096','734906250303',70],
+  ['420435_10','MDAsif MDAsif','4204350162','731009250856',57],
+  ['420435_10','Mohameed Abdullah Mohammed','4204350131','741004250596',61],
+  ['420435_10','Mohammed Jafer Kalur','4204350090','644912250061',58],
+  ['420435_10','Parashuram G Gouripurada','4204350093','744912250360',75],
+  ['420435_10','Vijay Kumar','4204350123','744909250592',57],
+  ['420435_10','WASIM Syed dada khalander','4204350089','645109150110',6],
+  ['420435_11','Basavanagouda Vanner','4204350216','730907260857',12],
+  ['420435_11','Nagaraj P Pategowdar','4204350101','741012230304',112],
+  ['420435_11','Noor Mohammed Sk','4204350100','744810230155',51],
+  ['420435_12','Mohammedismail Dhalayat','4204350182','734912250863',60],
+  ['420435_12','Nabirasul Bagban','4204350104','741004250604',65],
+  ['420435_12','Pundaleeka Bannidinni','4204350103','744802240274',74],
+  ['420435_12','Shravankumar Shirur','4204350197','731001260921',54],
+  ['420435_13','Akbar Ahmed','4204350108','644410210054',62],
+  ['420435_13','Haneef Khan KHAN','4204350111','744810230113',47],
+  ['420435_13','Keertiraj Mallikarjun','4204350200','730907260861',8],
+  ['420435_13','MD Asif Shareef Siddiqui','4204350110','744912250273',73],
+  ['420435_13','Md Zakir Ali','4204350117','644202190108',70],
+  ['420435_13','Mohammed Mubeen Shaik','4204350112','744810230119',61],
+  ['420435_13','Rabani Shaik','4204350120','644209180102',64],
+  ['420435_13','Shakeel Ashraf Chowdhari','4204350118','634906250056',66],
+  ['420435_13','Vijaykumar Jadhav','4204350119','644909250055',72],
+  ['420435_14','Akshay Natikar','4204350234','730907260864',6],
+  ['420435_14','Mallappa Sadashiv Santi','4204350135','644410210053',44],
+  ['420435_14','Mohd Abusufiyan Jahagirdar','4204350233','730907260863',6],
+  ['420435_14','Muthuraj Madivalappa Natikar','4204350136','534409210782',42],
+  ['420435_14','Sangappa Bannatti Bannatti','4204350196','731012250921',52],
+  ['420435_14','UMESH Patil','4204350109','534912250299',46],
+  ['420435_14','Umarfaruq Bagayat','4204350223','730907260862',15],
+  ['420435_2','Aditya Pathare','4204350194','531011250895',58],
+  ['420435_2','Alsif Shaikh','4204350179','531010250870',99],
+  ['420435_2','Anandrao Patil','4204350154','',6],
+  ['420435_2','Bapusaheb Darade','4204350144','',6],
+  ['420435_2','Navnath Patare','4204350087','534909250704',72],
+  ['420435_2','Nilesh Gawande','4204350040','',6],
+  ['420435_2','Nilesh Salunke','4204350006','535506240631',63],
+  ['420435_2','Rushikesh Magar','4204350126','534912250780',85],
+  ['420435_2','Sagar Aher','4204350045','',6],
+  ['420435_2','Sunil Gujaba','4204350198','531003260944',63],
+  ['420435_2','Yuvraj Sarode','4204350038','',6],
+  ['420435_3','Anil Howal','4199640109','',6],
+  ['420435_3','Balasaheb Gadhave','4204350017','535501240261',41],
+  ['420435_3','Lahu Doifode','4204350036','531009230594',68],
+  ['420435_3','Umesh Kale','4204350125','531008250825',56],
+  ['420435_4','Dinesh Kalidas','4204350159','531008250837',57],
+  ['420435_4','Lakhan Athavale','4204350044','534906250735',8],
+  ['420435_4','Naresh Tidke','4204350219','530906260924',8],
+  ['420435_4','Nitin Parde','4204350037','535512230237',6],
+  ['420435_4','Rafiq Shaikh','4204350043','531012250911',49],
+  ['420435_4','Rameshwar Akole','4204350035','535511230238',65],
+  ['420435_4','Sagar Pardeshi','4204350046','534904250742',62],
+  ['420435_4','Vinod Buktare','4204350041','534610220239',81],
+  ['420435_5','Ishwar Jadhav','4204350152','531008250839',91],
+  ['420435_5','Kishor Muntode','4204350028','',6],
+  ['420435_5','Popot Chavan','4204350042','',6],
+  ['420435_5','Rushikesh Khurud','4204350151','531008250831',49],
+  ['420435_5','Sachin Pathare','4204350146','534912250815',78],
+  ['420435_5','Sandip Gagare','4204350145','534909250826',63],
+  ['420435_5','Vaibhav Malunjkar','4204350025','',6],
+  ['420435_6','Ganesh Chapkanade','4204350139','534912250835',59],
+  ['420435_6','Jyotiram Shiralkar','4204350033','534411210260',6],
+  ['420435_6','Mahaling Patil','4204350032','535512230019',59],
+  ['420435_6','Shaligram Potdar','4204350147','534903260833',49],
+  ['420435_7','Mahesh Holge','4204350217','530906260923',19],
+  ['420435_7','Prabhakar Uphade','4204350034','531003120781',65],
+  ['420435_7','Yogesh Dhawale','4204350086','534309200262',6],
+  ['420435_8','Aman Rao','4204350140','',6],
+  ['420435_8','Huchchappa Gadagi','4204350052','744802240272',55],
+  ['420435_8','Imamusen Dakhani','4204350127','531011250880',6],
+  ['420435_8','Irfn Mulla','4204350128','734912250838',58],
+  ['420435_8','Kareppa Doopad','4204350057','744601240199',81],
+  ['420435_8','Khurshid Havaragi','4204350063','744807230042',80],
+  ['420435_8','Krishna Dasabal','4204350143','731007250807',79],
+  ['420435_8','Namdev Khavari','4204350141','731007250803',99],
+  ['420435_8','Vittal Satannavar','4204350054','744401230100',58],
+  ['420435_8','Yallapa Arer','4204350064','741003240350',81],
+  ['420435_9','Amit Mekkalike','4204350055','744909250568',64],
+  ['420435_9','Dinanath Lohar','4204350069','741012230311',52],
+  ['420435_9','Gajanan Bhosale','4204350077','731008250817',87],
+  ['420435_9','Ghouse Mohiaddin Mohammed','4204310023','',6],
+  ['420435_9','Mahaveer Busavi','4204350050','741004250599',72],
+  ['420435_9','Nilesh Bavkar','4204350071','744811230192',63],
+  ['420435_9','Pramod Dharigoud','4204350075','744811230160',51],
+  ['420435_9','Prashant Patil','4204350074','744912250143',55],
+  ['420435_9','Raju Magund','4204350056','744909250569',58],
+  ['420435_9','Raju Talwar','4204350061','645108180048',98],
+  ['420435_9','Sameer Humayun','4204350237','730907260858',8],
+  ['420435_9','Santosh Kunikar','4204350080','731008250816',62],
+  ['420435_9','Satish Navagekar','4204350076','744312230020',63],
+  ['420435_9','Sunil Humbarwadi','4204350078','744912250068',64],
+  ['420435_9','Vishal Khan','4204350058','641011220269',33],
+];
+
+// ---- REAL training records -------------------------------------------------
+// From 'New file upload/Traning report.xlsx' — the same file the SE UID Master
+// is built from. [SKILL, CATEGORY, TRAINING DATE] per engineer UID, duplicates
+// of the same skill+category collapsed to the first time it was taken.
+const TRAINING = {
+  '4204350006':[['LkVA','Breakdown Expert','2024-03-16'],['LkVA','Service Expert','2024-03-16'],['CPCB4+','Breakdown Expert','2024-06-07'],['CPCB4+','Service Expert','2024-06-07'],['BS V','Breakdown Expert','2026-01-30'],['BS V','Service Expert','2026-01-30']],
+  '4204350015':[['LkVA','Service Expert','2023-10-13'],['MkVA','Service Expert','2023-10-13'],['BS V','Breakdown Expert','2025-04-25'],['CPCB4+','Breakdown Expert','2025-04-25'],['BS V','Service Expert','2025-04-25'],['CPCB4+','Service Expert','2025-04-25']],
+  '4204350017':[['CPCB4+','Breakdown Expert','2024-01-20'],['CPCB4+','Service Expert','2024-01-20']],
+  '4204350018':[['LkVA','Service Expert','2020-09-11'],['MkVA','Service Expert','2020-09-11'],['BS V','Breakdown Expert','2025-07-02'],['CPCB4+','Breakdown Expert','2025-07-02'],['BS V','Service Expert','2025-07-02'],['CPCB4+','Service Expert','2025-07-02']],
+  '4204350019':[['CPCB4+','Breakdown Expert','2023-07-28'],['CPCB4+','Service Expert','2023-07-28']],
+  '4204350022':[['CPCB4+','Breakdown Expert','2023-07-07'],['CPCB4+','Service Expert','2023-07-07']],
+  '4204350023':[['CPCB4+','Breakdown Expert','2023-07-21'],['CPCB4+','Service Expert','2023-07-21']],
+  '4204350024':[['BSIV Industrial','Breakdown Expert','2021-11-12'],['BSIV Industrial','Service Expert','2021-11-12']],
+  '4204350032':[['CPCB4+','Breakdown Expert','2023-12-08'],['CPCB4+','Service Expert','2023-12-08'],['BS V','Breakdown Expert','2026-01-30'],['BS V','Service Expert','2026-01-30']],
+  '4204350033':[['BSIV Industrial','Breakdown Expert','2021-12-10'],['BSIV Industrial','Service Expert','2021-12-10']],
+  '4204350034':[['LkVA','Service Expert','2012-03-09'],['MkVA','Service Expert','2012-03-09']],
+  '4204350035':[['LkVA','Service Expert','2012-07-16'],['MkVA','Service Expert','2012-07-16'],['BSIV Industrial','Breakdown Expert','2022-07-16'],['BSIV Industrial','Engine Overhauling Expert','2022-07-16'],['CPCB4+','Breakdown Expert','2023-12-01'],['CPCB4+','Service Expert','2023-12-01'],['BSIV Industrial','Service Expert','2024-10-23']],
+  '4204350036':[['LkVA','Service Expert','2024-08-23'],['MkVA','Service Expert','2024-08-23']],
+  '4204350037':[['LkVA','Service Expert','2019-08-28'],['MkVA','Service Expert','2019-08-28'],['BSIV Industrial','Breakdown Expert','2021-12-11'],['BSIV Industrial','Engine Overhauling Expert','2021-12-11'],['BSIV Industrial','Service Expert','2021-12-11'],['CPCB4+','Breakdown Expert','2023-12-22'],['CPCB4+','Service Expert','2023-12-22']],
+  '4204350041':[['LkVA','Service Expert','2010-08-20'],['MkVA','Service Expert','2010-08-20'],['R550','Breakdown Expert','2022-08-10'],['R550','Engine Overhauling Expert','2022-08-10'],['R550','Service Expert','2022-11-10']],
+  '4204350043':[['PM','Service Expert','2025-12-01']],
+  '4204350044':[['LkVA','Service Expert','2025-02-14'],['MkVA','Service Expert','2025-02-14'],['BS V','Breakdown Expert','2025-06-06'],['CPCB4+','Breakdown Expert','2025-06-06'],['BS V','Service Expert','2025-06-06'],['CPCB4+','Service Expert','2025-06-06']],
+  '4204350046':[['LkVA','Service Expert','2025-02-14'],['MkVA','Service Expert','2025-02-14'],['BS V','Breakdown Expert','2025-04-25'],['CPCB4+','Breakdown Expert','2025-04-25'],['BS V','Service Expert','2025-04-25'],['CPCB4+','Service Expert','2025-04-25']],
+  '4204350050':[['Brand Ambassador program','Service Expert','2025-04-25'],['PM','Service Expert','2025-04-25']],
+  '4204350052':[['LkVA','Service Expert','2022-09-09'],['MkVA','Service Expert','2022-09-09'],['R550','Service Expert','2023-01-25'],['CPCB4+','Breakdown Expert','2024-02-09'],['CPCB4+','Service Expert','2024-02-09']],
+  '4204350054':[['Jump Start','Level 1','2022-09-20'],['BSIV Industrial','Service Expert','2023-01-13'],['MkVA','Service Expert','2023-01-13']],
+  '4204350055':[['LkVA','Service Expert','2025-03-10'],['MkVA','Service Expert','2025-03-10'],['BS V','Breakdown Expert','2025-09-29'],['CPCB4+','Breakdown Expert','2025-09-29'],['BS V','Service Expert','2025-09-29'],['CPCB4+','Service Expert','2025-09-29'],['K4300','Breakdown Expert','2026-04-17'],['HkVA','Service Expert','2026-04-17']],
+  '4204350056':[['LkVA','Service Expert','2025-03-10'],['MkVA','Service Expert','2025-03-10'],['BS V','Breakdown Expert','2025-09-12'],['CPCB4+','Breakdown Expert','2025-09-12'],['BS V','Service Expert','2025-09-12'],['CPCB4+','Service Expert','2025-09-12']],
+  '4204350057':[['LkVA','Service Expert','2023-07-01'],['MkVA','Service Expert','2023-07-01'],['KCC Inverter Technology','Service Expert','2023-12-05'],['R550','Service Expert','2024-01-25'],['BS V','Breakdown Expert','2026-02-20'],['CPCB4+','Breakdown Expert','2026-02-20'],['BS V','Service Expert','2026-02-20'],['CPCB4+','Service Expert','2026-02-20']],
+  '4204350058':[['LkVA','Service Expert','2022-11-19']],
+  '4204350061':[['HkVA','Electrical - Expert','2018-08-18'],['Industrial','Electrical - Expert','2018-08-18'],['KCC','Electrical - Expert','2018-08-18'],['LkVA','Service Expert','2018-08-18'],['MkVA','Service Expert','2018-08-18']],
+  '4204350063':[['Industrial','Service Expert','2010-09-20'],['LkVA','Service Expert','2010-09-20'],['MkVA','Service Expert','2010-09-20'],['HkVA','Breakdown Expert','2016-09-24'],['HkVA','Engine Overhauling Expert','2016-09-24'],['HkVA','Service Expert','2016-09-24'],['BSIV Industrial','Service Expert','2021-09-27'],['CPCB4+','Breakdown Expert','2023-07-28'],['CPCB4+','Service Expert','2023-07-28']],
+  '4204350064':[['LkVA','Service Expert','2024-03-30'],['MkVA','Service Expert','2024-03-30'],['Brand Ambassador program','Level 1','2025-01-03'],['CPCB4+','Service Expert','2025-01-03']],
+  '4204350069':[['LkVA','Service Expert','2023-12-23'],['MkVA','Service Expert','2023-12-23'],['Brand Ambassador program','Level 1','2025-01-03'],['CPCB4+','Service Expert','2025-01-03'],['KCC Inverter Technology','Service Expert','2026-03-30'],['KCC Inverter Technology','Breakdown Expert','2026-04-03']],
+  '4204350071':[['KCC','Service Expert','2015-09-21'],['LkVA','Service Expert','2015-09-21'],['MkVA','Service Expert','2015-09-21'],['CPCB4+','Breakdown Expert','2023-12-01'],['CPCB4+','Service Expert','2023-12-01'],['KCC Inverter Technology','Breakdown Expert','2026-04-03'],['KCC Inverter Technology','Service Expert','2026-04-03']],
+  '4204350074':[['HkVA','Breakdown Expert','2018-03-17'],['HkVA','Electrical - Expert','2018-03-17'],['CRDI Engine','Level 1','2018-03-17'],['HkVA','Service Expert','2018-03-17'],['Power Car','Breakdown Expert','2019-06-26'],['BSIV Industrial','Breakdown Expert','2021-10-01'],['Bio Gas','Service Expert','2022-04-26'],['CPCB4+','Breakdown Expert','2023-10-20'],['CPCB4+','Service Expert','2023-10-20'],['BS V','Breakdown Expert','2025-12-15'],['BS V','Service Expert','2025-12-15']],
+  '4204350075':[['Industrial','Service Expert','2021-07-26'],['LkVA','Service Expert','2021-07-26'],['MkVA','Service Expert','2021-07-26'],['CPCB4+','Breakdown Expert','2023-11-10'],['CPCB4+','Service Expert','2023-11-10']],
+  '4204350076':[['Industrial','Service Expert','2016-12-03'],['LkVA','Service Expert','2016-12-03'],['MkVA','Service Expert','2016-12-03'],['Power Car','Breakdown Expert','2019-09-26'],['R550','Service Expert','2023-01-25'],['BSIV Industrial','Service Expert','2023-03-17'],['CPCB4+','Breakdown Expert','2023-07-28'],['CPCB4+','Service Expert','2023-07-28'],['KCC Inverter Technology','Service Expert','2023-12-05']],
+  '4204350077':[['PM','Breakdown Expert','2025-08-04'],['PM','Service Expert','2025-08-04']],
+  '4204350078':[['Industrial','Breakdown Expert','2010-06-14'],['Industrial','Service Expert','2010-06-14'],['LkVA','Service Expert','2010-06-14'],['MkVA','Service Expert','2010-06-14'],['HkVA','Breakdown Expert','2016-09-24'],['HkVA','Service Expert','2016-09-24'],['BSIV Industrial','Breakdown Expert','2021-10-25'],['BSIV Industrial','Service Expert','2021-10-25'],['CPCB4+','Breakdown Expert','2023-08-25'],['CPCB4+','Service Expert','2023-08-25'],['BS V','Breakdown Expert','2025-12-19'],['BS V','Service Expert','2025-12-19']],
+  '4204350080':[['PM','Breakdown Expert','2025-08-04'],['PM','Service Expert','2025-08-04']],
+  '4204350086':[['KCC','Service Expert','2020-09-10'],['LkVA','Service Expert','2020-09-10'],['MkVA','Service Expert','2020-09-10']],
+  '4204350087':[['LkVA','Service Expert','2024-12-02'],['MkVA','Service Expert','2024-12-02'],['BS V','Breakdown Expert','2025-09-12'],['CPCB4+','Breakdown Expert','2025-09-12'],['BS V','Service Expert','2025-09-12'],['CPCB4+','Service Expert','2025-09-12'],['K4300','Breakdown Expert','2026-04-17'],['HkVA','Service Expert','2026-04-17']],
+  '4204350088':[['PM','Service Expert','2025-04-14'],['BS V','Breakdown Expert','2025-09-29'],['CPCB4+','Breakdown Expert','2025-09-29'],['BS V','Service Expert','2025-09-29'],['CPCB4+','Service Expert','2025-09-29'],['KCC Inverter Technology','Breakdown Expert','2026-04-03'],['KCC Inverter Technology','Service Expert','2026-04-03']],
+  '4204350089':[['LkVA','Service Expert','2015-08-09'],['MkVA','Service Expert','2015-08-09']],
+  '4204350090':[['BSIV Industrial','Service Expert','2021-08-10'],['LkVA','Service Expert','2021-08-10'],['BS V','Breakdown Expert','2025-12-19'],['CPCB4+','Breakdown Expert','2025-12-19'],['BS V','Service Expert','2025-12-19'],['CPCB4+','Service Expert','2025-12-19']],
+  '4204350092':[['LkVA','Service Expert','2019-04-12'],['MkVA','Service Expert','2019-04-12']],
+  '4204350093':[['BSIV Industrial','Service Expert','2022-03-20'],['LkVA','Service Expert','2022-03-20'],['MkVA','Service Expert','2022-03-20'],['Brand Ambassador program','Level 1','2024-10-21'],['CPCB4+','Service Expert','2024-10-21'],['BS V','Breakdown Expert','2025-12-19'],['CPCB4+','Breakdown Expert','2025-12-19'],['BS V','Service Expert','2025-12-19']],
+  '4204350095':[['Brand Ambassador program','Level 1','2024-09-09'],['KCC Inverter Technology','Service Expert','2024-09-09'],['LkVA','Service Expert','2024-09-09'],['MkVA','Service Expert','2024-09-09'],['BS V','Breakdown Expert','2025-07-02'],['CPCB4+','Breakdown Expert','2025-07-02'],['BS V','Service Expert','2025-07-02'],['CPCB4+','Service Expert','2025-07-02']],
+  '4204350096':[['LkVA','Service Expert','2023-12-23'],['MkVA','Service Expert','2023-12-23'],['BS V','Breakdown Expert','2025-07-02'],['CPCB4+','Breakdown Expert','2025-07-02'],['BS V','Service Expert','2025-07-02'],['CPCB4+','Service Expert','2025-07-02']],
+  '4204350100':[['LkVA','Service Expert','2021-04-07'],['MkVA','Service Expert','2021-04-07'],['CPCB4+','Breakdown Expert','2023-10-16'],['CPCB4+','Service Expert','2023-10-16']],
+  '4204350101':[['LkVA','Service Expert','2023-11-12'],['MkVA','Service Expert','2023-11-12']],
+  '4204350103':[['HkVA','Service Expert','2016-08-08'],['LkVA','Service Expert','2016-08-08'],['MkVA','Service Expert','2016-08-08'],['CPCB4+','Breakdown Expert','2024-05-02'],['CPCB4+','Service Expert','2024-05-02']],
+  '4204350104':[['Brand Ambassador program','Level 1','2025-04-25'],['PM','Service Expert','2025-04-25']],
+  '4204350108':[['BSIV Industrial','Service Expert','2021-10-29'],['LkVA','Service Expert','2021-10-29'],['MkVA','Service Expert','2021-10-29']],
+  '4204350109':[['LkVA','Service Expert','2023-01-08'],['MkVA','Service Expert','2023-01-08'],['BS V','Breakdown Expert','2025-12-15'],['BS V','Service Expert','2025-12-15'],['CPCB4+','Service Expert','2025-12-15']],
+  '4204350110':[['LkVA','Service Expert','2021-08-11'],['MkVA','Service Expert','2021-08-11'],['CPCB4+','Service Expert','2024-05-02'],['BS V','Breakdown Expert','2025-12-19'],['CPCB4+','Breakdown Expert','2025-12-19'],['BS V','Service Expert','2025-12-19']],
+  '4204350111':[['LkVA','Service Expert','2022-08-03'],['MkVA','Service Expert','2022-08-03'],['CPCB4+','Breakdown Expert','2023-02-10'],['CPCB4+','Service Expert','2023-02-10']],
+  '4204350112':[['LkVA','Service Expert','2022-08-04'],['CPCB4+','Breakdown Expert','2023-09-10'],['CPCB4+','Service Expert','2023-09-10']],
+  '4204350117':[['LkVA','Service Expert','2019-08-02'],['MkVA','Service Expert','2019-08-02']],
+  '4204350118':[['LkVA','Service Expert','2021-04-08'],['BSIV Industrial','Service Expert','2021-04-10'],['MkVA','Service Expert','2021-04-10'],['BS V','Breakdown Expert','2025-07-02'],['CPCB4+','Breakdown Expert','2025-07-02'],['BS V','Service Expert','2025-07-02'],['CPCB4+','Service Expert','2025-07-02']],
+  '4204350119':[['LkVA','Service Expert','2021-08-10'],['MkVA','Service Expert','2021-08-10'],['BS V','Breakdown Expert','2025-09-29'],['CPCB4+','Breakdown Expert','2025-09-29'],['BS V','Service Expert','2025-09-29'],['CPCB4+','Service Expert','2025-09-29']],
+  '4204350120':[['LkVA','Service Expert','2018-08-09']],
+  '4204350123':[['Brand Ambassador program','Level 1','2025-04-25'],['PM','Service Expert','2025-04-25'],['BS V','Breakdown Expert','2025-09-12'],['CPCB4+','Breakdown Expert','2025-09-12'],['BS V','Service Expert','2025-09-12'],['CPCB4+','Service Expert','2025-09-12']],
+  '4204350125':[['PM','Breakdown Expert','2025-08-04'],['PM','Service Expert','2025-08-04']],
+  '4204350126':[['PM','Service Expert','2025-04-14'],['BS V','Breakdown Expert','2025-12-15'],['CPCB4+','Breakdown Expert','2025-12-15'],['BS V','Service Expert','2025-12-15'],['CPCB4+','Service Expert','2025-12-15']],
+  '4204350127':[['PM','Service Expert','2025-11-24']],
+  '4204350128':[['PM','Breakdown Expert','2025-08-18'],['PM','Service Expert','2025-08-18'],['BS V','Breakdown Expert','2025-12-26'],['CPCB4+','Breakdown Expert','2025-12-26'],['BS V','Service Expert','2025-12-26'],['CPCB4+','Service Expert','2025-12-26'],['HkVA','Service Expert','2026-04-17'],['K4300','Breakdown Expert','2026-05-14']],
+  '4204350131':[['Brand Ambassador program','Level 1','2025-04-25'],['PM','Service Expert','2025-04-25']],
+  '4204350135':[['Industrial','Service Expert','2014-02-10'],['LkVA','Service Expert','2014-02-10'],['MkVA','Service Expert','2014-02-10'],['KCC','Service Expert','2018-06-02'],['BSIV Industrial','Service Expert','2021-10-25']],
+  '4204350136':[['Industrial','Service Expert','2017-08-19'],['KCC','Service Expert','2017-08-19'],['LkVA','Service Expert','2017-08-19'],['BSIV Industrial','Service Expert','2021-09-29']],
+  '4204350139':[['PM','Breakdown Expert','2025-08-18'],['PM','Service Expert','2025-08-18'],['BS V','Breakdown Expert','2025-12-15'],['CPCB4+','Breakdown Expert','2025-12-15'],['BS V','Service Expert','2025-12-15'],['CPCB4+','Service Expert','2025-12-15']],
+  '4204350141':[['PM','Breakdown Expert','2025-07-21'],['PM','Service Expert','2025-07-21']],
+  '4204350143':[['PM','Breakdown Expert','2025-07-21'],['PM','Service Expert','2025-07-21']],
+  '4204350145':[['PM','Breakdown Expert','2025-08-04'],['PM','Service Expert','2025-08-04'],['BS V','Breakdown Expert','2025-09-12'],['CPCB4+','Breakdown Expert','2025-09-12'],['BS V','Service Expert','2025-09-12'],['CPCB4+','Service Expert','2025-09-12']],
+  '4204350146':[['PM','Breakdown Expert','2025-08-04'],['PM','Service Expert','2025-08-04'],['BS V','Breakdown Expert','2025-12-15'],['CPCB4+','Breakdown Expert','2025-12-15'],['BS V','Service Expert','2025-12-15'],['CPCB4+','Service Expert','2025-12-15']],
+  '4204350147':[['PM','Breakdown Expert','2025-08-18'],['PM','Service Expert','2025-08-18'],['CPCB4+','Breakdown Expert','2026-03-27'],['CPCB4+','Service Expert','2026-03-27']],
+  '4204350151':[['PM','Breakdown Expert','2025-08-18'],['PM','Service Expert','2025-08-18']],
+  '4204350152':[['PM','Breakdown Expert','2025-08-18'],['PM','Service Expert','2025-08-18']],
+  '4204350158':[['PM','Service Expert','2025-09-29']],
+  '4204350159':[['PM','Breakdown Expert','2025-08-18'],['PM','Service Expert','2025-08-18'],['KCC Inverter Technology','Breakdown Expert','2026-04-03'],['KCC Inverter Technology','Service Expert','2026-04-03']],
+  '4204350162':[['PM','Service Expert','2025-09-29']],
+  '4204350179':[['Brand Ambassador program','Service Expert','2025-10-06'],['PM','Service Expert','2025-10-06']],
+  '4204350182':[['Brand Ambassador program','Service Expert','2025-10-06'],['PM','Service Expert','2025-10-06'],['BS V','Breakdown Expert','2025-12-15'],['CPCB4+','Breakdown Expert','2025-12-15'],['BS V','Service Expert','2025-12-15'],['CPCB4+','Service Expert','2025-12-15'],['KCC Inverter Technology','Breakdown Expert','2026-04-03'],['KCC Inverter Technology','Service Expert','2026-04-03']],
+  '4204350185':[['Brand Ambassador program','Service Expert','2025-10-06'],['PM','Service Expert','2025-10-06'],['BS V','Breakdown Expert','2026-02-20'],['CPCB4+','Breakdown Expert','2026-02-20'],['BS V','Service Expert','2026-02-20'],['CPCB4+','Service Expert','2026-02-20']],
+  '4204350186':[['PM','Service Expert','2025-10-06'],['Brand Ambassador program','Service Expert','2025-10-17']],
+  '4204350187':[['PM','Service Expert','2025-09-29']],
+  '4204350194':[['PM','Service Expert','2025-11-17']],
+  '4204350196':[['PM','Service Expert','2025-12-01']],
+  '4204350197':[['PM','Service Expert','2026-01-16']],
+  '4204350198':[['PM','Level 1','2026-03-21'],['PM','Service Expert','2026-03-21']],
+  '4204350200':[['PM','Service Expert','2026-07-10']],
+  '4204350201':[['PM','Service Expert','2026-07-10']],
+  '4204350216':[['PM','Service Expert','2026-07-10']],
+  '4204350217':[['PM','Service Expert','2026-06-22']],
+  '4204350219':[['PM','Service Expert','2026-06-22']],
+  '4204350220':[['PM','Service Expert','2026-06-22']],
+  '4204350223':[['PM','Service Expert','2026-07-10']],
+  '4204350233':[['PM','Service Expert','2026-07-10']],
+  '4204350234':[['PM','Service Expert','2026-07-10']],
+  '4204350237':[['PM','Service Expert','2026-07-10']],
+};
+const HIRED = {
+  '4204350006':'2024-10-13',
+  '4204350015':'2024-10-13',
+  '4204350017':'2024-10-13',
+  '4204350018':'2024-10-13',
+  '4204350019':'2024-10-13',
+  '4204350022':'2024-10-13',
+  '4204350023':'2024-10-13',
+  '4204350024':'2024-10-13',
+  '4204350032':'2024-10-13',
+  '4204350033':'2024-10-13',
+  '4204350034':'2024-10-13',
+  '4204350035':'2024-10-13',
+  '4204350036':'2024-10-13',
+  '4204350037':'2024-10-13',
+  '4204350041':'2024-10-13',
+  '4204350043':'2024-10-13',
+  '4204350044':'2024-10-13',
+  '4204350046':'2024-10-13',
+  '4204350050':'2024-11-26',
+  '4204350052':'2024-11-26',
+  '4204350054':'2024-11-26',
+  '4204350055':'2024-11-26',
+  '4204350056':'2024-11-26',
+  '4204350057':'2024-11-26',
+  '4204350058':'2024-11-26',
+  '4204350061':'2024-11-26',
+  '4204350063':'2024-11-26',
+  '4204350064':'2024-11-26',
+  '4204350069':'2024-11-26',
+  '4204350071':'2024-11-26',
+  '4204350074':'2024-11-26',
+  '4204350075':'2024-11-26',
+  '4204350076':'2024-11-26',
+  '4204350077':'2024-11-26',
+  '4204350078':'2024-11-26',
+  '4204350080':'2024-11-26',
+  '4204350086':'2025-01-16',
+  '4204350087':'2025-01-29',
+  '4204350088':'2025-02-13',
+  '4204350089':'2025-02-23',
+  '4204350090':'2025-02-23',
+  '4204350092':'2025-02-23',
+  '4204350093':'2025-02-23',
+  '4204350095':'2025-02-23',
+  '4204350096':'2025-02-23',
+  '4204350100':'2025-02-23',
+  '4204350101':'2025-02-23',
+  '4204350103':'2025-02-23',
+  '4204350104':'2025-02-23',
+  '4204350108':'2025-02-23',
+  '4204350109':'2025-02-23',
+  '4204350110':'2025-02-23',
+  '4204350111':'2025-02-23',
+  '4204350112':'2025-02-23',
+  '4204350117':'2025-02-23',
+  '4204350118':'2025-02-23',
+  '4204350119':'2025-02-23',
+  '4204350120':'2025-02-23',
+  '4204350123':'2025-02-23',
+  '4204350125':'2025-04-08',
+  '4204350126':'2025-04-08',
+  '4204350127':'2025-04-10',
+  '4204350128':'2025-04-10',
+  '4204350131':'2025-04-17',
+  '4204350135':'2025-04-28',
+  '4204350136':'2025-04-28',
+  '4204350139':'2025-06-16',
+  '4204350141':'2025-07-04',
+  '4204350143':'2025-07-04',
+  '4204350145':'2025-07-05',
+  '4204350146':'2025-07-05',
+  '4204350147':'2025-07-05',
+  '4204350151':'2025-07-17',
+  '4204350152':'2025-07-18',
+  '4204350158':'2025-07-25',
+  '4204350159':'2025-07-25',
+  '4204350162':'2025-07-28',
+  '4204350179':'2025-08-02',
+  '4204350182':'2025-08-02',
+  '4204350185':'2025-08-10',
+  '4204350186':'2025-08-10',
+  '4204350187':'2025-08-10',
+  '4204350194':'2025-11-08',
+  '4204350196':'2025-11-10',
+  '4204350197':'2025-12-09',
+  '4204350198':'2025-12-12',
+  '4204350200':'2025-12-12',
+  '4204350201':'2025-12-12',
+  '4204350216':'2026-03-26',
+  '4204350217':'2026-03-26',
+  '4204350219':'2026-04-28',
+  '4204350220':'2026-04-28',
+  '4204350223':'2026-04-28',
+  '4204350233':'2026-05-25',
+  '4204350234':'2026-05-25',
+  '4204350237':'2026-06-15',
+};
+
+// deterministic PRNG — the sheet must never reshuffle between renders
+function rng(seed){ let s=(seed>>>0)||1; return ()=>{ s=(s*1103515245+12345)>>>0; return (s>>>8)/0xFFFFFF; }; }
+const pick = (r,lo,hi,step) => { const v = lo + r()*(hi-lo); return step ? Math.round(v/step)*step : v; };
+// a "100% or nothing" commitment (LMS update, first-site, task closure) is met
+// outright often enough in real life that the demo has to show both outcomes
+const pctVal = (r,lo,hitChance) => r() < hitChance ? 100 : +pick(r,lo,99.4).toFixed(1);
+
+// `base` is ONE MONTH of this engineer. The period figures (`se.v`) are built
+// from it by recompute() whenever the reporting period changes — see periodOf.
+const SES = RAW_SE.map(([bid,name,uid,ticket,srCount],i)=>{
+  const r = rng(+uid*7919 + i*13);
+  const br = BRANCHES.find(b=>b.id===bid);
+  const row = {
+    uid, name, bid, code:ticket || uid, region:br.region, grp:br.grp,
+    branch:br.name,
+    base:{
+      sr:      srCount,
+      spare:   pick(r,20000,340000,5000),
+      labour:  pick(r,8000,165000,2000),
+      amcLead: Math.round(pick(r,0,12)),
+      battery: Math.round(pick(r,0,9)),
+      lms:     pctVal(r,46,.34),
+      first:   pctVal(r,50,.30),
+      sfTask:  pctVal(r,55,.32),
+      attend:  +pick(r,62,100).toFixed(1),
+      closure: +pick(r,60,100).toFixed(1),
+      cdi:     +pick(r,5.2,10).toFixed(1),
+      wetPm:   +pick(r,0.7,2.9).toFixed(2),
+    },
+    // avg first-site arrival, shown on the printable matrix under KPI 6
+    firstAvg: (()=>{ const m = Math.round(pick(r,530,650)); return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'); })(),
+    comply: COMPLY.map(()=> r() > .16),
+    // what the branch has issued him — the other half of the declaration
+    support: Array.from({length:8}, ()=> r() > .13),
+  };
+  row.base.prod = 0;                   // set per period by recompute()
+  row.v = row.base;                    // replaced by recompute() at boot
+  return row;
+});
+
+/* ---- the period ------------------------------------------------------------
+   PMONTHS is how many months the selected period is worth — 1.00 for a month,
+   3.00 for a quarter, 12.00 for a financial year, and a fraction for anything
+   clipped. Every per-month commitment is multiplied by it. */
+let PMONTHS = 1;
+const daysBetween = (a,b) => Math.round((pdate(b)-pdate(a))/86400000) + 1;
+const monthDays = (y,m) => new Date(y, m+1, 0).getDate();
+const sundaysIn = (y,m) => { let n=0, d=monthDays(y,m);
+  for(let k=1;k<=d;k++) if(new Date(y,m,k).getDay()===0) n++; return n; };
+
+// The months the period touches, each with the fraction of it that falls inside
+function periodSpan(){
+  const out = [];
+  let d = pdate(state.from);
+  d = new Date(d.getFullYear(), d.getMonth(), 1);
+  const end = pdate(state.to);
+  while(d <= end && out.length < 60){
+    const y = d.getFullYear(), m = d.getMonth(), dim = monthDays(y,m);
+    const a = isoOf(new Date(y,m,1)) > state.from ? isoOf(new Date(y,m,1)) : state.from;
+    const b = isoOf(new Date(y,m,dim)) < state.to ? isoOf(new Date(y,m,dim)) : state.to;
+    const over = daysBetween(a,b);
+    if(over > 0) out.push({y, m, dim, from:a, to:b, days:over, f:over/dim,
+                           sun:(()=>{ let n=0; for(let k=pdate(a).getDate(); k<=pdate(b).getDate(); k++)
+                                        if(new Date(y,m,k).getDay()===0) n++; return n; })()});
+    d = new Date(y, m+1, 1);
+  }
+  return out;
+}
+
+// One engineer's figures FOR THE PERIOD. Counts and money scale with the months;
+// rates and ratings are carried across as they are; working days and days
+// present are counted off the calendar — every day but Sunday is a working day.
+function periodOf(se){
+  const span = periodSpan();
+  const months = span.reduce((a,x)=>a+x.f, 0) || 1;
+  const days = span.reduce((a,x)=>a+x.days, 0) || 1;
+  const b = se.base;
+  const work = span.reduce((a,x)=>a + (x.days - x.sun), 0);
+  const present = Math.min(work, Math.round(work * b.attend/100));
+  const v = {
+    sr:      Math.round(b.sr * months),
+    spare:   b.spare * months,
+    labour:  b.labour * months,
+    amcLead: Math.round(b.amcLead * months),
+    battery: Math.round(b.battery * months),
+    lms:b.lms, first:b.first, sfTask:b.sfTask, closure:b.closure, cdi:b.cdi, wetPm:b.wetPm,
+    attend:  work ? +(present/work*100).toFixed(1) : 0,
+    present,                                   // the productivity denominator
+  };
+  v.prod = +(present ? v.sr/present : 0).toFixed(2);
+  return {v, months, days, work, present};
+}
+
+// Called at boot and on every period change: nothing on the page is scored
+// against a commitment that has not been resolved to the period first.
+function recompute(){
+  PMONTHS = periodSpan().reduce((a,x)=>a+x.f, 0) || 1;
+  SES.forEach(se=>{
+    const P = periodOf(se);
+    se.v = P.v; se.workDays = P.work; se.present = P.present; se.periodDays = P.days;
+    se.score = scoreOf(se); se.grade = gradeOf(se.score);
+  });
+}
+
+/* ===========================================================================
+   3. SCORING
+   =========================================================================== */
+
+const state = {
+  openBr:new Set(),         // the branches unfolded in the explorer
+  drill:[],                 // the explorer's path, e.g. ['1','420435_3']
+  openSe:null,              // the engineer whose detail report is open
+  gran:'day',               // that report's granularity: day | week | month
+  dtOpen:new Set(),         // which breakdown rows are opened into their parts
+  targets:Object.fromEntries(KPIS.map(k=>[k.key, Array.isArray(k.target)?k.target.slice():k.target])),
+  weights:Object.fromEntries(KPIS.map(k=>[k.key,1])),
+  period:'last_month', from:'2026-07-01', to:'2026-07-31',
+};
+
+// achievement of one value against its (possibly edited) commitment
+// The commitment AS IT APPLIES TO THE SELECTED PERIOD. 60 SRs a month is 180
+// over a quarter; 95% within timeline is 95% however long you look.
+function targetFor(k){
+  const t = state.targets[k.key];
+  return k.perMonth ? t * PMONTHS : t;
+}
+function achieve(k, v){
+  if(k.info) return null;                    // a reference column has no target
+  if(v===null || v===undefined || !isFinite(v)) return null;
+  const t = targetFor(k);
+  if(k.dir==='range'){
+    const [lo,hi] = t;
+    if(v>=lo && v<=hi) return 100;
+    return v<lo ? (lo? v/lo*100 : 0) : (v? hi/v*100 : 0);
+  }
+  return t ? v/t*100 : 0;
+}
+const statusOf = p => p===null ? 'na' : (p>=100 ? 'ok' : (p>=85 ? 'near' : 'miss'));
+
+function scoreOf(row){
+  let num=0, den=0;
+  for(const k of COMMITMENTS){
+    const w = +state.weights[k.key] || 0;
+    if(!w) continue;
+    const p = achieve(k, row.v[k.key]);
+    if(p===null) continue;
+    num += Math.min(100,p) * w; den += w;
+  }
+  return den ? +(num/den).toFixed(1) : 0;
+}
+const gradeOf = s => s>=90?'A' : s>=80?'B' : s>=70?'C' : s>=60?'D' : 'E';
+
+
+// roll a set of engineers into one row: counts sum, percentages average
+function rollup(list){
+  const v = {};
+  for(const k of KPIS){
+    if(k.agg==='derived') continue;                 // second pass, below
+    if(!list.length){ v[k.key]=null; continue; }
+    if(k.agg==='sum') v[k.key] = list.reduce((a,s)=>a+s.v[k.key],0);
+    else v[k.key] = +(list.reduce((a,s)=>a+s.v[k.key],0)/list.length).toFixed(2);
+  }
+  // A RATIO is recomputed from this level's own totals — a branch's
+  // productivity is its SRs over its paid days, never the mean of its
+  // engineers' rates, which would weight a 6-SR engineer like a 100-SR one.
+  for(const k of KPIS){
+    if(k.agg!=='derived') continue;
+    v[k.key] = list.length ? +k.derive(v).toFixed(2) : null;
+  }
+  const score = list.length ? +(list.reduce((a,s)=>a+s.score,0)/list.length).toFixed(1) : 0;
+  return {v, score, grade:gradeOf(score), n:list.length,
+          workDays:list.reduce((a,s)=>a+s.workDays,0), present:list.reduce((a,s)=>a+s.present,0)};
+}
+
+/* ===========================================================================
+   4. FORMATTING
+   =========================================================================== */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const inr = v => Math.round(v).toLocaleString('en-IN');
+// The FULL figure with its unit — tooltips, the CSV and the printed matrix all
+// have room for it.
+function fmtVal(k, v){
+  if(v===null || v===undefined || v===0) return '–';
+  switch(k.fmt){
+    case 'amt':  return '₹'+inr(v);
+    case 'pct':  return v.toFixed(1)+'%';
+    case 'rate': return v.toFixed(1);
+    case 'rate2':return trim2(v)+' SR/day';
+    case 'hrs':  return v.toFixed(2)+' h';
+    default:     return Math.round(v).toLocaleString('en-IN');
+  }
+}
+function fmtTarget(k){
+  const t = targetFor(k);
+  if(k.dir==='range') return t[0].toFixed(1)+'–'+t[1].toFixed(1)+' h';
+  return fmtVal(k, +t);
+}
+const fmtPct = p => p===null ? '–' : (p>=999 ? '999+' : p.toFixed(0)+'%');
+const fmtDay = s => new Date(s+'T00:00:00').toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'});
+
+/* ===========================================================================
+   5. FILTERING
+   =========================================================================== */
+// Nothing filters the roster any more — the branch board itself is the way in.
+// Kept as a function so the explorer and the report share one source of truth.
+function visibleSes(){ return SES; }
+/* ===========================================================================
+   6. RENDER — the page is the explorer plus one engineer's report
+   =========================================================================== */
+function render(){
+  const list = visibleSes();
+  renderPanel(list);
+  renderDetail();
+  $('footer').textContent =
+    `EPR 7.0 prototype · ${list.length} of ${SES.length} service engineers · `
+    + `${COMMITMENTS.length} commitments + ${KPIS.length-COMMITMENTS.length} reference figures · `
+    + `period ${fmtDay(state.from)} – ${fmtDay(state.to)} · temp data`;
+}
+
+/* ===========================================================================
+   7. PERFORMANCE EXPLORER — the panel follows GROUP BY
+
+   Engineer wise : one ranked list of every engineer
+   Branch wise   : branch group -> branch -> engineer
+   Region wise   : MH / KA -> branch -> engineer
+   Clicking an engineer opens the detail report at the foot of the page.
+   =========================================================================== */
+const RG_NAME = { MH:'Maharashtra', KA:'Karnataka' };
+const CHEV_R = `<svg class="pn-go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>`;
+
+// One row of the tree — a branch or an engineer. Same shape either way, so the
+// two levels read as one list rather than two designs.
+function exRow(o){
+  const col = o.score>=90?'var(--pms-ok-ink)' : o.score>=80?'#3f7a2e'
+            : o.score>=70?'var(--pms-near-ink)' : 'var(--pms-miss-ink)';
+  const chev = o.kind==='br'
+    ? `<svg class="pn-go tw${o.open?' open':''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>`
+    : CHEV_R;
+  return `<div class="pn-row ${o.kind}${o.cls||''}${o.open?' open':''}" data-k="${esc(o.key)}" data-kind="${o.kind}">
+    <span class="pn-rank">${o.rank}</span>
+    <span class="pn-name"><b>${esc(o.name)}</b><span>${esc(o.sub)}</span></span>
+    <span class="pn-met" title="parameters met">${o.met}/${COMMITMENTS.length}</span>
+    <span class="pn-bar"><i style="width:${Math.min(100,o.score)}%;background:${col}"></i></span>
+    <span class="pn-score" style="color:${col}">${o.score.toFixed(1)}</span>
+    <span><span class="gr gr-${o.grade}">${o.grade}</span></span>
+    ${chev}</div>`;
+}
+
+function renderPanel(list){
+  const box = $('pnList');
+  box.className = 'ex-cols';
+  const open = state.openBr.size > 0;
+  $('pnHint').textContent = open
+    ? 'click an engineer for the full report'
+    : 'click a branch to unfold its service engineers';
+  $('crumbs').innerHTML =
+    `<button class="ex-back" id="exAll">${open ? 'Collapse all' : 'Expand all branches'}</button>`;
+  $('exAll').onclick = ()=>{
+    if(open) state.openBr.clear();
+    else BRANCHES.forEach(b=> list.some(x=>x.bid===b.id) && state.openBr.add(b.id));
+    renderPanel(visibleSes());
+  };
+
+  box.innerHTML = ['MH','KA'].map(rg=>{
+    const bs = BRANCHES.filter(b=>b.region===rg)
+      .map(b=>({b, mem:list.filter(s=>s.bid===b.id)}))
+      .filter(x=>x.mem.length)
+      .map(x=>({...x, r:rollup(x.mem)}))
+      .sort((a,b)=>b.r.score-a.r.score);
+    const rows = bs.length ? bs.map((x,i)=>{
+      const isOpen = state.openBr.has(x.b.id);
+      let h = exRow({
+        key:x.b.id, kind:'br', open:isOpen, rank:i+1, name:x.b.name,
+        sub:`${x.b.id} · ${x.mem.length} engineer${x.mem.length>1?'s':''}`,
+        met:COMMITMENTS.filter(c=>achieve(c,x.r.v[c.key])>=100).length,
+        score:x.r.score, grade:x.r.grade,
+      });
+      if(isOpen){
+        const mem = x.mem.slice().sort((a,b)=>b.score-a.score);
+        h += `<div class="ex-kids">` + mem.map((se,j)=> exRow({
+          key:se.uid, kind:'se', rank:j+1, name:se.name,
+          sub:`UID ${se.uid} · code ${esc(se.code)}`,
+          met:COMMITMENTS.filter(k=>achieve(k,se.v[k.key])>=100).length,
+          score:se.score, grade:se.grade,
+          cls:(state.openSe===se.uid ? ' on' : '')
+              + (mem.length>4 ? (j===0 ? ' top1' : (j===mem.length-1 ? ' bot1' : '')) : ''),
+        })).join('') + `</div>`;
+      }
+      return h;
+    }).join('') : '<div class="pn-empty">No branch matches the filters.</div>';
+    return `<div><div class="ex-h">${RG_NAME[rg]}
+        <span>${bs.length} branch${bs.length===1?'':'es'} · ${bs.reduce((a,x)=>a+x.mem.length,0)} engineers</span>
+      </div>${rows}</div>`;
+  }).join('');
+
+  box.querySelectorAll('.pn-row').forEach(el=>{
+    el.onclick = e=>{
+      e.stopPropagation();
+      if(el.dataset.kind==='se'){ openDetail(el.dataset.k); return; }
+      const k = el.dataset.k;
+      state.openBr.has(k) ? state.openBr.delete(k) : state.openBr.add(k);
+      renderPanel(visibleSes());
+    };
+  });
+}
+
+/* ===========================================================================
+   8. THE ENGINEER DETAIL REPORT — day / week / month, with charts
+   =========================================================================== */
+const MSD = 86400000;
+const pdate = d => new Date(d+'T00:00:00');
+const isoOf = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const addD = (s,n)=>{ const d=pdate(s); d.setDate(d.getDate()+n); return isoOf(d); };
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// Spread a total across weighted slots so the parts add back to the whole —
+// the drill-down must reconcile with the row it came from, to the unit.
+function spreadInt(total, w){
+  const sum = w.reduce((a,b)=>a+b,0) || 1;
+  const raw = w.map(x=>total*x/sum), out = raw.map(Math.floor);
+  let rem = Math.round(total) - out.reduce((a,b)=>a+b,0);
+  const order = raw.map((v,i)=>[v-Math.floor(v),i]).sort((a,b)=>b[0]-a[0]);
+  for(let i=0;i<rem;i++) out[order[i%order.length][1]]++;
+  return out;
+}
+const spreadNum = (total, w)=>{ const sum=w.reduce((a,b)=>a+b,0)||1; return w.map(x=>total*x/sum); };
+
+// A percentage / rating varies day to day around the engineer's own figure. The
+// deviations are made to sum to zero and are kept inside the headroom, so no
+// value ever needs clamping and the mean stays exactly the period figure.
+function wobble(base, n, r, cap){
+  const head = Math.min(base, cap-base) * .55;
+  const d = Array.from({length:n}, ()=> (r()-.5)*2*head);
+  const mean = d.reduce((a,b)=>a+b,0)/n;
+  return d.map(x=> base + x - mean);
+}
+
+// ---- the day buckets of the selected reporting period ----------------------
+function dayBuckets(se){
+  const days = [];
+  for(let d=state.from; d<=state.to && days.length<400; d=addD(d,1)) days.push(d);
+  const n = days.length, r = rng(+se.uid*31 + 17);
+  // Sunday carries a token load, not none: emergency call-outs happen
+  const w = days.map(d=> pdate(d).getDay()===0 ? .07 : .55 + r()*1.0);
+  const sr = spreadInt(se.v.sr, w);
+  const spare = spreadNum(se.v.spare, w), labour = spreadNum(se.v.labour, w);
+  const leads = spreadInt(se.v.amcLead, w), batt = spreadInt(se.v.battery, w);
+  const closure = wobble(se.v.closure,n,r,100), first = wobble(se.v.first,n,r,100),
+        cdi = wobble(se.v.cdi,n,r,10);
+  // ---- working days, and the P / A mark on each of them --------------------
+  // EVERY day the branch works is marked: the engineer was either present (P)
+  // or he was not (A). Only a Sunday carries a dash, because only a Sunday is
+  // not a working day. The percentage is then the marks' own ratio rather than
+  // a second, disagreeing number.
+  const work = days.map(d=> pdate(d).getDay()===0 ? 0 : 1);
+  const wantWork = work.reduce((a,b)=>a+b,0);
+  const pres = work.slice();
+  const order = [...days.keys()].sort((a,b)=> ((a*2246822519)%101) - ((b*2246822519)%101));
+  let absent = wantWork - Math.max(0, Math.min(wantWork, Math.round(wantWork * se.v.attend/100)));
+  for(const i of order){ if(absent<=0) break; if(pres[i]){ pres[i]=0; absent--; } }
+  return bifurcate(se, days.map((d,i)=>({
+    key:d, label:pdate(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short'}),
+    sub:pdate(d).toLocaleDateString('en-GB',{weekday:'short'}),
+    off: pdate(d).getDay()===0,
+    sr:sr[i], spare:spare[i], labour:labour[i], leads:leads[i], batt:batt[i],
+    work:work[i], pres:pres[i],
+    attend: work[i] ? pres[i]*100 : se.v.attend,
+    closure:closure[i], first:first[i], cdi:cdi[i], days:1,
+  })));
+}
+
+// ---- roll the days up into calendar weeks (Mon–Sun) ------------------------
+function weekBuckets(se){
+  const days = dayBuckets(se), out = [];
+  days.forEach(d=>{
+    const dow = (pdate(d.key).getDay()+6)%7;                 // Mon = 0
+    const ws = addD(d.key, -dow);
+    let b = out[out.length-1];
+    if(!b || b.ws!==ws){
+      b = {ws, key:ws, label:'W'+(out.length+1), sub:'', sr:0,spare:0,labour:0,leads:0,batt:0,
+           work:0,pres:0, attend:0,closure:0,first:0,cdi:0,days:0};
+      out.push(b);
+    }
+    ['sr','spare','labour','leads','batt','work','pres'].forEach(k=> b[k]+=d[k]);
+    ['closure','first','cdi'].forEach(k=> b[k]+=d[k]);
+    b.days++; b.end = d.key;
+  });
+  out.forEach(b=>{
+    ['closure','first','cdi'].forEach(k=> b[k]/=b.days);
+    b.attend = b.work ? b.pres/b.work*100 : 0;
+    // the first and last week of a period are CLIPPED to it, so the label has
+    // to show the days actually counted — not the Monday before the period began
+    const st = b.ws < state.from ? state.from : b.ws;
+    b.sub = `${pdate(st).getDate()}–${pdate(b.end).toLocaleDateString('en-GB',{day:'2-digit',month:'short'})}`;
+  });
+  return bifurcate(se, out);
+}
+
+// ---- a trailing twelve months, so the trend has somewhere to run -----------
+// The month the reporting period sits in carries the engineer's REAL figures;
+// the eleven before it are generated around them, deterministically.
+// The raw monthly series — N months ending at the reporting period's last
+// month. Month, quarter and year views are all built from this one series, so
+// a quarter is always exactly the three months printed beside it.
+function rawMonths(se, N){
+  const end = pdate(state.to), out = [], r = rng(+se.uid*7919 + 3);
+  for(let i=N-1;i>=0;i--){
+    const d = new Date(end.getFullYear(), end.getMonth()-i, 1);
+    const dim = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+    const f = i===0 ? 1 : .62 + r()*.72;
+    out.push({
+      key:isoOf(d), label:MON[d.getMonth()], sub:String(d.getFullYear()).slice(2),
+      cur:i===0, days:dim,
+      sr:Math.round(se.base.sr*f),
+      spare:se.base.spare*f, labour:se.base.labour*f,
+      leads:Math.round(se.base.amcLead*f), batt:Math.round(se.base.battery*f),
+      attend:Math.min(100, se.base.attend*(i===0?1:.9+r()*.2)),
+      closure:Math.min(100, se.base.closure*(i===0?1:.88+r()*.24)),
+      first:Math.min(100, se.base.first*(i===0?1:.88+r()*.24)),
+      cdi:Math.min(10, se.base.cdi*(i===0?1:.9+r()*.2)),
+    });
+    // every day but Sunday is a working day; presence is marked on those
+    const m = out[out.length-1];
+    m.work = dim - sundaysIn(d.getFullYear(), d.getMonth());
+    m.pres = Math.round(m.work * m.attend/100);
+    m.attend = m.work ? m.pres/m.work*100 : 0;
+  }
+  return out;
+}
+
+function monthBuckets(se){
+  // a period longer than a month IS the window; a single month gets the
+  // trailing twelve so the trend has somewhere to run
+  const span = periodSpan();
+  const out = rawMonths(se, Math.max(12, span.length));
+  const keep = span.length > 1
+    ? out.filter(m=> span.some(x=> x.y===pdate(m.key).getFullYear() && x.m===pdate(m.key).getMonth()))
+    : out.slice(-12);
+  return bifurcate(se, keep.length ? keep : out.slice(-12));
+}
+// ---- the dimensions every metric bifurcates on -----------------------------
+// SR TYPE comes from the 'SR Type Master (MaxTTR)' heads the report already
+// uses; the part categories are the Part Sale file's own PART CATEGORY.
+const SR_TYPES = ['Warranty','PW','AMC','KOEL AMC','CSP','Others'];
+const PART_CATS = ['Filters','Battery','Coolant','K-Oil','DEF','Spares','Others'];
+
+// An engineer's job mix is a PROPERTY OF THE ENGINEER, not noise: the same
+// shares apply to every bucket, so the mix reads as a profile down the row.
+function mixOf(seed, n){
+  const r = rng(seed), w = Array.from({length:n}, ()=> .18 + r()*1.0);
+  const s = w.reduce((a,b)=>a+b,0);
+  return w.map(x=>x/s);
+}
+// deviations that come to zero under the mix's own weights, so the parts
+// weight-average back to the whole and nothing needs clamping
+function devFor(mix, base, r, cap){
+  const head = Math.min(base, cap-base) * .5;
+  const d = mix.map(()=> (r()-.5)*2*head);
+  const m = d.reduce((a,x,i)=>a+x*mix[i], 0);
+  return d.map(x=>x-m);
+}
+
+// Every bucket carries its own bifurcations, so a metric can be opened at any
+// granularity without regenerating anything.
+function bifurcate(se, B){
+  const srMix = mixOf(+se.uid*13+1, SR_TYPES.length);
+  const partMix = mixOf(+se.uid*13+2, PART_CATS.length);
+  const labMix = mixOf(+se.uid*13+3, SR_TYPES.length);
+  const closeDev = devFor(srMix, se.v.closure, rng(+se.uid*13+4), 100);
+  B.forEach(b=>{
+    b.srBy = {}; b.labourBy = {}; b.spareBy = {}; b.closeBy = {};
+    const srSplit = spreadInt(b.sr, srMix);
+    SR_TYPES.forEach((t,i)=>{
+      b.srBy[t] = srSplit[i];
+      b.labourBy[t] = b.labour * labMix[i];
+      b.closeBy[t] = Math.max(0, Math.min(100, b.closure + closeDev[i]));
+    });
+    PART_CATS.forEach((c,i)=>{ b.spareBy[c] = b.spare * partMix[i]; });
+  });
+  // ---- CDI feedback ---------------------------------------------------------
+  // The split follows the rating — a 9/10 engineer collects promotors, a 6/10
+  // one collects detractors — but it is struck ONCE over the whole period and
+  // then spread across the buckets. Struck per bucket it degenerates: a day
+  // carries one feedback, and one feedback always lands in whichever share is
+  // largest, so a 7.4 engineer would show promotors only.
+  const nAll = Math.max(3, Math.round(B.reduce((a,b)=>a+b.sr,0)/4));
+  const rate = B.reduce((a,b)=>a+b.cdi*b.days,0) / (B.reduce((a,b)=>a+b.days,0)||1);
+  const pSh = Math.max(.06, Math.min(.94, (rate-4.5)/5.5));
+  const dSh = (1-pSh)*.45;
+  const [Pall, PaAll, Dall] = spreadInt(nAll, [pSh, 1-pSh-dSh, dSh]);
+  const w = B.map(b=> b.sr + .35);                    // feedback follows the load
+  const pB = spreadInt(Pall, w), paB = spreadInt(PaAll, w), dB = spreadInt(Dall, w);
+  B.forEach((b,i)=>{ b.cdiP = pB[i]; b.cdiPa = paB[i]; b.cdiD = dB[i]; b.cdiN = pB[i]+paB[i]+dB[i]; });
+  return B;
+}
+
+/* ---- the breakdown's ROWS --------------------------------------------------
+   Periods run across the head; these run down the side. A row with `kids`
+   opens on its own chevron into the bifurcation underneath it. */
+const iN = v => Math.round(v).toLocaleString('en-IN');
+const iL = v => (v/1e5).toFixed(2);
+const i1 = v => v.toFixed(1);
+const trim2 = v => Number.isInteger(+v.toFixed(2)) ? String(+v.toFixed(2)) : v.toFixed(2);
+// '0', '0.0', '0.00', '0%' — a formatted nothing, whatever the formatter made
+// of it. A compound cell like '0 / 5' is left alone: that zero is half a fact.
+const dashZero = t => /^0(\.0+)?%?$/.test(String(t).replace(/<[^>]*>/g,'').trim()) ? '–' : t;
+const sumB = (B,f)=> B.reduce((a,b)=>a+f(b),0);
+const wavgB = (B,f)=>{ const d=B.reduce((a,b)=>a+b.days,0)||1; return B.reduce((a,b)=>a+f(b)*b.days,0)/d; };
+// a per-SR-type closure averages under that type's OWN load, not under the days
+const srwB = (B,f,t)=>{ const n=sumB(B,b=>b.srBy[t]); return n? B.reduce((a,b)=>a+f(b)*b.srBy[t],0)/n : null; };
+
+const DT_ROWS = [
+  {id:'sr', lab:'SR closed', u:'count', mid:true, val:b=>b.sr, f:iN, tot:B=>iN(sumB(B,b=>b.sr)),
+   kids:()=>SR_TYPES.map(t=>({lab:t, u:'count', mid:true, val:b=>b.srBy[t], f:iN,
+     tot:B=>iN(sumB(B,b=>b.srBy[t]))}))},
+
+  // no paid-days row: the attendance marks below already carry it
+  // 2.00 SRs a day is 2 SRs a day — the decimals are only worth printing when
+  // there are decimals
+  {id:'prod', lab:'Productivity', u:'SR / day', val:b=> b.pres? b.sr/b.pres : null, f:trim2,
+   tot:B=>{ const p=sumB(B,b=>b.pres); return p? trim2(sumB(B,b=>b.sr)/p) : '–'; }},
+
+  {id:'spare', lab:'Spare parts sales', u:'₹ Lakh', val:b=>b.spare, f:iL, tot:B=>iL(sumB(B,b=>b.spare)),
+   kids:()=>PART_CATS.map(c=>({lab:c, u:'₹ Lakh', val:b=>b.spareBy[c], f:iL, tot:B=>iL(sumB(B,b=>b.spareBy[c]))}))},
+
+  {id:'labour', lab:'Labour revenue', u:'₹ Lakh', val:b=>b.labour, f:iL, tot:B=>iL(sumB(B,b=>b.labour)),
+   kids:()=>SR_TYPES.map(t=>({lab:t, u:'₹ Lakh', val:b=>b.labourBy[t], f:iL, tot:B=>iL(sumB(B,b=>b.labourBy[t]))}))},
+
+  {id:'leads', lab:'AMC leads', u:'count', mid:true, val:b=>b.leads, f:v=>String(Math.round(v)), tot:B=>String(sumB(B,b=>b.leads))},
+  {id:'batt', lab:'Battery sold', u:'count', mid:true, val:b=>b.batt, f:v=>String(Math.round(v)), tot:B=>String(sumB(B,b=>b.batt))},
+
+  // Attendance is MARKED, not measured — a day is P or A, and it needs no
+  // bifurcation because the mark IS the whole of it. The period column carries
+  // what the marks come to: the percentage present.
+  {id:'attend', lab:'Attendance', u:'P / A', mid:true,
+   cell:b=> state.gran==='day'
+     ? (b.work ? (b.pres ? '<span class="pa-p">P</span>' : '<span class="pa-a">A</span>')
+               : '<span class="pa-o">–</span>')
+     : `<span class="pa-p">${b.pres}</span><span class="pa-o"> / </span><span class="pa-a">${b.work-b.pres}</span>`,
+   tot:B=>{ const p=sumB(B,b=>b.pres), w=sumB(B,b=>b.work); return w ? i1(p/w*100)+'%' : '–'; }},
+
+  {id:'closure', lab:'SR / eFSR closure', u:'%', val:b=>b.closure, f:i1, tot:B=>i1(wavgB(B,b=>b.closure)),
+   kids:()=>SR_TYPES.map(t=>({lab:t, u:'%', val:b=> b.srBy[t]? b.closeBy[t] : null, f:i1,
+     tot:B=>{ const v=srwB(B,b=>b.closeBy[t],t); return v==null?'–':i1(v); }}))},
+
+  {id:'first', lab:'First site before 10:00', u:'%', val:b=>b.first, f:i1, tot:B=>i1(wavgB(B,b=>b.first))},
+
+  // CDI: the rating on top, the feedback it is made of underneath
+  {id:'cdi', lab:'Customer delight (CDI)', u:'/ 10', val:b=>b.cdi, f:i1, tot:B=>i1(wavgB(B,b=>b.cdi)),
+   kids:()=>[
+     {lab:'Promotor (P)', u:'count', mid:true, val:b=>b.cdiP, f:v=>String(v), tot:B=>String(sumB(B,b=>b.cdiP))},
+     {lab:'Passive (P)', u:'count', mid:true, val:b=>b.cdiPa, f:v=>String(v), tot:B=>String(sumB(B,b=>b.cdiPa))},
+     {lab:'Detractor (D)', u:'count', mid:true, val:b=>b.cdiD, f:v=>String(v), tot:B=>String(sumB(B,b=>b.cdiD))},
+     // below three feedbacks the percentage swings between 0 and 100 and means
+     // nothing — the counts above it are the honest reading for that bucket
+     {lab:'CDI %', u:'%', val:b=> b.cdiN>=3 ? (b.cdiP-b.cdiD)/b.cdiN*100 : null, f:i1,
+      tot:B=>{ const n=sumB(B,b=>b.cdiN); return n? i1((sumB(B,b=>b.cdiP)-sumB(B,b=>b.cdiD))/n*100) : '–'; }},
+   ]},
+];
+
+// ---- quarters and years ----------------------------------------------------
+// Both are the month series folded up. Quarters follow the FINANCIAL year
+// (Apr–Jun is Q1), because that is the year this business plans and reports in.
+const FYQ = m => Math.floor(((m + 9) % 12) / 3);            // month 0-11 -> Q 0-3
+const FYof = d => d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+
+function foldMonths(se, months, keyOf, labelOf, subOf){
+  const out = [], byKey = new Map();
+  months.forEach(m=>{
+    const d = pdate(m.key), k = keyOf(d);
+    let g = byKey.get(k);
+    if(!g){
+      g = {key:k, label:labelOf(d), sub:subOf(d), days:0, sr:0, spare:0, labour:0,
+           leads:0, batt:0, work:0, pres:0, closure:0, first:0, cdi:0, n:0};
+      byKey.set(k, g); out.push(g);
+    }
+    ['sr','spare','labour','leads','batt','work','pres','days'].forEach(f=> g[f] += m[f]);
+    ['closure','first','cdi'].forEach(f=> g[f] += m[f] * m.days);
+    g.n++;
+  });
+  out.forEach(g=>{
+    ['closure','first','cdi'].forEach(f=> g[f] = g.days ? g[f]/g.days : 0);
+    g.attend = g.work ? g.pres/g.work*100 : 0;
+  });
+  return bifurcate(se, out);
+}
+
+const quarterBuckets = se => foldMonths(se, rawMonths(se, 24),
+  d=> FYof(d)+'Q'+FYQ(d.getMonth()),
+  d=> 'Q'+(FYQ(d.getMonth())+1),
+  d=> 'FY '+String(FYof(d)).slice(2)+'–'+String(FYof(d)+1).slice(2));
+
+const yearBuckets = se => foldMonths(se, rawMonths(se, 48),
+  d=> String(FYof(d)),
+  d=> 'FY '+String(FYof(d)).slice(2)+'–'+String(FYof(d)+1).slice(2),
+  d=> '');
+
+const bucketsFor = se => state.gran==='day' ? dayBuckets(se)
+  : state.gran==='week' ? weekBuckets(se)
+  : state.gran==='quarter' ? quarterBuckets(se)
+  : state.gran==='year' ? yearBuckets(se)
+  : monthBuckets(se);
+
+/* ---- SVG chart primitives -------------------------------------------------
+   No library: every chart here is a string of SVG. Marks follow the data-viz
+   specs — bars capped at 24px with a 4px rounded cap and a 2px surface gap,
+   2px lines with >=8px end markers ringed in the surface colour, solid hairline
+   grid, a legend whenever there is more than one series and text in ink tokens
+   rather than in the series colour. Every mark carries a <title>, which is the
+   hover layer. */
+const VW = 660;                                  // viewBox width of a half-width chart
+const niceMax = v => {
+  if(v<=0) return 1;
+  const e = Math.pow(10, Math.floor(Math.log10(v))), m = v/e;
+  return (m<=1?1:m<=2?2:m<=2.5?2.5:m<=5?5:10)*e;
+};
+const ticksOf = (max,n=4)=> Array.from({length:n+1},(_,i)=> max*i/n);
+// a bar with a rounded cap and a square foot
+const barPath = (x,y,w,h,r)=>{ r=Math.max(0,Math.min(r,w/2,h));
+  return `M${x},${y+h}L${x},${y+r}Q${x},${y} ${x+r},${y}L${x+w-r},${y}Q${x+w},${y} ${x+w},${y+r}L${x+w},${y+h}Z`; };
+const sq = (x,y,w,h)=> `M${x},${y}h${w}v${h}h${-w}Z`;
+// x labels thin out rather than collide
+const labelEvery = n => n<=8 ? 1 : n<=14 ? 2 : n<=22 ? 3 : Math.ceil(n/8);
+
+function chartFrame(H, max, cats, fmtY){
+  const pad = {l:44,r:52,t:12,b:28};
+  const pw = VW-pad.l-pad.r, ph = H-pad.t-pad.b;
+  const y = v => pad.t + ph - (v/max)*ph;
+  let g = '';
+  ticksOf(max).forEach(t=>{
+    g += `<line x1="${pad.l}" x2="${VW-pad.r}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}" stroke="var(--viz-grid)" stroke-width="1"/>`
+       + `<text x="${pad.l-7}" y="${(y(t)+3.5).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--viz-mut)">${fmtY(t)}</text>`;
+  });
+  g += `<line x1="${pad.l}" x2="${VW-pad.r}" y1="${pad.t+ph}" y2="${pad.t+ph}" stroke="var(--viz-base)" stroke-width="1"/>`;
+  const step = labelEvery(cats.length), band = pw/cats.length;
+  cats.forEach((c,i)=>{
+    if(i%step) return;
+    g += `<text x="${(pad.l+band*(i+.5)).toFixed(1)}" y="${H-9}" text-anchor="middle" font-size="10" fill="var(--viz-mut)">${esc(c)}</text>`;
+  });
+  return {pad, pw, ph, y, band, g};
+}
+
+// Columns — one series, or several stacked. One y axis, always.
+function colChart(cats, series, opts={}){
+  const H = opts.h||168;
+  const totals = cats.map((_,i)=> series.reduce((a,s)=>a+(s.values[i]||0),0));
+  const max = niceMax(Math.max(opts.target||0, ...totals) * 1.08) || 1;
+  const F = chartFrame(H, max, cats, opts.fmtY || (v=>Math.round(v)));
+  const bw = Math.min(24, Math.max(3, F.band-6));
+  let m = '';
+  cats.forEach((c,i)=>{
+    let acc = 0;
+    series.forEach((s,si)=>{
+      const v = s.values[i]||0;
+      if(v<=0){ acc+=v; return; }
+      const y0 = F.y(acc+v), y1 = F.y(acc);
+      const gap = si<series.length-1 ? 2 : 0;          // 2px surface gap in a stack
+      const h = Math.max(1, y1-y0-gap);
+      const x = F.pad.l + F.band*(i+.5) - bw/2;
+      const top = si===series.length-1;
+      m += `<path d="${top?barPath(x,y0,bw,h,4):sq(x,y0+gap,bw,h)}" fill="${s.color}">`
+         + `<title>${esc(c)} · ${esc(s.name)}: ${esc(opts.fmtV?opts.fmtV(v):Math.round(v))}</title></path>`;
+      acc += v;
+    });
+  });
+  let t = '';
+  if(opts.target){
+    const ty = F.y(opts.target);
+    t = `<line x1="${F.pad.l}" x2="${VW-F.pad.r}" y1="${ty.toFixed(1)}" y2="${ty.toFixed(1)}" stroke="var(--viz-ink)" stroke-width="1" stroke-dasharray="5 3" opacity=".55"/>`
+      + `<text x="${VW-F.pad.r}" y="${(ty-5).toFixed(1)}" text-anchor="end" font-size="9.5" fill="var(--viz-mut)">${esc(opts.targetLabel||'target')}</text>`;
+  }
+  return `<svg viewBox="0 0 ${VW} ${H}" role="img" aria-label="${esc(opts.aria||'')}">${F.g}${m}${t}</svg>`;
+}
+
+// Lines — every series on ONE scale, each direct-labelled at its end.
+function lineChart(cats, series, opts={}){
+  const H = opts.h||168;
+  const max = opts.max || niceMax(Math.max(...series.flatMap(s=>s.values)) * 1.12) || 1;
+  const F = chartFrame(H, max, cats, opts.fmtY || (v=>Math.round(v)));
+  const px = i => F.pad.l + F.band*(i+.5);
+  let m = '';
+  if(opts.ref!=null){
+    const ry = F.y(opts.ref);
+    m += `<line x1="${F.pad.l}" x2="${VW-F.pad.r}" y1="${ry.toFixed(1)}" y2="${ry.toFixed(1)}" stroke="var(--viz-ink)" stroke-width="1" stroke-dasharray="5 3" opacity=".55"/>`
+       + `<text x="${VW-F.pad.r}" y="${(ry-5).toFixed(1)}" text-anchor="end" font-size="9.5" fill="var(--viz-mut)">${esc(opts.refLabel||'target')}</text>`;
+  }
+  series.forEach(s=>{
+    const d = s.values.map((v,i)=>`${i?'L':'M'}${px(i).toFixed(1)},${F.y(v).toFixed(1)}`).join('');
+    m += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    s.values.forEach((v,i)=>{
+      m += `<circle cx="${px(i).toFixed(1)}" cy="${F.y(v).toFixed(1)}" r="7" fill="transparent">`
+         + `<title>${esc(cats[i])} · ${esc(s.name)}: ${esc(opts.fmtV?opts.fmtV(v):v.toFixed(1))}</title></circle>`;
+    });
+    const li = s.values.length-1;
+    m += `<circle cx="${px(li).toFixed(1)}" cy="${F.y(s.values[li]).toFixed(1)}" r="4.5" fill="${s.color}" stroke="var(--viz-surf)" stroke-width="2"/>`;
+  });
+  // one end label per series, in ink — never in the series colour
+  const li2 = cats.length-1;
+  const ends = series.map(s=>({s, y0:F.y(s.values[li2]), v:s.values[li2]})).sort((a,b)=>a.y0-b.y0);
+  let prev = F.pad.t;
+  ends.forEach(e=>{ e.y = Math.max(e.y0, prev+11); prev = e.y; });
+  ends.forEach(e=>{
+    const lx = px(li2)+8;
+    // a leader line, never a label floating away from its own series
+    if(Math.abs(e.y-e.y0)>2)
+      m += `<path d="M${(px(li2)+5).toFixed(1)},${e.y0.toFixed(1)}L${lx.toFixed(1)},${e.y.toFixed(1)}" stroke="${e.s.color}" stroke-width="1" fill="none" opacity=".7"/>`;
+    m += `<text x="${(lx+2).toFixed(1)}" y="${(e.y+3.5).toFixed(1)}" font-size="9.5" fill="var(--viz-ink)" font-weight="600">${esc(opts.fmtV?opts.fmtV(e.v):e.v.toFixed(1))}</text>`;
+  });
+  return `<svg viewBox="0 0 ${VW} ${H}" role="img" aria-label="${esc(opts.aria||'')}">${F.g}${m}</svg>`;
+}
+
+const lg = arr => `<span class="ch-lg">${arr.map(a=>`<span><i style="background:${a.c}"></i>${esc(a.n)}</span>`).join('')}</span>`;
+
+
+/* ---- the short summary -----------------------------------------------------
+   Sits between the numbers and the charts and says, in words, what the period
+   actually came to: four figures, then the three or four things a branch
+   manager would say out loud about this engineer. Everything in it is read off
+   the buckets, so it can never drift from the table above it. */
+function summaryOf(se, B){
+  const T = k => B.reduce((a,b)=>a+b[k],0);
+  const sr = T('sr'), pres = T('pres'), work = T('work');
+  const rev = T('spare') + T('labour');
+  const revT = state.targets.spare + state.targets.labour;
+  const nMonths = state.gran==='month' ? B.length : (B.reduce((a,b)=>a+b.days,0)/30.4);
+  const met = COMMITMENTS.filter(k=>achieve(k,se.v[k.key])>=100);
+  const missed = COMMITMENTS.filter(k=>{ const a=achieve(k,se.v[k.key]); return a!=null && a<85; })
+    .sort((a,b)=> achieve(a,se.v[a.key]) - achieve(b,se.v[b.key]));
+  const best = COMMITMENTS.slice().sort((a,b)=> achieve(b,se.v[b.key]) - achieve(a,se.v[a.key]))[0];
+
+  // the mix, straight off the bifurcations
+  const srMix = SR_TYPES.map(t=>({t, n:B.reduce((a,b)=>a+b.srBy[t],0)})).sort((a,b)=>b.n-a.n);
+  const partMix = PART_CATS.map(c=>({c, v:B.reduce((a,b)=>a+b.spareBy[c],0)})).sort((a,b)=>b.v-a.v);
+  const P = T('cdiP'), Pa = T('cdiPa'), Dt = T('cdiD'), N = T('cdiN');
+  const worstType = SR_TYPES.map(t=>({t, n:B.reduce((a,b)=>a+b.srBy[t],0),
+      c:(()=>{ const n=B.reduce((a,b)=>a+b.srBy[t],0);
+               return n? B.reduce((a,b)=>a+b.closeBy[t]*b.srBy[t],0)/n : null; })()}))
+    .filter(x=>x.n>=3 && x.c!=null).sort((a,b)=>a.c-b.c)[0];
+
+  const tile = (l,v,h,c) => `<div class="sm-t"><span class="l">${l}</span>`
+    + `<span class="v"${c?` style="color:${c}"`:''}>${v}</span><span class="h">${h}</span></div>`;
+  const revCol = rev >= revT*nMonths ? 'var(--pms-ok-ink)' : 'var(--pms-miss-ink)';
+  const attCol = work && pres/work*100 >= state.targets.attend ? 'var(--pms-ok-ink)' : 'var(--pms-miss-ink)';
+
+  const say = [];
+  say.push(`Closed <b>${sr} SRs</b> over <b>${pres} days present</b> — `
+    + `<b>${pres?(sr/pres).toFixed(2):'–'} a day present</b>, against the ${iN(state.targets.sr)}-a-month commitment `
+    + `(${(state.targets.sr*nMonths).toFixed(0)} over the ${nMonths<1.02?'month':nMonths.toFixed(0)+' months'} shown).`);
+  if(srMix[0] && srMix[0].n)
+    say.push(`The load is mostly <b>${esc(srMix[0].t)}</b> (${Math.round(srMix[0].n/Math.max(1,sr)*100)}% of SRs)`
+      + (srMix[1] && srMix[1].n ? `, then ${esc(srMix[1].t)} (${Math.round(srMix[1].n/Math.max(1,sr)*100)}%)` : '') + '.');
+  say.push(`Revenue <b>₹${(rev/1e5).toFixed(2)} L</b> — spare ₹${(T('spare')/1e5).toFixed(2)} L`
+    + (partMix[0] && partMix[0].v ? ` (mostly ${esc(partMix[0].c)})` : '')
+    + `, labour ₹${(T('labour')/1e5).toFixed(2)} L — against ₹${(revT*nMonths/1e5).toFixed(2)} L committed.`);
+  say.push(`The period holds <b>${work} working days</b> — present on <b>${pres}</b>, absent on `
+    + `<b>${work-pres}</b> (${work?(pres/work*100).toFixed(1):'0'}%).`);
+  say.push(`Customer feedback: <b>${P} promotor · ${Pa} passive · ${Dt} detractor</b> out of ${N}.`);
+  if(worstType && worstType.c < state.targets.closure)
+    say.push(`Closure is weakest on <b>${esc(worstType.t)}</b> SRs at ${worstType.c.toFixed(1)}% `
+      + `against the ${state.targets.closure}% timeline.`);
+  say.push(missed.length
+    ? `Strongest on <b>${esc(best.short)}</b>; short on <b>${missed.slice(0,3).map(k=>esc(k.short)).join('</b>, <b>')}</b>.`
+    : `Every commitment kept — strongest on <b>${esc(best.short)}</b>.`);
+
+  return `<section class="sm-box">
+    <h4>Summary <span>${esc(firstName(se.name))} · ${state.gran==='month'?'trailing 12 months':'the selected period'}</span></h4>
+    <div class="sm-tiles">
+      ${tile('Parameter met', met.length+' / '+COMMITMENTS.length, 'score '+se.score.toFixed(1)+' · grade '+se.grade)}
+      ${tile('SR closed', iN(sr), (pres?(sr/pres).toFixed(2):'–')+' per day present')}
+      ${tile('Revenue', '₹'+(rev/1e5).toFixed(2)+' L', 'committed ₹'+(revT*nMonths/1e5).toFixed(2)+' L', revCol)}
+      ${tile('Present', pres+' / '+work, 'of '+work+' working days · '+(work?(pres/work*100).toFixed(1):'0')+'%', attCol)}
+    </div>
+    <ul class="sm-say">${say.map(x=>`<li>${x}</li>`).join('')}</ul>
+  </section>`;
+}
+
+// The mirrored bar above the breakdown: same width as the table, scrolling in
+// step with it, and hidden outright when the table already fits.
+function syncDtBar(){
+  const box = $('dtBox'), bar = $('dtTopBar'), inner = $('dtTopInner');
+  if(!box || !bar || !inner || !box.getBoundingClientRect) return;
+  const apply = ()=>{
+    const w = box.scrollWidth, need = w > box.clientWidth + 1;
+    bar.classList.toggle('hide', !need);
+    inner.style.width = need ? w+'px' : '100%';
+    bar.scrollLeft = box.scrollLeft;
+  };
+  // measured AFTER layout — read straight out of renderDetail and the table has
+  // not been laid out yet, so scrollWidth comes back as the visible width and
+  // the bar's thumb spans the whole strip however wide the table really is
+  apply();
+  requestAnimationFrame(apply);
+  let lock = false;
+  box.onscroll = ()=>{ if(lock) return; lock=true; bar.scrollLeft = box.scrollLeft; lock=false; };
+  bar.onscroll = ()=>{ if(lock) return; lock=true; box.scrollLeft = bar.scrollLeft; lock=false; };
+}
+window.addEventListener('resize', syncDtBar);
+
+/* ---- the panel itself ---------------------------------------------------- */
+function openDetail(uid){
+  state.openSe = uid;
+  renderDetail();
+  renderPanel(visibleSes());
+  $('detail').scrollIntoView({behavior:'smooth', block:'start'});
+}
+function closeDetail(){
+  state.openSe = null;
+  renderDetail();
+  renderPanel(visibleSes());
+}
+
+function renderDetail(){
+  const se = SES.find(s=>s.uid===state.openSe);
+  if(!se){
+    $('detail').innerHTML = `<div class="dt-empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"/></svg>
+      <b>Pick a service engineer</b>
+      <span>Choose one in the explorer above — their day, week and month report opens here,
+        with the charts of how the period actually ran.</span>
+    </div>`;
+    return;
+  }
+  const B = bucketsFor(se);
+  const met = COMMITMENTS.filter(k=>achieve(k,se.v[k.key])>=100).length;
+  const scope = (state.gran==='day' || state.gran==='week')
+    ? `${fmtDay(state.from)} – ${fmtDay(state.to)} · ${B.length} ${state.gran==='day'?'days':'weeks'}`
+    : `${B.length} ${({month:'months',quarter:'quarters',year:'financial years'})[state.gran]} to `
+      + `${MON[pdate(state.to).getMonth()]} ${pdate(state.to).getFullYear()}`;
+
+  // ---- the breakdown, TRANSPOSED --------------------------------------------
+  // Periods left to right across the head; every metric top to bottom down the
+  // frozen side column. This table is also the relief the light-mode aqua line
+  // owes under the palette's contrast rule — every plotted number is here.
+  const headCells = B.map(b=>
+    `<th class="${b.off?'off':''}${b.cur?' cur':''}"><b>${esc(b.label)}</b>${b.sub?`<span>${esc(b.sub)}</span>`:''}</th>`).join('');
+  // A zero reads as a dash across the whole sheet: nothing happened is easier
+  // to skim as an absence than as a row of 0.00s, and the eye goes to the
+  // figures that ARE there.
+  const cellsOf = (row, kid) => B.map(b=>{
+    const html = row.cell ? row.cell(b)
+      : (()=>{ const v=row.val(b); return (v==null||v===0)?'–':dashZero(row.f(v)); })();
+    const raw = String(html).replace(/<[^>]*>/g,'');
+    return `<td class="${b.off?'off ':''}${kid?'k ':''}${row.mid?'mid':''}" title="${esc(b.label+(b.sub?' '+b.sub:''))} · ${esc(row.lab)}: ${esc(raw)} ${esc(row.u)}">${html}</td>`;
+  }).join('');
+  const CH = o => `<svg class="dtc${o?' open':''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>`;
+  const bodyRows = DT_ROWS.map(row=>{
+    const kids = row.kids ? row.kids() : null;
+    const open = kids && state.dtOpen.has(row.id);
+    let h = `<tr class="par${kids?' has':''}"${kids?` data-row="${row.id}"`:''}>`
+      + `<th class="m">${kids?CH(open):''}<span>${esc(row.lab)}<em>${esc(row.u)}</em></span></th>`
+      + cellsOf(row, false) + `<td class="tot${row.mid?' mid':''}">${dashZero(row.tot(B))}</td></tr>`;
+    if(open) kids.forEach(k=>{
+      // the unit is only worth stating where it CHANGES — six 'count' rows under
+      // a 'count' parent is six labels saying nothing
+      const ku = k.u === row.u ? '' : `<em>${esc(k.u)}</em>`;
+      h += `<tr class="kid"><th class="m"><span>${esc(k.lab)}${ku}</span></th>`
+         + cellsOf(k, true) + `<td class="tot${k.mid?' mid':''}">${dashZero(k.tot(B))}</td></tr>`;
+    });
+    return h;
+  }).join('');
+
+  const cats = B.map(b=> state.gran==='month' ? b.label : b.label.replace(/ /,' '));
+  // the MONTHLY commitment spread over one bucket — a month bucket gets the
+  // whole of it, a day or a week its share
+  const perBucketTarget = k => {
+    const t = state.targets[k];
+    return state.gran==='month' ? t : t * (B.reduce((a,b)=>a+b.days,0)/B.length) / 30.4;
+  };
+
+  $('detail').innerHTML = `
+    <div class="dt-top">
+      <div class="dt-id">
+        <h3>${esc(se.name)}</h3>
+        <p>${esc(se.branch)} · SE UID <b>${se.uid}</b> · code <b>${esc(se.code)}</b> · ${se.region}</p>
+      </div>
+      <div class="dt-kpis">
+        <div class="dt-k"><div class="l">Score</div><div class="v">${se.score.toFixed(1)}</div></div>
+        <div class="dt-k"><div class="l">Grade</div><div class="v">${se.grade}</div></div>
+        <div class="dt-k"><div class="l">Parameter met</div><div class="v">${met}/${COMMITMENTS.length}</div></div>
+        <div class="dt-k"><div class="l">Productivity</div><div class="v">${trim2(se.v.prod)}</div></div>
+      </div>
+      <div style="display:flex;gap:7px">
+        <button class="sh-x" id="dtPrint">Print</button>
+        <button class="sh-x" id="dtCsv">Export</button>
+        <button class="sh-x" id="dtSheet">Signed matrix</button>
+        <button class="sh-x" id="dtAssets">Employee assets</button>
+        <button class="sh-x" id="dtTrain">Training &amp; Skill</button>
+        <button class="sh-x" id="dtClose">Close</button>
+      </div>
+    </div>
+    <div class="dt-body">
+      <div class="dt-bar">
+        <div class="ms" id="msGran">
+          <button class="btn" type="button">View: <span class="cnt"></span></button>
+          <div class="ms-pop pick"><div class="ms-list"></div></div>
+        </div>
+        <span class="dt-scope">${esc(scope)}</span>
+      </div>
+
+      <div class="dt-frame">
+      <div class="dt-topbar" id="dtTopBar"><div id="dtTopInner"></div></div>
+      <div class="dt-tblbox" id="dtBox">
+        <table class="dt-t">
+          <thead><tr>
+            <th class="m">${({day:'Day',week:'Week',month:'Month',quarter:'Quarter',year:'Year'})[state.gran]} →</th>
+            ${headCells}
+            <th class="tot">Period<span>total / avg</span></th>
+          </tr></thead>
+          <tbody>${bodyRows}</tbody>
+        </table>
+      </div>
+      </div>
+
+      ${summaryOf(se, B)}
+
+      <div class="dt-charts">
+        <figure class="ch">
+          <figcaption><span class="ch-t">SR closed</span><span class="ch-s">against the 60-a-month commitment</span></figcaption>
+          ${colChart(cats, [{name:'SR closed', color:'var(--viz-1)', values:B.map(b=>b.sr)}],
+            {target:perBucketTarget('sr'), targetLabel:'commitment', aria:'SR closed per '+state.gran})}
+        </figure>
+
+        <figure class="ch">
+          <figcaption><span class="ch-t">Revenue</span><span class="ch-s">₹ lakh</span>
+            ${lg([{n:'Spare parts',c:'var(--viz-1)'},{n:'Labour',c:'var(--viz-2)'}])}</figcaption>
+          ${colChart(cats, [
+              {name:'Spare parts', color:'var(--viz-1)', values:B.map(b=>b.spare/1e5)},
+              {name:'Labour',      color:'var(--viz-2)', values:B.map(b=>b.labour/1e5)}],
+            {target:(perBucketTarget('spare')+perBucketTarget('labour'))/1e5, targetLabel:'combined commitment',
+             fmtY:v=>v.toFixed(1), fmtV:v=>'₹'+v.toFixed(2)+' L', aria:'Spare and labour revenue'})}
+        </figure>
+
+        <figure class="ch">
+          <figcaption><span class="ch-t">Productivity</span><span class="ch-s">SR closed per day present</span></figcaption>
+          ${lineChart(cats, [{name:'SR / paid day', color:'var(--viz-1)',
+              values:B.map(b=> b.pres ? b.sr/b.pres : 0)}],
+            {ref:se.v.prod, refLabel:'period average', fmtY:v=>v.toFixed(1), fmtV:v=>v.toFixed(2),
+             aria:'Productivity trend'})}
+        </figure>
+
+        <figure class="ch">
+          <figcaption><span class="ch-t">Quality &amp; discipline</span><span class="ch-s">per cent</span>
+            ${lg([{n:'SR closure',c:'var(--viz-1)'},{n:'Attendance',c:'var(--viz-2)'},{n:'1st site before 10',c:'var(--viz-3)'}])}</figcaption>
+          ${lineChart(cats, [
+              {name:'SR closure', color:'var(--viz-1)', values:B.map(b=>b.closure)},
+              {name:'Attendance', color:'var(--viz-2)', values:B.map(b=>b.attend)},
+              {name:'1st site before 10', color:'var(--viz-3)', values:B.map(b=>b.first)}],
+            {max:100, ref:95, refLabel:'95%', fmtV:v=>v.toFixed(1)+'%', aria:'Quality and discipline trend'})}
+        </figure>
+
+      </div>
+    </div>`;
+
+  $('detail').querySelectorAll('tr.par.has th.m').forEach(th=>{
+    th.onclick = ()=>{
+      const k = th.parentElement.dataset.row;
+      state.dtOpen.has(k) ? state.dtOpen.delete(k) : state.dtOpen.add(k);
+      renderDetail();
+    };
+  });
+  $('dtClose').onclick = closeDetail;
+  $('dtSheet').onclick = ()=> openSheet(se.uid);
+  $('dtAssets').onclick = ()=> openAssets(se.uid);
+  $('dtTrain').onclick = ()=> openTraining(se.uid);
+  // print THIS report rather than the signed matrix — a body class picks which
+  $('dtPrint').onclick = ()=>{
+    document.body.classList.add('print-detail');
+    window.print();
+    setTimeout(()=>document.body.classList.remove('print-detail'), 400);
+  };
+  syncDtBar();
+  // the export carries THIS engineer's breakdown — every metric, every period,
+  // and every bifurcation whether it is opened on screen or not: a file has no
+  // reason to hide what the screen merely folded away
+  /* The export is the same table, in Excel's own colours. An HTML table is
+     what Excel reads most reliably, and unlike a CSV it can carry the blue
+     head, the tinted metric column and the green P / amber A that make the
+     sheet scannable. Kept deliberately plain: no merged banner rows — those
+     are what make Excel's columns behave oddly — just four label/value lines,
+     a blank, and the grid. */
+  $('dtCsv').onclick = ()=>{
+    const C = {head:'#e8f3fc', metric:'#eaf4fd', tot:'#dcebf9', kid:'#f5faff',
+               line:'#9fc0df', ink:'#111827', mut:'#6b7280',
+               ok:'#12401f', okBg:'#d6f0d6', bad:'#6b3405', badBg:'#fce3c8'};
+    const B0 = `border:1px solid ${C.line};font-family:Calibri,Arial;font-size:10pt;`;
+    const num  = B0 + 'text-align:right;';
+    const head = B0 + `background:${C.head};color:${C.ink};font-weight:bold;text-align:center;`;
+    const metS = B0 + `background:${C.metric};color:${C.ink};font-weight:bold;`;
+    const kidS = B0 + `background:${C.kid};color:${C.mut};`;
+    const totS = B0 + `background:${C.tot};color:${C.ink};font-weight:bold;text-align:right;`;
+    const lbl  = `font-family:Calibri,Arial;font-size:10pt;color:${C.mut};border:0;`;
+    const val  = `font-family:Calibri,Arial;font-size:10pt;color:${C.ink};font-weight:bold;border:0;`;
+
+    const txt = v => String(v).replace(/<[^>]*>/g,'').replace(/\u2013|&ndash;/g,'-').trim();
+    const attStyle = v => {
+      const t = txt(v), c = B0 + 'text-align:center;font-weight:bold;';
+      if(t==='P') return c + `background:${C.okBg};color:${C.ok};`;
+      if(t==='A') return c + `background:${C.badBg};color:${C.bad};`;
+      const m = /^(\d+)\s*\/\s*(\d+)$/.exec(t);
+      if(m && (+m[1] + +m[2]))
+        return c + (+m[1]/(+m[1] + +m[2])*100 >= state.targets.attend
+          ? `background:${C.okBg};color:${C.ok};` : `background:${C.badBg};color:${C.bad};`);
+      return B0 + 'text-align:center;';
+    };
+    const td = (v, st) => `<td style="${st}">${v===''||v==null?'&nbsp;':v}</td>`;
+    const info = (a,b) => `<tr>${td(a,lbl)}${td(b,val)}</tr>`;
+
+    let h = '<table cellspacing="0" cellpadding="4">'
+      + info('Engineer', esc(se.name))
+      + info('Branch', `${esc(se.branch)} (${se.bid}) &middot; ${se.region}`)
+      + info('SE UID / code', `${se.uid} &middot; ${esc(se.code)}`)
+      + info('Period', `${fmtDay(state.from)} &ndash; ${fmtDay(state.to)} &middot; ${state.gran} wise`)
+      + info('Score', `${se.score.toFixed(1)} ${se.grade} &middot; `
+          + `${COMMITMENTS.filter(k=>achieve(k,se.v[k.key])>=100).length} of ${COMMITMENTS.length} commitments kept`)
+      + '<tr><td style="border:0;height:8pt;"></td></tr>'
+      + '<tr>' + td('Metric', head + 'text-align:left;') + td('Unit', head)
+        + B.map(b=> td(esc(b.label) + (b.sub ? '<br>' + esc(b.sub) : ''), head)).join('')
+        + td('Period', head) + '</tr>';
+
+    DT_ROWS.forEach(row=>{
+      const att = row.id === 'attend';
+      h += '<tr>' + td(esc(row.lab), metS)
+         + td(esc(row.u), metS + `font-weight:normal;color:${C.mut};text-align:center;`)
+         + B.map(b=>{
+             const raw = row.cell ? row.cell(b)
+               : (()=>{ const v = row.val(b); return (v==null||v===0) ? '-' : dashZero(row.f(v)); })();
+             return td(txt(raw) || '-', att ? attStyle(raw) : num);
+           }).join('')
+         + td(txt(dashZero(row.tot(B))) || '-', totS) + '</tr>';
+      if(row.kids) row.kids().forEach(k=>{
+        h += '<tr>' + td('&nbsp;&nbsp;&nbsp;' + esc(k.lab), kidS)
+           + td(esc(k.u), kidS + 'text-align:center;')
+           + B.map(b=>{ const v = k.val(b);
+               return td((v==null||v===0) ? '-' : txt(dashZero(k.f(v))), kidS + 'text-align:right;'); }).join('')
+           + td(txt(dashZero(k.tot(B))) || '-', totS) + '</tr>';
+      });
+    });
+    h += '</table>';
+
+    const doc = '<html><head><meta charset="utf-8"></head><body>' + h + '</body></html>';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\ufeff' + doc], {type:'application/vnd.ms-excel'}));
+    a.download = `${se.name.replace(/[^A-Za-z0-9]+/g,'-')}_${state.gran}-wise_${state.from}_${state.to}.xls`;
+    a.click();
+  };
+
+  dropDrop('msGran');                       // the panel was just rebuilt
+  picker('msGran','gran', [
+    {v:'day',     label:'Day wise',     sub:'every day of the period'},
+    {v:'week',    label:'Week wise',    sub:'calendar weeks, Mon–Sun'},
+    {v:'month',   label:'Month wise',   sub:'trailing 12 months'},
+    {v:'quarter', label:'Quarterly',    sub:'financial quarters, 2 years back'},
+    {v:'year',    label:'Yearly',       sub:'financial years, 4 years back'},
+  ], null, renderDetail);
+}
+
+/* ===========================================================================
+   9. THE SIGNED MATRIX — Annexure I as a two-way document
+
+   The paper form's own Declaration says KCGL provides "training, uniforms, PPE,
+   tools and operational support" and the engineer commits to twelve numbers in
+   return. A scorecard that only prints the engineer's half is half a document —
+   and, worse, it lets a branch hold someone to a commitment it never equipped
+   them for. So this sheet prints BOTH columns of that bargain, and then says
+   what to do about the difference.
+   =========================================================================== */
+
+// What the branch issues. The manager ticks these; nothing counts them.
+// [short label, the full thing]. The sheet prints the short one and carries
+// the full wording in the tooltip — the checklists are a record, not the point
+// of the page, and they were taking a third of it.
+const SUPPORT = [
+  ['Uniform',                'Uniform issued'],
+  ['ID card',                'ID card issued'],
+  ['PPE set',                'PPE set — helmet, gloves, safety shoes'],
+  ['Tool kit',               'Tool kit issued'],
+  ['Measuring instruments',  'Measuring instruments issued'],
+  ['eFSR app access',        'Mobile / eFSR app access'],
+  ['Travel &amp; conveyance','Travel &amp; conveyance support'],
+  ['Coordinator support',    'Coordinator / back-office support'],
+];
+const COMPLY_SHORT = [
+  'Uniform, ID card &amp; PPE worn',
+  'Tool kit carried',
+  'Machine health check every visit',
+  'Promotes parts, battery &amp; AMC',
+  'Explains work done to customer',
+  'Professional &amp; safe conduct',
+  'No repeat complaints',
+  'Responds to coordinator',
+];
+
+/* Which trainings bear on which commitment.
+   The point is not to score the training — it is to tell a SKILL gap from an
+   APPLICATION gap from a DISCIPLINE gap, because the three have three
+   different answers. An engineer who misses closure and has never been on a
+   breakdown course needs a course. One who has been on it needs coaching. One
+   who misses first-site reporting needs neither — that is a discipline matter,
+   and no training fixes it. `disc` marks those. */
+const TRAIN_FOR = {
+  sr:      ['LkVA','MkVA','HkVA','Industrial','CPCB','BS V','BSIV','CRDI','Engine','R550','K4300','Power Car','Bio Gas'],
+  closure: ['Breakdown','Industrial','CRDI','Engine','R550','K4300','CPCB'],
+  wetPm:   ['PM'],
+  cdi:     ['Brand Ambassador'],
+  spare:   ['Brand Ambassador','KCC'],
+  labour:  ['LkVA','MkVA','HkVA','Industrial','CPCB'],
+  amcLead: ['Brand Ambassador'],
+  battery: ['Inverter','Jump Start','KCC'],
+  first:   null, sfTask: null, lms: null, attend: null,     // null = discipline
+};
+
+const MONTHS_SHORT = MON;
+const fmtTrainDate = d => d ? `${MONTHS_SHORT[+d.slice(5,7)-1]} ${d.slice(0,4)}` : '—';
+function tenureOf(uid){
+  const h = HIRED[uid];
+  if(!h) return null;
+  const y = (pdate(state.to) - pdate(h)) / (365.25*86400000);
+  return {from:h, years:y, label: y>=1 ? `${y.toFixed(1)} yrs` : `${Math.round(y*12)} mo`};
+}
+
+/* ---- the conversation ------------------------------------------------------
+   A gap the manager cannot put into a sentence is a gap nobody acts on. So each
+   shortfall is turned into three things: what it IS, what it is WORTH, and the
+   one thing to ask for. Counts are derived from the engineer's own figures so
+   the sentence survives being read out loud in front of him. */
+const plain = t => String(t).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
+// 'Md Zakir Ali' reads as 'Md Zakir', not 'Md'
+const firstName = n => { const w = String(n).split(' '); return w[0].length<=3 && w[1] ? w[0]+' '+w[1] : w[0]; };
+const plural = (n, one, many) => `${n} ${n===1?one:(many||one+'s')}`;
+
+function talkFor(k, se, ctx){
+  const t = targetFor(k), v = se.v[k.key];
+  const gap = Array.isArray(t) ? 0 : Math.max(0, t - v);
+  const wk = 4.3 * PMONTHS;                         // weeks in the period
+  switch(k.key){
+    case 'sr': return {
+      short: `${plural(gap,'SR')} short`,
+      say: `${iN(v)} SRs closed against ${iN(t)}. ${gap} short — about ${(gap/wk).toFixed(1)} a week.`,
+      ask: `Close ${Math.ceil(gap/wk)} more SRs a week.` };
+    case 'spare': return {
+      short: `₹${iN(gap)} short`,
+      say: `Spare parts billed ₹${iN(v)} against ₹${iN(t)}. That is ₹${iN(se.v.sr?v/se.v.sr:0)} of parts attached per SR`
+         + (ctx.bSpareSr!=null ? `, where the branch attaches ₹${iN(ctx.bSpareSr)}.` : '.'),
+      ask: `Attach ₹${iN(se.v.sr? gap/se.v.sr : gap)} more parts per SR — a filter set or a coolant on the jobs already booked.` };
+    case 'labour': return {
+      short: `₹${iN(gap)} short`,
+      say: `Labour billed ₹${iN(v)} against ₹${iN(t)} — ₹${iN(se.v.sr?v/se.v.sr:0)} a job`
+         + (ctx.bLabSr!=null ? ` against the branch's ₹${iN(ctx.bLabSr)}.` : '.'),
+      ask: `Bill the full labour line on every job; ₹${iN(gap)} over ${se.v.sr} SRs is ₹${iN(se.v.sr?gap/se.v.sr:gap)} a job.` };
+    case 'amcLead': return {
+      short: `${plural(gap,'lead')} short`,
+      say: `${plural(v,'AMC lead')} against ${t}. On ${se.v.sr} SRs that is one lead every ${se.v.amcLead? Math.round(se.v.sr/se.v.amcLead) : se.v.sr} jobs.`,
+      ask: `Raise ${gap} more — one AMC ask on every ${Math.max(1,Math.round(se.v.sr/Math.max(1,t)))}th job covers it.` };
+    case 'battery': return {
+      short: `${gap} batter${gap===1?'y':'ies'} short`,
+      say: `${v} batteries sold against ${t}. Every wet PM is a battery check.`,
+      ask: `${gap} more this month — check and quote on the PM visits already scheduled.` };
+    case 'lms': return {
+      short: `${(100-v).toFixed(1)}% not updated`,
+      say: `${v.toFixed(1)}% of leads updated on LMS. The commitment is every one of them.`,
+      ask: `Update the same day. An unlogged lead is a lead the branch cannot follow.` };
+    case 'first': return {
+      short: `${plural(Math.round(se.workDays*(100-v)/100),'day')} late`,
+      say: `First site before 10:00 on ${v.toFixed(1)}% of days — roughly ${Math.round(se.workDays*(100-v)/100)} of ${se.workDays} working days started late.`,
+      ask: `First call on site by 10:00 every day. Report the exception the evening before, not on the day.` };
+    case 'sfTask': return {
+      short: `${plural(Math.round(se.v.sr*(100-v)/100),'task')} left open`,
+      say: `${v.toFixed(1)}% of tasks closed before leaving site — about ${Math.round(se.v.sr*(100-v)/100)} of ${se.v.sr} tasks left open.`,
+      ask: `Close the task on the app before the vehicle moves.` };
+    case 'attend': {
+      const abs = Math.max(0, se.workDays - se.present);
+      return {
+        short: `${plural(abs,'day')} absent`,
+        say: `Present ${se.present} of ${se.workDays} working days — ${abs} absent. At his own billing that is ₹${iN(ctx.perDay)} a day of work not done.`,
+        ask: `Attendance above ${targetFor(COMMITMENTS.find(x=>x.key==='attend'))}% means no more than ${plural(Math.floor(se.workDays*(100-state.targets.attend)/100),'absent day')} in a month.` }; }
+    case 'closure': {
+      const late = Math.round(se.v.sr*(100-v)/100);
+      return {
+        short: `${plural(late,'SR')} late`,
+        say: `${v.toFixed(1)}% closed inside the timeline against ${t}% — about ${late} of ${se.v.sr} SRs ran past MaxTTR.`,
+        ask: `No SR past its timeline. Ask the coordinator to flag anything open on day two.` }; }
+    case 'cdi': {
+      const c = ctx.cdi;
+      return {
+        short: `${(t-v).toFixed(1)} pts below`,
+        say: `Rated ${v.toFixed(1)} of 10 against ${t}. ${c.D} of ${plural(c.N,'customer')} came back as ${c.D===1?'a detractor':'detractors'} this period`
+           + (c.P ? `, ${c.P} as promotors.` : '.'),
+        ask: `Explain the work done and the site status before leaving — that one habit moves the rating more than anything else.` }; }
+    case 'wetPm': {
+      const [lo,hi] = state.targets.wetPm;
+      const fast = v < lo;
+      return {
+        short: fast ? `${(lo-v).toFixed(2)} hrs under` : `${(v-hi).toFixed(2)} hrs over`,   // already a phrase
+        say: fast
+          ? `Wet PM jobs average ${v.toFixed(2)} hrs against the ${lo}–${hi} hr window — under the time the checklist takes.`
+          : `Wet PM jobs average ${v.toFixed(2)} hrs against the ${lo}–${hi} hr window — longer than the job should need.`,
+        ask: fast
+          ? `Work the full PM checklist. A short PM is what comes back as a breakdown.`
+          : `Review the PM sequence with the branch — the time is going somewhere it should not.` }; }
+    default: return {short:'—', say:'', ask:''};
+  }
+}
+
+// The CDI feedback split, struck by the SAME rule the day/week/month report
+// uses, so the sheet and the report never quote different numbers.
+function cdiSplit(sr, rating){
+  const N = Math.max(3, Math.round(sr/4));
+  const pSh = Math.max(.06, Math.min(.94, (rating-4.5)/5.5));
+  const dSh = (1-pSh)*.45;
+  const [P,Pa,D] = spreadInt(N, [pSh, 1-pSh-dSh, dSh]);
+  return {P, Pa, D, N};
+}
+
+/* ---- the review: everything the sheet asserts is computed here ---------- */
+function reviewOf(se){
+  const A = k => achieve(k, se.v[k.key]);
+  const met  = COMMITMENTS.filter(k=>A(k)>=100);
+  const miss = COMMITMENTS.filter(k=>{ const a=A(k); return a!=null && a<85; }).sort((a,b)=>A(a)-A(b));
+  const near = COMMITMENTS.filter(k=>{ const a=A(k); return a!=null && a>=85 && a<100; });
+  const comply = se.comply.filter(Boolean).length;
+  const support = se.support.filter(Boolean).length;
+  // the file records a skill once per CATEGORY, so 'BS V' can appear as both
+  // Service Expert and Breakdown Expert — one training to a reader, so merge
+  // them and name both categories
+  const bySkill = new Map();
+  (TRAINING[se.uid] || []).forEach(([sk,cat,d])=>{
+    const e = bySkill.get(sk);
+    if(!e) bySkill.set(sk, {sk, cats:cat?[cat]:[], d});
+    else { if(cat && !e.cats.includes(cat)) e.cats.push(cat); if(d > e.d) e.d = d; }
+  });
+  const tr = [...bySkill.values()].sort((a,b)=> b.d.localeCompare(a.d))
+    .map(e=>[e.sk, e.cats.join(' · '), e.d]);
+  const skills = tr.map(t=>t[0].toLowerCase());
+  const hasTraining = k => {
+    const words = TRAIN_FOR[k.key];
+    if(words===null || words===undefined) return null;                 // discipline
+    return words.some(w=> skills.some(s=> s.includes(w.toLowerCase())));
+  };
+
+  const rev = se.v.spare + se.v.labour;
+  const perSR = se.v.sr ? rev/se.v.sr : 0;
+  const perDay = se.present ? rev/se.present : 0;
+  const absent = Math.max(0, se.workDays - se.present);
+
+  // How he sits against the people doing the same job in the same branch —
+  // the only fair comparison, and the one he will make himself.
+  const peers = SES.filter(x=>x.bid===se.bid && x.uid!==se.uid);
+  const pAvg = f => peers.length ? peers.reduce((a,x)=>a+f(x),0)/peers.length : null;
+  const branch = {
+    n: peers.length + 1,
+    rank: SES.filter(x=>x.bid===se.bid).sort((a,b)=>b.score-a.score).findIndex(x=>x.uid===se.uid) + 1,
+    sr: pAvg(x=>x.v.sr), score: pAvg(x=>x.score), prod: pAvg(x=>x.v.prod),
+    spareSr: pAvg(x=> x.v.sr ? x.v.spare/x.v.sr : 0),
+    labSr: pAvg(x=> x.v.sr ? x.v.labour/x.v.sr : 0),
+  };
+  const ctx = {perSR, perDay, bSpareSr:branch.spareSr, bLabSr:branch.labSr,
+               cdi: cdiSplit(se.v.sr, se.v.cdi)};
+
+  // EVERY commitment he is short on, each with what it is worth, what to say
+  // and the one thing to ask for. Money is priced at the ENGINEER'S OWN rates,
+  // never a branch average: the question is what HE would have billed had he
+  // hit the number. Where a gap has no defensible rupee value it carries none
+  // rather than an invented one.
+  const worthOf = k => {
+    const t = targetFor(k), v = se.v[k.key];
+    if(k.key==='sr')     return Math.max(0, t-v) * perSR;
+    if(k.key==='spare' || k.key==='labour') return Math.max(0, t-v);
+    if(k.key==='attend') return absent * perDay;
+    return null;
+  };
+  const stake = COMMITMENTS
+    .filter(k=>{ const a=A(k); return a!=null && a<100; })
+    .map(k=>({k, pct:A(k), worth:worthOf(k), ...talkFor(k, se, ctx)}))
+    .sort((a,b)=> (b.worth||0)-(a.worth||0) || a.pct-b.pct);
+  const total = stake.reduce((a,x)=>a+(x.worth||0),0);
+  const focus = stake.find(x=>x.worth) || stake[0] || null;
+
+  // The call. Compliance and the support the branch actually gave both weigh on
+  // it: an engineer the branch never kitted out is not a performance case.
+  let verdict, tone, why;
+  const unsupported = SUPPORT.length - support;
+  if(unsupported >= 3 && se.score < 80){
+    verdict = 'Branch action first';
+    tone = 'warn';
+    why = `${unsupported} of ${SUPPORT.length} support items are not issued. Close that before the performance conversation — the commitments assume the kit.`;
+  } else if(se.score >= 90 && comply === COMPLY.length){
+    verdict = 'Recommend — incentive / promotion review';
+    tone = 'good';
+    why = `${met.length} of ${COMMITMENTS.length} commitments kept and every mandatory item in order.`;
+  } else if(se.score >= 80){
+    const weakComply = comply <= COMPLY.length - 3;
+    verdict = weakComply ? 'On track on the numbers — pull up the mandatory list' : 'On track — confirm';
+    tone = weakComply ? 'warn' : 'good';
+    why = (miss.length ? `Solid on the numbers; ${miss.length} commitment${miss.length>1?'s':''} to close out.`
+                       : 'Every commitment kept.')
+      + (weakComply ? ` But only ${comply} of ${COMPLY.length} mandatory items are in order — the score does not cover uniform, PPE, tool kit or workmanship.` : '');
+  } else if(se.score >= 70){
+    verdict = 'Coach — focused support';
+    tone = 'warn';
+    why = `Short on ${miss.slice(0,2).map(k=>plain(k.short)).join(' and ')}. Set a 30-day target on ${miss.length>1?'both':'it'}.`;
+  } else if(se.score >= 60){
+    verdict = 'Formal review';
+    tone = 'bad';
+    why = `${miss.length} commitments missed by more than 15%. Review with the branch manager this month.`;
+  } else {
+    verdict = 'Performance improvement plan';
+    tone = 'bad';
+    why = `Score ${se.score.toFixed(1)} with ${miss.length} commitments missed. Put a written plan and a review date in place.`;
+  }
+
+  // Skill gap, application gap or discipline — the three have three answers
+  const actions = miss.map(k=>{
+    const t = hasTraining(k);
+    if(t === null) return {k, type:'Discipline', tone:'bad',
+      act:'No training closes this — set the expectation and follow it daily.'};
+    if(t) return {k, type:'Application', tone:'warn',
+      act:'Trained already — this is coaching and follow-up on site, not another course.'};
+    return {k, type:'Skill', tone:'warn', act:'No training on record that covers this — nominate for the next batch.'};
+  });
+
+  // If several gaps come back 'Skill', the honest reading is usually that the
+  // catalogue has no course for them — it is almost all product training
+  // (LkVA, CPCB4+, BS V …) and very little on selling or customer handling.
+  // That is a finding about the training plan, not about the engineer.
+  const skillGaps = actions.filter(a=>a.type==='Skill').length;
+  const catalogue = skillGaps >= 3
+    ? `${skillGaps} of these have no course on record that covers them. The Training Report is `
+      + `almost entirely product training — worth checking the gap against the training plan `
+      + `before nominating him for anything.`
+    : null;
+
+  // one line the manager can close the conversation on
+  const asks = stake.slice(0,3).map(x=>x.ask);
+
+  return {met, miss, near, comply, support, tr, stake, total, focus, asks, branch,
+          rev, perSR, perDay, absent, verdict, tone, why, actions, catalogue,
+          tenure:tenureOf(se.uid)};
+}
+
+// Inside the matrix every column is already headed by its unit, so the cells
+// carry the bare figure — a % or a ₹ on every row of a six-column table is
+// noise the reader has to look past.
+const bare = t => String(t).replace(/%/g,'').replace(/₹/g,'')
+  .replace(/ h$/,'').replace(/ SR\/day/,'').trim();
+// the one commitment written as a band rather than a floor
+const targetText = k => k.dir==='range'
+  ? state.targets[k.key][0] + '–' + state.targets[k.key][1]
+  : bare(fmtVal(k, targetFor(k)));
+
+/* ---- Employee assets ------------------------------------------------------
+   What the branch has issued. Nothing counts these — no import knows whether a
+   man was given his tool kit — so they are the manager's to set, and they sit
+   on a panel of their own rather than buried in the signed form. */
+function openAssets(uid){
+  const se = SES.find(s=>s.uid===uid);
+  if(!se) return;
+  const n = se.support.filter(Boolean).length;
+  $('sheet').innerHTML = `
+    <div class="sh-top">
+      <div><h2>Employee assets</h2>
+        <div class="s2">${esc(se.name)} · ${esc(se.branch)} · SE UID ${se.uid}</div></div>
+      <div style="display:flex;gap:7px">
+        <button class="sh-x" id="asSave">Save</button>
+        <button class="sh-x" id="shClose">Close</button>
+      </div>
+    </div>
+    <div class="sh-body">
+      <div class="sh-h">Issued to the engineer <span id="asCount">${n} of ${SUPPORT.length} issued</span></div>
+      <div class="sh-set">An engineer who has not been kitted out is not a performance case —
+        this list is what the commitments assume.</div>
+      <div class="chk big">${SUPPORT.map((c,i)=>
+        `<label title="${esc(c[1].replace(/&amp;/g,'&'))}"><input type="checkbox" data-s="${i}" ${se.support[i]?'checked':''}>
+          <span>${c[1]}</span></label>`).join('')}</div>
+      <div class="sh-note" id="asNote"></div>
+
+      <div class="sh-h">Mandatory compliance <span id="asComply">${se.comply.filter(Boolean).length} of ${COMPLY.length} in order</span></div>
+      <div class="sh-set">Tick each item the engineer has kept. Nothing counts these either —
+        no file knows whether a man wore his PPE.</div>
+      <div class="chk big">${COMPLY.map((c,i)=>
+        `<label title="${esc(c.replace(/&amp;/g,'&'))}"><input type="checkbox" data-c="${i}" ${se.comply[i]?'checked':''}>
+          <span>${c}</span></label>`).join('')}</div>
+    </div>`;
+  const paint = ()=>{
+    const k = se.support.filter(Boolean).length;
+    $('asCount').textContent = `${k} of ${SUPPORT.length} issued`;
+    $('asNote').innerHTML = k===SUPPORT.length
+      ? 'Fully issued — every commitment on the matrix is fair to hold him to.'
+      : `<b>${SUPPORT.length-k} not issued.</b> `
+        + SUPPORT.filter((_,i)=>!se.support[i]).map(c=>c[0]).join(', ')
+        + '. Close these before the performance conversation.';
+  };
+  paint();
+  $('sheet').querySelectorAll('input[data-s]').forEach(cb=>{
+    cb.onchange = ()=>{ se.support[+cb.dataset.s] = cb.checked; paint(); };
+  });
+  $('sheet').querySelectorAll('input[data-c]').forEach(cb=>{
+    cb.onchange = ()=>{
+      se.comply[+cb.dataset.c] = cb.checked;
+      $('asComply').textContent = `${se.comply.filter(Boolean).length} of ${COMPLY.length} in order`;
+    };
+  });
+  $('shClose').onclick = closeSheet;
+  $('asSave').onclick = ()=>{ closeSheet(); if(state.openSe) renderDetail(); };
+  $('mask').classList.add('open', 'mid');
+}
+
+/* ---- Training & Skill -----------------------------------------------------
+   The trainings on record come from the Training Report and are not the
+   manager's to invent, so they are shown as they stand. What IS his to set is
+   the NOMINATION: which of the gaps he wants this engineer put on a course
+   for. That is the line the training plan is actually built from. */
+function openTraining(uid){
+  const se = SES.find(s=>s.uid===uid);
+  if(!se) return;
+  const R = reviewOf(se);
+  se.nominate = se.nominate || new Set();
+  const skillGaps = R.actions.filter(a=>a.type==='Skill');
+  $('sheet').innerHTML = `
+    <div class="sh-top">
+      <div><h2>Training &amp; Skill</h2>
+        <div class="s2">${esc(se.name)} · ${esc(se.branch)} · SE UID ${se.uid}
+          · with KCGL ${R.tenure?R.tenure.label:'—'}</div></div>
+      <div style="display:flex;gap:7px">
+        <button class="sh-x" id="trSave">Save</button>
+        <button class="sh-x" id="shClose">Close</button>
+      </div>
+    </div>
+    <div class="sh-body">
+      <div class="sh-h">Trainings on record <span>${R.tr.length} · from the Training Report</span></div>
+      ${R.tr.length
+        ? `<table class="sh-t"><colgroup><col class="w-n"><col><col style="width:190px"><col style="width:96px"></colgroup>
+            <thead><tr><th>#</th><th style="text-align:left">Skill</th><th style="text-align:left">Category</th><th>Taken</th></tr></thead>
+            <tbody>${R.tr.map((t,i)=>`<tr><td class="n">${i+1}</td>
+              <td class="k"><b>${esc(t[0])}</b></td>
+              <td class="k" style="color:#6b7280">${esc(t[1]||'—')}</td>
+              <td class="c">${fmtTrainDate(t[2])}</td></tr>`).join('')}</tbody></table>`
+        : `<div class="sh-none">No training on record for this UID in the Training Report.</div>`}
+
+      <div class="sh-h">Nominate for training <span id="trCount"></span></div>
+      <div class="sh-set">Tick what he should be put on a course for. Only the gaps with
+        <b>no course on record</b> are listed — the rest is coaching, not training.</div>
+      ${skillGaps.length
+        ? `<div class="chk two big">${skillGaps.map(a=>
+            `<label title="${esc(plain(a.k.name))}"><input type="checkbox" data-n="${a.k.key}" ${se.nominate.has(a.k.key)?'checked':''}>
+              <span>${a.k.no}. ${plain(a.k.short)} <em>${esc(bare(fmtVal(a.k, se.v[a.k.key])))} against ${esc(plain(a.k.commit))}</em></span></label>`).join('')}</div>`
+        : `<div class="sh-none">Nothing to nominate — every gap he has is coaching or discipline, not a missing course.</div>`}
+      ${R.catalogue ? `<div class="sh-note">${esc(R.catalogue)}</div>` : ''}
+    </div>`;
+  const paint = ()=>{
+    $('trCount').textContent = se.nominate.size
+      ? `${se.nominate.size} nominated` : `${skillGaps.length} open`;
+  };
+  paint();
+  $('sheet').querySelectorAll('input[data-n]').forEach(cb=>{
+    cb.onchange = ()=>{ cb.checked ? se.nominate.add(cb.dataset.n) : se.nominate.delete(cb.dataset.n); paint(); };
+  });
+  $('shClose').onclick = closeSheet;
+  $('trSave').onclick = ()=>{ closeSheet(); if(state.openSe) renderDetail(); };
+  $('mask').classList.add('open', 'mid');
+}
+
+function openSheet(uid){
+  const se = SES.find(s=>s.uid===uid);
+  if(!se) return;
+  const R = reviewOf(se);
+  const A = k => achieve(k, se.v[k.key]);
+
+  const rows = COMMITMENTS.slice().sort((a,b)=>a.no-b.no).map(k=>{
+    const v = se.v[k.key], p = A(k), st = statusOf(p);
+    const lab = st==='ok'?'MET':st==='near'?'NEAR':'MISSED';
+    let extra = '';
+    if(k.key==='first')  extra = `<div class="sub2">avg ${se.firstAvg}</div>`;
+    if(k.key==='attend') extra = `<div class="sub2">${se.present} P · ${R.absent} A of ${se.workDays}</div>`;
+    return `<tr>
+      <td class="n">${k.no}</td>
+      <td class="k"><div>${k.name}</div>${k.hint?`<div class="sub2">${k.hint}</div>`:''}</td>
+      <td class="c"><b>${targetText(k)}</b>
+        <div class="sub2">${esc(k.commit)}${k.perMonth && PMONTHS>1.02 ? ` · ×${PMONTHS.toFixed(PMONTHS%1?1:0)} months` : ''}</div></td>
+      <td class="a">${bare(fmtVal(k,v))}${extra}</td>
+      <td class="p">${p==null?'–':Math.round(p)}</td>
+      <td class="s sh-${st}">${lab}</td></tr>`;
+  }).join('');
+
+  const kindOf = k => (R.actions.find(a=>a.k.key===k.key) || {type:'Close out', tone:'good'});
+  const gapHtml = R.stake.length
+    ? R.stake.map(x=>{
+        const kind = kindOf(x.k);
+        return `<div class="gap">
+          <div class="gh">
+            <span class="gn">${x.k.no}</span>
+            <span class="gt" title="${esc(plain(x.k.name))} — ${esc(plain(x.k.commit))}">${x.k.name}</span>
+            <span class="tag t-${kind.tone}">${kind.type}</span>
+            <span class="gs">${x.short}</span>
+            <span class="gw">${x.worth ? '₹'+iN(x.worth) : '—'}</span>
+          </div>
+          <div class="gb">${x.say}</div>
+          <div class="ga"><b>Ask:</b> ${x.ask}</div>
+        </div>`; }).join('')
+    : `<div class="sh-none">Every commitment kept — nothing to raise.</div>`;
+  const catHtml = R.catalogue ? `<div class="sh-note">${esc(R.catalogue)}</div>` : '';
+  const b = R.branch;
+  const cmpHtml = b.n > 1 ? `<div class="sh-note">
+      <b>Against his own branch.</b> ${esc(firstName(se.name))} ranks <b>${b.rank} of ${b.n}</b> in ${esc(se.branch)}.
+      He closes <b>${iN(se.v.sr)}</b> SRs where the other ${b.n-1} average <b>${iN(b.sr)}</b>;
+      attaches <b>₹${iN(se.v.sr?se.v.spare/se.v.sr:0)}</b> of parts a job against <b>₹${iN(b.spareSr)}</b>;
+      productivity <b>${se.v.prod.toFixed(2)}</b> against <b>${b.prod.toFixed(2)}</b> SR a paid day.
+    </div>` : '';
+
+  const scoreCol = se.score>=90?'#12401f' : se.score>=80?'#3f7a2e' : se.score>=70?'#4a3c05' : '#6b3405';
+
+  $('sheet').innerHTML = `
+    <div class="sh-top">
+      <div>
+        <h2>Service Engineer Performance Commitment &amp; Accountability Matrix</h2>
+        <div class="s2">Annexure – I · KALA Care Global Services LLP · period ${fmtDay(state.from)} – ${fmtDay(state.to)}</div>
+      </div>
+      <div style="display:flex;gap:7px">
+        <button class="sh-x" onclick="window.print()">Print</button>
+        <button class="sh-x" id="shClose">Close</button>
+      </div>
+    </div>
+    <div class="sh-body">
+      <div class="sh-id">
+        <div class="f"><div class="l">Employee Name</div><div class="v" title="${esc(se.name)}">${esc(se.name)}</div></div>
+        <div class="f"><div class="l">Employee Code</div><div class="v">${esc(se.code)}</div></div>
+        <div class="f"><div class="l">Branch / Outlet</div><div class="v">${esc(se.branch)}</div></div>
+        <div class="f"><div class="l">SE UID · Region</div><div class="v">${se.uid} · ${se.region}</div></div>
+        <div class="f"><div class="l">With KCGL</div><div class="v">${R.tenure?R.tenure.label:'—'}
+          <span class="vs">${R.tenure?'since '+fmtTrainDate(R.tenure.from):''}</span></div></div>
+        <div class="f"><div class="l">Trainings on record</div><div class="v">${R.tr.length}
+          <span class="vs">${R.tr.length?'last '+fmtTrainDate(R.tr[0][2]):'none'}</span></div></div>
+      </div>
+
+      <!-- the call, before the detail that justifies it -->
+      <div class="sh-verdict v-${R.tone}">
+        <div class="sc"><div class="l">Commitment score</div>
+          <div class="big" style="color:${scoreCol}">${se.score.toFixed(1)}<span>%</span></div>
+          <span class="gr gr-${se.grade}">${se.grade}</span></div>
+        <div class="vd">
+          <div class="l">Recommendation</div>
+          <div class="h">${esc(R.verdict)}</div>
+          <div class="w">${esc(R.why)}</div>
+        </div>
+        <div class="vm">
+          <div><b>${R.met.length}</b> of ${COMMITMENTS.length} commitments kept</div>
+          <div><b>${R.comply}</b> of ${COMPLY.length} mandatory items in order</div>
+          <div><b>${R.support}</b> of ${SUPPORT.length} support items issued</div>
+          <div><b>${se.present} P · ${R.absent} A</b> of ${se.workDays} working days</div>
+        </div>
+      </div>
+
+      <div class="sh-h">Minimum Monthly Performance Commitments <span>actuals for the selected period</span></div>
+      <table class="sh-t">
+        <colgroup><col class="w-n"><col class="w-k"><col class="w-c"><col class="w-a"><col class="w-p"><col class="w-s"></colgroup>
+        <thead><tr><th>Sr.</th><th style="text-align:left">KPI</th><th>Target</th><th>Actual</th><th>Ach. %</th><th>Status</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+
+      <div class="sh-h">What the shortfall is worth — and what to say
+        <span>priced at his own rates · read it out as it stands</span></div>
+
+      <div class="sh-lede">
+        <div class="ld-n">${R.total ? '₹'+iN(R.total) : R.stake.length || '✓'}</div>
+        <div class="ld-t">${
+          R.total
+            ? `at stake this period${R.rev ? ` — ${Math.round(R.total/R.rev*100)}% of the ₹${iN(R.rev)} he did bill` : ''}.`
+            : R.stake.length
+              ? `commitment${R.stake.length===1?'':'s'} short. None of them bills a rupee directly — they are the habits that decide whether next month does.`
+              : `Every commitment kept.`}
+          He earns <b>₹${iN(R.perSR)}</b> a job and <b>₹${iN(R.perDay)}</b> a day present.
+          ${R.focus ? `<b>Start with ${esc(plain(R.focus.k.short))}</b>${R.focus.worth ? ` — worth ₹${iN(R.focus.worth)} on its own` : ''}.` : ''}
+        </div>
+      </div>
+
+      <div class="gaps">${gapHtml}</div>
+      ${R.asks.length ? `<div class="sh-ask"><b>The 30-day ask.</b> ${R.asks.map(a=>esc(a)).join(' ')}</div>` : ''}
+      ${cmpHtml}
+      ${catHtml}
+    </div>`;
+
+  $('mask').classList.remove('mid');       // the matrix wants the full height
+  $('mask').classList.add('open');
+  $('shClose').onclick = closeSheet;
+
+
+
+}
+
+const closeSheet = ()=> $('mask').classList.remove('open','mid');
+$('mask').onclick = e => { if(e.target===$('mask')) closeSheet(); };
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeSheet(); });
+
+/* ===========================================================================
+   10. THE PERIOD PICKER AND THE PAGE'S PLUMBING
+   =========================================================================== */
+/* A single-choice dropdown — Group by and Cells. Same chrome, same hover
+   behaviour and the same close rules as the multi-selects, so every control in
+   the row opens and shuts the same way; only the list is a radio rather than a
+   set of ticks. */
+const TICK = `<svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" `
+  + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4.5 12.75 6 6 9-13.5"/></svg>`;
+function picker(id, key, opts, after, rerender){
+  const box = $(id), btn = box.querySelector('.btn'), cnt = box.querySelector('.cnt'),
+        list = box.querySelector('.ms-list');
+  const lab = ()=>{ const o = opts.find(o=>o.v===state[key]); cnt.textContent = o ? o.label : ''; };
+  function paint(){
+    list.innerHTML = opts.map(o=>
+      `<div class="pick-item${state[key]===o.v?' on':''}" data-v="${o.v}">${TICK}
+         <span class="lbl">${o.label}${o.sub?`<span class="sub">${o.sub}</span>`:''}</span></div>`).join('');
+    list.querySelectorAll('.pick-item').forEach(el=>{
+      el.onclick = ()=>{
+        state[key] = el.dataset.v;
+        lab(); paint();
+        if(after) after();
+        drop.close(true);
+        (rerender || render)();
+      };
+    });
+  }
+  const drop = hoverDrop(box, 'on-open', paint);
+  btn.onclick = e=>{
+    e.stopPropagation();
+    box.classList.contains('on-open') ? drop.close(true) : drop.open();
+  };
+  box.querySelector('.ms-pop').onclick = e=>e.stopPropagation();
+  lab(); paint();
+}
+
+/* ---- hover-open plumbing, shared by every dropdown ----------------------
+   `openCls` differs per control ('.ms' uses on-open, the period box uses
+   open), so the helper takes it. closeAll() is what the outside-click handler
+   and every "apply" action call, so a control can never be left hanging. */
+const DROPS = [];
+function hoverDrop(box, openCls, onOpen){
+  let t = null;
+  const open = ()=>{
+    clearTimeout(t);
+    DROPS.forEach(d=>{ if(d.box!==box) d.close(true); });
+    box.classList.add(openCls);
+    if(onOpen) onOpen();
+  };
+  const close = (now)=>{
+    clearTimeout(t);
+    if(now) box.classList.remove(openCls);
+    else t = setTimeout(()=>box.classList.remove(openCls), 220);
+  };
+  box.addEventListener('mouseenter', open);
+  box.addEventListener('mouseleave', ()=>close(false));
+  DROPS.push({box, open, close});
+  return {open, close};
+}
+const closeAllDrops = ()=> DROPS.forEach(d=>d.close(true));
+// renderDetail() rebuilds its own controls each time, so the previous
+// registration has to go or the registry grows on every re-render (and every
+// hover would try to close a control that no longer exists).
+function dropDrop(id){
+  for(let i=DROPS.length-1;i>=0;i--)
+    if(DROPS[i].box && DROPS[i].box.id===id) DROPS.splice(i,1);
+}
+document.addEventListener('click', e=>{ if(!e.target.closest || !e.target.closest('.ms,.per')) closeAllDrops(); });
+
+// period picker
+const PERIODS = [
+  ['fy','FY 2026–27','2026-04-01','2027-03-31'],
+  ['current_month','Current Month','2026-08-01','2026-08-25'],
+  ['last_month','Last Month','2026-07-01','2026-07-31'],
+  ['last_quarter','Last Quarter','2026-04-01','2026-06-30'],
+  ['last_6m','Last 6 Months','2026-02-01','2026-07-31'],
+  ['full','Full Data','2026-01-01','2026-08-25'],
+];
+$('perGrid').innerHTML = PERIODS.map(([k,l])=>`<button data-p="${k}" class="${k===state.period?'on':''}">${l}</button>`).join('');
+$('perGrid').querySelectorAll('button').forEach(b=> b.onclick = ()=>{
+  const p = PERIODS.find(x=>x[0]===b.dataset.p);
+  state.period=p[0]; state.from=p[2]; state.to=p[3];
+  $('perGrid').querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  $('perLbl').textContent = p[1];
+  $('pFrom').value=p[2]; $('pTo').value=p[3];
+  $('perBox').classList.remove('open');
+  paintPeriod(); recompute(); render();
+});
+const perDrop = hoverDrop($('perBox'), 'open');
+$('perBtn').onclick = e=>{
+  e.stopPropagation();
+  $('perBox').classList.contains('open') ? perDrop.close(true) : perDrop.open();
+};
+$('perBox').querySelector('.per-pop').onclick = e=>e.stopPropagation();
+$('pApply').onclick = ()=>{
+  if(!$('pFrom').value || !$('pTo').value) return;
+  state.from=$('pFrom').value; state.to=$('pTo').value; state.period='custom';
+  $('perGrid').querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+  $('perLbl').textContent='Custom';
+  $('perBox').classList.remove('open');
+  paintPeriod(); recompute(); render();
+};
+$('pFrom').value = state.from; $('pTo').value = state.to;
+function paintPeriod(){
+  $('subPeriod').textContent = `${fmtDay(state.from)} → ${fmtDay(state.to)}`;
+}
+
+/* ---- boot ---- */
+paintPeriod();
+recompute();
+render();
+</script>
+</body>
+</html>

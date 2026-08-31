@@ -1,0 +1,1389 @@
+<title>Personal Assistant — Prototype 1.0</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* ============================================================
+   KALA Care — Personal Assistant (Master Admin only)
+   Prototype 1.0 · same design system as the MOM / Welcome Letter
+   prototypes: indigo brand #2f3192, 13.5px Inter, 12px cards.
+   Light is the primary theme; dark mirrors the app's html.dark layer.
+   ============================================================ */
+:root{
+  --brand:#2f3192; --brand-2:#4a4dc4; --brand-dark:#23255f;
+  --brand-soft:rgba(47,49,146,.09); --brand-soft2:rgba(47,49,146,.16);
+  --brand-ink:#2f3192;
+  --accent:#71C9CE; --accent-ink:#0f7c85; --accent-soft:rgba(113,201,206,.18);
+  --yellow:#ffdb62; --yellow-soft:rgba(255,219,98,.28);
+  --ground:#eceef2; --card:#ffffff; --card2:#fafbfc;
+  --line:#e5e7eb; --line2:#f1f2f4;
+  --ink:#111827; --ink2:#374151; --gray:#6b7280; --gray2:#9ca3af;
+  --ok:#059669; --ok-soft:rgba(5,150,105,.12);
+  --warn:#d97706; --warn-soft:rgba(217,119,6,.13);
+  /* no red in this module — "late / high" reads in the same amber as reminders */
+  --danger:#d97706; --danger-soft:rgba(217,119,6,.13);
+  --orange:#F97316; --orange-soft:rgba(249,115,22,.13);
+  --violet:#7c3aed; --violet-soft:rgba(124,58,237,.12);
+  --shadow:0 1px 2px rgba(16,24,40,.05);
+  --shadow-md:0 4px 14px rgba(16,24,40,.08);
+  --shadow-lg:0 18px 44px rgba(16,24,40,.18);
+}
+[data-theme="dark"]{
+  --brand:#5457d8; --brand-2:#6f72e6; --brand-dark:#1b1d4a;
+  --brand-soft:rgba(99,102,241,.16); --brand-soft2:rgba(99,102,241,.28);
+  --brand-ink:#aeb0f5;
+  --accent:#38bdf8; --accent-ink:#7dd3fc; --accent-soft:rgba(56,189,248,.16);
+  --yellow:#f0c74b; --yellow-soft:rgba(240,199,75,.16);
+  --ground:#0e1116; --card:#171a20; --card2:#1c2027;
+  --line:#2c323e; --line2:#22262e;
+  --ink:#e6e9ef; --ink2:#c7cdd8; --gray:#a8b0bf; --gray2:#8b93a3;
+  --ok:#34d399; --ok-soft:rgba(52,211,153,.14);
+  --warn:#fbbf24; --warn-soft:rgba(251,191,36,.14);
+  --danger:#fbbf24; --danger-soft:rgba(251,191,36,.14);
+  --orange:#fb923c; --orange-soft:rgba(251,146,60,.14);
+  --violet:#a78bfa; --violet-soft:rgba(167,139,250,.16);
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+  --shadow-md:0 4px 14px rgba(0,0,0,.45);
+  --shadow-lg:0 18px 44px rgba(0,0,0,.6);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--ground); color:var(--ink);
+  font:13.5px/1.5 'Inter','Segoe UI',Arial,sans-serif;
+  -webkit-font-smoothing:antialiased; transition:background .18s,color .18s;
+}
+button{font:inherit; cursor:pointer; border:none; background:none; color:inherit; padding:0}
+input,select,textarea{
+  font:inherit; color:var(--ink); background:var(--card); border:1px solid var(--line);
+  border-radius:8px; padding:7px 10px; width:100%;
+}
+input::placeholder,textarea::placeholder{color:var(--gray2)}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--brand); outline-offset:1px}
+svg.ic{width:15px; height:15px; flex:none; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round}
+svg.ic.sm{width:13px; height:13px}
+svg.ic.lg{width:18px; height:18px}
+svg.ic.xl{width:22px; height:22px}
+.num{font-variant-numeric:tabular-nums}
+.muted{color:var(--gray2)}
+.wrap{max-width:1560px; margin:0 auto; padding:14px 16px 18px}
+.row{display:flex; align-items:center; gap:8px}
+.spacer{flex:1}
+.hide{display:none !important}
+
+/* ============ HERO ============ */
+.hero{
+  border-radius:16px; padding:12px 18px; margin-bottom:12px; color:#fff;
+  background:linear-gradient(118deg, #2f3192 0%, #23255f 62%, #171a4d 100%);
+  position:relative; overflow:hidden; box-shadow:var(--shadow-md);
+}
+.hero::before{content:""; position:absolute; right:-34px; top:-44px; width:140px; height:140px; border-radius:50%; background:rgba(255,255,255,.07)}
+.hero::after{content:""; position:absolute; right:78px; bottom:-52px; width:104px; height:104px; border-radius:50%; background:rgba(255,255,255,.05)}
+/* ONE row: title block takes the slack and its date line truncates, so the
+   tabs, theme button and New Item never drop to a second line */
+.hero .hrow{position:relative; z-index:1; display:flex; flex-wrap:nowrap; align-items:center; gap:11px}
+.hero .icobox{width:40px; height:40px; border-radius:11px; background:rgba(255,255,255,.16); display:grid; place-items:center; border:1px solid rgba(255,255,255,.14)}
+.hero .htitle{flex:1; min-width:0}
+.hero h1{margin:0; font-size:19px; font-weight:700; line-height:1.2; letter-spacing:-.2px; white-space:nowrap}
+.hero .sub{font-size:11px; color:rgba(255,255,255,.74); line-height:1.35; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.hbtn{
+  display:inline-flex; align-items:center; gap:6px; border-radius:9px; padding:7px 12px;
+  font-size:12px; font-weight:600; background:rgba(255,255,255,.14); color:#fff;
+  border:1px solid rgba(255,255,255,.16); transition:.15s;
+}
+.hbtn:hover{background:rgba(255,255,255,.26)}
+.hbtn.solid{background:#fff; color:#2f3192; border-color:#fff}
+.hbtn.solid:hover{background:rgba(255,255,255,.88)}
+.iconbtn{width:32px; height:32px; border-radius:9px; display:grid; place-items:center; background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.16); color:#fff; transition:.15s}
+.iconbtn:hover{background:rgba(255,255,255,.28)}
+
+/* tabs live on the hero, like the other KALA prototypes */
+.tabs{display:flex; gap:3px; background:rgba(255,255,255,.13); border-radius:11px; padding:3px; flex-wrap:nowrap; flex:none}
+.tab{display:inline-flex; align-items:center; gap:6px; border-radius:8px; padding:6px 11px; font-size:12px; font-weight:600; color:rgba(255,255,255,.76); transition:.15s; white-space:nowrap}
+.tab:hover{color:#fff; background:rgba(255,255,255,.12)}
+.tab.on{background:#fff; color:#2f3192}
+.tab .cnt{font-size:10px; font-weight:700; border-radius:999px; padding:1px 6px; background:rgba(255,255,255,.24); color:#fff; min-width:19px; text-align:center}
+.tab.on .cnt{background:rgba(47,49,146,.13); color:#2f3192}
+.hero .hbtn,.hero .iconbtn{flex:none}
+/* under this width one row genuinely does not fit — wrap instead of squeezing */
+@media (max-width:1230px){
+  .hero .hrow{flex-wrap:wrap}
+  .hero .htitle{flex:1 1 auto}
+  .hero .sub{white-space:normal}
+  .tabs{flex-wrap:wrap}
+}
+
+/* (no KPI strip — the hero tab badges are the only counters) */
+
+/* ============ CARDS ============ */
+.card{background:var(--card); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow)}
+.card+.card{margin-top:12px}
+.card-h{display:flex; align-items:center; gap:8px; padding:10px 13px; border-bottom:1px solid var(--line); font-size:12.5px; font-weight:700}
+.card-h svg.ic{color:var(--brand-ink)}
+/* ...but NOT the icon inside a header button: an indigo plus on the indigo
+   Add button is invisible, so header buttons keep their own text colour */
+.card-h .btn svg.ic{color:currentColor}
+/* NOT .note — that class is the yellow sticky note, and it leaked its
+   background and border into every card header that used the name */
+.card-h .hnote{margin-left:auto; font-size:11px; font-weight:500; color:var(--gray); white-space:nowrap}
+.card-h .btn{margin-left:9px; flex:none; padding:5px 11px; font-size:11.5px; font-weight:700; border-radius:8px}
+.card-h .btn.pri:hover{box-shadow:0 2px 8px rgba(47,49,146,.28)}
+.card-b{padding:12px 13px}
+.card-b.tight{padding:8px 10px}
+
+/* generic buttons */
+.btn{display:inline-flex; align-items:center; gap:6px; border-radius:8px; padding:6px 11px; font-size:12px; font-weight:600; border:1px solid var(--line); background:var(--card); color:var(--ink2); transition:.15s}
+.btn:hover{border-color:var(--brand); color:var(--brand-ink); background:var(--brand-soft)}
+.btn.pri{background:var(--brand); border-color:var(--brand); color:#fff}
+.btn.pri:hover{background:var(--brand-dark); color:#fff}
+.btn.ok{background:var(--ok); border-color:var(--ok); color:#fff}
+.btn.ok:hover{filter:brightness(.94); color:#fff}
+.btn.ghost{border-color:transparent; background:transparent; color:var(--gray)}
+.btn.ghost:hover{background:var(--brand-soft); color:var(--brand-ink)}
+.btn.xs{padding:4px 8px; font-size:11px; border-radius:7px}
+.btn.icon{padding:5px; width:27px; height:27px; justify-content:center}
+.btn.danger:hover{border-color:var(--danger); color:var(--danger); background:var(--danger-soft)}
+
+
+/* ============ LAYOUT GRIDS ============ */
+.g-today{display:grid; grid-template-columns:minmax(0,1.5fr) minmax(0,1fr); gap:12px; align-items:start}
+@media (max-width:1180px){ .g-today{grid-template-columns:1fr} }
+
+/* ============ QUICK CAPTURE ============ */
+
+/* ============ FOCUS NOW ============ */
+/* Focus-now card — light yellow, the same paper as the notes */
+.focus{
+  border-radius:12px; padding:12px 14px; color:var(--ink); position:relative; overflow:hidden;
+  background:#fffaea; border:1px solid #f0dfa4; box-shadow:var(--shadow);
+}
+[data-theme="dark"] .focus{background:#262110; border-color:#4a411f}
+/* title on the left, countdown + time in the top-right corner */
+.focus .fhead{display:flex; align-items:flex-start; gap:12px}
+.focus .fhead h3{flex:1; min-width:0; margin:0 0 2px}
+.focus .fwhen{display:flex; align-items:center; gap:7px; flex:none; padding-top:1px}
+.focus .ftime{font-size:11.5px; font-weight:700; color:var(--ink2); font-variant-numeric:tabular-nums}
+.focus h3{font-size:16px; font-weight:700; line-height:1.3}
+.focus .facts{display:flex; gap:6px; margin-top:11px; flex-wrap:wrap}
+.countdown{font-size:11px; font-weight:700; background:rgba(217,119,6,.15); color:var(--warn); border:1px solid rgba(217,119,6,.35); border-radius:999px; padding:3px 9px; display:inline-flex; align-items:center; gap:5px}
+.focus .plist li{color:var(--ink2)}
+.focus .plist li::before{background:#c79a1a}
+
+/* ============ TASK ROWS + BULLETS ============ */
+.tlist{display:flex; flex-direction:column; gap:8px}
+.trow{
+  border:1px solid var(--line); border-radius:11px; background:var(--card); padding:9px 11px;
+  display:flex; gap:10px; align-items:flex-start; transition:.15s; position:relative; overflow:hidden;
+}
+.trow::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--line)}
+.trow.p-high::before{background:var(--warn)}
+.trow:hover{border-color:var(--brand-soft2); box-shadow:var(--shadow-md); transform:translateY(-1px)}
+.trow.is-done{opacity:.62}
+.trow.is-done .tt{text-decoration:line-through; color:var(--gray)}
+/* flat amber wash, no left-to-right fade */
+.trow.overdue{background:rgba(217,119,6,.07)}
+[data-theme="dark"] .trow.overdue{background:rgba(251,191,36,.09)}
+.cbox{
+  width:19px; height:19px; border-radius:6px; border:1.8px solid var(--line); flex:none; margin-top:1px;
+  display:grid; place-items:center; color:transparent; transition:.15s; background:var(--card);
+}
+.cbox:hover{border-color:var(--ok); color:var(--ok)}
+.cbox.on{background:var(--ok); border-color:var(--ok); color:#fff}
+.tbody{flex:1; min-width:0}
+.tt{font-size:13px; font-weight:600; line-height:1.35; word-break:break-word}
+.tacts{display:flex; gap:4px; align-items:center; opacity:0; transition:.15s}
+.trow:hover .tacts{opacity:1}
+@media (max-width:820px){ .tacts{opacity:1} }
+
+/* the bullet checklist — "task ke andar proper bullet points" */
+.blist{list-style:none; margin:8px 0 0; padding:0 0 0 2px; display:flex; flex-direction:column; gap:3px}
+.blist li{display:flex; align-items:flex-start; gap:7px; font-size:12px; color:var(--ink2); line-height:1.45; padding:2px 4px; border-radius:6px; transition:.12s}
+.blist li:hover{background:var(--line2)}
+/* circle points, to match the circle bullet you type in the drawer */
+.bdot{
+  width:15px; height:15px; border-radius:50%; border:1.5px solid var(--line); flex:none; margin-top:2px;
+  display:grid; place-items:center; color:transparent; background:var(--card); transition:.15s;
+}
+.bdot:hover{border-color:var(--brand); color:var(--brand)}
+.bdot.on{background:var(--brand); border-color:var(--brand); color:#fff}
+.blist li.done span.bt{text-decoration:line-through; color:var(--gray2)}
+.bt{flex:1; text-align:left; white-space:pre-wrap}
+/* static bullets (read-only points, e.g. notes / suggestions) */
+.plist{list-style:none; margin:6px 0 0; padding:0; display:flex; flex-direction:column; gap:3px}
+.plist li{position:relative; padding-left:14px; font-size:12px; color:var(--ink2); line-height:1.5; white-space:pre-wrap}
+.plist li::before{content:""; position:absolute; left:2px; top:7px; width:5px; height:5px; border-radius:50%; background:var(--brand); opacity:.75}
+.plist.warnb li::before{background:var(--warn)}
+
+/* ============ TIME SLOTS — plain rows, no boxes; a dotted rule carries
+   the eye from the time across to the count ============ */
+.tslot{background:transparent; border:none}
+.tslot-h{display:flex; align-items:center; gap:10px; width:100%; padding:8px 4px; border-radius:8px; transition:.15s}
+.tslot-h:hover{background:var(--brand-soft)}
+.tslot-time{
+  font-size:12.5px; font-weight:700; letter-spacing:-.2px; min-width:70px; text-align:left;
+  font-variant-numeric:tabular-nums; color:var(--ink);
+}
+.tslot-line{flex:1; height:0; border-top:1.5px dotted rgba(107,114,128,.35)}
+[data-theme="dark"] .tslot-line{border-top-color:rgba(168,176,191,.35)}
+.tslot .cnt2{font-size:10px; font-weight:700; border-radius:999px; padding:1px 7px; background:var(--brand-soft); color:var(--brand-ink); display:inline-flex; align-items:center; gap:3px}
+.tslot .cnt2.ok{background:var(--ok-soft); color:var(--ok)}
+.tslot .chev{display:grid; place-items:center; color:var(--gray2); transition:transform .18s}
+.tslot.open .chev{transform:rotate(180deg)}
+.tslot.open .tslot-time{color:var(--brand-ink)}
+.tslot.late .tslot-time{color:var(--warn)}
+.tslot.late .tslot-line{border-top-color:rgba(217,119,6,.45)}
+.tslot.late .cnt2{background:var(--warn-soft); color:var(--warn)}
+.tslot.alldone .tslot-time{color:var(--gray2)}
+.tslot.alldone .tslot-line{border-top-color:rgba(107,114,128,.22)}
+/* the opened item just sits under its time — still no box around it, and its
+   edit / snooze / delete buttons stay visible rather than waiting for a hover */
+.tslot-b{padding:2px 0 9px 4px; border:none; background:transparent}
+.tslot-b .tacts{opacity:1}
+/* the live "now" marker sits between two times */
+.nowline{display:flex; align-items:center; gap:8px; margin:3px 0 5px; padding:0 4px}
+.nowline .lbl{font-size:9.5px; font-weight:800; color:var(--brand-ink); letter-spacing:.4px}
+.nowline .bar{flex:1; height:2px; border-radius:2px; background:linear-gradient(90deg,var(--brand),transparent)}
+
+/* ============ COLLAPSIBLE FOLDS inside the plan box ============ */
+.fold{border:1px solid var(--line); border-radius:10px; margin:11px 13px 0; overflow:hidden; background:var(--card)}
+.fold-h{display:flex; align-items:center; gap:7px; width:100%; padding:8px 11px; font-size:12px; font-weight:700; background:var(--card2); transition:.15s}
+.fold-h:hover{background:var(--brand-soft); color:var(--brand-ink)}
+.fold-h .cnt2{font-size:10px; font-weight:700; border-radius:999px; padding:1px 7px; background:var(--line2); color:var(--gray)}
+.fold-h .chev{margin-left:auto; display:grid; place-items:center; color:var(--gray2); transition:transform .18s}
+.fold.open .fold-h .chev{transform:rotate(180deg)}
+.fold-b{padding:10px 11px; border-top:1px solid var(--line)}
+.fold.amber .fold-h{background:var(--warn-soft); color:var(--warn)}
+.fold.amber .fold-h .cnt2{background:rgba(217,119,6,.18); color:var(--warn)}
+.fold.amber{border-color:rgba(217,119,6,.3)}
+/* Overdue reads in ONE amber tone — no mixed chip colours inside it */
+.fold.amber .fold-b{background:rgba(217,119,6,.05)}
+.fold.amber .trow{background:var(--card); border-color:rgba(217,119,6,.28)}
+.fold.amber .trow::before{background:var(--warn)}
+.fold.amber .trow:hover{border-color:var(--warn)}
+.fold.amber .cbox:hover,.fold.amber .bdot:hover{border-color:var(--warn); color:var(--warn)}
+.fold.amber .bdot.on{background:var(--warn); border-color:var(--warn); color:#fff}
+.fold.amber .blist li:hover{background:rgba(217,119,6,.08)}
+
+/* ============ CALENDAR (compact, sits beside the plan) ============ */
+/* exactly the same light yellow as the Focus card and the notes */
+.calcard{background:#fffaea; border-color:#f0dfa4}
+[data-theme="dark"] .calcard{background:#2e2814; border-color:#4a411f}
+.calcard .calbar,.calcard .legend{border-color:#efdfae}
+[data-theme="dark"] .calcard .calbar,[data-theme="dark"] .calcard .legend{border-color:#4a411f}
+.calcard .navbtn,.calcard .btn{background:#fff; border-color:#efdfae}
+[data-theme="dark"] .calcard .navbtn,[data-theme="dark"] .calcard .btn{background:rgba(255,255,255,.06); border-color:#4a411f}
+/* day tiles: pale yellow on the deeper yellow card, weekends a shade warmer.
+   Nothing is white except the states you interact with. */
+.calcard .cell{background:#fffdf6; border-color:#f2e4bd}
+.calcard .cell.we{background:#fdf2d6; border-color:#eeddad}   /* Sunday */
+.calcard .cell.out{background:transparent; border-color:transparent}
+.calcard .dnum{color:#6a5827}
+.calcard .cell.out .dnum{color:#b9a875}
+.calcard .cell:hover{background:#fff; border-color:var(--brand); box-shadow:var(--shadow)}
+.calcard .cell.late .dnum{color:var(--warn)}
+/* TODAY is unmistakable: indigo-tinted tile, indigo border and a filled round
+   number. SELECTED (when it is a different day) is the white tile with a ring. */
+.calcard .cell.today{background:var(--brand-soft); border-color:var(--brand); border-width:1.5px}
+.calcard .cell.today .dnum{
+  background:var(--brand); color:#fff; font-weight:800; border-radius:50%;
+  width:23px; height:23px; box-shadow:0 2px 6px rgba(47,49,146,.32);
+}
+.calcard .cell.today .dots i{box-shadow:0 0 0 1.5px var(--brand-soft)}
+.calcard .cell.sel:not(.today){background:#fff; border-color:var(--brand); box-shadow:0 0 0 2px var(--brand-soft2)}
+.calcard .cell.today.sel{box-shadow:0 0 0 3px var(--brand-soft2)}
+.calcard .dow div{color:#9c8859}
+.calcard .dow div.we{color:#8a6f2a}
+[data-theme="dark"] .calcard .cell{background:rgba(255,255,255,.04); border-color:#463d1d}
+[data-theme="dark"] .calcard .cell.we{background:rgba(255,255,255,.02); border-color:#3d3519}
+[data-theme="dark"] .calcard .dnum{color:#d9cfae}
+[data-theme="dark"] .calcard .cell:hover,[data-theme="dark"] .calcard .cell.sel{background:rgba(255,255,255,.1)}
+[data-theme="dark"] .calcard .cell.today{background:var(--brand-soft); border-color:var(--brand)}
+[data-theme="dark"] .calcard .dow div{color:#a4926a}
+.calbar{display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:9px 11px; border-bottom:1px solid var(--line)}
+/* centred in a tight column: the arrows sit right beside the month name and
+   still don't jump when the name gets longer (September vs May) */
+.mtitle{font-size:13.5px; font-weight:700; min-width:112px; text-align:center; letter-spacing:-.2px}
+.navbtn{width:27px; height:27px; border-radius:8px; border:1px solid var(--line); display:grid; place-items:center; color:var(--gray); background:var(--card); transition:.15s}
+.navbtn:hover{border-color:var(--brand); color:var(--brand-ink); background:var(--brand-soft)}
+.dow{display:grid; grid-template-columns:repeat(7,1fr); gap:4px; padding:9px 11px 0}
+.dow div{font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--gray2); text-align:center; padding-bottom:4px}
+.dow div.we{color:var(--brand-ink)}
+.cgrid{display:grid; grid-template-columns:repeat(7,1fr); gap:4px; padding:0 11px 11px}
+.cell{
+  min-height:42px; border:1px solid transparent; border-radius:9px; background:var(--card2);
+  padding:4px 2px 3px; display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+  gap:3px; transition:.13s;
+}
+.cell:hover{border-color:var(--brand); background:var(--brand-soft)}
+.cell.out{opacity:.34}
+.cell.we{background:var(--line2)}
+.cell.today .dnum{background:var(--brand); color:#fff}
+.cell.sel{border-color:var(--brand); background:var(--brand-soft); box-shadow:0 0 0 2px var(--brand-soft2)}
+.cell.late .dnum{color:var(--warn)}
+.cell.late.today .dnum{color:#fff}
+.dnum{font-size:12px; font-weight:600; min-width:22px; height:22px; border-radius:7px; display:grid; place-items:center; color:var(--ink2)}
+.dots{display:flex; gap:3px; height:5px; align-items:center}
+.dots i{width:5px; height:5px; border-radius:50%; display:block}
+.d-rem{background:var(--warn)} .d-note{background:var(--violet)}
+.legend{display:flex; flex-wrap:wrap; gap:11px; padding:8px 12px; border-top:1px solid var(--line); font-size:10.5px; color:var(--gray)}
+.legend span{display:inline-flex; align-items:center; gap:5px}
+.legend i{width:8px; height:8px; border-radius:50%; display:block}
+
+/* ============ REMINDER CARDS ============ */
+.rcard{border:1px solid var(--line); border-radius:11px; padding:9px 11px; display:flex; gap:10px; align-items:flex-start; transition:.15s; background:var(--card)}
+.rcard:hover{border-color:var(--warn); box-shadow:var(--shadow-md)}
+.rcard.fired{background:rgba(217,119,6,.07)}
+[data-theme="dark"] .rcard.fired{background:rgba(251,191,36,.09)}
+.rico{width:32px; height:32px; border-radius:9px; display:grid; place-items:center; flex:none; background:var(--warn-soft); color:var(--warn)}
+.rcard.is-done .rico{background:var(--ok-soft); color:var(--ok)}
+/* bolder than plain text, still short of the old 14px/800 headline */
+.rtime{font-size:13px; font-weight:700; letter-spacing:-.15px; line-height:1.2; color:var(--ink)}
+.rt2{font-size:9.5px; font-weight:600; color:var(--gray2); text-transform:uppercase; letter-spacing:.35px}
+.rgut{width:58px; text-align:right; flex:none; padding-top:3px}
+.snooze{display:flex; gap:4px; flex-wrap:wrap; margin-top:7px}
+
+/* ============ SUGGESTION CARDS ============ */
+.sug{border:1px dashed var(--violet); border-radius:11px; padding:9px 11px; background:var(--violet-soft); display:flex; gap:9px; align-items:flex-start}
+.sug .sico{width:29px; height:29px; border-radius:8px; background:var(--card); color:var(--violet); display:grid; place-items:center; flex:none; border:1px solid rgba(124,58,237,.25)}
+.sug .st{font-size:12.5px; font-weight:700; line-height:1.35}
+.sug .ss{font-size:11px; color:var(--gray); margin-top:1px}
+/* :not(.pri) matters — a plain `.sug .btn` beats `.btn.pri` on specificity and
+   turned the primary buttons white-on-white */
+.sug .btn:not(.pri){background:var(--card)}
+
+/* ============ NOTES — all light yellow ============ */
+.notes{display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:11px}
+.note{
+  border-radius:12px; padding:11px 12px; box-shadow:var(--shadow); position:relative; transition:.15s;
+  display:flex; flex-direction:column; gap:6px;
+  background:#fffaea; border:1px solid #f2e2ac;
+}
+[data-theme="dark"] .note{background:#262110; border-color:#4a411f}
+.note:hover{transform:translateY(-2px); box-shadow:var(--shadow-md)}
+.note .nt{font-size:13px; font-weight:700; display:flex; align-items:flex-start; gap:6px}
+.note .nf{margin-top:auto; padding-top:7px; border-top:1px dashed #eadfba; display:flex; align-items:center; gap:6px; font-size:10.5px; color:var(--gray)}
+[data-theme="dark"] .note .nf{border-top-color:#4a411f}
+.note .plist li::before{background:#c79a1a}
+.pin{position:absolute; right:8px; top:8px; color:var(--gray2); transition:.15s}
+.pin:hover,.pin.on{color:var(--orange)}
+
+/* ============ EMPTY / MISC ============ */
+.empty{text-align:center; padding:24px 14px; color:var(--gray2)}
+.empty .eico{width:44px; height:44px; border-radius:13px; background:var(--line2); color:var(--gray2); display:grid; place-items:center; margin:0 auto 9px}
+.empty p{margin:0; font-size:12.5px}
+.toolbar{display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:9px 11px; border-bottom:1px solid var(--line); background:var(--card2); border-radius:12px 12px 0 0}
+
+/* ============ SIDE DRAWER (slides in from the right) ============ */
+.ovl{position:fixed; inset:0; background:rgba(17,24,39,.45); backdrop-filter:blur(2px); display:flex; justify-content:flex-end; z-index:60; animation:fade .15s ease}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes slidein{from{transform:translateX(100%)}to{transform:none}}
+.modal{
+  width:100%; max-width:460px; height:100%; background:var(--card);
+  box-shadow:var(--shadow-lg); border-left:1px solid var(--line);
+  display:flex; flex-direction:column; animation:slidein .22s cubic-bezier(.22,.8,.3,1);
+}
+@media (max-width:520px){ .modal{max-width:100%} }
+.modal-h{padding:13px 15px; color:#fff; background:linear-gradient(112deg,#2f3192,#23255f); display:flex; align-items:center; gap:10px}
+.modal-h h3{margin:0; font-size:15px; font-weight:700}
+.modal-h .sub{font-size:10.5px; color:rgba(255,255,255,.7)}
+.modal-h .mico{width:32px; height:32px; border-radius:9px; background:rgba(255,255,255,.16); display:grid; place-items:center; flex:none}
+.modal-b{padding:12px 15px; overflow:auto; flex:1; display:flex; flex-direction:column; min-height:0}
+.modal-f{padding:11px 15px; border-top:1px solid var(--line); display:flex; gap:8px; align-items:center; background:var(--card2)}
+.fld{margin-bottom:8px; flex:none}
+.fld label{display:block; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--gray); margin-bottom:3px}
+.fgrid{display:grid; grid-template-columns:1fr 1fr; gap:9px}
+/* the small metadata fields stay tight so Title and Bullet points get the room */
+.modal-b input,.modal-b select{padding:6px 9px; font-size:12.5px}
+/* ---- time picker: three plain dropdowns ---- */
+.timepick{display:flex; align-items:center; gap:5px}
+.timepick select{
+  width:auto; flex:none; padding:6px 7px; font-weight:600; text-align:center;
+  font-variant-numeric:tabular-nums; min-width:58px;
+}
+.tsep{font-weight:800; color:var(--gray2)}
+
+/* the one writing box takes whatever height is left in the drawer */
+.fld.fill{flex:1; min-height:0; display:flex; flex-direction:column; margin-bottom:0}
+textarea.body{min-height:170px; line-height:1.7; font-size:13.5px; overflow:hidden}
+.bodyhint{font-size:10.5px; color:var(--gray2); margin-top:6px}
+.bodyhint b{color:var(--brand-ink); font-weight:600}
+/* every text field in the modals is an auto-growing textarea */
+textarea.grow{
+  resize:none; overflow:hidden; min-height:34px; line-height:1.45; padding:7px 10px;
+  font:inherit; display:block;
+}
+.toggle{width:38px; height:21px; border-radius:999px; background:var(--line); position:relative; transition:.18s; flex:none}
+.toggle::after{content:""; position:absolute; top:2px; left:2px; width:17px; height:17px; border-radius:50%; background:#fff; transition:.18s; box-shadow:0 1px 3px rgba(0,0,0,.28)}
+.toggle.on{background:var(--ok)}
+.toggle.on::after{transform:translateX(17px)}
+
+/* ============ TOAST ============ */
+.toasts{position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:7px; z-index:90}
+.toast{
+  background:var(--card); border:1px solid var(--line); border-left:3px solid var(--ok);
+  border-radius:9px; padding:9px 12px; box-shadow:var(--shadow-lg); font-size:12px; font-weight:600;
+  display:flex; align-items:center; gap:8px; min-width:225px; animation:slide .2s ease;
+}
+@keyframes slide{from{opacity:0; transform:translateX(18px)}to{opacity:1; transform:none}}
+.toast svg.ic{color:var(--ok)}
+.toast.warn{border-left-color:var(--warn)} .toast.warn svg.ic{color:var(--warn)}
+.toast.info{border-left-color:var(--brand)} .toast.info svg.ic{color:var(--brand-ink)}
+.toast.err{border-left-color:var(--danger)} .toast.err svg.ic{color:var(--danger)}
+
+/* pop-up reminder banner (the "assistant nudge") — light yellow, the same
+   paper as the notes and the Focus-now card */
+.nudge{
+  position:fixed; right:16px; top:16px; z-index:95; width:318px; border-radius:13px; overflow:hidden;
+  background:#fffaea; border:1px solid #f2e2ac;
+  box-shadow:var(--shadow-lg); animation:slide .22s ease;
+}
+[data-theme="dark"] .nudge{background:#262110; border-color:#4a411f}
+.nudge .nh{
+  padding:9px 12px; background:rgba(217,119,6,.13); color:#a4700e; border-bottom:1px solid #f2e2ac;
+  display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700;
+}
+[data-theme="dark"] .nudge .nh{color:var(--warn); border-bottom-color:#4a411f}
+.nudge .nh button{color:inherit; opacity:.75; display:grid; place-items:center}
+.nudge .nh button:hover{opacity:1}
+.nudge .nb{padding:11px 12px}
+</style>
+
+<!-- ============ ICON SPRITE (feather-style line icons — no emoji) ============ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+ <defs>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M4.2 7.5l2.1 2.1M17.7 14.4l2.1 2.1M3 12h3M18 12h3M4.2 16.5l2.1-2.1M17.7 9.6l2.1-2.1"/><circle cx="12" cy="12" r="3.2"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-checksq" viewBox="0 0 24 24"><path d="m9 11 3 3 8-8"/><path d="M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="M12 7v5.2l3.4 2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="m17 1 4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="m7 23-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.6"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10l6-6V5a2 2 0 0 0-2-2z"/><path d="M15 21v-6h6"/></symbol>
+  <symbol id="i-trend" viewBox="0 0 24 24"><path d="m23 6-9.5 9.5-5-5L1 18"/><path d="M17 6h6v6"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a2 2 0 0 1 2-2 2 2 0 0 0-2-2H9a2 2 0 0 0-2 2 2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-sunrise" viewBox="0 0 24 24"><path d="M17 18a5 5 0 0 0-10 0"/><path d="M12 2v7M4.2 10.2l1.4 1.4M1 18h2M21 18h2M18.4 11.6l1.4-1.4M23 22H1"/><path d="m8 6 4-4 4 4"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+ </defs>
+</svg>
+
+<div class="wrap">
+
+  <!-- ============================ HERO ============================ -->
+  <div class="hero">
+    <div class="hrow">
+      <div class="icobox"><svg class="ic xl"><use href="#i-spark"/></svg></div>
+      <div class="htitle">
+        <h1>Personal Assistant</h1>
+        <div class="sub" id="heroSub">Your day, your reminders, your to-dos — all in one place</div>
+      </div>
+      <div class="tabs" id="tabs">
+        <button class="tab on" data-v="today"><svg class="ic sm"><use href="#i-sunrise"/></svg> Today <span class="cnt" id="c-today">0</span></button>
+        <button class="tab" data-v="notes"><svg class="ic sm"><use href="#i-note"/></svg> Notes</button>
+      </div>
+      <button class="iconbtn" id="themeBtn" title="Light / dark theme"><svg class="ic"><use href="#i-moon"/></svg></button>
+      <button class="hbtn solid" id="addBtn"><svg class="ic"><use href="#i-plus"/></svg> New Item</button>
+    </div>
+  </div>
+
+  <!-- ============================ TODAY (plan + calendar in one page) ============================ -->
+  <section id="v-today">
+    <div class="g-today">
+      <!-- ---- left: focus now, then the day's plan ---- -->
+      <div>
+        <div id="focusMount"></div>
+
+        <!-- the plan box — overdue + next reminders sit inside it, collapsed -->
+        <div class="card" style="margin-top:12px">
+          <div class="card-h">
+            <svg class="ic"><use href="#i-clock"/></svg>
+            <span id="planTitle">Today's plan</span>
+            <span class="hnote" id="planNote"></span>
+            <button class="btn xs pri" id="planAdd"><svg class="ic sm"><use href="#i-plus"/></svg> Add</button>
+          </div>
+          <div id="folds"></div>
+          <div class="card-b" id="timeline"></div>
+        </div>
+      </div>
+
+      <!-- ---- right: the calendar itself, then suggestions ---- -->
+      <div>
+        <div class="card calcard">
+          <div class="calbar">
+            <button class="navbtn" id="mPrev"><svg class="ic"><use href="#i-left"/></svg></button>
+            <div class="mtitle" id="mTitle"></div>
+            <button class="navbtn" id="mNext"><svg class="ic"><use href="#i-right"/></svg></button>
+            <div class="spacer"></div>
+            <button class="btn xs" id="mToday"><svg class="ic sm"><use href="#i-target"/></svg> Today</button>
+          </div>
+          <div class="dow" id="dow"></div>
+          <div class="cgrid" id="cgrid"></div>
+          <div class="legend">
+            <span><i style="background:#d97706"></i> Reminder</span>
+            <span><i style="background:#7c3aed"></i> Note</span>
+            <span style="margin-left:auto" class="muted">Click a date to open its plan</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h">
+            <svg class="ic"><use href="#i-pulse"/></svg> Suggested for you
+            <span class="hnote">from your other modules</span>
+          </div>
+          <div class="card-b" id="sugList"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ NOTES ============================ -->
+  <section id="v-notes" class="hide">
+    <div class="card">
+      <div class="toolbar">
+        <svg class="ic" style="color:var(--brand-ink)"><use href="#i-note"/></svg>
+        <b style="font-size:12.5px">Notes</b>
+        <span class="muted" style="font-size:11px">— pin what you must not forget</span>
+        <div class="spacer"></div>
+        <button class="btn pri" id="addNoteBtn"><svg class="ic sm"><use href="#i-plus"/></svg> New note</button>
+      </div>
+      <div class="card-b"><div class="notes" id="noteList"></div></div>
+    </div>
+  </section>
+
+</div>
+
+<div id="modalRoot"></div>
+<div id="nudgeRoot"></div>
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* ================================================================
+   Personal Assistant — prototype logic
+   Two pages only: TODAY (plan + calendar + suggestions) and NOTES.
+   Everything runs off ONE array (ITEMS); a change mutates it and
+   calls render() — the same shape a React page would take.
+   ================================================================ */
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const ic = (n, c = '') => `<svg class="ic ${c}"><use href="#i-${n}"/></svg>`;
+const esc = s => String(s ?? '').replace(/[&<>"]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+
+/* ---------- dates (naive IST, same convention as the ERP) ---------- */
+const NOW = new Date();
+const pad = n => String(n).padStart(2, '0');
+const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const shift = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const TODAY = iso(NOW);
+const D = n => iso(shift(NOW, n));
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DOWS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const DOWL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const mins = t => t ? (+t.slice(0, 2) * 60 + +t.slice(3, 5)) : 24 * 60 + 1;  // no time = end of day
+const NOWM = NOW.getHours() * 60 + NOW.getMinutes();
+const byTime = (a, b) => mins(a.time) - mins(b.time);
+const byDate = (a, b) => a.date.localeCompare(b.date) || byTime(a, b);
+function fmt(t) {
+  if (!t) return '';
+  let h = +t.slice(0, 2); const m = t.slice(3, 5);
+  const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+  return `${h}:${m} ${ap}`;
+}
+function relDay(dt) {
+  if (dt === TODAY) return 'Today';
+  if (dt === D(1)) return 'Tomorrow';
+  if (dt === D(-1)) return 'Yesterday';
+  const d = new Date(dt + 'T00:00:00');
+  return `${DOWS[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}`;
+}
+const isOver = it => !it.done && (it.date < TODAY || (it.date === TODAY && it.time && mins(it.time) < NOWM));
+
+/* ---------- the sample day-book ---------- */
+let SEQ = 100;
+const mk = o => ({ id: ++SEQ, type: 'rem', prio: 'med', done: false, bullets: [], tags: [], repeat: '', ...o });
+const B = (...t) => t.map(x => typeof x === 'string' ? { t: x, done: false } : x);
+
+let ITEMS = [
+  /* ---- running late ---- */
+  mk({ type:'rem', date:D(-3), time:'11:00', prio:'high', cat:'PMS / AOP', src:'AOP Master',
+       title:'Sign off Nashik AOP revision (labour head)', tags:['aop','nashik'],
+       bullets:[{t:'Check labour revenue gap vs AOP',done:true},{t:'Confirm SE head-count with BM',done:false},{t:'Send revised sheet to COO for L5',done:false}] }),
+  mk({ type:'rem', date:D(-2), time:'10:30', prio:'high', cat:'Approval', src:'Note For Approval',
+       title:'L5 approval pending — Mumbai tool purchase ₹4.2L', tags:['l5','mumbai'],
+       bullets:B('Read HOD remark on quantity','Compare with last year rate') }),
+  mk({ type:'rem', date:D(-1), time:'16:00', prio:'med', cat:'Expense', src:'Expense',
+       title:'Reply to Aurangabad expense escalation', tags:['imprest'],
+       bullets:B('Ask BM for the missing bill','Decide on the ₹18k TADA gap') }),
+
+  /* ---- today ---- */
+  mk({ type:'rem', date:TODAY, time:'09:00', prio:'med', cat:'Import', repeat:'daily', done:true,
+       title:'Daily import check — PMS labour file', tags:['import'],
+       bullets:[{t:'Check the file landed',done:true},{t:'Verify the dedupe hash',done:true}] }),
+  mk({ type:'rem', date:TODAY, time:'09:30', prio:'low', cat:'Personal', done:true,
+       title:'Morning inbox sweep', bullets:B('Clear approval mails','Flag anything from COO') }),
+  mk({ type:'rem', date:TODAY, time:'11:30', prio:'high', cat:'MOM', src:'MOM Tracking',
+       title:'Branch review call — Pune & PCMC', tags:['review'],
+       bullets:B('Open SR ageing over 30 days','AMC renewal pipeline for September','Two SE resignations — backfill plan','Carry last MOM action points forward') }),
+  mk({ type:'rem', date:TODAY, time:'12:30', prio:'high', cat:'Welcome Letter', src:'Welcome Letter',
+       title:'Release Welcome Letters for 14 CC customers', tags:['cc','letters'],
+       bullets:[{t:'Verify customer emails in the import',done:true},{t:'Check branch signatory for Nagpur',done:false},{t:'Send and mark dispatch date',done:false}] }),
+  mk({ type:'rem', date:TODAY, time:'15:00', prio:'med', cat:'SR Allocation',
+       title:'Nudge Nagpur BM — 9 SRs still unallocated', tags:['nagpur'],
+       bullets:B('Send him the pending SR list','Ask for allocation before evening','Copy the branch admin') }),
+  mk({ type:'rem', date:TODAY, time:'16:00', prio:'med', cat:'Training', src:'Training Report',
+       title:'Review Training Report — 6 SEs pending skill update', tags:['training'],
+       bullets:B('Confirm the 2 leavers stay listed','Approve typed override for 4 rows') }),
+  mk({ type:'rem', date:TODAY, time:'17:30', prio:'high', cat:'MOM',
+       title:'COO weekly sync', tags:['coo'],
+       bullets:B('August labour revenue vs AOP','Welcome-letter rollout status','Personal Assistant module demo') }),
+  mk({ type:'rem', date:TODAY, time:'18:30', prio:'low', cat:'Campaign',
+       title:'Sign off tomorrow’s campaign call list', tags:['campaign'],
+       bullets:B('Check the customer count per SE','Drop the ones called last week') }),
+  mk({ type:'note', date:TODAY, prio:'low', cat:'Personal', pinned:true,
+       title:'Follow-ups I must not drop',
+       bullets:B('Pune BM — AMC renewal numbers','Nagpur signatory letter','Ask HR for the SE UID master update','Confirm September AOP lock date') }),
+
+  /* ---- ahead ---- */
+  mk({ type:'rem', date:D(1), time:'10:00', prio:'high', cat:'PMS / AOP', src:'Sales & Labour Report',
+       title:'Close August Sales & Labour report', tags:['august','report'],
+       bullets:B('Re-upload the corrected part-sale file','Verify SR-head mapping for 3 new types','Cross-check branch totals with finance','Publish to the 3 rights admins') }),
+  mk({ type:'rem', date:D(1), time:'16:00', prio:'high', cat:'Customer',
+       title:'Call Pune BM about AMC renewal', tags:['amc'],
+       bullets:B('Check last quotation','Share the AOP gap sheet') }),
+  mk({ type:'rem', date:D(2), time:'11:00', prio:'med', cat:'Purchase',
+       title:'Vendor meeting — spare parts pricing', bullets:B('Last 6-month consumption','Ask for slab discount') }),
+  mk({ type:'rem', date:D(2), time:'15:00', prio:'med', cat:'Import',
+       title:'Verify EFSR import column mapping', tags:['efsr'],
+       bullets:B('Match critical columns','Test one file end-to-end') }),
+  mk({ type:'rem', date:D(3), time:'09:30', prio:'med', cat:'Personal', repeat:'monthly',
+       title:'Salary input cut-off — remind HR',
+       bullets:B('Share the attendance sheet','Confirm the new joiners','Flag the two exits') }),
+  mk({ type:'rem', date:D(4), time:'12:00', prio:'med', cat:'Approval',
+       title:'Quarterly authority-matrix review', tags:['matrix'],
+       bullets:B('Re-check L4 / L5 per branch group','Remove the two exited approvers','Confirm merged branch rows') }),
+  mk({ type:'rem', date:D(5), time:'11:00', prio:'low', cat:'Maintenance',
+       title:'Maintenance schedule audit — 3 branches',
+       bullets:B('Pune, Nashik, Nagpur','Check the missed check dates','Ask BMs for a catch-up plan') }),
+  mk({ type:'rem', date:D(6), time:'10:00', prio:'med', cat:'MOM',
+       title:'MOM follow-up — action point review', bullets:B('Pending points older than 15 days','Owner-wise closure %') }),
+  mk({ type:'rem', date:D(7), time:'09:00', prio:'high', cat:'PMS / AOP', repeat:'monthly',
+       title:'Monthly AOP vs actual review',
+       bullets:B('Pull branch-wise labour actuals','Compare against the AOP','List the three worst gaps') }),
+  mk({ type:'rem', date:D(9), time:'14:00', prio:'med', cat:'Customer',
+       title:'Bulk customer export — data cleanup pass', bullets:B('Blank mobile numbers','Duplicate SR numbers') }),
+  mk({ type:'rem', date:D(12), time:'11:00', prio:'low', cat:'Knowledge Book',
+       title:'Upload PDI + Letter Send training decks',
+       bullets:B('Final review of both decks','Upload and tag by module') }),
+  mk({ type:'rem', date:D(14), time:'15:30', prio:'high', cat:'MOM', title:'Half-monthly branch admin call',
+       bullets:B('Agenda from the last MOM','Pending action points per branch','Next month targets') }),
+
+  /* ---- already closed ---- */
+  mk({ type:'rem', date:D(-6), time:'11:00', prio:'med', cat:'PMS / AOP', done:true, title:'Publish EPR 6.0 to branch admins',
+       bullets:[{t:'Freeze the SE UID master',done:true},{t:'Share the link with the 3 admins',done:true}] }),
+  mk({ type:'rem', date:D(-5), time:'12:00', prio:'low', cat:'Expense', done:true, title:'Approve Nashik imprest',
+       bullets:[{t:'Check the last settlement',done:true}] }),
+  mk({ type:'rem', date:D(-4), time:'10:00', prio:'high', cat:'Approval', done:true, title:'Clear 11 pending L4 notes',
+       bullets:[{t:'Sort by ageing',done:true},{t:'Send two back for remarks',done:true}] }),
+  mk({ type:'rem', date:D(-2), time:'17:00', prio:'med', cat:'Campaign', done:true, title:'Approve September campaign master',
+       bullets:[{t:'Check the branch split',done:true},{t:'Lock the call script',done:true}] }),
+
+  /* ---- notes ---- */
+  mk({ type:'note', date:D(-1), prio:'low', cat:'PMS / AOP',
+       title:'Service penetration — Q3 push ideas',
+       bullets:B('Target the 2019–2021 commissioned base','Tie the drive to the AMC renewal calendar','One SE per 40 customers, branch-wise') }),
+  mk({ type:'note', date:D(0), prio:'low', cat:'MOM',
+       title:'COO sync — talking points',
+       bullets:B('PMS access rights: 3 admins only','Welcome Letter goes live next Monday','Training override table needs a policy line') }),
+  mk({ type:'note', date:D(3), prio:'low', cat:'Personal',
+       title:'Read / decide later',
+       bullets:B('Dark-theme rollout for the letter module','Do we archive FY24 imports?') }),
+];
+
+/* What the assistant offers from the other modules. Two kinds:
+   - with `task`  → can be added to the day AND opened
+   - only `page`  → just a shortcut into that report                     */
+const SUGGESTIONS = [
+  { id:'s1', icon:'shield', title:'6 approval notes are waiting at your level', sub:'Note For Approval · oldest is 4 days old',
+    page:{ label:'Open Note For Approval', to:'/approval-application' },
+    task:{ title:'Clear 6 pending approval notes', cat:'Approval', prio:'high', time:'10:00',
+           bullets:B('Sort by ageing, oldest first','Reject the two without HOD remark','Escalate the ₹4.2L tool purchase') } },
+  { id:'s2', icon:'inbox', title:'3 MOM action points cross their due date today', sub:'MOM Tracking · Pune, Nashik, Nagpur',
+    page:{ label:'Open MOM Tracking', to:'/mom-tracking' },
+    task:{ title:'Close 3 overdue MOM action points', cat:'MOM', prio:'high', time:'14:00',
+           bullets:B('Pune — SR ageing plan','Nashik — SE training slot','Nagpur — branch signatory') } },
+  { id:'s3', icon:'mail', title:'14 Welcome Letters are still unsent', sub:'Welcome Letter · from the last Open SR import',
+    page:{ label:'Open Welcome Letter', to:'/welcome-letter' },
+    task:{ title:'Send the 14 pending Welcome Letters', cat:'Welcome Letter', prio:'med', time:'12:00',
+           bullets:B('Check emails','Send','Mark dispatch date') } },
+  { id:'s4', icon:'trend', title:'Today’s Sales & Labour report is ready', sub:'PMS · branch-wise labour vs AOP, updated this morning',
+    page:{ label:'View Sales & Labour Report', to:'/sales-labour-report' } },
+];
+
+/* ---------- view state ---------- */
+let VIEW = 'today';                    // 'today' | 'notes'
+let SEL = TODAY;                       // the date the plan box is showing
+let CUR = new Date(NOW.getFullYear(), NOW.getMonth(), 1);
+const FOLD = { over: false, rem: false };   // collapsed by default
+const TOPEN = new Set();               // '<date>|<time>' slots that are open
+const ADDED = new Set();               // suggestions already accepted / dismissed
+
+const TYPE = {
+  rem:  { label:'Reminder', icon:'bell',    cls:'rem',  ink:'var(--warn)' },
+  note: { label:'Note',     icon:'note',    cls:'note', ink:'var(--violet)' },
+};
+
+/* ---------- toast ---------- */
+function toast(msg, kind = '') {
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind;
+  el.innerHTML = ic(kind === 'warn' ? 'clock' : kind === 'err' ? 'alert' : kind === 'info' ? 'spark' : 'check') + `<span>${esc(msg)}</span>`;
+  $('#toasts').appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateX(18px)'; el.style.transition = '.25s'; }, 2100);
+  setTimeout(() => el.remove(), 2450);
+}
+
+/* ================================================================
+   SHARED PIECES
+   ================================================================ */
+/* the bullet block — always shown, because what collapses now is the time
+   slot above it, not the individual row */
+function bulletBlock(it) {
+  const b = it.bullets || [];
+  if (!b.length) return '';
+  return `<ul class="blist">${b.map((x, i) => `
+    <li class="${x.done ? 'done' : ''}">
+      <button class="bdot ${x.done ? 'on' : ''}" data-a="bul" data-id="${it.id}" data-i="${i}" title="Tick this point">${ic('check','sm')}</button>
+      <span class="bt">${esc(x.t)}</span>
+    </li>`).join('')}</ul>`;
+}
+/* a reminder keeps its own card: time on the left, bell, then the snooze strip.
+   Inside an open time slot the gutter is dropped, since the slot prints the time. */
+function remCard(it, opts = {}) {
+  const late = isOver(it);
+  return `
+  <div class="rcard ${it.done ? 'is-done' : ''} ${late ? 'fired' : ''}">
+    ${opts.inSlot ? '' : `<div class="rgut">
+      <div class="rtime">${it.time ? fmt(it.time).replace(' ', '') : '\u2014'}</div>
+      <div class="rt2">${late ? 'was due' : it.date === TODAY ? 'today' : relDay(it.date)}</div>
+    </div>`}
+    <span class="rico">${ic(it.done ? 'check' : 'bell')}</span>
+    <div style="flex:1; min-width:0">
+      <div class="tt" style="${it.done ? 'text-decoration:line-through; color:var(--gray)' : ''}">${esc(it.title)}</div>
+      ${bulletBlock(it)}
+      ${it.done ? '' : `<div class="snooze">
+        <button class="btn xs" data-a="snz" data-id="${it.id}" data-m="10">${ic('clock','sm')}10 min</button>
+        <button class="btn xs" data-a="snz" data-id="${it.id}" data-m="60">${ic('clock','sm')}1 hour</button>
+        <button class="btn xs" data-a="pp" data-id="${it.id}">${ic('cal','sm')}Postpone</button>
+        <button class="btn xs ok" data-a="done" data-id="${it.id}">${ic('check','sm')}Done</button>
+        <button class="btn icon xs" data-a="edit" data-id="${it.id}" title="Edit">${ic('edit','sm')}</button>
+        <button class="btn icon xs danger" data-a="del" data-id="${it.id}" title="Delete">${ic('trash','sm')}</button>
+      </div>`}
+    </div>
+  </div>`;
+}
+function emptyBox(txt, icon = 'inbox') {
+  return `<div class="empty"><div class="eico">${ic(icon,'lg')}</div><p>${esc(txt)}</p></div>`;
+}
+
+/* ================================================================
+   TAB BADGE — the only counter on the page
+   ================================================================ */
+function renderCounts() {
+  const due = ITEMS.filter(i => i.date === TODAY && i.type !== 'note' && !i.done).length;
+  $('#c-today').textContent = due;
+}
+
+/* ================================================================
+   FOCUS NOW
+   ================================================================ */
+function renderFocus() {
+  const todays = ITEMS.filter(i => i.date === TODAY && !i.done && i.type !== 'note').sort(byTime);
+  const late = ITEMS.filter(i => !i.done && i.date < TODAY).sort(byDate);
+  const next = todays.find(i => mins(i.time) >= NOWM) || todays[0] || late[0];
+  if (!next) {
+    $('#focusMount').innerHTML = `<div class="card"><div class="card-b">${emptyBox('Nothing left for today — the day is clear.','star')}</div></div>`;
+    return;
+  }
+  let cd;
+  if (next.date < TODAY) cd = `${ic('alert','sm')} overdue since ${relDay(next.date)}`;
+  else {
+    const diff = mins(next.time) - NOWM;
+    cd = diff > 0
+      ? `${ic('clock','sm')} in ${diff >= 60 ? Math.floor(diff / 60) + 'h ' : ''}${diff % 60}m`
+      : `${ic('alert','sm')} ${Math.abs(diff)}m past its time`;
+  }
+  const b = next.bullets || [];
+  $('#focusMount').innerHTML = `
+    <div class="focus">
+      <div class="fhead">
+        <h3>${esc(next.title)}</h3>
+        <div class="fwhen">
+          <span class="countdown">${cd}</span>
+          ${next.time ? `<span class="ftime">${fmt(next.time)}</span>` : ''}
+        </div>
+      </div>
+      ${b.length ? `<ul class="plist">${b.map(x => `<li>${x.done ? '<s>' + esc(x.t) + '</s>' : esc(x.t)}</li>`).join('')}</ul>` : ''}
+      <div class="facts">
+        <button class="btn pri" data-a="done" data-id="${next.id}">${ic('check','sm')} Mark done</button>
+        <button class="btn" data-a="snz" data-id="${next.id}" data-m="30">${ic('clock','sm')} Snooze 30 min</button>
+        <button class="btn" data-a="pp" data-id="${next.id}">${ic('cal','sm')} Postpone</button>
+      </div>
+    </div>`;
+}
+
+/* ================================================================
+   THE PLAN BOX — folds (overdue + next reminders) then the timeline
+   ================================================================ */
+function foldBlock(key, label, icon, cls, list, render) {
+  if (!list.length) return '';
+  const open = FOLD[key];
+  return `
+    <div class="fold ${cls} ${open ? 'open' : ''}">
+      <button class="fold-h" data-a="fold" data-f="${key}">
+        ${ic(icon,'sm')} <span>${label}</span>
+        <span class="cnt2">${list.length}</span>
+        <span class="chev">${ic('down','sm')}</span>
+      </button>
+      ${open ? `<div class="fold-b"><div class="tlist">${list.map(render).join('')}</div></div>` : ''}
+    </div>`;
+}
+function renderFolds() {
+  const over = ITEMS.filter(i => !i.done && i.type !== 'note' && i.date < TODAY).sort(byDate);
+  const rem  = ITEMS.filter(i => i.type === 'rem' && !i.done && i.date >= TODAY).sort(byDate).slice(0, 6);
+  $('#folds').innerHTML =
+    foldBlock('over', 'Overdue', 'alert', 'amber', over, i => remCard(i)) +
+    foldBlock('rem',  'Next reminders', 'bell', '', rem, remCard);
+}
+const nowLine = () => `<div class="nowline"><span class="lbl">NOW</span><span class="bar"></span></div>`;
+function renderPlan() {
+  const isToday = SEL === TODAY;
+  const day = ITEMS.filter(i => i.date === SEL && i.type !== 'note').sort(byTime);
+  const done = day.filter(i => i.done).length;
+  $('#planTitle').textContent = isToday ? "Today's plan" : `Plan — ${relDay(SEL)}`;
+  $('#planNote').textContent = day.length ? `${day.length} item${day.length === 1 ? '' : 's'} · ${done} done` : '';
+
+  if (!day.length) {
+    $('#timeline').innerHTML = emptyBox(isToday ? 'Nothing scheduled today — use Add above.' : `Nothing on ${relDay(SEL)} yet.`, 'cal');
+    return;
+  }
+  /* one box per time; the box shows the time only until you open it */
+  const slots = [];
+  day.forEach(it => {
+    const key = it.time || 'any';
+    let s = slots.find(x => x.key === key);
+    if (!s) slots.push(s = { key, time: it.time, items: [] });
+    s.items.push(it);
+  });
+
+  let html = '', nowDrawn = !isToday;
+  slots.forEach(s => {
+    if (!nowDrawn && mins(s.time) > NOWM) { html += nowLine(); nowDrawn = true; }
+    const open = TOPEN.has(SEL + '|' + s.key);
+    const late = s.items.some(isOver);
+    const allDone = s.items.every(i => i.done);
+    html += `
+      <div class="tslot ${open ? 'open' : ''} ${late ? 'late' : ''} ${allDone ? 'alldone' : ''}">
+        <button class="tslot-h" data-a="tslot" data-k="${s.key}" title="${open ? 'Collapse' : 'Open this time'}">
+          <span class="tslot-time">${s.time ? fmt(s.time) : 'Any time'}</span>
+          <span class="tslot-line"></span>
+          ${allDone ? `<span class="cnt2 ok">${ic('check','sm')}done</span>`
+                    : `<span class="cnt2">${s.items.length}</span>`}
+          <span class="chev">${ic('down','sm')}</span>
+        </button>
+        ${open ? `<div class="tslot-b"><div class="tlist">${s.items.map(i => remCard(i, { inSlot:true })).join('')}</div></div>` : ''}
+      </div>`;
+  });
+  if (!nowDrawn) html += nowLine();
+  $('#timeline').innerHTML = html;
+}
+
+/* ================================================================
+   SUGGESTIONS — each one links straight into its ERP page
+   ================================================================ */
+function renderSug() {
+  const open = SUGGESTIONS.filter(s => !ADDED.has(s.id));
+  $('#sugList').innerHTML = open.length ? `<div class="tlist">${open.map(s => `
+    <div class="sug">
+      <span class="sico">${ic(s.icon)}</span>
+      <div style="flex:1; min-width:0">
+        <div class="st">${esc(s.title)}</div>
+        <div class="ss">${esc(s.sub)}</div>
+        <div class="row" style="margin-top:8px; gap:5px; flex-wrap:wrap; justify-content:flex-end">
+          <button class="btn xs ${s.task ? '' : 'pri'}" data-a="page" data-to="${esc(s.page.to)}">
+            ${ic('link','sm')} ${esc(s.page.label)} ${ic('arrow','sm')}
+          </button>
+          ${s.task ? `<button class="btn xs pri" data-a="sug" data-s="${s.id}">${ic('plus','sm')} Add to my day</button>` : ''}
+        </div>
+      </div>
+    </div>`).join('')}</div>` : emptyBox('Nothing pending in the other modules.', 'check');
+}
+
+/* ================================================================
+   CALENDAR — compact month grid, sits next to the plan box.
+   Clicking a date just changes which day the plan box shows.
+   ================================================================ */
+function renderCal() {
+  const y = CUR.getFullYear(), m = CUR.getMonth();
+  $('#mTitle').textContent = `${MONTHS[m]} ${y}`;
+  $('#dow').innerHTML = DOWS.map((d, i) => `<div class="${i === 0 ? 'we' : ''}">${d}</div>`).join('');
+
+  const first = new Date(y, m, 1), start = shift(first, -first.getDay());
+  let h = '';
+  for (let n = 0; n < 42; n++) {
+    const cd = shift(start, n), ds = iso(cd);
+    const out = cd.getMonth() !== m, we = cd.getDay() === 0;   // Sunday is the only holiday
+    const day = ITEMS.filter(i => i.date === ds);
+    const late = day.some(i => !i.done && i.type !== 'note' && i.date < TODAY);
+    const dots = ['rem','note'].filter(t => day.some(i => i.type === t))
+      .map(t => `<i class="d-${t}"></i>`).join('');
+    const open = day.filter(i => !i.done && i.type !== 'note').length;
+    h += `
+      <button class="cell ${out ? 'out' : ''} ${we && !out ? 'we' : ''} ${ds === TODAY ? 'today' : ''} ${ds === SEL ? 'sel' : ''} ${late ? 'late' : ''}"
+              data-a="pick" data-d="${ds}" title="${relDay(ds)}${day.length ? ` — ${day.length} item${day.length === 1 ? '' : 's'}${open ? `, ${open} open` : ''}` : ' — nothing planned'}">
+        <span class="dnum">${cd.getDate()}</span>
+        <span class="dots">${dots}</span>
+      </button>`;
+  }
+  $('#cgrid').innerHTML = h;
+}
+
+/* ================================================================
+   NOTES — one colour (light yellow), pin, bullet points
+   ================================================================ */
+function renderNotes() {
+  const notes = ITEMS.filter(i => i.type === 'note')
+    .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.date.localeCompare(a.date));
+  $('#noteList').innerHTML = notes.length ? notes.map(nt => `
+    <div class="note">
+      <button class="pin ${nt.pinned ? 'on' : ''}" data-a="pin" data-id="${nt.id}" title="${nt.pinned ? 'Unpin' : 'Pin to top'}">${ic('pin','sm')}</button>
+      <div class="nt" style="padding-right:20px">${ic('note','sm')} <span>${esc(nt.title)}</span></div>
+      ${(nt.bullets || []).length ? `<ul class="plist">${nt.bullets.map((b, i) => `
+        <li><button class="bt" data-a="bul" data-id="${nt.id}" data-i="${i}" style="${b.done ? 'text-decoration:line-through; color:var(--gray2)' : ''}">${esc(b.t)}</button></li>`).join('')}</ul>` : ''}
+      <div class="nf">
+        ${ic('cal','sm')} ${relDay(nt.date)}
+        <span class="spacer"></span>
+        <button class="btn icon xs" data-a="edit" data-id="${nt.id}" title="Edit">${ic('edit','sm')}</button>
+        <button class="btn icon xs danger" data-a="del" data-id="${nt.id}" title="Delete">${ic('trash','sm')}</button>
+      </div>
+    </div>`).join('') : emptyBox('No notes yet — jot the first one.', 'note');
+}
+
+/* ================================================================
+   RENDER ALL + TAB SWITCHING
+   ================================================================ */
+function render() {
+  renderCounts();
+  if (VIEW === 'today') { renderFocus(); renderFolds(); renderPlan(); renderCal(); renderSug(); }
+  else renderNotes();
+}
+function setView(v) {
+  VIEW = v;
+  $$('#tabs .tab').forEach(t => t.classList.toggle('on', t.dataset.v === v));
+  ['today','notes'].forEach(k => $('#v-' + k).classList.toggle('hide', k !== v));
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+/* move the plan box (and the calendar month) to a date */
+function gotoDate(ds) {
+  SEL = ds;
+  CUR = new Date(+ds.slice(0, 4), +ds.slice(5, 7) - 1, 1);
+  if (VIEW !== 'today') setView('today'); else render();
+}
+
+/* ================================================================
+   MODALS — a compact one for tasks / reminders,
+   and a deliberately bare one for notes (title + points only)
+   ================================================================ */
+let EDITID = null;
+/* every text field is a textarea that grows as you type / press Enter */
+/* grows with the content; the drawer body scrolls once it runs out of room */
+function autoGrow(el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }
+function growAll() { $$('textarea.grow').forEach(autoGrow); }
+document.addEventListener('input', e => {
+  if (e.target.tagName === 'TEXTAREA' && e.target.classList.contains('grow')) autoGrow(e.target);
+});
+/* ONE box for the whole item: line 1 is the title, each following line is a
+   bullet point. Pressing Enter drops in the bullet marker for you. */
+const MARK = '● ';                 /* the circle bullet the box types for you */
+function bodyValue(it) {
+  /* the first line is the plain title; only the points carry a marker */
+  return [it.title || '']
+    .concat((it.bullets || []).map(b => MARK + b.t))
+    .join('\n');
+}
+function bodyField(it, ph) {
+  return `
+    <div class="fld fill">
+      <textarea id="f-body" class="grow body" rows="6" placeholder="${ph}">${esc(bodyValue(it))}</textarea>
+      <div class="bodyhint">First line is the title · press <b>Enter</b> for the next ● point</div>
+    </div>`;
+}
+/* ---------- time: three plain dropdowns, hour 1-12, minute, AM/PM ---------- */
+function timePicker(hhmm) {
+  let h = '', m = '00', ap = 'AM';
+  if (hhmm) {
+    const H = +hhmm.slice(0, 2);
+    m = hhmm.slice(3, 5);
+    ap = H >= 12 ? 'PM' : 'AM';
+    h = String(H % 12 || 12);
+  }
+  const hours = Array.from({ length: 12 }, (_, i) => String(i + 1));
+  const mins = Array.from({ length: 60 }, (_, i) => pad(i));
+  return `
+    <label>Time</label>
+    <div class="timepick">
+      <select id="t-h" title="Hour">
+        <option value="">--</option>
+        ${hours.map(x => `<option ${x === h ? 'selected' : ''}>${x}</option>`).join('')}
+      </select>
+      <span class="tsep">:</span>
+      <select id="t-m" title="Minute">${mins.map(x => `<option ${x === m ? 'selected' : ''}>${x}</option>`).join('')}</select>
+      <select id="t-ap" title="AM / PM">${['AM','PM'].map(x => `<option ${x === ap ? 'selected' : ''}>${x}</option>`).join('')}</select>
+    </div>`;
+}
+function readTime() {
+  const h = $('#t-h')?.value;
+  if (!h) return '';
+  const m = $('#t-m')?.value || '00';
+  let H = +h % 12;
+  if (($('#t-ap')?.value || 'AM') === 'PM') H += 12;
+  return pad(H) + ':' + m;
+}
+function readBody() {
+  const lines = ($('#f-body')?.value || '').split('\n')
+    .map(l => l.replace(/^[\u25CF\u25CB\u25E6\u2022\-\*]\s*/, '').trim());
+  const title = (lines.shift() || '').trim();
+  return { title, bullets: lines.filter(Boolean).map(t => ({ t, done:false })) };
+}
+/* Enter inside that box adds the next point instead of a bare newline */
+document.addEventListener('keydown', e => {
+  const el = e.target;
+  if (el && el.id === 'f-body' && e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    const at = el.selectionStart, v = el.value;
+    el.value = v.slice(0, at) + '\n' + MARK + v.slice(el.selectionEnd);
+    el.selectionStart = el.selectionEnd = at + 1 + MARK.length;
+    autoGrow(el);
+  }
+});
+function openModal(preset = {}, editId = null) {
+  EDITID = editId;
+  const it = { title:'', date:SEL, time:'', bullets:[], ...preset };
+  $('#modalRoot').innerHTML = `
+  <div class="ovl" data-a="mbg">
+    <div class="modal">
+      <div class="modal-h">
+        <span class="mico">${ic(editId ? 'edit' : 'plus','lg')}</span>
+        <div style="flex:1"><h3>${editId ? 'Edit item' : 'New item'}</h3></div>
+        <button class="iconbtn" data-a="mclose">${ic('x')}</button>
+      </div>
+      <div class="modal-b">
+        <div class="fgrid">
+          <div class="fld"><label>Date</label><input type="date" id="f-date" value="${it.date}"></div>
+          <div class="fld">${timePicker(it.time)}</div>
+        </div>
+        ${bodyField(it, 'e.g. Sign off Nashik AOP revision')}
+      </div>
+      <div class="modal-f">
+        <span class="spacer"></span>
+        <button class="btn" data-a="mclose">Cancel</button>
+        <button class="btn pri" data-a="msave">${ic('check','sm')} ${editId ? 'Save' : 'Add'}</button>
+      </div>
+    </div>
+  </div>`;
+  setTimeout(() => {
+    growAll();
+    const el = $('#f-body');
+    if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; }
+  }, 30);
+}
+/* notes get the same single box — no date, no time */
+function openNoteModal(preset = {}, editId = null) {
+  EDITID = editId;
+  const it = { title:'', bullets:[], ...preset };
+  $('#modalRoot').innerHTML = `
+  <div class="ovl" data-a="mbg">
+    <div class="modal">
+      <div class="modal-h">
+        <span class="mico">${ic('note','lg')}</span>
+        <div style="flex:1"><h3>${editId ? 'Edit note' : 'New note'}</h3></div>
+        <button class="iconbtn" data-a="mclose">${ic('x')}</button>
+      </div>
+      <div class="modal-b">
+        ${bodyField(it, 'What should this note remember?')}
+      </div>
+      <div class="modal-f">
+        <span class="spacer"></span>
+        <button class="btn" data-a="mclose">Cancel</button>
+        <button class="btn pri" data-a="nsave">${ic('check','sm')} ${editId ? 'Save note' : 'Add note'}</button>
+      </div>
+    </div>
+  </div>`;
+  setTimeout(() => {
+    growAll();
+    const el = $('#f-body');
+    if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; }
+  }, 30);
+}
+function closeModal() { $('#modalRoot').innerHTML = ''; EDITID = null; POSTID = null; }
+/* Postpone: pick the new date and time yourself instead of a blind +1 day */
+let POSTID = null;
+function openPostpone(id) {
+  const it = ITEMS.find(x => x.id === id); if (!it) return;
+  POSTID = id;
+  const base = it.date < TODAY ? TODAY : it.date;
+  const next = iso(shift(new Date(base + 'T00:00:00'), 1));
+  $('#modalRoot').innerHTML = `
+  <div class="ovl" data-a="mbg">
+    <div class="modal" style="max-width:380px">
+      <div class="modal-h">
+        <span class="mico">${ic('clock','lg')}</span>
+        <div style="flex:1"><h3>Postpone</h3></div>
+        <button class="iconbtn" data-a="mclose">${ic('x')}</button>
+      </div>
+      <div class="modal-b" style="display:block">
+        <div style="font-size:12.5px; font-weight:600; margin-bottom:10px; line-height:1.4">${esc(it.title)}</div>
+        <div style="font-size:11px; color:var(--gray); margin-bottom:11px">
+          ${ic('cal','sm')} now on ${relDay(it.date)}${it.time ? ' at ' + fmt(it.time) : ''}
+        </div>
+        <div class="fgrid">
+          <div class="fld"><label>New date</label><input type="date" id="p-date" value="${next}"></div>
+          <div class="fld">${timePicker(it.time)}</div>
+        </div>
+        <div class="row" style="gap:5px; flex-wrap:wrap; margin-top:4px">
+          <button class="btn xs" data-a="ppq" data-d="1">Tomorrow</button>
+          <button class="btn xs" data-a="ppq" data-d="2">In 2 days</button>
+          <button class="btn xs" data-a="ppq" data-d="7">Next week</button>
+        </div>
+      </div>
+      <div class="modal-f">
+        <span class="spacer"></span>
+        <button class="btn" data-a="mclose">Cancel</button>
+        <button class="btn pri" data-a="ppsave">${ic('check','sm')} Postpone</button>
+      </div>
+    </div>
+  </div>`;
+}
+function savePostpone() {
+  const it = ITEMS.find(x => x.id === POSTID); if (!it) return;
+  it.date = $('#p-date').value || it.date;
+  it.time = readTime();
+  const to = it.date;
+  toast(`Postponed to ${relDay(to)}${it.time ? ' at ' + fmt(it.time) : ''}`, 'warn');
+  closeModal(); closeNudge(); gotoDate(to);
+}
+/* keep the tick state of points that survived an edit */
+function mergeBullets(it, fresh) {
+  const keep = new Map((it.bullets || []).map(b => [b.t, b.done]));
+  return fresh.map(b => ({ t: b.t, done: keep.get(b.t) || false }));
+}
+function saveModal() {
+  const { title, bullets } = readBody();
+  if (!title) { toast('Write the first line first', 'warn'); $('#f-body')?.focus(); return; }
+  const date = $('#f-date').value || TODAY;
+  const time = readTime();
+  if (EDITID) {
+    /* only the four fields the drawer shows — an existing item keeps its
+       category, priority and repeat */
+    const it = ITEMS.find(x => x.id === EDITID);
+    Object.assign(it, { title, date, time, bullets: mergeBullets(it, bullets) });
+    toast('Saved');
+  } else {
+    /* anything you add simply reminds you at that time */
+    ITEMS.push(mk({ type:'rem', title, date, time, prio:'med', cat:'', repeat:'', bullets }));
+    toast(`Reminder added for ${relDay(date)}${time ? ' at ' + fmt(time) : ''}`);
+  }
+  closeModal(); gotoDate(date);
+}
+function saveNote() {
+  const { title, bullets: fresh } = readBody();
+  if (!title) { toast('Write the first line first', 'warn'); $('#f-body')?.focus(); return; }
+  if (EDITID) {
+    const it = ITEMS.find(x => x.id === EDITID);
+    Object.assign(it, { title, bullets: mergeBullets(it, fresh) });
+    toast('Note saved');
+  } else {
+    ITEMS.push(mk({ type:'note', title, bullets: fresh, date: TODAY, cat:'Personal', prio:'low' }));
+    toast('Note added');
+  }
+  closeModal();
+  if (VIEW !== 'notes') setView('notes'); else render();
+}
+
+/* ================================================================
+   IN-APP NUDGE (what a live reminder pop-up would look like)
+   ================================================================ */
+function showNudge() {
+  const r = ITEMS.filter(i => i.type === 'rem' && !i.done).sort(byDate)[0];
+  if (!r) return;
+  $('#nudgeRoot').innerHTML = `
+    <div class="nudge">
+      <div class="nh">${ic('bell','sm')} Reminder ${r.date === TODAY ? 'today' : relDay(r.date)} at ${fmt(r.time)}
+        <span class="spacer"></span>
+        <button data-a="nx">${ic('x','sm')}</button>
+      </div>
+      <div class="nb">
+        <div style="font-size:13px; font-weight:700; line-height:1.35">${esc(r.title)}</div>
+        <div class="row" style="margin-top:9px; gap:5px">
+          <button class="btn xs ok" data-a="done" data-id="${r.id}">${ic('check','sm')} Done</button>
+          <button class="btn xs" data-a="snz" data-id="${r.id}" data-m="10">${ic('clock','sm')} 10 min</button>
+          <button class="btn xs" data-a="pp" data-id="${r.id}">${ic('cal','sm')} Postpone</button>
+        </div>
+      </div>
+    </div>`;
+  setTimeout(() => { if ($('#nudgeRoot').firstElementChild) $('#nudgeRoot').innerHTML = ''; }, 14000);
+}
+const closeNudge = () => { $('#nudgeRoot').innerHTML = ''; };
+
+/* ================================================================
+   ACTIONS
+   ================================================================ */
+function snooze(it, m) {
+  if (m >= 1440) {
+    const base = it.date < TODAY ? NOW : new Date(it.date + 'T00:00:00');
+    it.date = iso(shift(base, Math.round(m / 1440)));
+  } else {
+    let v = (it.date < TODAY ? NOWM : (it.time ? mins(it.time) : NOWM)) + m, add = 0;
+    if (it.date < TODAY) it.date = TODAY;
+    while (v >= 1440) { v -= 1440; add++; }
+    it.time = `${pad(Math.floor(v / 60))}:${pad(v % 60)}`;
+    if (add) it.date = iso(shift(new Date(it.date + 'T00:00:00'), add));
+  }
+}
+function toastUndo(msg, cb) {
+  const el = document.createElement('div');
+  el.className = 'toast err';
+  el.innerHTML = ic('trash') + `<span style="flex:1">${esc(msg)}</span>`;
+  const u = document.createElement('button');
+  u.className = 'btn xs'; u.textContent = 'Undo';
+  u.onclick = () => { cb(); el.remove(); };
+  el.appendChild(u);
+  $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), 5200);
+}
+document.addEventListener('click', e => {
+  /* tabs carry no data-a */
+  const tab = e.target.closest('#tabs .tab');
+  if (tab) { setView(tab.dataset.v); return; }
+  /* segmented pickers inside the modal (type + priority) — they sit inside the
+     overlay, so they have to be handled BEFORE the [data-a] branch below */
+
+  const b = e.target.closest('[data-a]');
+  if (!b) return;
+  const a = b.dataset.a, id = +b.dataset.id, it = ITEMS.find(x => x.id === id);
+
+  /* clicking the backdrop must NOT close the drawer — only the X, Cancel or ESC.
+     The branch still swallows the click so it cannot reach anything behind. */
+  if (a === 'mbg') return;
+  if (a === 'mclose') { closeModal(); return; }
+  if (a === 'msave') { saveModal(); return; }
+  if (a === 'nsave') { saveNote(); return; }
+  if (a === 'nx') { closeNudge(); return; }
+  if (a === 'pp') { openPostpone(id); return; }
+  if (a === 'ppsave') { savePostpone(); return; }
+  if (a === 'ppq') {
+    const d = $('#p-date');
+    if (d) d.value = iso(shift(NOW, +b.dataset.d));
+    return;
+  }
+  if (a === 'fold') { FOLD[b.dataset.f] = !FOLD[b.dataset.f]; renderFolds(); return; }
+  if (a === 'tslot') {
+    const k = SEL + '|' + b.dataset.k;
+    TOPEN.has(k) ? TOPEN.delete(k) : TOPEN.add(k);
+    renderPlan(); return;
+  }
+  if (a === 'page') { toast(`Opens ${b.dataset.to} in the ERP`, 'info'); return; }
+
+  if (a === 'done' && it) {
+    it.done = !it.done;
+    toast(it.done ? `Closed — ${it.title.slice(0, 34)}${it.title.length > 34 ? '…' : ''}` : 'Reopened', it.done ? '' : 'info');
+    closeNudge(); render(); return;
+  }
+  if (a === 'bul' && it) {
+    const x = it.bullets[+b.dataset.i]; if (x) x.done = !x.done;
+    const dn = it.bullets.filter(y => y.done).length;
+    if (dn === it.bullets.length && !it.done && it.type !== 'note') toast('All points ticked — mark it done?', 'warn');
+    render(); return;
+  }
+  if (a === 'snz' && it) {
+    snooze(it, +b.dataset.m);
+    toast(+b.dataset.m >= 1440 ? `Pushed to ${relDay(it.date)}` : `Snoozed to ${fmt(it.time)}`, 'warn');
+    closeNudge(); render(); return;
+  }
+  if (a === 'del' && it) {
+    const idx = ITEMS.findIndex(x => x.id === id), copy = ITEMS[idx];
+    ITEMS.splice(idx, 1);
+    toastUndo(`Deleted "${copy.title.slice(0, 26)}${copy.title.length > 26 ? '…' : ''}"`, () => { ITEMS.splice(idx, 0, copy); render(); toast('Restored'); });
+    render(); return;
+  }
+  if (a === 'edit' && it) {
+    it.type === 'note' ? openNoteModal({ ...it }, it.id) : openModal({ ...it }, it.id);
+    return;
+  }
+  if (a === 'pin' && it) { it.pinned = !it.pinned; render(); toast(it.pinned ? 'Pinned to top' : 'Unpinned', 'info'); return; }
+  if (a === 'pick') { gotoDate(b.dataset.d); return; }
+  if (a === 'addfor') { openModal({ date: b.dataset.d }); return; }
+  if (a === 'sug') {
+    const s = SUGGESTIONS.find(x => x.id === b.dataset.s);
+    ITEMS.push(mk({ ...s.task, date: TODAY, src: s.sub.split(' · ')[0], bullets: s.task.bullets.map(x => ({ ...x })) }));
+    ADDED.add(s.id); gotoDate(TODAY); toast('Added to today'); return;
+  }
+});
+
+/* ================================================================
+   WIRING + INIT
+   ================================================================ */
+$('#mPrev').addEventListener('click', () => { CUR = new Date(CUR.getFullYear(), CUR.getMonth() - 1, 1); renderCal(); });
+$('#mNext').addEventListener('click', () => { CUR = new Date(CUR.getFullYear(), CUR.getMonth() + 1, 1); renderCal(); });
+$('#mToday').addEventListener('click', () => gotoDate(TODAY));
+$('#planAdd').addEventListener('click', () => openModal({ date: SEL }));
+$('#addBtn').addEventListener('click', () => openModal({ date: SEL }));
+$('#addNoteBtn').addEventListener('click', () => openNoteModal());
+
+/* theme — same storage key as the ERP, so the prototype follows your app choice */
+const THEME_KEY = 'erp-theme';
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  $('#themeBtn').innerHTML = `<svg class="ic"><use href="#i-${t === 'dark' ? 'sun' : 'moon'}"/></svg>`;
+  try { localStorage.setItem(THEME_KEY, t); } catch {}
+}
+$('#themeBtn').addEventListener('click', () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
+try { setTheme(localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light'); } catch { setTheme('light'); }
+
+/* keyboard shortcuts */
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeModal(); closeNudge(); return; }
+  if ($('#modalRoot').firstElementChild) return;   // modal owns the keyboard
+  if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) return;
+  if (e.key === 'n' || e.key === 'N') { e.preventDefault(); openModal({ date: SEL }); }
+  if (e.key === '1') setView('today');
+  if (e.key === '2') setView('notes');
+});
+
+/* hero subtitle — short, so the whole hero stays on one row */
+$('#heroSub').innerHTML =
+  `${DOWL[NOW.getDay()]}, ${NOW.getDate()} ${MONTHS[NOW.getMonth()]} ${NOW.getFullYear()} · ${fmt(pad(NOW.getHours()) + ':' + pad(NOW.getMinutes()))} IST`;
+
+render();
+setTimeout(showNudge, 5200);
+</script>

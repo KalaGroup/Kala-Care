@@ -15,7 +15,8 @@ from app.models.customer_model import (
     AMCAgreement, AssetDetailed, AssetService,
     AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
     PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, MaxTTROilChangeSRZeroLabourFlag,
-    ResponseTimeMaxTTR, CDIDetailReport, EFSRReport
+    ResponseTimeMaxTTR, CDIDetailReport, EFSRReport, AMCExpiryPlanner, LMSInsia,
+    AllInvoiceReport
 )
 
 router = APIRouter(prefix="/import", tags=["import"])
@@ -44,12 +45,23 @@ FILE_TYPES = [
     "MaxTTR - Oil Change SR Zero Labour Flag",
     "Response Time & MaxTTR Details",
     "CDI Detail Report",
-    "EFSR Report"
+    "EFSR Report",
+    "AMC Agreement Expiry Planner",
+    "LMS Data from Insia",
+    "All Invoice Detailed Report"
 ]
 
 # Old file-type names still accepted from clients running a cached JS bundle.
+# What an upload may be NAMED. read_upload_table() sniffs the real content and
+# reads .xlsx, legacy binary .xls, the HTML tables some portals name ".xls", and
+# CSV/TSV — so this is only a first-glance filter, and it has to allow every
+# format that reader handles. It used to allow Excel alone, which turned away
+# the CSV exports (SR Closed under FTR / FVR come out that way).
+ACCEPTED_UPLOAD_EXTENSIONS = (".xlsx", ".xls", ".xlsm", ".csv", ".tsv", ".txt")
+
 LEGACY_FILE_TYPES = {
     "Open SR Data": "MaxTTR - Oil Change SR Zero Labour Flag",
+    "LMS Insia": "LMS Data from Insia",
 }
 
 
@@ -124,10 +136,11 @@ async def import_excel(
             status_code=400,
             detail=f"Invalid file type. Must be one of: {', '.join(FILE_TYPES)}"
         )
-    if not file.filename.endswith((".xlsx", ".xls")):
+    if not file.filename.lower().endswith(ACCEPTED_UPLOAD_EXTENSIONS):
         raise HTTPException(
             status_code=400,
-            detail="File must be an Excel file (.xlsx or .xls)"
+            detail=("Unsupported file. Upload the report as "
+                    + ", ".join(ACCEPTED_UPLOAD_EXTENSIONS))
         )
 
     # Optional user-defined header mapping {"file header": "important column"}
@@ -198,6 +211,9 @@ FILE_TYPE_MODELS = {
     "Response Time & MaxTTR Details": ResponseTimeMaxTTR,
     "CDI Detail Report": CDIDetailReport,
     "EFSR Report": EFSRReport,
+    "AMC Agreement Expiry Planner": AMCExpiryPlanner,
+    "LMS Data from Insia": LMSInsia,
+    "All Invoice Detailed Report": AllInvoiceReport,
 }
 
 # In-memory cache so clicking through the dropdown doesn't re-hit the DB.
@@ -213,7 +229,8 @@ _UPDATED_AT_TABLES = [
     "anubandhan_plus_quotes", "anubandhan_quotes", "bandhan_plus_quotes",
     "pulse_quotations", "regular_bandhan", "lms_data", "open_sr_load_reports",
     "maxttr_oil_change_sr_zero_labour_flag", "response_time_maxttr",
-    "cdi_detail_report", "efsr_report",
+    "cdi_detail_report", "efsr_report", "amc_expiry_planner", "lms_insia",
+    "all_invoice_report",
 ]
 
 

@@ -110,8 +110,9 @@ class MaintenanceKitPart(Base):
 class MaintenancePart(Base):
     """A single part / consumable line under an application code.
 
-    `service_hours` binds the part to a service type (e.g. 500 -> B-Check), since the
-    source file's "Service schedules" column is blank.
+    `service_hours` binds the part to a service type (e.g. 500 -> B-Check). The
+    master file's "Service schedules" column is not stored — it was always blank
+    and nothing in the app read it (dropped 2026-08-26).
 
     The alt_* columns are the LEGACY kit storage (kit data written onto the part
     row). Kits now live in maintenance_kits; these columns are kept only so the
@@ -135,7 +136,6 @@ class MaintenancePart(Base):
     alt_service_hours = Column(String(20), nullable=True)
     service_hours = Column(String(20), nullable=True)
     consumable = Column(String(40), nullable=True)
-    schedule = Column(String(120), nullable=True)
     sort_order = Column(Integer, nullable=True, default=0)
 
     app = relationship("MaintenanceAppCode", back_populates="parts")

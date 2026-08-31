@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, desc, and_, func, exists
+from sqlalchemy import or_, desc, and_, func, exists, case
 from fastapi import HTTPException
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -8,7 +8,8 @@ from app.models.customer_model import (
     Customer, AMCAgreement, AssetDetailed, AssetService,
     AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
     PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, MaxTTROilChangeSRZeroLabourFlag,
-    ResponseTimeMaxTTR, CDIDetailReport, EFSRReport
+    ResponseTimeMaxTTR, CDIDetailReport, EFSRReport, AMCExpiryPlanner, LMSInsia,
+    AllInvoiceReport
 )
 from app.time_utils import now_ist
 from app.schemas.customer_schema import (
@@ -45,7 +46,8 @@ class CustomerController:
                     Customer.instance_id.ilike(search_term),
                     Customer.phone_number.ilike(search_term),
                     Customer.email.ilike(search_term),
-                    Customer.location.ilike(search_term)
+                    Customer.location.ilike(search_term),
+                    Customer.branch_id.ilike(search_term)
                 )
             )
         
@@ -234,7 +236,8 @@ class CustomerController:
                     Customer.instance_id.ilike(search_term),
                     Customer.phone_number.ilike(search_term),
                     Customer.email.ilike(search_term),
-                    Customer.location.ilike(search_term)
+                    Customer.location.ilike(search_term),
+                    Customer.branch_id.ilike(search_term)
                 )
             )
         
@@ -1244,11 +1247,13 @@ class CustomerController:
             search_term = f"%{search}%"
             query = query.filter(
                 or_(
+                    CDIDetailReport.instance_id.ilike(search_term),
                     CDIDetailReport.sr_number.ilike(search_term),
                     CDIDetailReport.branch_name.ilike(search_term),
                     CDIDetailReport.x_technician_id.ilike(search_term),
                     CDIDetailReport.x_technician_name.ilike(search_term),
                     CDIDetailReport.cdi_category.ilike(search_term),
+                    CDIDetailReport.x_account_name.ilike(search_term),
                     CDIDetailReport.overall_experience.ilike(search_term)
                 )
             )
@@ -1287,11 +1292,15 @@ class CustomerController:
             return None
         return {
             "id": rec.id,
+            "instance_id": rec.instance_id,
             "sr_number": rec.sr_number,
             "branch_name": rec.branch_name,
             "x_technician_id": rec.x_technician_id,
             "x_technician_name": rec.x_technician_name,
             "cdi_category": rec.cdi_category,
+            "x_account_name": rec.x_account_name,
+            "feedback_customer_name": rec.feedback_customer_name,
+            "feedback_customer_number": rec.feedback_customer_number,
             "overall_experience": rec.overall_experience,
             "activity_end_date": rec.activity_end_date,
             "extra_data": rec.extra_data,
@@ -1308,13 +1317,15 @@ class CustomerController:
             search_term = f"%{search}%"
             query = query.filter(
                 or_(
+                    EFSRReport.instance_id.ilike(search_term),
                     EFSRReport.service_request_no.ilike(search_term),
                     EFSRReport.appointment_number.ilike(search_term),
                     EFSRReport.sd_branch_code.ilike(search_term),
                     EFSRReport.sr_type.ilike(search_term),
                     EFSRReport.sr_status.ilike(search_term),
                     EFSRReport.service_engineer_name.ilike(search_term),
-                    EFSRReport.service_engineer_uid.ilike(search_term)
+                    EFSRReport.service_engineer_uid.ilike(search_term),
+                    EFSRReport.account.ilike(search_term)
                 )
             )
         return query
@@ -1352,6 +1363,7 @@ class CustomerController:
             return None
         return {
             "id": rec.id,
+            "instance_id": rec.instance_id,
             "service_request_no": rec.service_request_no,
             "appointment_number": rec.appointment_number,
             "sd_branch_code": rec.sd_branch_code,
@@ -1362,6 +1374,258 @@ class CustomerController:
             "sr_status": rec.sr_status,
             "service_engineer_name": rec.service_engineer_name,
             "service_engineer_uid": rec.service_engineer_uid,
+            "account": rec.account,
+            "installation_site_address": rec.installation_site_address,
+            "customer_name": rec.customer_name,
+            "customer_contact_number": rec.customer_contact_number,
+            "extra_data": rec.extra_data,
+            "created_at": rec.created_at,
+            "updated_at": rec.updated_at
+        }
+
+    # ==================== LMS INSIA ====================
+    # Second LMS layout, keyed on LEAD NUMBER. The file has no genset column,
+    # so instance_id is resolved from LEAD SR NUMBER at import time and is null
+    # on leads whose SR has not been uploaded yet. Read back by the Customer
+    # page and by the per-instance data hub.
+
+    def _lms_insia_search_filter(self, query, search: Optional[str]):
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                or_(
+                    LMSInsia.lead_number.ilike(search_term),
+                    LMSInsia.instance_id.ilike(search_term),
+                    LMSInsia.branch_id.ilike(search_term),
+                    LMSInsia.account_name.ilike(search_term),
+                    LMSInsia.lead_sr_number.ilike(search_term),
+                    LMSInsia.service_engineer_name.ilike(search_term)
+                )
+            )
+        return query
+
+    def get_lms_insia_count(self, search: Optional[str] = None):
+        """Get total count of LMS Data from Insia rows with optional search"""
+        query = self._lms_insia_search_filter(self.db.query(LMSInsia), search)
+        return query.count()
+
+    def get_lms_insia(self, skip: int = 0, limit: Optional[int] = 100, search: Optional[str] = None):
+        """Get all LMS Data from Insia rows with optional search + pagination"""
+        query = self._lms_insia_search_filter(self.db.query(LMSInsia), search)
+        query = query.order_by(desc(LMSInsia.updated_at)).offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return [self._lms_insia_to_dict(r) for r in query.all()]
+
+    def get_lms_insia_by_instance(self, instance_id: str):
+        """Get LMS Data from Insia rows by instance ID"""
+        return self.db.query(LMSInsia).filter(LMSInsia.instance_id == instance_id).all()
+
+    def delete_lms_insia(self, record_id: int):
+        """Delete one LMS Data from Insia row"""
+        rec = self.db.query(LMSInsia).filter(LMSInsia.id == record_id).first()
+        if not rec:
+            raise HTTPException(status_code=404, detail="LMS Data from Insia record not found")
+        self.db.delete(rec)
+        self.db.commit()
+        return {"message": "LMS Data from Insia record deleted successfully"}
+
+    def bulk_delete_lms_insia(self, record_ids: List[int]):
+        """Delete multiple LMS Data from Insia rows"""
+        self.db.query(LMSInsia).filter(LMSInsia.id.in_(record_ids)).delete(synchronize_session=False)
+        self.db.commit()
+        return {"message": f"{len(record_ids)} LMS Data from Insia records deleted successfully"}
+
+    def _lms_insia_to_dict(self, rec):
+        if not rec:
+            return None
+        return {
+            "id": rec.id,
+            "instance_id": rec.instance_id,
+            "lead_number": rec.lead_number,
+            "lead_created_date": rec.lead_created_date,
+            "branch_id": rec.branch_id,
+            "account_name": rec.account_name,
+            "lead_sr_number": rec.lead_sr_number,
+            "service_engineer_name": rec.service_engineer_name,
+            "order_creation_date": rec.order_creation_date,
+            "extra_data": rec.extra_data,
+            "created_at": rec.created_at,
+            "updated_at": rec.updated_at
+        }
+
+    # ==================== AMC AGREEMENT EXPIRY PLANNER ====================
+    # Instance-linked table: filled by the 'AMC Agreement Expiry Planner'
+    # import, which also tops up the customer master. Read back by the
+    # Customer page and by the per-instance data hub.
+
+    def _amc_expiry_planner_search_filter(self, query, search: Optional[str]):
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                or_(
+                    AMCExpiryPlanner.instance_id.ilike(search_term),
+                    AMCExpiryPlanner.agreement_number.ilike(search_term),
+                    AMCExpiryPlanner.branch_id.ilike(search_term),
+                    AMCExpiryPlanner.account_name.ilike(search_term),
+                    AMCExpiryPlanner.installation_site_address.ilike(search_term)
+                )
+            )
+        return query
+
+    def get_amc_expiry_planner_count(self, search: Optional[str] = None):
+        """Get total count of AMC Agreement Expiry Planner rows with optional search"""
+        query = self._amc_expiry_planner_search_filter(self.db.query(AMCExpiryPlanner), search)
+        return query.count()
+
+    def get_amc_expiry_planner(self, skip: int = 0, limit: Optional[int] = 100,
+                               search: Optional[str] = None):
+        """Get all AMC Agreement Expiry Planner rows with optional search + pagination"""
+        query = self._amc_expiry_planner_search_filter(self.db.query(AMCExpiryPlanner), search)
+        # Soonest expiry first — the whole point of a planner. Rows with no end
+        # date sort last rather than heading the list. The nulls-last flag has
+        # to be a CASE: SQL Server has no boolean type, so ordering directly on
+        # `col.is_(None)` is a syntax error ("Incorrect syntax near 'IS'").
+        query = query.order_by(
+            case((AMCExpiryPlanner.agreement_end_date.is_(None), 1), else_=0),
+            AMCExpiryPlanner.agreement_end_date.asc()
+        ).offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return [self._amc_expiry_planner_to_dict(r) for r in query.all()]
+
+    def get_cdi_detail_report_by_instance(self, instance_id: str):
+        """Get CDI Detail Report rows by instance ID (ASSET NUMBER in the file)"""
+        return self.db.query(CDIDetailReport).filter(
+            CDIDetailReport.instance_id == instance_id
+        ).order_by(desc(CDIDetailReport.activity_end_date)).all()
+
+    def get_efsr_report_by_instance(self, instance_id: str):
+        """Get EFSR Report rows by instance ID"""
+        return self.db.query(EFSRReport).filter(
+            EFSRReport.instance_id == instance_id
+        ).order_by(desc(EFSRReport.task_assigned_date)).all()
+
+    def get_amc_expiry_planner_by_instance(self, instance_id: str):
+        """Get AMC Agreement Expiry Planner rows by instance ID"""
+        return self.db.query(AMCExpiryPlanner).filter(
+            AMCExpiryPlanner.instance_id == instance_id
+        ).order_by(desc(AMCExpiryPlanner.agreement_end_date)).all()
+
+    def delete_amc_expiry_planner(self, record_id: int):
+        """Delete one AMC Agreement Expiry Planner row"""
+        rec = self.db.query(AMCExpiryPlanner).filter(AMCExpiryPlanner.id == record_id).first()
+        if not rec:
+            raise HTTPException(status_code=404,
+                                detail="AMC Agreement Expiry Planner record not found")
+        self.db.delete(rec)
+        self.db.commit()
+        return {"message": "AMC Agreement Expiry Planner record deleted successfully"}
+
+    def bulk_delete_amc_expiry_planner(self, record_ids: List[int]):
+        """Delete multiple AMC Agreement Expiry Planner rows"""
+        self.db.query(AMCExpiryPlanner).filter(
+            AMCExpiryPlanner.id.in_(record_ids)).delete(synchronize_session=False)
+        self.db.commit()
+        return {"message": f"{len(record_ids)} AMC Agreement Expiry Planner records deleted successfully"}
+
+    def _amc_expiry_planner_to_dict(self, rec):
+        if not rec:
+            return None
+        return {
+            "id": rec.id,
+            "instance_id": rec.instance_id,
+            "agreement_number": rec.agreement_number,
+            "branch_id": rec.branch_id,
+            "account_name": rec.account_name,
+            "installation_site_address": rec.installation_site_address,
+            "agreement_end_date": rec.agreement_end_date,
+            "extra_data": rec.extra_data,
+            "created_at": rec.created_at,
+            "updated_at": rec.updated_at
+        }
+
+    # ==================== ALL INVOICE DETAILED REPORT ====================
+    # Instance-linked table: filled by the 'All Invoice Detailed Report' import.
+    # Only its Service lines carry an Instance Id (OTC / Agreement lines have no
+    # genset), so the per-instance hub shows the service invoices of that genset
+    # while the Customer page grid shows every line in the file.
+
+    def _all_invoice_search_filter(self, query, search: Optional[str]):
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                or_(
+                    AllInvoiceReport.invoice_number.ilike(search_term),
+                    AllInvoiceReport.instance_id.ilike(search_term),
+                    AllInvoiceReport.branch_id.ilike(search_term),
+                    AllInvoiceReport.branch_name.ilike(search_term),
+                    AllInvoiceReport.account_name.ilike(search_term),
+                    AllInvoiceReport.invoice_type.ilike(search_term),
+                    AllInvoiceReport.invoice_segment.ilike(search_term),
+                    AllInvoiceReport.invoice_status.ilike(search_term)
+                )
+            )
+        return query
+
+    def get_all_invoice_report_count(self, search: Optional[str] = None):
+        """Get total count of All Invoice Detailed Report rows with optional search"""
+        query = self._all_invoice_search_filter(self.db.query(AllInvoiceReport), search)
+        return query.count()
+
+    def get_all_invoice_report(self, skip: int = 0, limit: Optional[int] = 100,
+                               search: Optional[str] = None):
+        """Get all All Invoice Detailed Report rows with optional search + pagination"""
+        query = self._all_invoice_search_filter(self.db.query(AllInvoiceReport), search)
+        # Newest invoice first; undated rows last rather than heading the list.
+        # The nulls-last flag has to be a CASE: SQL Server has no boolean type,
+        # so ordering directly on `col.is_(None)` is a syntax error.
+        query = query.order_by(
+            case((AllInvoiceReport.invoice_date.is_(None), 1), else_=0),
+            AllInvoiceReport.invoice_date.desc()
+        ).offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return [self._all_invoice_report_to_dict(r) for r in query.all()]
+
+    def get_all_invoice_report_by_instance(self, instance_id: str):
+        """Get All Invoice Detailed Report rows by instance ID"""
+        return self.db.query(AllInvoiceReport).filter(
+            AllInvoiceReport.instance_id == instance_id
+        ).order_by(desc(AllInvoiceReport.invoice_date)).all()
+
+    def delete_all_invoice_report(self, record_id: int):
+        """Delete one All Invoice Detailed Report row"""
+        rec = self.db.query(AllInvoiceReport).filter(AllInvoiceReport.id == record_id).first()
+        if not rec:
+            raise HTTPException(status_code=404,
+                                detail="All Invoice Detailed Report record not found")
+        self.db.delete(rec)
+        self.db.commit()
+        return {"message": "All Invoice Detailed Report record deleted successfully"}
+
+    def bulk_delete_all_invoice_report(self, record_ids: List[int]):
+        """Delete multiple All Invoice Detailed Report rows"""
+        self.db.query(AllInvoiceReport).filter(
+            AllInvoiceReport.id.in_(record_ids)).delete(synchronize_session=False)
+        self.db.commit()
+        return {"message": f"{len(record_ids)} All Invoice Detailed Report records deleted successfully"}
+
+    def _all_invoice_report_to_dict(self, rec):
+        if not rec:
+            return None
+        return {
+            "id": rec.id,
+            "invoice_number": rec.invoice_number,
+            "instance_id": rec.instance_id,
+            "branch_id": rec.branch_id,
+            "branch_name": rec.branch_name,
+            "account_name": rec.account_name,
+            "invoice_date": rec.invoice_date,
+            "invoice_status": rec.invoice_status,
+            "invoice_segment": rec.invoice_segment,
+            "invoice_type": rec.invoice_type,
+            "invoice_amount": rec.invoice_amount,
             "extra_data": rec.extra_data,
             "created_at": rec.created_at,
             "updated_at": rec.updated_at
@@ -1395,6 +1659,11 @@ class CustomerController:
         if not include_closed:
             open_sr_query = open_sr_query.filter(~self._sr_closed_in_maxttr())
         open_sr_load_reports_count = open_sr_query.count()
+        amc_expiry_planner_count = self.db.query(AMCExpiryPlanner).filter(AMCExpiryPlanner.instance_id == instance_id).count()
+        cdi_detail_report_count = self.db.query(CDIDetailReport).filter(CDIDetailReport.instance_id == instance_id).count()
+        efsr_report_count = self.db.query(EFSRReport).filter(EFSRReport.instance_id == instance_id).count()
+        lms_insia_count = self.db.query(LMSInsia).filter(LMSInsia.instance_id == instance_id).count()
+        all_invoice_report_count = self.db.query(AllInvoiceReport).filter(AllInvoiceReport.instance_id == instance_id).count()
 
         complete_data = {
             "customer": self._customer_to_dict(customer),
@@ -1410,6 +1679,11 @@ class CustomerController:
             "open_sr_load_reports": [self._open_sr_load_report_to_dict(a) for a in self.get_open_sr_load_reports_by_instance(instance_id, include_closed)],
             "open_sr_data": [self._open_sr_data_to_dict(a) for a in self.get_open_sr_data_by_instance(instance_id)],
             "response_time_maxttr": [self._response_time_maxttr_to_dict(a) for a in self.get_response_time_maxttr_by_instance(instance_id)],
+            "amc_expiry_planner": [self._amc_expiry_planner_to_dict(a) for a in self.get_amc_expiry_planner_by_instance(instance_id)],
+            "cdi_detail_report": [self._cdi_detail_report_to_dict(a) for a in self.get_cdi_detail_report_by_instance(instance_id)],
+            "efsr_report": [self._efsr_report_to_dict(a) for a in self.get_efsr_report_by_instance(instance_id)],
+            "lms_insia": [self._lms_insia_to_dict(a) for a in self.get_lms_insia_by_instance(instance_id)],
+            "all_invoice_report": [self._all_invoice_report_to_dict(a) for a in self.get_all_invoice_report_by_instance(instance_id)],
 
             "amc_agreements_count": amc_agreements_count,
             "asset_detailed_count": asset_detailed_count,
@@ -1421,6 +1695,11 @@ class CustomerController:
             "regular_bandhan_count": regular_bandhan_count,
             "lms_data_count": lms_data_count,
             "open_sr_load_reports_count": open_sr_load_reports_count,
+            "amc_expiry_planner_count": amc_expiry_planner_count,
+            "cdi_detail_report_count": cdi_detail_report_count,
+            "efsr_report_count": efsr_report_count,
+            "lms_insia_count": lms_insia_count,
+            "all_invoice_report_count": all_invoice_report_count,
             "total_records": (
                 amc_agreements_count +
                 asset_detailed_count +
@@ -1431,7 +1710,12 @@ class CustomerController:
                 pulse_quotations_count +
                 regular_bandhan_count +
                 lms_data_count +
-                open_sr_load_reports_count
+                open_sr_load_reports_count +
+                amc_expiry_planner_count +
+                cdi_detail_report_count +
+                efsr_report_count +
+                lms_insia_count +
+                all_invoice_report_count
             )
         }
         
@@ -2015,7 +2299,10 @@ class CustomerController:
             'open_sr_data': MaxTTROilChangeSRZeroLabourFlag,
             'response_time_maxttr': ResponseTimeMaxTTR,
             'cdi_detail_report': CDIDetailReport,
-            'efsr_report': EFSRReport
+            'efsr_report': EFSRReport,
+            'amc_expiry_planner': AMCExpiryPlanner,
+            'lms_insia': LMSInsia,
+            'all_invoice_report': AllInvoiceReport
         }
         
         if table_name not in model_map:

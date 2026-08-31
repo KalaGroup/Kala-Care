@@ -2,7 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, status, Header, UploadFil
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import SessionLocal
-from app.controllers.user_controller import UserController
+from app.controllers.user_controller import (
+    UserController, aop_tabs_map, AOP_TAB_KEYS, pms_pages_list, PMS_PAGE_KEYS,
+    annual_tabs_list, ANNUAL_TAB_KEYS
+)
 from app.schemas.user_schema import (
     UserCreate, UserLogin, 
     UserUpdate, UserProfileUpdate, 
@@ -106,7 +109,16 @@ def login(user_login: UserLogin, db: Session = Depends(get_db)):
                     "can_access_mom": bool(user.can_access_mom),
                     "can_access_approval": bool(user.can_access_approval),
                     "can_access_pms": bool(user.can_access_pms),
+                    "can_access_quotation_tracker": bool(user.can_access_quotation_tracker),
                     "aop_access": user.aop_access or "none",
+                    # {tab: 'view'|'edit'} — which AOP & Master tabs this user
+                    # gets. null = no per-tab restriction (whole page at the
+                    # aop_access level above).
+                    # Which PMS report pages this user gets; null = every page.
+                    "pms_pages": pms_pages_list(user),
+                    # Which Annual Reports sheets; null = every sheet.
+                    "annual_tabs": annual_tabs_list(user),
+                    "aop_tabs": aop_tabs_map(user),
                     "theme": user.theme or "light",
                     "session_id": session_id,
                     "branches": [
@@ -408,7 +420,13 @@ def get_all_employees(
                         "can_access_mom": bool(emp.can_access_mom),
                         "can_access_approval": bool(emp.can_access_approval),
                         "can_access_pms": bool(emp.can_access_pms),
+                        "can_access_quotation_tracker": bool(emp.can_access_quotation_tracker),
                         "aop_access": emp.aop_access or "none",
+                        # Which PMS report pages this user gets; null = every page.
+                        "pms_pages": pms_pages_list(emp),
+                        # Which Annual Reports sheets; null = every sheet.
+                        "annual_tabs": annual_tabs_list(emp),
+                        "aop_tabs": aop_tabs_map(emp),
                         "password": emp.password if is_master else None
                     }
                     for emp in employees
@@ -611,15 +629,15 @@ def toggle_page_access(
     db: Session = Depends(get_db)
 ):
     """Grant/revoke a user's access to the Part Detail Info, MOM Tracking,
-    Approval or PMS pages (Master Admin only).
-    Body: { page: 'part_detail'|'mom'|'approval'|'pms', allowed: bool }."""
+    Approval, PMS or Open Quotation Tracker pages (Master Admin only).
+    Body: { page: 'part_detail'|'mom'|'approval'|'pms'|'quotation_tracker', allowed: bool }."""
     try:
         page = body.get('page')
         allowed = bool(body.get('allowed', False))
         updated = UserController.toggle_page_access(db, employee_id, user_id, page, allowed)
 
         page_label = {"part_detail": "Part Detail Info", "approval": "Approval Application",
-                      "pms": "PMS"}.get(page, "MOM Tracking")
+                      "pms": "PMS", "quotation_tracker": "Open Quotation Tracker"}.get(page, "MOM Tracking")
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
@@ -631,7 +649,12 @@ def toggle_page_access(
                     "can_access_mom": bool(updated.can_access_mom),
                     "can_access_approval": bool(updated.can_access_approval),
                     "can_access_pms": bool(updated.can_access_pms),
-                    "aop_access": updated.aop_access or "none"
+                    "can_access_quotation_tracker": bool(updated.can_access_quotation_tracker),
+                    "aop_access": updated.aop_access or "none",
+                    # Which PMS report pages this user gets; null = every page.
+                    "pms_pages": pms_pages_list(updated),
+                    "annual_tabs": annual_tabs_list(updated),
+                    "aop_tabs": aop_tabs_map(updated)
                 }
             }
         )
@@ -666,7 +689,12 @@ def set_aop_access(
                 "employee": {
                     "id": updated.id,
                     "can_access_pms": bool(updated.can_access_pms),
-                    "aop_access": updated.aop_access or "none"
+                    "can_access_quotation_tracker": bool(updated.can_access_quotation_tracker),
+                    "aop_access": updated.aop_access or "none",
+                    # Which PMS report pages this user gets; null = every page.
+                    "pms_pages": pms_pages_list(updated),
+                    "annual_tabs": annual_tabs_list(updated),
+                    "aop_tabs": aop_tabs_map(updated)
                 }
             }
         )
@@ -677,6 +705,150 @@ def set_aop_access(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error setting AOP access: {str(e)}"
+        )
+
+@router.put("/employees/{employee_id}/pms-pages")
+def set_pms_pages(
+    employee_id: int,
+    body: dict,
+    user_id: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    """Choose WHICH PMS report pages a user gets. Body:
+    { pages: ['sales_labour', 'annual', ...] } — pages left out are hidden.
+    Send { pages: null } to drop the restriction and show every report page.
+    AOP & Master is not settable here; it has its own aop-access / aop-tabs
+    endpoints. Master Admin only, same as the PMS Access flag."""
+    try:
+        pages = body.get('pages', []) if isinstance(body, dict) else []
+        updated = UserController.set_pms_pages(db, employee_id, user_id, pages)
+
+        chosen = pms_pages_list(updated)
+        total = len(PMS_PAGE_KEYS)
+        # Kept short: this goes out as a small toast, not a dialog.
+        if chosen is None:
+            message = f"PMS pages: all {total}"
+        elif not chosen:
+            message = "PMS pages: none selected"
+        else:
+            message = f"PMS pages: {len(chosen)} of {total}"
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "success": True,
+                "message": message,
+                "employee": {
+                    "id": updated.id,
+                    "can_access_pms": bool(updated.can_access_pms),
+                    "can_access_quotation_tracker": bool(updated.can_access_quotation_tracker),
+                    "pms_pages": chosen,
+                    "annual_tabs": annual_tabs_list(updated)
+                }
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error setting PMS pages: {str(e)}"
+        )
+
+@router.put("/employees/{employee_id}/annual-tabs")
+def set_annual_tabs(
+    employee_id: int,
+    body: dict,
+    user_id: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    """Choose WHICH sheets of the Annual Reports page a user gets. Body:
+    { tabs: ['cdi', 'service_load', ...] } — sheets left out are hidden. Send
+    { tabs: null } to drop the restriction and show every sheet. The sheets only
+    read, so there is no view/edit level here.
+    Only the PMS & AOP rights admins (AOP_RIGHTS_ADMIN_IDS) may call this."""
+    try:
+        tabs = body.get('tabs', []) if isinstance(body, dict) else []
+        updated = UserController.set_annual_tabs(db, employee_id, user_id, tabs)
+
+        chosen = annual_tabs_list(updated)
+        total = len(ANNUAL_TAB_KEYS)
+        # Kept short: this goes out as a small toast, not a dialog.
+        if chosen is None:
+            message = f"Annual Reports: all {total} sheets"
+        elif not chosen:
+            message = "Annual Reports: none — page hidden"
+        else:
+            message = f"Annual Reports: {len(chosen)} of {total} sheets"
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "success": True,
+                "message": message,
+                "employee": {
+                    "id": updated.id,
+                    "can_access_pms": bool(updated.can_access_pms),
+                    "can_access_quotation_tracker": bool(updated.can_access_quotation_tracker),
+                    "pms_pages": pms_pages_list(updated),
+                    "annual_tabs": chosen
+                }
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error setting the Annual Reports sheets: {str(e)}"
+        )
+
+@router.put("/employees/{employee_id}/aop-tabs")
+def set_aop_tabs(
+    employee_id: int,
+    body: dict,
+    user_id: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    """Choose WHICH tabs of the AOP & Master page a user gets, and at which
+    level. Body: { tabs: { 'targets': 'edit', 'cditargets': 'view', ... } } —
+    tabs left out are hidden. Send { tabs: null } to drop the restriction and
+    let every tab run at the user's overall aop_access level.
+    Only the AOP rights admins (AOP_RIGHTS_ADMIN_IDS) may call this."""
+    try:
+        tabs = body.get('tabs', {}) if isinstance(body, dict) else {}
+        updated = UserController.set_aop_tabs(db, employee_id, user_id, tabs)
+
+        chosen = aop_tabs_map(updated)
+        total = len(AOP_TAB_KEYS)
+        # Kept short: this goes out as a small toast, not a dialog.
+        if chosen is None:
+            message = f"AOP tabs: all {total}"
+        elif not chosen:
+            message = "AOP tabs: none — page hidden"
+        else:
+            message = f"AOP tabs: {len(chosen)} of {total}"
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "success": True,
+                "message": message,
+                "employee": {
+                    "id": updated.id,
+                    "can_access_pms": bool(updated.can_access_pms),
+                    "can_access_quotation_tracker": bool(updated.can_access_quotation_tracker),
+                    "aop_access": updated.aop_access or "none",
+                    "aop_tabs": chosen
+                }
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error setting AOP tabs: {str(e)}"
         )
 
 @router.put("/profile")
@@ -753,7 +925,13 @@ def get_profile(
                     "can_access_mom": bool(user.can_access_mom),
                     "can_access_approval": bool(user.can_access_approval),
                     "can_access_pms": bool(user.can_access_pms),
+                    "can_access_quotation_tracker": bool(user.can_access_quotation_tracker),
                     "aop_access": user.aop_access or "none",
+                    # Which PMS report pages this user gets; null = every page.
+                    "pms_pages": pms_pages_list(user),
+                    # Which Annual Reports sheets; null = every sheet.
+                    "annual_tabs": annual_tabs_list(user),
+                    "aop_tabs": aop_tabs_map(user),
                     "email": user.email or '',
                     "password": user.password
                 }

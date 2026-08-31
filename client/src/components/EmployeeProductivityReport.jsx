@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { ArrowUpTrayIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { canExportExcel } from '../utils/exportPermission';
 import { THEME, GRID, HScrollBox, MultiSelect, FilterRow } from './reportChrome';
+import SEDetailModal from './SEDetailModal';
 
 /* ----------------------------------------------------------------------------
    Employee Productivity (Service Engineer Productivity) — PMS report.
@@ -40,7 +41,28 @@ import { THEME, GRID, HScrollBox, MultiSelect, FilterRow } from './reportChrome'
      Leads         distinct LMS LEAD NUMBERs of the engineer's SE UID (SE UID
                    Master maps SE NAME -> UID), on LEAD CREATED DATE, split by
                    'Lead Raised For' through the Lead Category Master
-     Conv. Amount  those leads' PART / LABOUR INVOICE AMOUNT
+     Conv. Amount  those leads' PART (Spare) / LABOUR INVOICE AMOUNT, dated on
+                   the ORDER's own creation date instead of the lead's: the
+                   ORDER CREATION DATE comes from 'LMS Data from Insia', looked
+                   up per LEAD NUMBER. A lead with no order there (or a blank /
+                   '0' / 'N/A' date) contributes nothing, and Spare additionally
+                   EXCLUDES 'OTC Quotation' rows. The lead COUNTS above are
+                   unaffected — they stay on LEAD CREATED DATE, which is why the
+                   two arrive as separate record streams.
+                   Each of the two is split SE | Other. The true TOTAL rows —
+                   Sub Total, MH / KA Total, Grand Total — merge that pair into
+                   one figure; the collapsed Branch / Group Total rows keep it
+                   split, since they are the folded view's data rows.
+     Other         the middle sub-column of each: conversions that belong to NO
+                   engineer — the lead has no Service Engineer UID, or one the
+                   SE UID Master does not know. Held per BRANCH
+                   (other_conv_records is keyed on the BRANCH index), so it
+                   never enters the engineer roster: as an 'Other'
+                   pseudo-engineer it inflated every branch's SE headcount and
+                   handed the branch a phantom engineer's working days. It
+                   prints on branch / group / region / Grand Total rows only;
+                   an engineer row leaves it blank and its Total is just its own
+                   SE figure.
 
    The payload is raw per-day records, so the period (page picker), the week
    ticks and every filter re-aggregate client-side without a refetch.
@@ -164,6 +186,9 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
   const [weekSel, setWeekSel] = useState(() => new Set());     // empty = all
   const [brSel, setBrSel] = useState(() => new Set());         // branch indices
   const [seSel, setSeSel] = useState(() => new Set());         // employee indices
+  // The SE name opens the drill-down: the MaxTTR rows this engineer's Close SR
+  // figure was counted from, for the period the table is showing.
+  const [seDetail, setSeDetail] = useState(null);
   const [query, setQuery] = useState('');
   // SR Type and Product Wise Lead Count start OPEN — the arrow in their group
   // header folds them away and brings them back.
@@ -214,7 +239,8 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
     if (!data || !start || !end || start > end) return null;
     const { branches = [], branch_regions: regions = [], employees = [],
       heads = [], lead_categories: cats = [], efsr_heads: eheads = [],
-      sr_records: srRec = [], lead_records: ldRec = [], present_records: prRec = [],
+      sr_records: srRec = [], lead_records: ldRec = [], conv_records: cvRec = [],
+      other_conv_records: ocRec = [], present_records: prRec = [],
       allocate_records: alRec = [], cdi_records: cdiRec = [],
       working_days: wdMaster = {} } = data;
 
@@ -299,14 +325,36 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
       if (!on(ds)) return;
       if (emp[ei]) emp[ei].days.add(ds);
     });
-    ldRec.forEach(([ei, ds, ci, n, spare, labour]) => {
+    // Lead COUNTS — on LEAD CREATED DATE.
+    ldRec.forEach(([ei, ds, ci, n]) => {
       if (!on(ds)) return;
       const e = emp[ei];
       if (!e) return;
       e.leads += n;
       e.cats[ci] = (e.cats[ci] || 0) + n;
+    });
+    // Conv. AMOUNTS — a separate stream because they are dated on the ORDER
+    // CREATION DATE ('LMS Data from Insia'), not on the lead's created date, so
+    // the same lead lands in one period for its count and another for its
+    // money. Spare already has 'OTC Quotation' removed server-side.
+    cvRec.forEach(([ei, ds, spare, labour]) => {
+      if (!on(ds)) return;
+      const e = emp[ei];
+      if (!e) return;
       e.spare += spare || 0;
       e.labour += labour || 0;
+    });
+
+    // 'Other' — the conversions of leads with NO Service Engineer, keyed on the
+    // BRANCH, so they never enter the engineer roster (which would corrupt every
+    // branch's SE headcount and working days). Own columns, branch rows only.
+    const otherBr = branches.map(() => ({ spare: 0, labour: 0 }));
+    ocRec.forEach(([bi, ds, spare, labour]) => {
+      if (!on(ds)) return;
+      const o = otherBr[bi];
+      if (!o) return;
+      o.spare += spare || 0;
+      o.labour += labour || 0;
     });
 
     // A row is shown only when the engineer did something in the selection.
@@ -323,7 +371,8 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
     byBranch.forEach((list) => list.sort((a, b) =>
       employees[a].n.localeCompare(employees[b].n)));
 
-    return { weeks, weekOf, heads, cats, eheads, emp, active, byBranch, workOf, wdByRegion };
+    return { weeks, weekOf, heads, cats, eheads, emp, active, byBranch, workOf,
+      wdByRegion, otherBr };
   }, [data, start, end, weekSel]);
 
   if (loading) {
@@ -352,7 +401,7 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
   }
 
   const { meta, branches, employees, groups = [] } = data;
-  const { weeks, heads, cats, eheads, emp, byBranch, workOf } = agg;
+  const { weeks, heads, cats, eheads, emp, byBranch, workOf, otherBr } = agg;
   // Only the ticked weeks get a column; each keeps `i`, its index into the
   // per-week totals, so dropping columns never shifts the data.
   const shownWeeks = weeks
@@ -372,7 +421,13 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
     }
     return list;
   };
-  const branchOn = (bi) => (!brSel.size || brSel.has(bi)) && seOf(bi).length > 0;
+  const hasOther = (bi) => otherBr[bi].spare > 0 || otherBr[bi].labour > 0;
+  // A branch whose only figure in the period is unattributed money still has to
+  // show, or the Grand Total would not add up to the rows above it. Skipped
+  // while an SE filter / search is on: those narrow to named engineers, and an
+  // engineer-less branch answers neither.
+  const branchOn = (bi) => (!brSel.size || brSel.has(bi))
+    && (seOf(bi).length > 0 || (!seSel.size && !q && hasOther(bi)));
 
   // ---- roll-ups ------------------------------------------------------------
   const zero = () => ({
@@ -380,7 +435,15 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
     sr: 0, heads: new Array(heads.length).fill(0),
     weekly: new Array(weeks.length).fill(0), present: 0, work: 0,
     leads: 0, cats: new Array(cats.length).fill(0), spare: 0, labour: 0,
+    // Unattributed (no-SE) conversion money — a BRANCH figure, so it is added
+    // by the branch roll-ups below and stays 0 on every engineer row.
+    oSpare: 0, oLabour: 0,
   });
+  const addBranchOther = (t, bi) => {
+    t.oSpare += otherBr[bi].spare;
+    t.oLabour += otherBr[bi].labour;
+    return t;
+  };
   const addSE = (t, ei) => {
     const e = emp[ei];
     t.sr += e.sr; t.alloc += e.alloc;
@@ -394,8 +457,9 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
     return t;
   };
   const seRow = (ei) => addSE(zero(), ei);
-  const sumBranch = (bi) => seOf(bi).reduce((t, ei) => addSE(t, ei), zero());
-  const sumBranches = (list) => list.reduce((t, bi) => seOf(bi).reduce((x, ei) => addSE(x, ei), t), zero());
+  const sumBranch = (bi) => addBranchOther(seOf(bi).reduce((t, ei) => addSE(t, ei), zero()), bi);
+  const sumBranches = (list) => list.reduce(
+    (t, bi) => addBranchOther(seOf(bi).reduce((x, ei) => addSE(x, ei), t), bi), zero());
 
   // ---- region blocks (MH then KA) -----------------------------------------
   // The branch groups arrive in their master order, but the backend APPENDS every
@@ -427,7 +491,19 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
   // Working Days / Days present print on ENGINEER rows only — every other row
   // is a roll-up, where a summed man-day figure means nothing. Passed explicitly
   // (not inferred) so a new row kind has to say which it is.
-  const dataCells = (t, key, kind = ROW_TOTAL) => {
+  // `merge` controls the Other column inside an expanded branch, where it is a
+  // BRANCH figure and a dash repeated on every engineer row says nothing:
+  //   {mode:'start', span, t}  one cell spanning the engineer rows, branch value
+  //   {mode:'skip'}            no cell at all — the span above covers this row
+  //   null                     one cell for this row alone
+  // There is no Total COLUMN: every roll-up row (Sub Total, Branch/Group/Region
+  // Total, Grand Total) merges its SE and Other cells into ONE cell holding
+  // SE + Other, so the total is read where a total belongs.
+  // `combine` is for the true TOTAL rows — Sub Total, MH / KA Total and the
+  // Grand Total — where one figure is what is read, so SE and Other merge into
+  // a single cell. The collapsed Branch Total / Group Total rows are the data
+  // rows of the folded view and keep the split visible.
+  const dataCells = (t, key, kind = ROW_TOTAL, merge = null, combine = false) => {
     const perSE = kind === ROW_SE;
     const cells = [];
     const cls = 'px-1 py-1 text-center text-[10.5px] text-black tabular-nums border-b border-l border-gray-400 whitespace-nowrap';
@@ -503,11 +579,54 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
     } else {
       cells.push(<td key={`${key}-cx`} className={cls} style={foldCol} />);
     }
-    // Conversion amounts are the LAST two columns — the only right-aligned ones.
-    cells.push(<td key={`${key}-sc`} className={clsAmt} style={amtCol}>{amtCell(t.spare)}</td>);
-    // border-r: the last column has no neighbour to draw its right edge, so
-    // scrolled fully right the table used to end on an open side.
-    cells.push(<td key={`${key}-lc`} className={`${clsAmt} border-r`} style={amtCol}>{amtCell(t.labour)}</td>);
+    // Conversion amounts are the LAST six columns — the only right-aligned ones.
+    // Each of the two runs SE | Other | Total, where 'Other' is the money of
+    // leads that carry no Service Engineer. Other belongs to the BRANCH, not to
+    // any one person, so an engineer row leaves it blank and its Total is just
+    // its own SE figure; every roll-up carries all three.
+    const mMode = merge && merge.mode;
+    const mT = mMode === 'start' ? merge.t : t;
+    // The vertically merged Other cell carries the BRANCH's figure and wears
+    // the Sub Total tint, so the block reads as one branch-level number.
+    const mStyle = mMode === 'start'
+      ? { ...amtCol, background: C_SUBTOT, verticalAlign: 'middle' }
+      : amtCol;
+    // Every row keeps SE and Other in their OWN columns — a roll-up that merged
+    // them into one total hid the split exactly where it is most read (the
+    // collapsed Branch / Group / Region / Grand Total rows, which have no
+    // engineer rows underneath to show it).
+    const amtPair = (which, seVal, oVal, lastCol) => {
+      const isLast = lastCol ? ' border-r' : '';
+      if (!perSE) {
+        if (combine) {
+          cells.push(
+            <td key={`${key}-${which}tot`} colSpan={2}
+              className={`${clsAmt} font-semibold${isLast}`}
+              style={{ width: W_AMT * 2, minWidth: W_AMT * 2, maxWidth: W_AMT * 2,
+                borderLeft: DIV }}>
+              {amtCell(seVal + oVal)}
+            </td>);
+          return;
+        }
+        cells.push(<td key={`${key}-${which}se`} className={`${clsAmt} font-semibold`}
+          style={{ ...amtCol, borderLeft: DIV }}>{amtCell(seVal)}</td>);
+        cells.push(<td key={`${key}-${which}o`} className={`${clsAmt} font-semibold${isLast}`}
+          style={amtCol}>{amtCell(oVal)}</td>);
+        return;
+      }
+      cells.push(<td key={`${key}-${which}se`} className={clsAmt}
+        style={{ ...amtCol, borderLeft: DIV }}>{amtCell(seVal)}</td>);
+      if (mMode === 'skip') return;      // covered by the rowSpan above
+      cells.push(<td key={`${key}-${which}o`}
+        {...(mMode === 'start' ? { rowSpan: merge.span } : {})}
+        className={`${clsAmt}${mMode === 'start' ? ' font-semibold' : ''}${isLast}`}
+        style={mStyle}>
+        {mMode === 'start' ? amtCell(which === 's' ? mT.oSpare : mT.oLabour) : Z}</td>);
+    };
+    amtPair('s', t.spare, t.oSpare, false);
+    // border-r on the last column: it has no neighbour to draw its right edge,
+    // so scrolled fully right the table used to end open.
+    amtPair('l', t.labour, t.oLabour, true);
     return cells;
   };
 
@@ -569,16 +688,21 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
       {text}
     </td>,
   ] : []);
-  const uidNameCells = (uid, name, keyBase, bg, indent = false) => (seOpen ? [
+  const uidNameCells = (uid, name, keyBase, bg, indent = false, onName = null) => (seOpen ? [
     <td key={`${keyBase}-u`} style={{ ...stick(OFF_UID, W_UID), background: bg }}
       className="px-1 py-1 text-center text-[9.5px] text-black tabular-nums border-b border-r border-gray-400">
       <div className="truncate" title={uid || undefined}>{uid || Z}</div>
     </td>,
     // A td ignores text-overflow, so the ellipsis lives on an inner block; the
     // full name is always in the tooltip.
+    // On an ENGINEER row the name also opens the drill-down: the Close SR rows
+    // the row's figures were counted from. Total / Sub Total rows pass no
+    // handler, so they stay plain text.
     <td key={`${keyBase}-n`} style={{ ...stick(OFF_NAME, W_NAME), background: bg, ...EDGE_R }}
       className={`${indent ? 'pl-2.5' : ''} px-1 py-1 text-left text-[10.5px] text-black border-b border-gray-400`}>
-      <div className="truncate" title={name || undefined}>{name || Z}</div>
+      <div className={`truncate ${onName ? 'cursor-pointer underline decoration-dotted underline-offset-2 hover:decoration-solid' : ''}`}
+        title={onName ? `${name} — click for the Close SR records` : (name || undefined)}
+        onClick={onName || undefined}>{name || Z}</div>
     </td>,
   ] : []);
 
@@ -662,6 +786,11 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
       const span = ses.length + 1;   // SE rows + the branch-total row
       const brBg = bandBg();         // shares the counter above, so the whole
                                      // Branch Name column strictly alternates
+      // Other is a branch figure: ONE cell spanning the ENGINEER rows. It stops
+      // above the Sub Total row, which merges its own SE + Other into a single
+      // total cell. A branch with no engineer rows has nothing to span.
+      const oMerge = ses.length
+        ? { mode: 'start', span: ses.length, t: bTot } : null;
       ses.forEach((ei, i) => {
         const bg = i % 2 ? C_ROW_B : C_ROW_A;
         rows.push(
@@ -669,8 +798,12 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
             {gcell(`b${bi}e${ei}c`)}
             {i === 0 && branchCell(bi, shortBranch(branches[bi]), seLabel, span, true,
               () => toggleBranch(bi), brBg)}
-            {uidNameCells(employees[ei].u, employees[ei].n, `b${bi}e${ei}`, bg, true)}
-            {dataCells(seRow(ei), `b${bi}e${ei}`, ROW_SE)}
+            {uidNameCells(employees[ei].u, employees[ei].n, `b${bi}e${ei}`, bg, true,
+              () => setSeDetail({ name: employees[ei].n, uid: employees[ei].u,
+                branch: shortBranch(branches[employees[ei].b]),
+                branchId: data.branch_ids[employees[ei].b] }))}
+            {dataCells(seRow(ei), `b${bi}e${ei}`, ROW_SE,
+              i === 0 ? oMerge : { mode: 'skip' })}
           </tr>
         );
       });
@@ -685,7 +818,7 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
             className="px-1.5 py-1 text-center text-[10.5px] text-black border-b border-gray-400">
             Sub Total
           </td>
-          {dataCells(bTot, `b${bi}tot`)}
+          {dataCells(bTot, `b${bi}tot`, ROW_TOTAL, null, true)}
         </tr>
       );
     });
@@ -702,7 +835,7 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
             className="px-1.5 py-1.5 text-center text-[11px] text-black border-y border-gray-400">
             Sub Total
           </td>
-          {dataCells(t, `g${gi}tot`)}
+          {dataCells(t, `g${gi}tot`, ROW_TOTAL, null, true)}
         </tr>
       );
     }
@@ -728,7 +861,7 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
           className="px-1.5 py-1.5 text-center text-[11px] border-y border-gray-400">
           {rg} Total
         </td>
-        {dataCells(sumBranches(list), `rg${rg}`).map((c) =>
+        {dataCells(sumBranches(list), `rg${rg}`, ROW_TOTAL, null, true).map((c) =>
           React.cloneElement(c, {
             className: `${c.props.className} !text-white`,
             style: { ...(c.props.style || {}), background: C_REGION, color: '#fff' },
@@ -884,8 +1017,13 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
       const C_CDI = C_PR + 1;                 // Passive / Detractor / %
       const C_LD = C_CDI + nCDI;
       const C_CAT = C_LD + 1;
-      const C_SPARE = C_CAT + xCats.length, C_LAB = C_SPARE + 1;
-      const LAST = C_LAB;
+      // Spare Conv. Amount and Labour Conv. Amount are each SE | Other. There is
+      // no Total column: a roll-up row merges its two cells into one total.
+      const C_SPARE = C_CAT + xCats.length;
+      const C_SP_OT = C_SPARE + 1;
+      const C_LAB = C_SPARE + 2;
+      const C_LB_OT = C_LAB + 1;
+      const LAST = C_LB_OT;
 
       // ---- row 1: the blue ERP band with the selected period ----
       for (let c = 1; c <= LAST; c++) put(1, c, '', { fill: BRAND });
@@ -952,14 +1090,18 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
       tall(C_LD, 'Number of Lead');
       band2(C_CAT, xCats.length, 'Product Wise Lead Count');
       xCats.forEach((c, k) => put(3, C_CAT + k, c, HD));
-      tall(C_SPARE, 'Spare Conv. Amount');
-      tall(C_LAB, 'Labour Conv. Amount');
+      band2(C_SPARE, 2, 'Spare Conv. Amount');
+      ['SE', 'Other'].forEach((h, k) => put(3, C_SPARE + k, h, HD));
+      band2(C_LAB, 2, 'Labour Conv. Amount');
+      ['SE', 'Other'].forEach((h, k) => put(3, C_LAB + k, h, HD));
       ws.getRow(2).height = 20;
       ws.getRow(3).height = 38;
 
       // ---- body ----
       // One data row. `o` carries the row's fill / font so totals read as totals.
-      const dataRow = (r, t, o = {}, kind = ROW_TOTAL) => {
+      // skipOther: the Other / Total cells are written once for the whole branch
+      // block and merged down, so the rows inside it must not overwrite them.
+      const dataRow = (r, t, o = {}, kind = ROW_TOTAL, skipOther = false) => {
         // the screen's rule, in the sheet: Working Days / Days present are
         // per-engineer, so a roll-up row leaves both blank
         const perSE = kind === ROW_SE;
@@ -989,8 +1131,39 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
           { ...o, align: CENTER, fmt: '0.0;-0.0;"-"', font: { ...(o.font || {}), bold: true } });
         put(r, C_LD, N(t.leads), { ...o, align: CENTER, fmt: F_CNT });
         xCats.forEach((c, k) => put(r, C_CAT + k, N(t.cats[k]), { ...o, align: CENTER, fmt: F_CNT }));
-        put(r, C_SPARE, N(Math.round(t.spare)), { ...o, align: RIGHT, fmt: F_AMT });
-        put(r, C_LAB, N(Math.round(t.labour)), { ...o, align: RIGHT, fmt: F_AMT });
+        // Other is a BRANCH figure: an engineer row leaves it empty and its Total
+        // is its own SE figure, exactly as on screen.
+        const amt = { ...o, align: RIGHT, fmt: F_AMT };
+        const amtB = { ...amt, font: { ...(o.font || {}), bold: true } };
+        if (!perSE) {
+          // The sheet only ever writes TOTAL rows (it always expands a branch),
+          // so SE and Other merge into one figure, as they do on screen.
+          [[C_SPARE, C_SP_OT, t.spare + t.oSpare],
+           [C_LAB, C_LB_OT, t.labour + t.oLabour]].forEach(([c1, c2, v]) => {
+            put(r, c1, N(Math.round(v)), amtB);
+            put(r, c2, '', amtB);
+            ws.mergeCells(r, c1, r, c2);
+            ws.getCell(r, c1).alignment = { vertical: 'middle', horizontal: 'right' };
+          });
+          return;
+        }
+        put(r, C_SPARE, N(Math.round(t.spare)), amt);
+        put(r, C_LAB, N(Math.round(t.labour)), amt);
+        if (skipOther) return;
+        put(r, C_SP_OT, '', amt);
+        put(r, C_LB_OT, '', amt);
+      };
+      // The branch's Other figure, written once at the top of the ENGINEER rows
+      // and merged down them — the sheet's echo of the screen's rowSpan. It
+      // stops above the Sub Total row, which carries its own merged total.
+      const mergedOther = (rFrom, rTo, t) => {
+        const st = { fill: BTOT, align: RIGHT, fmt: F_AMT, font: { bold: true } };
+        [[C_SP_OT, t.oSpare], [C_LB_OT, t.oLabour]].forEach(([c, v]) => {
+          put(rFrom, c, N(Math.round(v)), st);
+          for (let rr = rFrom + 1; rr <= rTo; rr++) put(rr, c, '', st);
+          if (rTo > rFrom) ws.mergeCells(rFrom, c, rTo, c);
+          ws.getCell(rFrom, c).alignment = { vertical: 'middle', horizontal: 'right' };
+        });
       };
       const labelRow = (r, branch, uid, name, o = {}) => {
         put(r, C_BR, branch, { ...o, align: LEFT });
@@ -1006,22 +1179,26 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
           const rFirst = r;
           // No separate branch summary row — the Sub Total row below already
           // carries the branch's figures, so each branch appears once.
+          const bTotX = sumBranch(bi);
           ses.forEach((ei, i) => {
             const bg = i % 2 ? SE_B : SE_A;
             labelRow(r, '', employees[ei].u || '', employees[ei].n, { fill: bg });
             // the branch name goes on the first engineer row and is merged down
             // the block, so it keeps a plain background like the screen
             if (i === 0) put(r, C_BR, shortBranch(branches[bi]), { align: LEFT, font: { bold: true } });
-            dataRow(r, seRow(ei), { fill: bg }, ROW_SE);
+            dataRow(r, seRow(ei), { fill: bg }, ROW_SE, ses.length > 0);
             r += 1;
           });
           labelRow(r, ses.length ? '' : shortBranch(branches[bi]), '',
             `Sub Total (${ses.length} SE${ses.length === 1 ? '' : 's'})`,
             { fill: BTOT, font: { bold: true } });
-          dataRow(r, sumBranch(bi), { fill: BTOT, font: { bold: true } });
+          dataRow(r, bTotX, { fill: BTOT, font: { bold: true } });
           r += 1;
           // the branch name spans its engineers + Sub Total, like the screen
           if (r - 1 > rFirst) ws.mergeCells(rFirst, C_BR, r - 1, C_BR);
+          // Other spans the ENGINEER rows only (r - 2 is the last of them):
+          // the Sub Total row holds its own merged SE + Other total.
+          if (ses.length) mergedOther(rFirst, r - 2, bTotX);
         });
         if (!single) {
           labelRow(r, 'Sub Total', '', `${g.length} branches`, { fill: GTOT, font: { bold: true } });
@@ -1291,10 +1468,12 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
                       <span className="inline-block mr-1 text-[9px]">▶</span>Lead Count
                     </th>
                   )}
-                  <th rowSpan={2} style={{ ...amtCol, ...HB }}
-                    className={`${thBase} !whitespace-normal`}>Spare Conv.<br />Amount</th>
-                  <th rowSpan={2} style={{ ...amtCol, ...HB }}
-                    className={`${thBase} !whitespace-normal`}>Labour Conv.<br />Amount</th>
+                  <th colSpan={2} style={{ ...HB, borderLeft: DIV }} className={grpTh}
+                    title="Part Invoice Amount, on the ORDER CREATION DATE (LMS Data from Insia, matched on Lead Number). Excludes OTC Quotation.">
+                    Spare Conv. Amount</th>
+                  <th colSpan={2} style={{ ...HB, borderLeft: DIV }} className={grpTh}
+                    title="Labour Invoice Amount, on the ORDER CREATION DATE (LMS Data from Insia, matched on Lead Number).">
+                    Labour Conv. Amount</th>
                 </tr>
                 <tr>
                   {SHOW_ALLOC && openAlloc && eheads.map((h) => (
@@ -1334,6 +1513,16 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
                     <th key={c} className={`${thBase} !whitespace-normal`}
                       lang="en" style={{ ...subCol, ...HB, ...wrapTh }} title={c}>{thLabel(c)}</th>
                   ))}
+                  <th className={thBase} style={{ ...amtCol, ...HB, borderLeft: DIV }}
+                    title="Spare converted by THIS engineer">SE</th>
+                  <th className={thBase} style={{ ...amtCol, ...HB }}
+                    title="Spare converted on leads that carry NO Service Engineer - a BRANCH figure. Every total row merges SE + Other into one cell.">
+                    Other</th>
+                  <th className={thBase} style={{ ...amtCol, ...HB, borderLeft: DIV }}
+                    title="Labour converted by THIS engineer">SE</th>
+                  <th className={thBase} style={{ ...amtCol, ...HB }}
+                    title="Labour converted on leads that carry NO Service Engineer - a BRANCH figure. Every total row merges SE + Other into one cell.">
+                    Other</th>
                 </tr>
               </thead>
               <tbody>
@@ -1356,7 +1545,7 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
                     className="px-1.5 py-1.5 text-center text-[11px] border-y border-gray-900">
                     Grand Total
                   </td>
-                  {dataCells(grand, 'grand').map((c) =>
+                  {dataCells(grand, 'grand', ROW_TOTAL, null, true).map((c) =>
                     React.cloneElement(c, {
                       className: `${c.props.className} !text-white !border-t !border-t-gray-900`,
                       style: { ...(c.props.style || {}), background: C_GRAND, color: '#fff' },
@@ -1368,6 +1557,14 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
         </div>
 
       </div>
+
+      {/* The engineer's own Close SR records — opened from the SE name, bounded
+          by the SAME period the table is showing so the count matches the row. */}
+      {seDetail && (
+        <SEDetailModal mode="ep" name={seDetail.name} uid={seDetail.uid}
+          branch={seDetail.branch} branchId={seDetail.branchId}
+          from={start} to={end} onClose={() => setSeDetail(null)} />
+      )}
     </div>
   );
 };

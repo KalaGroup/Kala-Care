@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 import { reflowLetterReferencesHtml } from '../utils/letterReferences';
+import { letterBodyTopMm, normalizeLetterBodyHtml } from '../utils/letterLayout';
 
 const themeColor = '#2f3192';
 
@@ -129,8 +130,10 @@ const generateBandedLetterPdf = async (bodyHtml) => {
     if (headerUrl) { try { const h = await loadLetterImg(headerUrl); if (h.width) headerH = pageW * (h.height / h.width); } catch (e) { headerH = 0; } }
     if (footerUrl) { try { const f = await loadLetterImg(footerUrl); if (f.width) footerH = pageW * (f.height / f.width); } catch (e) { footerH = 0; } }
     const SAFE_MM = 4;
-    const contentTop = headerH;
-    const contentH = Math.max(20, pageH - headerH - footerH - SAFE_MM);
+    // Body starts a touch INSIDE the header band — the band's bottom strip is blank
+    // paper, so pulling the text up into it closes the wide gap under the logos.
+    const contentTop = letterBodyTopMm(headerH);
+    const contentH = Math.max(20, pageH - contentTop - footerH - SAFE_MM);
 
     const holder = document.createElement('div');
     holder.style.position = 'fixed';
@@ -251,9 +254,10 @@ const generateBandedLetterPdf = async (bodyHtml) => {
 
             const sliceData = c.toDataURL('image/jpeg', 0.92);
             const sliceHmm = thisSliceHpx / pxPerMm;
-            pdf.addImage(sliceData, 'JPEG', 0, contentTop, pageW, sliceHmm);
+            // Bands first — the body slice overlaps the header band's blank bottom strip.
             if (headerUrl && headerH > 0) pdf.addImage(headerUrl, 'PNG', 0, 0, pageW, headerH);
             if (footerUrl && footerH > 0) pdf.addImage(footerUrl, 'PNG', 0, pageH - footerH, pageW, footerH);
+            pdf.addImage(sliceData, 'JPEG', 0, contentTop, pageW, sliceHmm);
         }
         if (firstPage) {
             if (headerUrl && headerH > 0) pdf.addImage(headerUrl, 'PNG', 0, 0, pageW, headerH);
@@ -429,7 +433,9 @@ const BranchLetterReportModal = ({ isOpen, onClose, branch, branchDisplayName, a
                 { params: { user_id: userData.user_id || userData.id, role: userData.role, branch: userData.branch } }
             );
             // Re-flow the stored References table (3 pairs per row when they fit, else 2)
-            const rawHtml = reflowLetterReferencesHtml(res.data?.letter_html || '');
+            // and re-apply the current page layout, so an old letter is laid out exactly
+            // like a freshly sent one (display only — nothing is re-saved).
+            const rawHtml = normalizeLetterBodyHtml(reflowLetterReferencesHtml(res.data?.letter_html || ''));
             if (!rawHtml) { alert('This letter has no content to display.'); return; }
             const bodyHtml = rawHtml.replace(/<img\b[^>]*?(?:max-width\s*:\s*780px|width\s*:\s*100%)[^>]*?>/gi, '');
             const b64 = await generateBandedLetterPdf(bodyHtml);

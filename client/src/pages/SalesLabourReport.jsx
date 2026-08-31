@@ -3454,6 +3454,16 @@ const SalesLabourReport = () => {
                 // numbers right-aligned (headers stay centered)
                 const tdB = 'px-1 py-1 border border-gray-400 text-right whitespace-nowrap text-[10px]';
                 const tdP = tdB;   // % share cells — same black text as the rest
+                // The letters ALWAYS RESTART AT A in every table. With the AOP
+                // targets shown the pairs run A·B, C·D, E·F; WITHOUT them the
+                // target columns are not on the table, so the three Sale columns
+                // are A, B, C — never B, D, F with A, C and E nowhere to be found.
+                const L = withTarget
+                  ? { st: 'A', ss: 'B', lt: 'C', ls: 'D', tt: 'E', ts: 'F' }
+                  : { ss: 'A', ls: 'B', ts: 'C' };
+                // "B / A × 100" against a target, "A / A Total × 100" as a share.
+                const pctOf = (sale, tgtL) => (withTarget
+                  ? `${sale} / ${tgtL} × 100` : `${sale} / ${sale} Total × 100`);
                 return (
                   <div className="border border-gray-200 rounded-lg overflow-hidden">
                     <div className="px-2 py-1 text-[11px] font-bold text-white flex items-center justify-between gap-2"
@@ -3470,21 +3480,15 @@ const SalesLabourReport = () => {
                         <thead>
                           <tr>
                             <th className={thB}>Name</th>
-                            {withTarget && <th className={thB}>{colTag('Spare Target', 'A')}</th>}
-                            <th className={thB}>{colTag('Spare Sale', 'B')}</th>
-                            <th className={thB}>
-                              {pctHead('Spare %', withTarget ? 'B / A × 100' : 'B / B Total × 100')}
-                            </th>
-                            {withTarget && <th className={thB}>{colTag('Labour Target', 'C')}</th>}
-                            <th className={thB}>{colTag('Labour Sale', 'D')}</th>
-                            <th className={thB}>
-                              {pctHead('Labour %', withTarget ? 'D / C × 100' : 'D / D Total × 100')}
-                            </th>
-                            {withTarget && <th className={thB}>{colTag('Total Target', 'E')}</th>}
-                            <th className={thB}>{colTag('Total Sale', 'F')}</th>
-                            <th className={thB}>
-                              {pctHead('Total %', withTarget ? 'F / E × 100' : 'F / F Total × 100')}
-                            </th>
+                            {withTarget && <th className={thB}>{colTag('Spare Target', L.st)}</th>}
+                            <th className={thB}>{colTag('Spare Sale', L.ss)}</th>
+                            <th className={thB}>{pctHead('Spare %', pctOf(L.ss, L.st))}</th>
+                            {withTarget && <th className={thB}>{colTag('Labour Target', L.lt)}</th>}
+                            <th className={thB}>{colTag('Labour Sale', L.ls)}</th>
+                            <th className={thB}>{pctHead('Labour %', pctOf(L.ls, L.lt))}</th>
+                            {withTarget && <th className={thB}>{colTag('Total Target', L.tt)}</th>}
+                            <th className={thB}>{colTag('Total Sale', L.ts)}</th>
+                            <th className={thB}>{pctHead('Total %', pctOf(L.ts, L.tt))}</th>
                           </tr>
                         </thead>
                         <tbody>

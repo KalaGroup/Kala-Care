@@ -297,7 +297,7 @@ def _send_submitted(to_email, app: dict, attachments, cc_emails, pending_label, 
     smtp_server = os.getenv("SMTP_SERVER")
     smtp_port = int(os.getenv("SMTP_PORT", 587))
     smtp_username = os.getenv("SMTP_USERNAME")
-    smtp_password = os.getenv("SMTP_PASSWORD")
+    smtp_password = mail_utils.smtp_password("SMTP_PASSWORD")
     from_email = os.getenv("FROM_EMAIL", smtp_username)
     to_list = [e for e in dict.fromkeys(
         to_email if isinstance(to_email, (list, tuple)) else [to_email]) if e]
@@ -348,7 +348,7 @@ def _send_email(to_email, app: dict, attachments, cc_emails=None):
     smtp_server = os.getenv("SMTP_SERVER")
     smtp_port = int(os.getenv("SMTP_PORT", 587))
     smtp_username = os.getenv("SMTP_USERNAME")
-    smtp_password = os.getenv("SMTP_PASSWORD")
+    smtp_password = mail_utils.smtp_password("SMTP_PASSWORD")
     from_email = os.getenv("FROM_EMAIL", smtp_username)
     to_list = [e for e in dict.fromkeys(
         to_email if isinstance(to_email, (list, tuple)) else [to_email]) if e]

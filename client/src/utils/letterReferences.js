@@ -2,12 +2,20 @@
 //
 // Letters are saved with the References block already rendered (2 label:value
 // pairs per table row). At view / print / download time we re-chunk that table:
-// 3 pairs per row when every "Label: value" is short enough to share one
-// ~700px line three-across at 12px, otherwise 2 per row — same rule as
-// buildReferencesHtml() in CustomerEng / CustomerEng2, applied retroactively
-// to old letter history (drive and non-drive), MyPerformance and Dashboard views.
+// 3 pairs per row when every "Label: value" is short enough to share one line
+// three-across at 12px inside the letter's text column, otherwise 2 per row —
+// same rule as buildReferencesHtml() in CustomerEng / CustomerEng2, applied
+// retroactively to old letter history (drive and non-drive), MyPerformance and
+// Dashboard views.
 
-const PAIR_FIT_LIMIT = 34; // max chars of "Label: value" for three-across
+import { LETTER_TEXT_W } from './letterLayout';
+
+// Max chars of "Label: value" that still fits three-across. Derived from the
+// letter's text column (LETTER_TEXT_W) so it tracks the page margins: 3 pairs
+// share that width, each spending ~26px on cell padding and ~6.5px per char at
+// 12px Arial. buildReferencesHtml() in CustomerEng / CustomerEng2 uses the same
+// constant, so a stored letter re-flows to exactly what a new one would render.
+export const PAIR_FIT_LIMIT = Math.floor(((LETTER_TEXT_W / 3) - 26) / 6.5);
 
 // Plain DOM traversal (no HTMLTableElement-specific APIs like .rows/.cells)
 const tableRows = (table) =>
@@ -69,7 +77,7 @@ export const reflowLetterReferencesHtml = (html) => {
             const labelStyle = (firstLabelTd && firstLabelTd.getAttribute('style')) ||
                 'padding:2px 8px 2px 0;vertical-align:top;white-space:nowrap;';
             const valueStyle = (firstValueTd && firstValueTd.getAttribute('style')) ||
-                'padding:2px 18px 2px 0;vertical-align:top;';
+                'padding:2px 18px 2px 0;vertical-align:top;overflow-wrap:anywhere;';
             const oldRows = tableRows(table);
             const rowParent = oldRows[0].parentNode; // tbody (or the table itself)
             oldRows.forEach(tr => tr.remove());

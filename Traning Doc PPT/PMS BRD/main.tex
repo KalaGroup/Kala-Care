@@ -1,0 +1,1039 @@
+% ============================================================================
+%  KALA Care Global LLP - Kala Care ERP
+%  BUSINESS REQUIREMENTS DOCUMENT (BRD)
+%  Module: PMS - Performance Management System
+%  Layout follows the MOM Tracking document, with the KALA logo added.
+%  Compile with pdfLaTeX on Overleaf. Text and tables only - no screenshots.
+%  The only image is logo.png (title page + header); if that file is not
+%  present the document still compiles, simply without the logo.
+% ============================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[a4paper,margin=1in,headheight=26pt,headsep=16pt]{geometry}
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage[table]{xcolor}
+\usepackage{amssymb}
+\usepackage{caption}
+\usepackage[hidelinks]{hyperref}
+
+% ---- colours ---------------------------------------------------------------
+\definecolor{kcglblue}{HTML}{2F3192}
+\definecolor{brdhead}{HTML}{E8F3FC}
+\definecolor{brdband}{HTML}{2F3192}
+\definecolor{brdline}{HTML}{9FC0DF}
+
+% ---- page furniture --------------------------------------------------------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\IfFileExists{logo.png}{\raisebox{-3pt}{\includegraphics[height=16pt]{logo.png}}\hspace{6pt}}{}%
+  \small Kala Care ERP}
+\fancyhead[R]{\small PMS -- Business Requirements Document}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\fancypagestyle{plain}{%
+  \fancyhf{}\fancyfoot[C]{\thepage}\renewcommand{\headrulewidth}{0pt}}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+\captionsetup{font=small,labelfont=bf}
+\setlist[itemize]{leftmargin=1.6em,itemsep=3pt,topsep=4pt}
+
+% ---- helpers ---------------------------------------------------------------
+% Quoted text
+\newcommand{\qt}[1]{\textquotedblleft #1\textquotedblright}
+% A column name of an uploaded file
+\newcommand{\col}[1]{\textsc{\small #1}}
+
+% One business requirement, with the solution against it.
+%   #1 id and title   #2 what the client asked   #3 what we built   #4 where
+\newcommand{\brreq}[4]{%
+  \par\vspace{7pt}\noindent
+  {\small\renewcommand{\arraystretch}{1.30}%
+  \begin{tabularx}{\linewidth}{|>{\raggedright\arraybackslash}p{2.9cm}|X|}
+  \hline
+  \rowcolor{brdhead}\multicolumn{2}{|l|}{\textbf{#1}}\\
+  \hline
+  \textbf{Client requirement} & #2\\
+  \hline
+  \textbf{Our solution} & #3\\
+  \hline
+  \textbf{Delivered in} & #4\\
+  \hline
+  \end{tabularx}}%
+  \par\vspace{3pt}}
+
+\begin{document}
+
+% ============================== TITLE PAGE ==================================
+\thispagestyle{empty}
+\begin{center}
+  \vspace*{18mm}
+  \IfFileExists{logo.png}{\includegraphics[width=46mm]{logo.png}}{}\\[10mm]
+  {\large\bfseries KALA CARE GLOBAL LLP}\\[3mm]
+  {\normalsize Kala Care ERP System}\\[16mm]
+  {\color{kcglblue}\rule{0.72\linewidth}{1.2pt}}\\[6mm]
+  {\Huge\bfseries Business Requirements}\\[4mm]
+  {\Huge\bfseries Document}\\[7mm]
+  {\LARGE PMS -- Performance Management System}\\[6mm]
+  {\color{kcglblue}\rule{0.72\linewidth}{1.2pt}}\\[16mm]
+  {\normalsize Prepared by: Vishal Chavan \& Nikhil Reddy}\\[3mm]
+  {\normalsize Date: August 2026 \quad$|$\quad Version 1.0}
+\end{center}
+
+\newpage
+
+% ============================== DOC CONTROL =================================
+\section*{Document Control}
+\addcontentsline{toc}{section}{Document Control}
+
+\begin{table}[H]\centering\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\linewidth}{@{}|p{3.6cm}|X|@{}}
+\hline
+\rowcolor{brdhead}\multicolumn{2}{|l|}{\textbf{Document details}}\\
+\hline
+Document title & Business Requirements Document -- PMS (Performance Management System)\\
+\hline
+Client & KALA Care Global LLP\\
+\hline
+System & Kala Care ERP\\
+\hline
+Module & PMS -- Performance Management System\\
+\hline
+Prepared by & Vishal Chavan, Nikhil Reddy\\
+\hline
+Version & 1.0\\
+\hline
+Date & August 2026\\
+\hline
+Status & Delivered. For client review and sign-off\\
+\hline
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]\centering\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\linewidth}{@{}|p{1.8cm}|p{2.6cm}|X|p{2.6cm}|@{}}
+\hline
+\rowcolor{brdhead}\textbf{Version} & \textbf{Date} & \textbf{Change} & \textbf{Author}\\
+\hline
+0.1 & July 2026 & Requirements collected from the business and written up & Vishal Chavan\\
+\hline
+0.9 & August 2026 & Our solution written against each requirement as the module
+was built & Vishal Chavan, Nikhil Reddy\\
+\hline
+1.0 & August 2026 & Issued for review and sign-off & Vishal Chavan\\
+\hline
+\end{tabularx}
+\caption{Revision history}
+\end{table}
+
+\vspace{4pt}
+\begin{table}[H]\centering\small
+\renewcommand{\arraystretch}{1.4}
+\begin{tabularx}{\linewidth}{@{}|X|p{3.2cm}|p{2.6cm}|p{2.4cm}|@{}}
+\hline
+\rowcolor{brdhead}\textbf{Role} & \textbf{Name} & \textbf{Signature} & \textbf{Date}\\
+\hline
+Business owner (KCGL) & & & \\
+\hline
+Service head & & & \\
+\hline
+Project lead & & & \\
+\hline
+\end{tabularx}
+\caption{Sign-off}
+\end{table}
+
+\newpage
+\tableofcontents
+\newpage
+
+
+% ============================== 1. PURPOSE ==================================
+\section{Purpose of this Document}
+
+This document lists what the business asked for in the PMS (Performance Management
+System) module of the Kala Care ERP, and what we built against each of those requests.
+
+It is written for the business, not for the technical team. Each requirement is written
+the way the business explained it. Next to it we have written what the user now gets on
+screen: what data the report reads, where each figure comes from, and where to find it in
+the system.
+
+Section~\ref{sec:req} is the main part of this document. It has 28 requirements, each one
+with our solution next to it. The sections after that cover the files PMS reads, how the
+data moves from a file to a report, and the problems we found in the source data with the
+decision taken on each.
+
+% ============================== 2. BACKGROUND ===============================
+\section{Business Background}
+
+KCGL reviews its service business every month against the annual operating plan. Branch
+by branch for spare and labour revenue. Engineer by engineer for productivity. Year by
+year for AMC, service penetration, customer delight and response time.
+
+Until now all of this was done by hand in Excel. Someone downloaded several exports from
+the KOEL systems, pasted them into working files, matched them against each other by
+name, and totalled them into review sheets. The business wanted this replaced for four
+reasons:
+
+\begin{itemize}
+  \item \textbf{Time.} A monthly review pack took days to prepare. If one figure was
+  questioned, the sheet had to be built again.
+  \item \textbf{Trust.} Two people could build the same sheet and get two different
+  numbers. There was no way to see which column a figure had come from.
+  \item \textbf{Timing.} By the time the pack was ready the data in it was already old. A
+  mid-month view was not really possible.
+  \item \textbf{Lost detail.} Once a sheet was totalled, you could no longer ask which
+  branch, which engineer or which week.
+\end{itemize}
+
+PMS was built to replace that manual work. It reads the same exports, applies the
+business's own targets and groupings, and produces every review sheet on demand. Every
+figure can be traced back to the column of the file it came from.
+
+% ============================== 3. SCOPE ====================================
+\section{Scope}
+
+\subsection*{In scope}
+\begin{itemize}
+  \item Uploading the Spare (Part Sale) and Labour Revenue files, and the Training Report
+  export, and keeping them safely as data builds up.
+  \item Using the ERP's existing imports, so the same file is never uploaded twice:
+  Response Time \& MaxTTR Details, EFSR Report, LMS Data, CDI Detail Report, Asset
+  Detailed Report, AMC Population Report, the four Bandhan quote files and the Open SR
+  Load Report.
+  \item An AOP \& Master page holding all the targets and all the mapping lists the
+  reports use.
+  \item The Sales \& Labour report in three views: All, Branch-wise, and FY / Quarterly /
+  Month-wise.
+  \item The Employee Productivity and SR Allocation reports.
+  \item The Training Report master, searchable by employee and by skill.
+  \item The four annual sheets: Service Penetration, AMC \& Bandhan Projection with its
+  AMC tab, Customer Delight Index, and Service Load \& Response.
+  \item Excel export from every report, and rights given per user and per master tab.
+\end{itemize}
+
+\subsection*{Out of scope}
+\begin{itemize}
+  \item Creating or editing the source data. PMS reports on the KOEL and ERP exports as
+  they come. Corrections are made at source and show up on the next upload.
+  \item Figures that no uploaded file contains. Where the business needs such a figure,
+  PMS gives a place to type it in and prints it as typed. It never works it out on its own
+  (see Section~\ref{sec:constraints}).
+  \item Closed financial years for AMC, for the reason given in
+  Section~\ref{sec:constraints}.
+  \item Payroll, incentive calculation and appraisals. PMS measures performance. It does
+  not price it.
+\end{itemize}
+
+% ============================== 4. STAKEHOLDERS =============================
+\section{Stakeholders and Users}
+
+\begin{table}[H]\centering\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\linewidth}{@{}|p{3.6cm}|X|@{}}
+\hline
+\rowcolor{brdhead}\textbf{Who} & \textbf{What they do with PMS}\\
+\hline
+Master Admin & Owns the module. Uploads the data, keeps every master up to date, gives
+PMS rights to others, and reads every report.\\
+\hline
+Management / COO & Reads the monthly and annual review sheets: sales against AOP, the
+annual reports, and the region and company totals.\\
+\hline
+Service head & Reads Employee Productivity, SR Allocation and Service Load \& Response.
+Owns the SR closure and response targets.\\
+\hline
+Branch admin & Reads their own branches in the Sales \& Labour and Branch-wise reports.\\
+\hline
+Users with PMS access & Sees only the report pages ticked for them, and only the AOP \&
+Master tabs given to them, either as show-only or as show and edit. See
+Section~\ref{sec:rights}.\\
+\hline
+\end{tabularx}
+\caption{Stakeholders and users of the PMS module}
+\end{table}
+
+\subsection{Visibility Rights -- Who Sees What}
+\label{sec:rights}
+
+Rights are given in three steps, from the Master Admin's Profile screen. Each step
+narrows the one before it. A later step can never give more than an earlier one.
+
+\begin{table}[H]\centering\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\linewidth}{@{}|p{1.1cm}|p{3.5cm}|X|@{}}
+\hline
+\rowcolor{brdhead}\textbf{Step} & \textbf{Given as} & \textbf{What it decides}\\
+\hline
+1 & PMS Access & Whether the user sees the PMS menu at all. Give it and the module opens.
+Take it away and every PMS page closes in one action.\\
+\hline
+2 & PMS Pages & Which report pages the user sees. Each page is ticked on its own, as Show
+or Don't show, with \qt{All pages} and \qt{Clear all} buttons to save time. If nothing is
+ticked for a user, they see all the report pages. That is how the module worked before
+this step was added.\\
+\hline
+3 & AOP \& Master Rights & The AOP \& Master page. First for the whole page, then tab by
+tab: Don't show, Show only, or Show and edit. A tab can never be set higher than the level
+given to the page itself.\\
+\hline
+\end{tabularx}
+\caption{The three steps of PMS visibility}
+\end{table}
+
+\textbf{The five report pages, each given on its own.} AOP \& Master is not in this list.
+It holds the targets, so it has its own rights.
+
+\begin{table}[H]\centering\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\linewidth}{@{}|p{4.2cm}|X|@{}}
+\hline
+\rowcolor{brdhead}\textbf{Report page} & \textbf{What the user sees when it is given}\\
+\hline
+Sales \& Labour Report & Uploading and previewing the two sales files, and the report in
+all three views: All, Branch-wise, and FY / Quarterly / Month-wise\\
+\hline
+Employee Productivity & The service engineer report: SRs closed, working days, days
+present, productivity, CDI and leads\\
+\hline
+SR Allocation Report & SRs allocated against SRs closed, engineer wise, with the open
+backlog and the branch-wise open SR load\\
+\hline
+Training Report & The skill and training master, By Employee and By Skill\\
+\hline
+Annual Reports & All four yearly sheets: Service Penetration, AMC \& Bandhan Projection
+with its AMC tab, Customer Delight Index, and Service Load \& Response\\
+\hline
+\end{tabularx}
+\caption{The PMS report pages, each given on its own}
+\end{table}
+
+\textbf{The nine AOP \& Master tabs, each at its own level.} Only the nominated AOP rights
+administrators can give these. They always hold every tab themselves.
+
+\begin{table}[H]\centering\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\linewidth}{@{}|p{5.6cm}|X|@{}}
+\hline
+\rowcolor{brdhead}\textbf{Tab} & \textbf{What it holds}\\
+\hline
+Target Master & The year's Spare and Labour targets, and the working days calendar\\
+\hline
+SR Type Master (Sales and Labour) & How the sales files' SR Types are grouped into heads\\
+\hline
+SR Type Master (MaxTTR) & The same for the MaxTTR file\\
+\hline
+SR Type Master (EFSR) & The same for the EFSR file\\
+\hline
+SR Type Master (Service Load) & The MaxTTR file grouped a second way, for the Service
+Load sheet\\
+\hline
+Lead Category Master & How lead reasons map to the products we sell\\
+\hline
+CDI Target Master & The CDI target percentage, for each row of that report\\
+\hline
+AMC \& Bandhan AOP & Last year's actual, this year's projection and the best month, per
+branch and per agreement category\\
+\hline
+Service Load AOP & The monthly SR closure targets, the response and productivity targets,
+and the FTR / FVR figures\\
+\hline
+\end{tabularx}
+\caption{The AOP \& Master tabs, each given as Don't show / Show only / Show and edit}
+\end{table}
+
+\textbf{Where the rights are applied.} A right that has not been given is blocked in three
+places, so there is no way around it. The page does not show in the menu. Typing its
+address does not open it. And the data behind it is refused as well. On a Show only tab,
+the save, sync and reset buttons are hidden and every cell is locked.
+
+Two rights sit outside these three steps. The \textbf{Service Engineer UID master} on the
+Profile page is Master Admin only, whatever PMS rights a user has. \textbf{Excel export}
+follows the separate export permission on the user's account (BR-27).
+
+% ============================== 5. REQUIREMENTS =============================
+\section{Business Requirements and Our Solution}
+\label{sec:req}
+
+The business gave us 28 requirements for PMS. They are grouped into seven areas below.
+Each one is written the way the business explained it, with our solution next to it and
+the screen where it can be seen.
+
+% ---------------------------------------------------------------------------
+\subsection{Area A -- Data foundation}
+
+\brreq{BR-01 \quad Upload as often as we like, without double counting}
+{\qt{We take the Part Sale and Labour extracts daily, weekly and monthly, and the periods
+overlap. Uploading the same period twice must not increase the sales figure.}}
+{Each row is identified by what makes it unique in its own file. For spares that is the
+invoice number plus the part line. For labour it is the invoice number plus the labour
+line, because one SR is billed as several labour lines. So when a row is uploaded again,
+it is updated if something changed, and counted as a duplicate if nothing changed. After
+each upload we show how many rows were new, updated, duplicate and unusable.}
+{Sales \& Labour Report $\rightarrow$ upload boxes}
+
+\brreq{BR-02 \quad A file should import even if the header spelling changes}
+{\qt{The export headers are not always the same. The file should still import. And if a
+column we really need is missing, tell us which one before anything is loaded.}}
+{Headers are matched on their shape, not letter by letter. So \qt{Claim Invoice Date} and
+\qt{CLAIM  INVOICE DATE.} are read as the same column. Only three columns are must-have:
+\col{branch id}, \col{claim invoice date} and \col{net taxable amount}. If any of them is
+missing, the file is rejected with the name of the missing column, and nothing is stored.
+The \emph{Check file format} button does a trial run and stores nothing. All the other
+columns in the file are kept, so nothing is lost.}
+{Sales \& Labour Report $\rightarrow$ Check file format}
+
+\brreq{BR-03 \quad A cancelled invoice should leave the report, not the system}
+{\qt{Invoices do get cancelled after billing. They should stop counting in the reports,
+but we still want to see that they were uploaded.}}
+{An invoice can be cancelled from the data preview. The row stays where it is, so we can
+still see it was received, but it is left out of every report from that point. It can be
+put back just as easily.}
+{Sales \& Labour Report $\rightarrow$ Uploaded File Preview}
+
+\brreq{BR-04 \quad One branch should be the same branch everywhere}
+{\qt{The files spell our branches differently, and some rows have branch codes that are
+not ours at all. One branch should read as one branch in every report, and anything that
+is not ours should be visible, not hidden.}}
+{Branches are matched on their code, not their name. Names differ between files and change
+between exports. Codes do not. The spelling entered in the Target Master is then used in
+every report, so a branch reads the same everywhere. A code that is not a KCGL branch
+(another dealer's code, which one file has on about 1\% of its rows) is collected in a
+single \qt{Unmapped Branch} row. It never creates a branch that does not exist.}
+{Every PMS report}
+
+\brreq{BR-05 \quad Nothing should disappear quietly}
+{\qt{If the system cannot classify something, we want to see it. A figure that quietly
+drops out of a total is worse than one we can question.}}
+{Every report shows its own gaps. An SR Type or lead reason that has not been mapped goes
+into an \qt{Unmapped} bucket, so the breakdown always adds up to the total. A lead whose
+engineer is not in the master is reported as unlinked. Rows with no usable date are
+reported too. Where the system has made a decision about a row, the screen says so when
+you hover over it.}
+{Every PMS report}
+
+% ---------------------------------------------------------------------------
+\subsection{Area B -- The annual plan and the master lists}
+
+\brreq{BR-06 \quad Enter the year's targets on one screen, in Lakh}
+{\qt{We set Spare and Labour targets branch by branch for the whole financial year. We
+work in Lakh, and we want the year on one screen, not twelve.}}
+{The Target Master shows one financial year at a time, April to March. There is one row
+per branch, with separate Spare and Labour lines. Values are entered and shown in Lakh,
+and the quarter and year totals add up as you type. The branch list, branch names and
+responsible person come from the ERP's own branch master, so the plan and the rest of the
+ERP always match.}
+{AOP \& Master $\rightarrow$ Target Master}
+
+\brreq{BR-07 \quad Targets should be spread over working days, not calendar days}
+{\qt{A target is not earned on a Sunday or on Gudi Padwa. And our Maharashtra and
+Karnataka branches do not have the same holidays, so one calendar will not work for
+both.}}
+{Holidays are ticked on a calendar, separately for each region, next to the targets. The
+working days for any date range are then the days in it, minus Sundays, minus the dates
+ticked for that region. This makes a part-month view exact instead of an estimate. If a
+month has holidays ticked, that calendar is used. If it has none, a typed count is used.
+If there is no typed count either, all days except Sundays are used.}
+{AOP \& Master $\rightarrow$ Target Master}
+
+\brreq{BR-08 \quad Group the SR Types the way each report is read}
+{\qt{The files have dozens of Service Report Types. We read them as heads: Warranty, Post
+Warranty, AMC and so on. Not every report groups them the same way. New types come from
+KOEL from time to time and they must not be lost.}}
+{There are four grouping lists, one for each way a report reads its SR Types: for the
+Sales and Labour files, for the MaxTTR file, for the EFSR file, and a second grouping of
+the MaxTTR file for the Service Load sheet. The last one is separate because that sheet
+shows CSP and Dealer AMC as rows of their own, while Employee Productivity counts them
+inside Warranty and AMC. \emph{Sync} reads the uploaded data again and brings in any type
+seen for the first time, ready to be mapped. A type that has not been mapped stays visible
+as \qt{Unmapped}.}
+{AOP \& Master $\rightarrow$ the four SR Type Master tabs}
+
+\brreq{BR-09 \quad Group the lead reasons into the products we sell}
+{\qt{The lead data records why a lead was raised. We read it as products: Spares, Whole
+Goods, K-Oil, Battery and the rest.}}
+{The Lead Category Master turns each \col{lead raised for} value into a product category.
+That list becomes the columns of the \emph{Product Wise Lead Count} group on the Employee
+Productivity report. New values are brought in by Sync. Anything not mapped gets its own
+column, so the split always adds up to the lead count.}
+{AOP \& Master $\rightarrow$ Lead Category Master}
+
+\brreq{BR-10 \quad One engineer should be one person in every report}
+{\qt{Some files have the engineer's name, others have a UID, and the spelling of a name
+varies. The same engineer must not appear twice. And if the files put an engineer in the
+wrong branch, we should be able to correct it by hand.}}
+{The Service Engineer UID master keeps the name and the UID together. Names are matched
+ignoring spaces and capitals, so \qt{Vijaykumar Jadhav} and \qt{VIJAYKUMAR  JADHAV} are one
+person. One person can have more than one UID. \emph{Sync} finds engineer names in the
+uploaded files and adds the ones the master does not have. UIDs can also be imported from
+an Excel sheet. Each row can also hold a branch, which is used when no file places the
+engineer correctly.}
+{Profile $\rightarrow$ Service Engineer UID Master (Master Admin only)}
+
+% ---------------------------------------------------------------------------
+\subsection{Area C -- Sales and labour reporting}
+
+\brreq{BR-11 \quad Sales against the plan, for any period we ask for}
+{\qt{We review month to date, but we also need a week, a quarter and a full year. And we
+want the target till date, not just the target for the whole month, so that a mid-month
+figure means something.}}
+{The report opens month to date and takes any date range. For every branch it shows the
+period Target, the Daily Target, the sale on the last day, the Target till date, the
+Achievement till date, the invoice count, \% Achieved, the Short-Fall and the Balance for
+the month. Target till date is each month's target multiplied by the working days inside
+the period, which is what makes a mid-month review fair. Every formula is printed in the
+column heading, so no figure has to be taken on trust.}
+{Sales \& Labour Report $\rightarrow$ All (Spare + Labour)}
+
+\brreq{BR-12 \quad Do not show a shortfall just because a file came late}
+{\qt{The Part Sale and Labour extracts rarely end on the same day. If the labour file is a
+week behind, the report should not show that as a shortfall.}}
+{Each side keeps its own as-on date. Spare is measured against the targets up to the last
+day of Spare data, and Labour up to the last day of Labour data. Both dates are printed on
+the report, so the reader knows what they are looking at.}
+{Sales \& Labour Report $\rightarrow$ All (Spare + Labour)}
+
+\brreq{BR-13 \quad Break the same period down in four ways}
+{\qt{After the branch tables we read the same period by region, by segment, by service
+report type, and for spares by category with quantity and line items.}}
+{Four breakdown tables are shown for the period on screen. Region-wise shows its own AOP
+target next to the sale, since a region's target is the total of its branches. Segment and
+Service Report Type have no target, so their \% is a share of the total instead of an
+achievement, and the heading says so. Category-wise is for spares only, because the labour
+file has no category column.}
+{Sales \& Labour Report $\rightarrow$ All (Spare + Labour)}
+
+\brreq{BR-14 \quad A branch review needs the detail behind that branch}
+{\qt{When we sit with one branch, we want that branch's weeks and months, and its own
+segment, service type and category split. Not the company's.}}
+{The Branch-wise view takes any set of branches and rebuilds five sections from only those
+branches' sales: Week-wise, Month-wise, Segment-wise, Service Report Type-wise and
+Category-wise. Each week also gets its share of the AOP target, worked out on the same
+holiday calendar, so a week can be read against a plan.}
+{Sales \& Labour Report $\rightarrow$ Branch-wise Report}
+
+\brreq{BR-15 \quad Show the whole year, and what it will take to close it}
+{\qt{Apart from the period we are reviewing, we need the financial year: the year, its
+quarters and its months, and the run rate still needed.}}
+{Three panels cover the full financial year, whatever the period picker says: FY,
+Quarterly (Q1 April to June through Q4 January to March) and Month-wise. They use the full
+monthly targets. The report also knows how far the data actually reaches, and splits the
+year's working days into elapsed and remaining for each region. So the run rate uses the
+same calendar as the targets. The export writes all three as sheets in one workbook.}
+{Sales \& Labour Report $\rightarrow$ FY / Quarterly / Month-wise}
+
+% ---------------------------------------------------------------------------
+\subsection{Area D -- Service engineer performance}
+
+\brreq{BR-16 \quad One row per engineer, answering four questions at once}
+{\qt{For each service engineer we want to see how much they closed, how many days they
+worked, how satisfied their customers were, and how much new business they raised. On one
+line, with totals by branch, region and company.}}
+{The Employee Productivity report puts all four on one row. SRs closed and their SR Type
+split come from the Response Time \& MaxTTR file, counted on \col{sr close date} under the
+engineer's name. Working days come from the AOP calendar for that engineer's region.
+Customer feedback comes from the CDI Detail Report. Leads, their product split and the
+spare and labour conversion amounts come from the LMS data. Productivity is SRs closed
+divided by working days, which is the man-days the plan allows, not the days attended.
+Working Days and Days present are shown on engineer rows only. Total rows leave them
+blank, because adding up man-days gives a number nobody can use.}
+{Employee Productivity}
+
+\brreq{BR-17 \quad Attendance should mean the day the work was done}
+{\qt{Our office closes SRs in batches, sometimes days later. If attendance is counted on
+the closing date, an engineer looks present on days they were not.}}
+{Days present counts the different days on which the engineer actually finished a job in
+the field. That comes from the task end date in the file, not from the day the office
+closed the SR in the system.}
+{Employee Productivity $\rightarrow$ Days present on Task end}
+
+\brreq{BR-18 \quad A lead should only be credited to the right engineer}
+{\qt{Leads carry a UID, not a name. Credit a lead only when we are sure whose it is, and
+tell us about the ones you cannot place.}}
+{A lead is credited only through the Service Engineer UID master. The UID on the lead is
+looked up there to find the engineer. It is never matched against names. If a UID is not
+in the master, the lead is reported as unlinked so the master can be corrected. It is not
+attached to the nearest similar name. Each lead counts once, however many rows the file
+has for it.}
+{Employee Productivity $\rightarrow$ Number of Lead}
+
+\brreq{BR-19 \quad Show what was given out against what came back}
+{\qt{We want to see, engineer by engineer, how many SRs were allocated and how many were
+actually completed. And what is still open.}}
+{The SR Allocation report counts each SR twice: on the day it was allocated to the
+engineer, and on the day the engineer finished it. The difference between the two totals
+is the open backlog. Closed means the day the engineer finished the job, not the office
+closing date. The office date comes days later, and for about a third of completed tasks
+it never comes at all. The date columns can be read by day, week or month, and the
+branch-wise open SR load is shown next to them.}
+{SR Allocation Report}
+
+% ---------------------------------------------------------------------------
+\subsection{Area E -- Training}
+
+\brreq{BR-20 \quad The training master, readable from both sides}
+{\qt{We need the KOEL training export kept as a master, so we can see who has been trained
+on what. We search it two ways: by a person, and by a skill. The export gains and loses
+columns sometimes, and that must not break it.}}
+{Eight columns are fixed: UID, ticket number, name, occupation, skill, branch name, branch
+id and hire date. Every other column in the file is carried through automatically, so a
+changed export needs no development work. \emph{By Employee} lists one row per person and
+opens their skills and full record. \emph{By Skill} lists one row per skill and opens
+everyone who has it. Rows build up across uploads, and a row uploaded again simply updates
+itself, so the page always shows the full training history. An engineer with no training
+yet still appears. The search ignores spaces and capitals.}
+{Training Report}
+
+% ---------------------------------------------------------------------------
+\subsection{Area F -- Annual management reports}
+
+\brreq{BR-21 \quad Service Penetration: how much of the base we actually touched}
+{\qt{Out of all the machines in our territory, how many were serviced? By branch, split
+into IND and PG, as a percentage.}}
+{The installed base is counted from the Asset Detailed master. Each machine counts once,
+in its own branch, on the day it was commissioned, and the figure is read as it stands at
+the end of the period. Retired machines are left out. The machines actually serviced are
+counted from the Response Time \& MaxTTR file as unique assets with at least one SR closed
+in the period, so a machine with five closed SRs counts once. Penetration \% is the second
+divided by the first, for each segment and for both together, with region and company
+totals.}
+{Annual Reports $\rightarrow$ Service Penetration}
+
+\brreq{BR-22 \quad AMC \& Bandhan Projection: the year against the plan}
+{\qt{For each branch we read last year's actual, this year's projection, the best month,
+how many AMCs are live today, and the business done in the month being reviewed.}}
+{The live AMC count comes from the AMC Population Report: agreements that are active and
+have not yet expired. It is a running count, so neither the year nor the month picked
+changes it. The month's business comes from the four Bandhan quote files, counted on the
+date payment was received, because business done means money received, not cover starting.
+Counted this way the figures match the business's own sheet: Mar-26 145, Apr-26 105 and
+Jun-26 104 against 144, 108 and 106. The first three columns are typed into the AOP master
+for the reason given in Section~\ref{sec:constraints}.}
+{Annual Reports $\rightarrow$ AMC \& Bandhan Projection}
+
+\brreq{BR-23 \quad The AMC sheet: the same data by agreement category}
+{\qt{The second AMC sheet is not by branch, it is by category: Bandhan with its MH and KAR
+split, KALA AMC, KOEL Corporate AMC, expiries, renewals and Live AMC. Month by month, with
+the running month opened up by week.}}
+{The same AMC file is read a second way, one row per agreement category, for one financial
+year. The columns are the AOP, the year so far, one column for each month reached, and the
+running month also broken into its Monday to Sunday weeks next to its month column. KOEL
+Corporate AMC is shown as a running total, the way the business shows it. If an agreement
+type is not covered by the grouping, it is reported instead of dropped.}
+{Annual Reports $\rightarrow$ AMC report $\rightarrow$ AMC tab}
+
+\brreq{BR-24 \quad Customer Delight Index by branch}
+{\qt{Score each branch on customer feedback, Promotor minus Detractor over all feedback,
+against the CDI target, with the last two years for comparison.}}
+{Each feedback row is put into one of three buckets: Promotor, Detractor or Passive. The
+bucket is read from the first word of the category, so a change in the score range does not
+break anything. The score is (Promotor $-$ Detractor) $\div$ all feedback $\times$ 100.
+Every total row is scored from its own feedback, not averaged from the rows below it. That
+is why a region can sit outside the range of its branches. The columns run: the two
+previous financial years, the AOP, the year so far, each month, and the running month by
+week.}
+{Annual Reports $\rightarrow$ Customer Delight Index}
+
+\brreq{BR-25 \quad Service Load and Response: the service scorecard}
+{\qt{One sheet for the service department: how much load was closed and of what type, the
+productivity per person per day, the 4 hour response and the 24 and 48 hour closure
+percentages, and the FTR / FVR figures. All against target.}}
+{It is built as six tabs of one sheet: Service Load (by SR type and by branch),
+Productivity (Calls PP PD with the monthly SR closure strip), 4 Hrs Response, SR Closed 24
+Hrs, SR Closed 48 Hrs, and the closing Overall and FTR / FVR block. All three compliance
+percentages use the response time given in the file. Every percentage row is scored from
+its own SRs, not averaged from the rows below it. Productivity is closures divided by
+working days times the engineers who actually closed something in that period. FTR and FVR
+are typed in, for the reason given in Section~\ref{sec:constraints}.}
+{Annual Reports $\rightarrow$ Service Load and Response}
+
+% ---------------------------------------------------------------------------
+\subsection{Area G -- Access, output and platform}
+
+\brreq{BR-26 \quad Decide per person which reports and which masters they see}
+{\qt{Not everybody should see everything. One person may need only the Training Report,
+another only the annual sheets. And some people should be able to read a master without
+being able to change it. We want to tick this person by person, and the ones we have not
+ticked should be properly closed, not just hidden from the menu.}}
+{Rights are given in three steps from Profile $\rightarrow$ Edit Employee, and each step
+narrows the one before it (Section~\ref{sec:rights}). \textbf{PMS Access} opens the module.
+\textbf{PMS Pages} then decides which of the five report pages the user sees. Each page is
+ticked on its own as Show or Don't show, with \qt{All pages} and \qt{Clear all} buttons, so
+a user can be given the Training Report alone. \textbf{AOP \& Master Rights} covers the
+targets page, first as a whole and then tab by tab, as Don't show, Show only or Show and
+edit. So a person can be given the CDI target tab alone, and read-only. A tab can never be
+set higher than the level given to the page itself, and only the nominated AOP rights
+administrators can give any of this. Anything not given is blocked in three places: the
+page is not in the menu, its address does not open, and its data is refused. So a user
+given one report cannot reach another report's figures in any way. On a Show only tab the
+save, sync and reset buttons are hidden and every cell is locked. The Service Engineer UID
+master stays Master Admin only.}
+{Profile $\rightarrow$ Edit Employee; applied on every PMS page}
+
+\brreq{BR-27 \quad Every report should come out to Excel, looking like the screen}
+{\qt{We circulate these sheets. The export should look like the report, and its dates
+should work with Excel's own filters.}}
+{Every report exports to a workbook that looks like the screen: the ERP blue band with the
+report name and its period, the header row, the branch rows, the Maharashtra and Karnataka
+totals and the overall row. The workbook always uses the light colours, since it is read
+and printed on its own. Dates are written as real dates, so Excel's date filters work.
+Export follows the export permission on the user's account.}
+{Every PMS report $\rightarrow$ Export}
+
+\brreq{BR-28 \quad Quick to open, current to the last upload, and dated our way}
+{\qt{These reports run on years of data. They should open quickly, changing the period
+should not mean waiting again, and a date should read the same for everybody.}}
+{Each report works out its figures once and then answers straight away. Changing the
+period, the day / week / month view or a filter redraws the screen without fetching the
+data again. The worked-out figures are reused until new data is uploaded, and a new upload
+makes the next report rebuild itself. So what is on screen is always as current as the last
+upload. Every date and time stamp in the module is India local time.}
+{Every PMS report}
+
+% ============================== 6. DATA SOURCES =============================
+\section{The Data PMS Reads}
+
+PMS reads thirteen Excel files. Two of them, the sales files, are uploaded on the Sales \&
+Labour page itself, and the Training file on the Training Report page. All the others are
+uploaded once on the ERP's Import page and shared with the rest of the ERP, so the same
+file is never asked for twice.
+
+\begin{table}[H]\centering\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\linewidth}{@{}|p{4.4cm}|p{3.1cm}|X|@{}}
+\hline
+\rowcolor{brdhead}\textbf{File} & \textbf{Uploaded on} & \textbf{Which reports read it}\\
+\hline
+Part Sale (spares) & Sales \& Labour & Sales \& Labour report, every view\\
+\hline
+Labour Revenue & Sales \& Labour & Sales \& Labour report, every view\\
+\hline
+Training Report & Training Report & Training Report (By Employee / By Skill)\\
+\hline
+Response Time \& MaxTTR Details & Import page & Employee Productivity; SR Allocation;
+Service Penetration; Service Load \& Response\\
+\hline
+EFSR Report & Import page & SR Allocation; Employee Productivity (allocated SRs)\\
+\hline
+LMS Data for ERP & Import page & Employee Productivity (leads, conversion amounts)\\
+\hline
+CDI Detail Report & Import page & Employee Productivity (CDI); annual CDI sheet\\
+\hline
+Asset Detailed Report & Import page & Service Penetration (the installed base)\\
+\hline
+AMC Population Report & Import page & AMC \& Bandhan Projection; the AMC monthly sheet\\
+\hline
+Anubandhan Plus, Anubandhan, BandhanPlus and Regular Bandhan quotes & Import page &
+AMC \& Bandhan Projection (the month's business done)\\
+\hline
+Open SR Load Report & Import page & SR Allocation (branch-wise open SR)\\
+\hline
+\end{tabularx}
+\caption{The uploaded files behind the PMS reports}
+\end{table}
+
+Two rules apply to every file, whichever page it comes in on. Dates are read as dates
+only, and a date written year first is never read as day first, so \qt{2026-07-01} can
+never become 7 January. Branch codes are converted to one common form, so
+\qt{420435-1}, \qt{420435 1} and \qt{420435\_1} are all read as the same branch.
+
+% ============================== 7. FLOW =====================================
+\section{How the Data Flows}
+
+Every figure in PMS follows the same five steps, and each step is visible to the reader.
+
+\vspace{4pt}
+\begin{center}\small
+\fbox{\parbox[c][10mm][c]{27mm}{\centering Excel file\\ uploaded}}$\;\rightarrow\;$%
+\fbox{\parbox[c][10mm][c]{27mm}{\centering Checked\\ and stored}}$\;\rightarrow\;$%
+\fbox{\parbox[c][10mm][c]{29mm}{\centering Grouped by the\\ master lists}}$\;\rightarrow\;$%
+\fbox{\parbox[c][10mm][c]{29mm}{\centering Compared with\\ the AOP}}$\;\rightarrow\;$%
+\fbox{\parbox[c][10mm][c]{22mm}{\centering Report\\ and Excel}}
+\end{center}
+\vspace{4pt}
+
+\begin{enumerate}[leftmargin=2.2em,itemsep=5pt]
+  \item \textbf{The file is uploaded.} Before anything is stored the file is checked. The
+  must-have columns have to be there, and if one is missing the user is told which one. A
+  progress bar runs while a large file is read.
+
+  \item \textbf{Rows are stored once.} Each row is identified by what makes it unique in
+  its own file. So uploading the same extract again updates what changed and reports the
+  rest as duplicates. This is what lets the business upload daily, weekly or monthly
+  without double counting (BR-01).
+
+  \item \textbf{Raw values are grouped by the master lists.} An uploaded row carries raw
+  words: an SR Type, a lead reason, a branch code, an engineer name. The AOP \& Master page
+  turns each of those into the wording the report shows. Anything not yet mapped goes into
+  an \qt{Unmapped} bucket where it stays visible (BR-05, BR-08, BR-09, BR-10).
+
+  \item \textbf{Counted figures meet typed figures.} What was counted from the files is
+  then compared with what the business typed in: the monthly targets, the working days
+  calendar, the CDI and Service Load percentages, the AMC projections, and the FTR / FVR
+  figures. The two are never mixed up. For every figure, this document says which of the
+  two it is.
+
+  \item \textbf{The report is drawn, and exported.} The screen shows the period asked for,
+  and redraws straight away when it changes, because the report already has its figures.
+  The export writes the same table to Excel (BR-27, BR-28).
+\end{enumerate}
+
+\textbf{What this means day to day.} A new figure on a report is usually not a change to
+the system. It is a mapping the business owns. A new SR Type from KOEL shows up in the
+master ready to be mapped, a new branch comes from the branch master, a new target is
+typed into AOP \& Master, and the reports follow.
+
+% ============================== 8. DELIVERED ================================
+\section{What Was Delivered}
+
+\begin{table}[H]\centering\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\linewidth}{@{}|p{3.9cm}|X|p{2.6cm}|@{}}
+\hline
+\rowcolor{brdhead}\textbf{Page (given one by one)} & \textbf{What it delivers} &
+\textbf{Requirements}\\
+\hline
+AOP \& Master & The annual plan and every master list the reports use, in nine tabs, each
+given on its own & BR-04, BR-06 to BR-09, BR-26\\
+\hline
+Sales \& Labour Report & Upload and preview of the two sales files, and the report in
+three views: All, Branch-wise, and FY / Quarterly / Month-wise & BR-01 to BR-03,
+BR-11 to BR-15\\
+\hline
+Employee Productivity & One row per service engineer: SRs closed, working days, days
+present, productivity, CDI and leads & BR-16 to BR-18\\
+\hline
+SR Allocation Report & SRs allocated against SRs closed, engineer wise, with the open
+backlog and the branch-wise open SR load & BR-19\\
+\hline
+Training Report & The skill and training master, searchable by employee and by skill &
+BR-20\\
+\hline
+Annual Reports & The four yearly sheets: Service Penetration, AMC \& Bandhan Projection
+with its AMC tab, Customer Delight Index, and Service Load \& Response & BR-21 to BR-25\\
+\hline
+\end{tabularx}
+\caption{The delivered pages and the requirements each one closes}
+\end{table}
+
+% ============================== 9. CONSTRAINTS ==============================
+\section{Data Constraints and the Decisions Taken}
+\label{sec:constraints}
+
+There were five things in the source data that we could not fix by building more. We took
+each one back to the business and agreed what to do. They are recorded here so that anyone
+reading a report later knows why a figure behaves the way it does.
+
+\begin{table}[H]\centering\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\linewidth}{@{}|p{3.5cm}|X|@{}}
+\hline
+\rowcolor{brdhead}\multicolumn{2}{|l|}{\textbf{C-01 \quad The AMC file cannot report a
+closed year}}\\
+\hline
+What we found & The AMC Population Report keeps only the latest agreement for each
+machine. So when an agreement is renewed, it replaces the old one, and a closed year's
+count gets smaller every month. Counted from today's file, FY26 gives 937 against the
+1,353 the business actually closed it with.\\
+\hline
+Decision & Last year's actual is typed into the AOP master and shown exactly as typed. The
+running year is counted live and is correct, so that one is counted. The AMC monthly sheet
+shows only the running year. A closed year column that far out would be worse than no
+column at all.\\
+\hline
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]\centering\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\linewidth}{@{}|p{3.5cm}|X|@{}}
+\hline
+\rowcolor{brdhead}\multicolumn{2}{|l|}{\textbf{C-02 \quad The SR open date is not a
+response clock}}\\
+\hline
+What we found & In the live file, 8,721 rows out of 45,279 have an open date that falls
+after their close date, always at midnight. These are the planned dates of scheduled work
+that was finished early. So measuring from open to close gives nothing useful on 42\% of
+the file.\\
+\hline
+Decision & Response and turnaround are read from the file's own columns. They are never
+calculated from the timestamps. A negative response time counts as zero hours, because the
+job was closed before it was due, which is how the source file scores it too. Hovering
+over a cell shows how many of its SRs those were.\\
+\hline
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]\centering\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\linewidth}{@{}|p{3.5cm}|X|@{}}
+\hline
+\rowcolor{brdhead}\multicolumn{2}{|l|}{\textbf{C-03 \quad FTR and FVR are not in any
+file}}\\
+\hline
+What we found & First Time Right and First Visit Report are judgements KOEL makes about a
+job. The two files that used to carry them have been withdrawn.\\
+\hline
+Decision & Both are typed into AOP \& Master, per month and per cumulative year, and shown
+as typed. A period nobody has filled in shows a dash, which is not the same as saying
+0\%.\\
+\hline
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]\centering\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\linewidth}{@{}|p{3.5cm}|X|@{}}
+\hline
+\rowcolor{brdhead}\multicolumn{2}{|l|}{\textbf{C-04 \quad The CDI file has no branch
+code}}\\
+\hline
+What we found & It is the only file that gives the branch by name only
+(\qt{KALA Care Global LLP - Ahmednagar}), with no code at all.\\
+\hline
+Decision & The list that matches those names to branches is built from the other files,
+which have both the name and the code. So when the ERP renames a branch, the match follows
+on the next upload with no development work. The AOP master's own spelling is added to the
+same list, so either wording works.\\
+\hline
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]\centering\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\linewidth}{@{}|p{3.5cm}|X|@{}}
+\hline
+\rowcolor{brdhead}\multicolumn{2}{|l|}{\textbf{C-05 \quad One file has another dealer's
+branch codes}}\\
+\hline
+What we found & About 1\% of EFSR rows have a branch code that is not KCGL's. Grouping
+directly on that code spread one engineer across branches that do not exist.\\
+\hline
+Decision & SRs are grouped by the engineer, not by the code on the row. All of an
+engineer's SRs count in the branch they belong to. That branch is decided in this order:
+the KCGL branch they have the most rows in; if not that, the branch the MaxTTR file gives
+them; if not that, the branch set on their master row; and if none of those, a single
+\qt{Unmapped Branch} row, so the report still adds up to the file.\\
+\hline
+\end{tabularx}
+\end{table}
+
+% ============================== 10. ASSUMPTIONS =============================
+\section{Assumptions and Dependencies}
+
+\begin{itemize}
+  \item The KOEL and ERP exports keep coming in their present form. A column that is
+  renamed or moved is handled. A column that disappears completely is a change of
+  requirement.
+  \item The business keeps the AOP targets, the holiday calendar and the SR Type, lead and
+  engineer mappings up to date. A report can only be as complete as its masters, which is
+  why anything unmapped is shown rather than hidden.
+  \item The shared imports (MaxTTR, EFSR, LMS, CDI, Asset, AMC, quotes, Open SR) are
+  uploaded on the Import page as part of the ERP's normal routine. PMS reads whatever is
+  there.
+  \item Branch codes stay as the ERP's branch codes. A new branch is added to the branch
+  master and shows up in PMS on its own.
+  \item The figures the business decides itself, such as last year's actual, the AMC
+  projections, FTR, FVR and every AOP, are typed in by the people who own them.
+\end{itemize}
+
+% ============================== 11. ACCEPTANCE ==============================
+\section{Acceptance Criteria}
+
+The module is accepted when, for the periods the business chooses:
+
+\begin{enumerate}[leftmargin=2.2em,itemsep=4pt]
+  \item Uploading the same extract twice leaves every reported figure unchanged, and the
+  second upload is reported as duplicates (BR-01).
+  \item A file missing a must-have column is rejected with the name of that column, and
+  nothing is stored (BR-02).
+  \item A cancelled invoice leaves every report and can be put back (BR-03).
+  \item The Sales \& Labour report matches the business's own result sheet for the same
+  period, with Spare and Labour each measured to their own last data date (BR-11, BR-12).
+  \item The region, segment, service type and category breakdowns add up to the branch
+  totals above them, and anything unmapped is visible (BR-05, BR-13).
+  \item Employee Productivity credits every engineer's SRs, leads and feedback correctly,
+  and reports any lead it could not place (BR-16, BR-18).
+  \item The annual sheets match the business's own workbooks for the same period, within
+  the limits recorded in Section~\ref{sec:constraints} (BR-21 to BR-25).
+  \item Rights work as given at all three steps: a user without PMS Access sees no PMS
+  menu; a user given only some report pages sees only those, and cannot reach another
+  report's data by typing its address; a Show only tab cannot be saved; and a tab that was
+  not given cannot be opened at all (BR-26).
+  \item Every report exports to Excel looking like the screen, with date filters working
+  (BR-27).
+\end{enumerate}
+
+% ============================== APPENDIX ====================================
+\appendix
+\section{Glossary}
+
+\begin{table}[H]\centering\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabularx}{\linewidth}{@{}|p{3.5cm}|X|@{}}
+\hline
+\rowcolor{brdhead}\textbf{Term} & \textbf{Meaning}\\
+\hline
+AOP & Annual Operating Plan, the targets the business sets for the financial year\\
+\hline
+FY & Financial year, April to March. FY26--27 starts in April 2026\\
+\hline
+SR & Service Request, one service job\\
+\hline
+SR Type & What kind of job it was: Warranty, Post Warranty, AMC, CSP and so on\\
+\hline
+Head & The reporting group that several SR Types are put into\\
+\hline
+Spare / Labour & The two halves of service revenue: parts sold, and labour billed\\
+\hline
+OTC & Over the counter business, a sale with no segment of its own\\
+\hline
+Segment (IND / PG) & The two segments of the installed base the reports measure\\
+\hline
+MH / KA (KAR) & The Maharashtra and Karnataka regions\\
+\hline
+CDI & Customer Delight Index, the customer feedback score\\
+\hline
+Promotor / Passive / Detractor & The three buckets a CDI response falls into\\
+\hline
+AMC & Annual Maintenance Contract\\
+\hline
+D/BAMC & Dealer AMC and Bandhan AMC counted together\\
+\hline
+Live AMC & Agreements that are active and have not yet expired\\
+\hline
+MaxTTR & Maximum turnaround time, the response and closure timings file\\
+\hline
+EFSR & The report of SRs allocated to, and completed by, each engineer\\
+\hline
+LMS & The lead management data: leads raised and what they converted into\\
+\hline
+FTR / FVR & First Time Right and First Visit Report, quality judgements made by KOEL\\
+\hline
+Calls PP PD & Calls per person per day, the productivity ratio\\
+\hline
+Working days & The days a target is spread over: all days minus Sundays and holidays\\
+\hline
+Unmapped & A value nobody has classified yet. It is shown, never hidden\\
+\hline
+\end{tabularx}
+\caption{Terms used in this document}
+\end{table}
+
+\vspace{12pt}
+\begin{center}\small\itshape End of document\end{center}
+
+\end{document}

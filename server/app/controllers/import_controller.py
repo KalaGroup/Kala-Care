@@ -1,10 +1,12 @@
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from fastapi import UploadFile, HTTPException
 import io
+import csv
+import codecs
 import re
 import json
 
@@ -13,7 +15,8 @@ from app.models.customer_model import (
     Customer, AMCAgreement, AssetDetailed, AssetService,
     AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
     PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, MaxTTROilChangeSRZeroLabourFlag,
-    ResponseTimeMaxTTR, CDIDetailReport, EFSRReport
+    ResponseTimeMaxTTR, CDIDetailReport, EFSRReport, AMCExpiryPlanner, LMSInsia,
+    AllInvoiceReport
 )
 
 # ==========================================================================
@@ -125,6 +128,16 @@ FILE_KNOWN_COLUMNS = {
         'Lead Source', 'Next Action Required', 'New Contact', 'Lead Contact Number',
         'Next Action Date', 'Lead Assign To SD'
     ],
+    # 'LMS Data from Insia' deliberately lists ONLY its seven fixed columns: every other
+    # header in that file (MODE OF LEAD CREATION, LEAD RAISED BY / FOR, SD NAME,
+    # SD ID, BRANCH NAME, PRODUCT LIST, PRODUCT TYPE, LEAD ASSIGNED TO,
+    # LEAD STATUS, ACCOUNT ID, ZONE, ENGINE MODEL, KVA RATING,
+    # TELE CALLER NAME, QUOTATION NUMBER, QUOTATION SUBMIT DATE,
+    # QUOTATION APPROVAL DATE, ORDER NUMBER) is dynamic and lands in extra_data.
+    'LMS Data from Insia': [
+        'LEAD NUMBER', 'LEAD CREATED DATE', 'BRANCH ID', 'ACCOUNT NAME',
+        'LEAD SR NUMBER', 'SERVICE ENGINEER NAME', 'ORDER CREATION DATE'
+    ],
     'Open SR Load Report': [
         'Instance Id [Asset #]', 'Service Request #', 'SR Due Date', 'SR Type',
         'Appointment Date', 'Service Dealer', 'Status', 'Problem Code',
@@ -173,12 +186,44 @@ FILE_KNOWN_COLUMNS = {
     # columns: every other header in those files is dynamic (extra_data).
     'CDI Detail Report': [
         'SR NUMBER', 'BRANCH NAME', 'X TECHNICIAN ID', 'X TECHNICIAN NAME',
-        'CDI CATEGORY', 'Overall Experience', 'ACTIVITY END DATE'
+        'CDI CATEGORY', 'Overall Experience', 'ACTIVITY END DATE',
+        # The genset key: the relation from a CDI row to the customers table.
+        'ASSET NUMBER',
+        # The account the feedback is about, and who answered the survey.
+        'X ACCOUNT NAME', 'FEEDBACK TKN CUST NAME', 'FEEDBACK TKN CUST NUM'
     ],
     'EFSR Report': [
         'SD Branch Code', 'Service Request No.', 'Appointment Number', 'SR Type',
         'SR Closed Date', 'SR Status', 'Service Engineer Name',
-        'Service Engineer UID', 'Task Assigned Date & Time', 'Task End Date'
+        'Service Engineer UID', 'Task Assigned Date & Time', 'Task End Date',
+        # The relation from an eFSR task row to the customers table.
+        'Instance ID',
+        # The account and site (both feed the customer master) plus the
+        # on-site contact for the visit.
+        'Account', 'Installation Site Address', 'Customer Name',
+        'Customer contact number'
+    ],
+    # AMC Agreement Expiry Planner: the five columns the app reads plus
+    # AGREEMENT NUMBER, which is the second half of the record key. The file's
+    # other 15 headers (ZONE NAME, SD ID/NAME, BRANCH NAME, AGREEMENT
+    # NAME/TYPE/STATUS/START DATE, NUMBER OF AGREEMENT YEARS, SEGMENT,
+    # APPLICATION CODE, ENGINE SERIAL NO, ENGINE MODEL, CUSTOMER NAME,
+    # CUSTOMER PHONE NUMBER) are dynamic and land in extra_data.
+    'AMC Agreement Expiry Planner': [
+        'INSTANCE ID', 'AGREEMENT NUMBER', 'BRANCH ID', 'ACCOUNT NAME',
+        'INSTALLATION SITE ADDRESS', 'AGREEMENT END DATE'
+    ],
+    # All Invoice Detailed Report: the nine columns the app reads plus INVOICE
+    # NUMBER, which is the record key (30,242 rows -> 30,242 distinct numbers in
+    # the real export). The file's other 19 headers (ZONE NAME, SD ID/NAME,
+    # SEGMENT, APPLICATION CODE, ENGINE SERIAL NUMBER, SR NUMBER/TYPE/SUBTYPE,
+    # SR CLOSE DATE, INVOICE CANCEL REASON/DATE, TOTAL NET TAXABLE AMOUNT,
+    # TOTAL DISCOUNT AMOUNT, CGST/SGST/IGST/UGST AMOUNT, TOTAL FRIEGHT AMOUNT)
+    # are dynamic and land in extra_data.
+    'All Invoice Detailed Report': [
+        'INVOICE NUMBER', 'BRANCH ID', 'BRANCH NAME', 'INSTANCE ID',
+        'ACCOUNT NAME', 'INVOICE DATE', 'INVOICE STATUS', 'INVOICE SEGMENT',
+        'INVOICE TYPE', 'INVOICE AMOUNT'
     ],
 }
 
@@ -231,6 +276,12 @@ FILE_COLUMN_ALIASES = {
         'Quotation Approved Date': ['Quotation Approval Date'],
     },
     'CDI Detail Report': {
+        'ASSET NUMBER': ['INSTANCE ID', 'Instance Id [Asset #]', 'Instance Id'],
+        'X ACCOUNT NAME': ['ACCOUNT NAME', 'ACCOUNT'],
+        'FEEDBACK TKN CUST NAME': ['FEEDBACK TAKEN CUSTOMER NAME',
+                                   'FEEDBACK TKN CUSTOMER NAME'],
+        'FEEDBACK TKN CUST NUM': ['FEEDBACK TAKEN CUSTOMER NUMBER',
+                                  'FEEDBACK TKN CUST NUMBER'],
         'ACTIVITY END DATE': ['ACTIVITY END DATE & TIME', 'ACTIVITY END DATETIME'],
         'BRANCH NAME': ['SD BRANCH NAME', 'BRANCH'],
         'SR NUMBER': ['SR NO', 'SR #', 'SERVICE REQUEST NUMBER', 'Service Request No.'],
@@ -239,6 +290,15 @@ FILE_COLUMN_ALIASES = {
         'Overall Experience': ['OVERALL EXPERIENCE RATING', 'OVERALL EXP'],
     },
     'EFSR Report': {
+        'Instance ID': ['INSTANCE ID', 'Instance Id [Asset #]', 'Instance Id',
+                        'Asset Number'],
+        'Account': ['Account Name', 'ACCOUNT NAME'],
+        'Installation Site Address': ['INSTALLATION SITE ADDRESS',
+                                      'Installation Address', 'Site Address'],
+        'Customer Name': ['CUSTOMER NAME'],
+        'Customer contact number': ['Customer Contact Number',
+                                    'CUSTOMER CONTACT NUMBER',
+                                    'Customer contact no'],
         'Task Assigned Date & Time': ['Task Assigned Date', 'Task Assign Date',
                                       'Task Assigned Date and Time'],
         'Task End Date': ['Task End Date & Time', 'Task End Date and Time',
@@ -256,6 +316,40 @@ FILE_COLUMN_ALIASES = {
     'AMC Population Report': {
         'KVA RATING': ['kVA Rating'],
     },
+    'AMC Agreement Expiry Planner': {
+        'INSTANCE ID': ['Instance Id [Asset #]', 'Instance Id', 'Asset Number'],
+        'AGREEMENT NUMBER': ['AGREEMENT NO', 'AGREEMENT #'],
+        'AGREEMENT END DATE': ['AGREEMENT EXPIRY DATE', 'EXPIRY DATE',
+                               'AGREEMENT END DT'],
+        'ACCOUNT NAME': ['ACCOUNT'],
+        'BRANCH ID': ['SD BRANCH CODE', 'BRANCH CODE'],
+        'INSTALLATION SITE ADDRESS': ['INSTALLATION ADDRESS', 'SITE ADDRESS'],
+    },
+    'LMS Data from Insia': {
+        # This file is the LMS layout WITHOUT an Instance Id; the alternate
+        # spellings are the ones the ERP layout of the same report uses.
+        'LEAD NUMBER': ['Lead Number', 'LEAD NO', 'LEAD #'],
+        'LEAD CREATED DATE': ['Lead Created Date', 'LEAD CREATION DATE',
+                              'LEAD CREATED DATE & TIME'],
+        'BRANCH ID': ['SD Branch Code', 'SD BRANCH CODE', 'BRANCH CODE'],
+        'ACCOUNT NAME': ['Account Name', 'ACCOUNT', 'CUSTOMER NAME'],
+        'LEAD SR NUMBER': ['Service Request Number', 'SR NUMBER', 'SR NO',
+                           'LEAD SR NO', 'LEAD SERVICE REQUEST NUMBER'],
+        'SERVICE ENGINEER NAME': ['Service Engineer', 'SE NAME'],
+        'ORDER CREATION DATE': ['Order Creation Date', 'ORDER DATE',
+                                'ORDER CREATED DATE'],
+    },
+    'All Invoice Detailed Report': {
+        'INSTANCE ID': ['Instance Id [Asset #]', 'Instance Id', 'ASSET NUMBER'],
+        'INVOICE NUMBER': ['INVOICE NO', 'INVOICE NO.', 'INVOICE #'],
+        'INVOICE DATE': ['INVOICE DATE & TIME', 'INVOICE DATETIME'],
+        'INVOICE AMOUNT': ['INVOICE VALUE', 'TOTAL INVOICE AMOUNT'],
+        'INVOICE TYPE': ['INVOICE LINE TYPE'],
+        'INVOICE SEGMENT': ['INVOICE BUSINESS SEGMENT'],
+        'BRANCH ID': ['SD BRANCH CODE', 'BRANCH CODE'],
+        'BRANCH NAME': ['SD BRANCH NAME'],
+        'ACCOUNT NAME': ['ACCOUNT', 'CUSTOMER NAME'],
+    },
     'Regular Bandhan Customers Report': {
         # Old/alternate export headers mapped onto the canonical ones
         'Engine No': ['Genset Number', 'Genset No'],
@@ -268,10 +362,17 @@ FILE_COLUMN_ALIASES = {
     },
 }
 
-# Standalone files: imported into their OWN table only. They never write to the
-# customers table and never trigger the cross-table matching / branch backfill
-# that the other imports run afterwards.
-STANDALONE_FILE_TYPES = {'CDI Detail Report', 'EFSR Report'}
+# Report files: imported into their OWN table and linked to the customers table
+# on instance_id, but they never trigger the cross-table matching / branch
+# backfill passes that run after the other imports — those exist to reconcile
+# the quote and SR files against each other, and neither of these feeds them.
+# (CDI and EFSR DID once skip the customers table entirely; they now carry the
+# genset key — CDI as ASSET NUMBER, EFSR as Instance ID — so each row belongs
+# to a customer like every other import. LMS Data from Insia carries no genset key at
+# all: its rows reach a customer through the SR the lead was raised on — see
+# _resolve_instance_ids_by_sr — so the ones whose SR is not loaded yet stay
+# unlinked until it is.)
+STANDALONE_FILE_TYPES = {'CDI Detail Report', 'EFSR Report', 'LMS Data from Insia'}
 
 
 # ==========================================================================
@@ -312,17 +413,70 @@ def read_upload_table(contents: bytes) -> pd.DataFrame:
 
     # Unknown signature: let pandas try (covers .ods and anything with a
     # future engine), then fall back to HTML and finally to CSV/TSV.
+    errors = []
     for reader in (_read_excel_any, _read_html_table, _read_delimited):
         try:
             return reader(contents)
-        except Exception:
-            continue
+        except Exception as e:
+            errors.append(f"{reader.__name__.lstrip('_')}: {e}")
 
+    # Say WHAT went wrong. The old message named the two formats the file
+    # already was, which told nobody anything when a real .csv was refused.
     raise HTTPException(
         status_code=400,
-        detail=("Unsupported file format. Save the report as .xlsx (Excel Workbook) "
-                "or .csv and upload it again.")
+        detail=("The file could not be read as Excel, an HTML report or a "
+                "delimited text file. Save it as .xlsx (Excel Workbook) or .csv "
+                "and upload it again. Details - " + " | ".join(errors)[:500])
     )
+
+
+# Excel stores a date as "days since 1899-12-30", and a cell that never got a
+# date number-format exports as that bare number instead of a date -- the Open
+# SR export does exactly this for SR Due Date / Appointment Date, so the file
+# arrives holding 46368 or 43990.22916666666. openpyxl/xlrd only convert cells
+# that carry a date format, so those columns reached the DB as NULL.
+#
+# The window is deliberately narrow: only 1902-01-01 .. 2173-10-14 counts as a
+# date, so an ID, a quantity or an amount that happens to sit in a date column
+# is never silently turned into 1970.
+_EXCEL_EPOCH = datetime(1899, 12, 30)
+_SERIAL_MIN = 1000        # 1902-09-26
+_SERIAL_MAX = 100000      # 2173-10-14
+
+
+def excel_serial_to_datetime(value):
+    """Convert an Excel date serial to a datetime, or None if `value` is not
+    one. Accepts the number itself and the string form a CSV/text export
+    produces ("46368", "43990.22916666666")."""
+    if value is None or isinstance(value, (datetime, pd.Timestamp, bool)):
+        return None
+    if isinstance(value, (int, float)):
+        serial = float(value)
+    else:
+        text = str(value).strip()
+        # A real date always carries a separator; a pure number never does.
+        if not re.fullmatch(r'\d{4,6}(\.\d+)?', text):
+            return None
+        serial = float(text)
+    if not (_SERIAL_MIN <= serial <= _SERIAL_MAX):
+        return None
+    # Round to the nearest second: 0.22916666666 of a day is 05:30:00, and
+    # floating point would otherwise land on 05:29:59.999.
+    return _EXCEL_EPOCH + timedelta(seconds=round(serial * 86400))
+
+
+# Only a column that CALLS ITSELF a date gets the serial treatment when it is
+# dynamic -- an unmapped numeric column must never be guessed into a date.
+# "Time" is not in the list on purpose: a bare clock time is a fraction of a
+# day, which the serial window rejects anyway, while a DURATION column
+# ("Downtime Hrs") would be inside it. "Update" is dropped first because it is
+# the one common word that contains "date" without being one.
+_DATE_HEADER_RE = re.compile(r'(date|expiry|dob)', re.IGNORECASE)
+_NOT_A_DATE_RE = re.compile(r'update(?:d(?!ate))?', re.IGNORECASE)
+
+
+def _looks_like_date_header(name) -> bool:
+    return bool(_DATE_HEADER_RE.search(_NOT_A_DATE_RE.sub('', str(name or ''))))
 
 
 def _read_excel_any(contents: bytes) -> pd.DataFrame:
@@ -352,15 +506,150 @@ def _read_html_table(contents: bytes) -> pd.DataFrame:
     return df
 
 
-def _read_delimited(contents: bytes) -> pd.DataFrame:
-    """CSV / TSV renamed .xls — sniff the separator and the encoding."""
-    last_error = None
-    for encoding in ('utf-8-sig', 'latin-1'):
+# The separators the portal / Excel exports actually use, in the order a tie is
+# broken. Sniffing alone is not enough — see _pick_separator.
+_CSV_SEPARATORS = (',', ';', '\t', '|')
+
+
+def _decode_upload(contents: bytes) -> str:
+    """Bytes -> text for a delimited file.
+
+    A BOM is authoritative, and it is the one that matters here: Excel's
+    "Unicode Text (*.txt)" and several portal exports are UTF-16, which
+    latin-1 happily decodes into NUL-padded mojibake — the read then
+    "succeeds" with column names like 'I\x00n\x00s\x00t...' instead of
+    failing, so nothing downstream matches and the import silently does
+    nothing. Without a BOM, try the encodings these files really come in;
+    latin-1 is last because it can decode ANY byte and so must never be
+    allowed to shadow a real one."""
+    for bom, encoding in ((codecs.BOM_UTF8, 'utf-8-sig'),
+                          (codecs.BOM_UTF32_LE, 'utf-32'),
+                          (codecs.BOM_UTF32_BE, 'utf-32'),
+                          (codecs.BOM_UTF16_LE, 'utf-16'),
+                          (codecs.BOM_UTF16_BE, 'utf-16')):
+        if contents.startswith(bom):
+            try:
+                return contents.decode(encoding)
+            except (UnicodeDecodeError, LookupError):
+                break
+
+    # BOM-less UTF-16 (rare, but some exports drop it): every other byte is a
+    # NUL, which no single-byte encoding would ever produce.
+    if contents.count(b'\x00') > len(contents) // 4:
+        for encoding in ('utf-16-le', 'utf-16-be'):
+            try:
+                return contents.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+
+    for encoding in ('utf-8-sig', 'cp1252', 'latin-1'):
         try:
-            return pd.read_csv(io.BytesIO(contents), sep=None, engine='python', encoding=encoding)
-        except Exception as e:
-            last_error = e
-    raise last_error
+            return contents.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return contents.decode('latin-1', errors='replace')
+
+
+def _pick_separator(text: str) -> str:
+    """The delimiter that parses this file's own header and rows CONSISTENTLY.
+
+    Replaces pandas' `sep=None`, which delegates to csv.Sniffer and gets two
+    common exports wrong without raising: a ONE-COLUMN file is split on the
+    space inside its header ('Quote ID' -> 'Quote' + 'ID'), and a
+    pipe-delimited file is not recognised at all. Each candidate is scored on
+    how many of the first rows have the same field count as the header, then on
+    how many columns that is — a wrong separator scores badly on both."""
+    lines = [ln for ln in text.splitlines()[:50] if ln.strip()]
+    if not lines:
+        return ','
+
+    best, best_score = None, None
+    for sep in _CSV_SEPARATORS:
+        try:
+            rows = list(csv.reader(lines, delimiter=sep))
+        except csv.Error:
+            continue
+        if not rows:
+            continue
+        widths = {}
+        for r in rows:
+            widths[len(r)] = widths.get(len(r), 0) + 1
+        # The MODAL width, not the header's: an export with a title line above
+        # its header would otherwise score every separator at one column.
+        width = max((w for w in widths if w >= 2),
+                    key=lambda w: (widths[w], w), default=0)
+        if width < 2:
+            continue                     # this separator does not appear at all
+        score = (widths[width], width)
+        if best_score is None or score > best_score:
+            best, best_score = sep, score
+    # Nothing split the file: it is genuinely single-column, and any separator
+    # gives that same one column.
+    return best or ','
+
+
+def _read_delimited(contents: bytes) -> pd.DataFrame:
+    """CSV / TSV — including the ones named .xls, exported as UTF-16, padded
+    with blank lines, or carrying rows WIDER than their own header.
+
+    That last one is why a perfectly ordinary portal CSV used to be rejected
+    with "Unsupported file format": one unescaped separator inside a value
+    makes the row wider than the header, and pandas aborts the whole read
+    rather than keeping the file. Here the widest row decides the column count
+    up front, so the stray fields land in their own 'Unnamed: n' columns (which
+    the dynamic-column support then stores in extra_data) and NOT ONE ROW IS
+    DROPPED."""
+    text = _decode_upload(contents)
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="The uploaded file is empty.")
+
+    sep = _pick_separator(text)
+    buf = lambda: io.StringIO(text)
+
+    try:
+        df = pd.read_csv(buf(), sep=sep, engine='python', skip_blank_lines=True)
+        # When the header row is NARROWER than the data (an export with a title
+        # line above its header), pandas does not complain — it quietly turns
+        # the extra leading fields into a MultiIndex. Those are columns, so send
+        # the file down the same path as a ragged one instead.
+        if df.index.nlevels == 1:
+            return df
+    except pd.errors.ParserError:
+        pass                             # ragged rows — handled below
+
+    # Ragged: the WIDEST row decides the column count, so every stray field has
+    # a column to land in instead of aborting the read.
+    rows = [r for r in csv.reader(buf(), delimiter=sep) if any(str(c).strip() for c in r)]
+    if not rows:
+        raise HTTPException(status_code=400, detail="The uploaded file has no rows.")
+
+    header = [str(h).strip() for h in rows[0]]
+    widest = max(len(r) for r in rows)
+    names = list(header) + [f'Unnamed: {i}' for i in range(len(header), widest)]
+    # Duplicate headers would silently collapse into one column
+    seen = {}
+    for i, name in enumerate(names):
+        if not name:
+            name = f'Unnamed: {i}'
+        if name in seen:
+            seen[name] += 1
+            name = f'{name}.{seen[name]}'
+        else:
+            seen[name] = 0
+        names[i] = name
+    # Re-serialise the rows padded to a single width and let pandas parse that.
+    # Passing `names` straight to read_csv is not an option: it refuses a list
+    # longer than the file's own header row, which is the entire problem here.
+    # Every value goes back through csv.writer, so separators and quotes inside
+    # a value survive, and dtype inference works exactly as on a clean file.
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator='\n')
+    writer.writerow(names)
+    for r in rows[1:]:
+        row = list(r)[:len(names)]
+        writer.writerow(row + [''] * (len(names) - len(row)))
+    out.seek(0)
+    return pd.read_csv(out, sep=',', engine='python', skip_blank_lines=True)
 
 
 class ImportController:
@@ -443,6 +732,14 @@ class ImportController:
         
         date_str = str(date_value).strip()
         
+        # A date cell the portal exported with GENERAL formatting arrives as a
+        # bare Excel serial ("46368", "43990.22916666666") -- openpyxl only
+        # converts cells that carry a date number-format, so without this the
+        # column silently imported as NULL.
+        serial_date = excel_serial_to_datetime(date_value)
+        if serial_date is not None:
+            return serial_date
+        
         # Try different date formats
         date_formats = [
             '%Y-%m-%d %H:%M:%S',
@@ -464,7 +761,16 @@ class ImportController:
             '%d/%m/%Y, %I:%M %p',
             '%d/%m/%Y %I:%M %p',
             '%m/%d/%Y, %I:%M:%S %p',
-            '%d/%m/%Y, %I:%M:%S %p'
+            '%d/%m/%Y, %I:%M:%S %p',
+            # Minutes but no seconds, four-digit year: how the All Invoice
+            # Detailed Report writes every one of its dates ("19-12-2024 10:47").
+            # Only '%d-%m-%y %H:%M' (TWO-digit year) was listed, which does not
+            # match a 4-digit year, so those cells parsed to NULL. Appended at
+            # the END so nothing that already parsed changes.
+            '%d-%m-%Y %H:%M',
+            '%Y-%m-%d %H:%M',
+            '%m/%d/%Y %H:%M',
+            '%d/%m/%Y %H:%M'
         ]
         
         for fmt in date_formats:
@@ -622,6 +928,11 @@ class ImportController:
                 pass
             if isinstance(value, (datetime, pd.Timestamp)):
                 out[str(col)] = str(value)
+            elif _looks_like_date_header(col) and excel_serial_to_datetime(value) is not None:
+                # Same General-formatted-date-cell problem as parse_date, for a
+                # column nothing maps to: keep the date, not the serial, so the
+                # reports built off extra_data do not print "46368".
+                out[str(col)] = str(excel_serial_to_datetime(value))
             else:
                 str_value = self.convert_to_string(value)
                 if str_value:
@@ -644,7 +955,17 @@ class ImportController:
             'Pulse Quotation - Service Only': 'Instance Id',
             'Regular Bandhan Customers Report': 'Pulse Instance ID',  # NEW format: matched by this column only
             'LMS Data for ERP': 'Instance ID',
-            'Open SR Load Report': 'Instance Id [Asset #]'  # Fixed: Added the correct column name
+            'Open SR Load Report': 'Instance Id [Asset #]',  # Fixed: Added the correct column name
+            'AMC Agreement Expiry Planner': 'INSTANCE ID',
+            # Only the Service invoice lines carry one; the OTC and Agreement
+            # lines have no genset and import unlinked.
+            'All Invoice Detailed Report': 'INSTANCE ID',
+            # CDI names the genset key ASSET NUMBER, exactly like the Asset files
+            'CDI Detail Report': 'ASSET NUMBER',
+            'EFSR Report': 'Instance ID',
+            # 'LMS Data from Insia' is deliberately absent: that file has NO genset
+            # column. Its instance_id is resolved from LEAD SR NUMBER against
+            # the SR tables instead (see _resolve_instance_ids_by_sr).
         }
         
         col_name = column_mapping.get(file_type)
@@ -714,7 +1035,13 @@ class ImportController:
             'Regular Bandhan Customers Report': None,  # No branch ID in this file
             'LMS Data for ERP': 'BRANCH ID',
             'Open SR Load Report': None,  # No branch ID in this file
-            'Response Time & MaxTTR Details': 'BRANCH ID'
+            'Response Time & MaxTTR Details': 'BRANCH ID',
+            'AMC Agreement Expiry Planner': 'BRANCH ID',
+            'All Invoice Detailed Report': 'BRANCH ID',
+            # CDI carries only a BRANCH NAME, never an id — see its docstring
+            'CDI Detail Report': None,
+            'EFSR Report': 'SD Branch Code',
+            'LMS Data from Insia': 'BRANCH ID'
         }
         
         col_name = column_mapping.get(file_type)
@@ -941,6 +1268,47 @@ class ImportController:
             field_mappings = {
                 'customer_name': ['ACCOUNT NAME']
             }
+        elif file_type == 'CDI Detail Report':
+            # Feedback file: the account name is the only customer-master field
+            # it can be trusted for. FEEDBACK TKN CUST NUM / NAME are the person
+            # who answered the survey, not the account's own contact, so they
+            # are deliberately left out.
+            field_mappings = {
+                'customer_name': ['X ACCOUNT NAME']
+            }
+        elif file_type == 'EFSR Report':
+            # 'Account' is the account name and is on every row. 'Customer Name'
+            # / 'Customer contact number' are the on-site contact for that visit
+            # (and only on ~80% of rows), so they are not taken.
+            field_mappings = {
+                'customer_name': ['Account'],
+                'location': ['Installation Site Address']
+            }
+        elif file_type == 'LMS Data from Insia':
+            # The lead file's ACCOUNT NAME is the only customer-master field it
+            # can be trusted for: it has no contact number, e-mail or site
+            # address column at all.
+            field_mappings = {
+                'customer_name': ['ACCOUNT NAME']
+            }
+        elif file_type == 'AMC Agreement Expiry Planner':
+            # The planner links to the customer master on INSTANCE ID and
+            # contributes the account name and the site address. Phone/email are
+            # deliberately not taken: the file's CUSTOMER PHONE NUMBER is the
+            # on-site contact for the agreement, not the account's own number,
+            # and there is no email column at all.
+            field_mappings = {
+                'customer_name': ['ACCOUNT NAME'],
+                'location': ['INSTALLATION SITE ADDRESS']
+            }
+        elif file_type == 'All Invoice Detailed Report':
+            # The invoice file's ACCOUNT NAME is the only customer-master field
+            # it carries: no contact number, e-mail or site address column at
+            # all. Only its Service lines have an Instance Id, so the OTC and
+            # Agreement lines never reach a customer.
+            field_mappings = {
+                'customer_name': ['ACCOUNT NAME']
+            }
         else:
             field_mappings = {
                 'customer_name': ['CUSTOMER NAME', 'Name', 'CompanyName', 'ACCOUNT NAME', 'Account', 'Customer Name', 'customer_name', 'name'],
@@ -1047,6 +1415,47 @@ class ImportController:
             }
         elif file_type == 'Response Time & MaxTTR Details':
             # File carries only the account name for the customer master
+            field_mappings = {
+                'customer_name': ['ACCOUNT NAME']
+            }
+        elif file_type == 'CDI Detail Report':
+            # Feedback file: the account name is the only customer-master field
+            # it can be trusted for. FEEDBACK TKN CUST NUM / NAME are the person
+            # who answered the survey, not the account's own contact, so they
+            # are deliberately left out.
+            field_mappings = {
+                'customer_name': ['X ACCOUNT NAME']
+            }
+        elif file_type == 'EFSR Report':
+            # 'Account' is the account name and is on every row. 'Customer Name'
+            # / 'Customer contact number' are the on-site contact for that visit
+            # (and only on ~80% of rows), so they are not taken.
+            field_mappings = {
+                'customer_name': ['Account'],
+                'location': ['Installation Site Address']
+            }
+        elif file_type == 'LMS Data from Insia':
+            # The lead file's ACCOUNT NAME is the only customer-master field it
+            # can be trusted for: it has no contact number, e-mail or site
+            # address column at all.
+            field_mappings = {
+                'customer_name': ['ACCOUNT NAME']
+            }
+        elif file_type == 'AMC Agreement Expiry Planner':
+            # The planner links to the customer master on INSTANCE ID and
+            # contributes the account name and the site address. Phone/email are
+            # deliberately not taken: the file's CUSTOMER PHONE NUMBER is the
+            # on-site contact for the agreement, not the account's own number,
+            # and there is no email column at all.
+            field_mappings = {
+                'customer_name': ['ACCOUNT NAME'],
+                'location': ['INSTALLATION SITE ADDRESS']
+            }
+        elif file_type == 'All Invoice Detailed Report':
+            # The invoice file's ACCOUNT NAME is the only customer-master field
+            # it carries: no contact number, e-mail or site address column at
+            # all. Only its Service lines have an Instance Id, so the OTC and
+            # Agreement lines never reach a customer.
             field_mappings = {
                 'customer_name': ['ACCOUNT NAME']
             }
@@ -1270,7 +1679,14 @@ class ImportController:
     def get_critical_columns(self, file_type):
         """Get critical columns that must be present for each file type"""
         critical = {
-            'AMC Population Report': ['INSTANCE ID', 'AGREEMENT NUMBER'],
+            # AGREEMENT TYPE decides what the AMC & Bandhan Projection report
+            # counts (a D/BAMC type or not) and AGREEMENT START DATE puts it in a
+            # month; import_amc_agreement itself FILTERS on AGREEMENT STATUS to
+            # keep one Active row per genset, so a file without that column fails
+            # on a KeyError rather than a message. All three are required.
+            'AMC Population Report': ['INSTANCE ID', 'AGREEMENT NUMBER',
+                                      'AGREEMENT TYPE', 'AGREEMENT STATUS',
+                                      'AGREEMENT START DATE'],
             # ASSET OPERATIONAL STATUS decides the Service Penetration report's
             # population: an 'Inactive' asset is a retired machine and is left
             # out of the installed base. Without the column every asset would
@@ -1304,10 +1720,49 @@ class ImportController:
             # 'Days present on Task end' counts distinct task-end dates, so a
             # file without the column silently zeroes that column (and with it
             # every Productivity figure) — block the upload instead.
+            # RESPONSE TIME RANGE IN HRS and MaxTTR on SR Closed in hrs added
+            # 2026-08-21: the Annual Reports' 'Service Load and Response' sheet
+            # reads BOTH columns straight out of the file and never recomputes
+            # them (SR OPEN DATE carries the SCHEDULED date on planned work, so
+            # open -> close arithmetic is wrong on ~19% of rows). Without the
+            # range column its 4 Hrs Response tab reads 0% for every branch;
+            # without the hours column the 24 Hrs and 48 Hrs tabs do the same —
+            # silently, since a missing column looks exactly like nobody
+            # meeting the SLA. Block the upload instead.
             'Response Time & MaxTTR Details': [
                 'BRANCH ID', 'BRANCH NAME', 'INSTANCE ID', 'SR NUMBER',
                 'SR TYPE', 'SEGMENT', 'SR OPEN DATE', 'SR TASK END DATE',
-                'SR CLOSE DATE', 'SE NAME', 'SE TICKET NUM'
+                'SR CLOSE DATE', 'SE NAME', 'SE TICKET NUM',
+                'RESPONSE TIME RANGE IN HRS', 'Response Time',
+                'MaxTTR on SR Closed in hrs'
+            ],
+            # Both halves of the record key. INSTANCE ID alone collapses 19.8%
+            # of the real export (a genset renews) and AGREEMENT NUMBER alone
+            # collapses 1.4% (one agreement covers a fleet), so a file missing
+            # either one cannot be stored without losing rows — block it.
+            # AGREEMENT END DATE is what the planner is FOR: without it every
+            # row imports with an empty expiry and the file says nothing.
+            'AMC Agreement Expiry Planner': ['INSTANCE ID', 'AGREEMENT NUMBER',
+                                             'AGREEMENT END DATE'],
+            # Only the record key is mandatory. The other six fixed columns are
+            # IMPORTANT (the Import page warns when one is missing) but never
+            # blocking: a lead file exported without, say, ORDER CREATION DATE
+            # is still worth importing.
+            'LMS Data from Insia': ['LEAD NUMBER'],
+            # INVOICE NUMBER is the record key. The other six are every column
+            # the Open Quotation Tracker reads: without INVOICE DATE no row
+            # lands in a period, without STATUS the 185 cancelled lines are
+            # counted as real business, without SEGMENT the 15,747 OTC lines
+            # flood the service figures, without TYPE nothing splits into labour
+            # and parts, without AMOUNT every value reads zero, and without
+            # BRANCH ID / BRANCH NAME no row can be placed on a branch. Each of
+            # those failures looks like a real number, so block the upload.
+            # INSTANCE ID and ACCOUNT NAME are deliberately NOT here: the OTC and
+            # Agreement lines legitimately have no genset.
+            'All Invoice Detailed Report': [
+                'INVOICE NUMBER', 'INVOICE DATE', 'INVOICE STATUS',
+                'INVOICE SEGMENT', 'INVOICE TYPE', 'INVOICE AMOUNT',
+                'BRANCH ID', 'BRANCH NAME'
             ]
         }
         return critical.get(file_type, [])
@@ -1466,18 +1921,21 @@ class ImportController:
         return imported_count, updated_count
     
     def convert_to_numeric(self, value):
-        """Convert value to integer if possible, otherwise return None"""
+        """Convert a value to int if possible, otherwise None.
+
+        Routed through convert_to_float so a grouped number ('1,234') and a
+        whole number written with a decimal ('5.0', which is what Excel hands
+        over for an integer column) both land, instead of failing isdigit()
+        and being dropped. A fractional value is not an integer -> None.
+        """
         if pd.isna(value) or value is None or value == '':
             return None
-        
-        try:
-            str_val = self.convert_to_string(value)
-            if str_val and str_val.isdigit():
-                return int(str_val)
+
+        number = self.convert_to_float(value)
+        if number is None:
             return None
-        except:
-            return None
-    
+        return int(number) if float(number).is_integer() else None
+
     def import_asset_detailed(self, file: UploadFile):
         """Import Asset Detailed Report - Override existing records"""
         contents = file.file.read()
@@ -1779,15 +2237,47 @@ class ImportController:
         return False
     
     def convert_to_float(self, value):
-        """Convert value to float"""
+        """Convert a value to float, THOUSANDS SEPARATORS INCLUDED.
+
+        The KOEL / Pulse exports write money the Indian way - '10,854.01',
+        '1,20,450.00', sometimes with a currency mark or wrapped in brackets
+        for a negative. A bare float() raises ValueError on every one of those,
+        and this used to swallow it and return None: **any amount of 1,000 or
+        more was silently dropped on import** while the sub-1,000 ones (no
+        comma, e.g. '1.18') stored fine. That is why the LMS Conv. Amount
+        columns read 2.52 L against the file's own 7.37 L - in the LMS Pulse
+        OLD export 783 of the part amounts carry a comma.
+
+        Anything that still does not parse returns None, exactly as before, so
+        a genuinely non-numeric cell behaves as it always did.
+        """
         if pd.isna(value) or value is None:
             return None
-        
-        try:
+
+        # A real number out of Excel needs no cleaning
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
             return float(value)
-        except:
+
+        text = str(value).strip()
+        if not text:
             return None
-    
+
+        # '(1,234.00)' is accountancy for -1234
+        negative = text.startswith('(') and text.endswith(')')
+
+        # Strip the grouping commas, spaces and the rupee / Rs. marks the
+        # portals sometimes prefix. Digits, sign, point and exponent survive.
+        cleaned = re.sub(r'(?i)^\s*(rs\.?|inr)\s*', '', text.strip('()'))
+        cleaned = re.sub(r'[,\s\u20b9$]', '', cleaned)
+        if not cleaned or cleaned in ('-', '+', '.'):
+            return None
+
+        try:
+            number = float(cleaned)
+        except (TypeError, ValueError):
+            return None
+        return -number if negative else number
+
     def import_anubandhan_quotes(self, file: UploadFile):
         """Import Anubandhan Quotes Report - Only take first record per instance_id"""
         contents = file.file.read()
@@ -2019,50 +2509,87 @@ class ImportController:
         return imported_count, updated_count
     
     def import_pulse_quotation(self, file: UploadFile):
-        """Import Pulse Quotation - Service Only - Only take first record per instance_id"""
+        """Import 'Pulse Quotation - Service Only' — ONE ROW PER QUOTATION.
+
+        The record key is the pair Instance Id + Quote ID. It used to be the
+        Instance Id ALONE (`groupby('Instance Id').first()`), which kept a single
+        quotation per genset and threw every other one away: a genset quoted five
+        times in a quarter stored one quote, carrying only that one quote's Labor
+        / Parts amounts. Nothing downstream ever wanted that — the Customer page
+        and the data hub read these rows as a LIST, and the Drive pages take [0],
+        which is now the LATEST quotation (rows come back newest first) instead of
+        whichever line happened to sit first in the file — and the Open Quotation
+        Tracker cannot be built on it at all, since it COUNTS quotations.
+
+        Quote ID is a critical column, so it is always there; a row that somehow
+        has none still imports, keyed on its Instance Id alone, rather than being
+        dropped. In-file duplicates of the same pair: FIRST wins.
+
+        The upsert is empty-safe (blank cells keep the old value, extra_data is
+        merged), so re-importing the same export only fills blanks in — and the
+        existing one-per-genset rows are matched by their own pair and updated in
+        place rather than duplicated."""
         contents = file.file.read()
         df = read_upload_table(contents)
-        
+
         # Flexible headers: map known columns to canonical names; the rest are dynamic
         df, extra_cols = self.canonicalize_dataframe(df, 'Pulse Quotation - Service Only')
 
         is_valid, message = self.validate_file_format(df, 'Pulse Quotation - Service Only')
         if not is_valid:
             raise HTTPException(status_code=400, detail=f"Invalid file format for Pulse Quotation - Service Only: {message}")
-        
-        # Group by Instance Id and take first record for each
-        first_records_df = df.groupby('Instance Id').first().reset_index()
-        
-        # ── FAST: dict iteration + bulk preload ──
-        records = first_records_df.to_dict('records')
-        instance_ids = [self.extract_instance_id(r, 'Pulse Quotation - Service Only') for r in records]
-        existing_map = self._bulk_load_by_instance_id(PulseQuotation, instance_ids)
+
+        def norm_quote_id(v):
+            # Same normalization the column is stored with, so a key built from
+            # the file and one rebuilt from a DB row always agree.
+            return self.convert_to_string(v)
+
+        # Unique key = Instance Id + Quote ID; FIRST occurrence in the file wins.
+        unique_rows = {}
+        for row in df.to_dict('records'):
+            instance_id = self.extract_instance_id(row, 'Pulse Quotation - Service Only')
+            if not instance_id:
+                continue
+            key = (instance_id, norm_quote_id(row.get('Quote ID')))
+            if key not in unique_rows:
+                unique_rows[key] = row
+
+        instance_ids = [iid for iid, _ in unique_rows]
+
+        # Existing rows keyed by the same pair. Loaded by instance_id (indexed),
+        # then re-keyed so each quotation of a genset is matched separately.
+        existing_map = {}
+        unique_iids = list(set(instance_ids))
+        for i in range(0, len(unique_iids), 1000):
+            chunk = unique_iids[i:i + 1000]
+            for rec in self.db.query(PulseQuotation).filter(
+                    PulseQuotation.instance_id.in_(chunk)).all():
+                existing_map[(rec.instance_id, rec.quote_id)] = rec
+
         customer_cache = self._bulk_load_by_instance_id(Customer, instance_ids)
-        
+        linked_iids = set()
+
         imported_count = 0
         updated_count = 0
-        
+
         with self.db.no_autoflush:
-            for row in records:
+            for (instance_id, quote_id), row in unique_rows.items():
                 try:
-                    instance_id = self.extract_instance_id(row, 'Pulse Quotation - Service Only')
-                    
-                    if not instance_id:
-                        continue
-                    
                     # Get branch_id from preloaded customer cache (O(1))
                     cust = customer_cache.get(instance_id)
                     branch_id = cust.branch_id if (cust and cust.branch_id) else None
-                    
-                    # Update or create customer
-                    self.update_or_create_customer(instance_id, row, 'Pulse Quotation - Service Only', cache=customer_cache)
+
+                    # Update or create customer — ONCE per genset per file, not
+                    # once per quotation of it.
+                    if instance_id not in linked_iids:
+                        self.update_or_create_customer(instance_id, row, 'Pulse Quotation - Service Only', cache=customer_cache)
                     
                     # Prepare quote data
                     quote_data = {
                         'instance_id': instance_id,
                         'branch_id': branch_id,
                         'creation_date': self.parse_date(row.get('Creation Date')),
-                        'quote_id': self.convert_to_string(row.get('Quote ID')),
+                        'quote_id': quote_id,
                         'first_level_observations': self.convert_to_string(row.get('First level observations')),
                         'quote_status': self.truncate_string(row.get('Quote Status'), 100),
                         'sr_type': self.truncate_string(row.get('SR Type'), 200),
@@ -2097,8 +2624,9 @@ class ImportController:
                         'extra_data': self.collect_extra_data(row, extra_cols),
                     }
                     
-                    # O(1) lookup from preloaded map
-                    existing = existing_map.get(instance_id)
+                    # O(1) lookup from preloaded map, on the Instance Id +
+                    # Quote ID pair
+                    existing = existing_map.get((instance_id, quote_id))
                     
                     if existing:
                         # Update existing record with new data
@@ -2108,7 +2636,7 @@ class ImportController:
                         # Create new record
                         quote = PulseQuotation(**quote_data)
                         self.db.add(quote)
-                        existing_map[instance_id] = quote
+                        existing_map[(instance_id, quote_id)] = quote
                         imported_count += 1
                         
                 except IntegrityError:
@@ -2959,16 +3487,22 @@ class ImportController:
         return imported_count, updated_count
 
     def import_cdi_detail_report(self, file):
-        """Import 'CDI Detail Report' — STANDALONE: writes ONLY to
-        cdi_detail_report. The customers table and every other import table are
-        left untouched.
+        """Import 'CDI Detail Report' — writes to cdi_detail_report and LINKS
+        each row to the customers table on ASSET NUMBER, the genset key the
+        Asset files store as instance_id (present on 100% of the rows of the
+        real export, and matching an existing customer on 4,978 of 4,979).
+        No other import table is touched.
+
+        The customer link uses the shared empty-safe helper, so a blank cell in
+        this file can never wipe a value the customer master already holds, and
+        only the FIRST row of each instance_id in the file is applied.
 
         SR NUMBER is the primary key: ONE row per unique SR NUMBER, upserted on
         re-import (blank cells never wipe existing data). If the same SR NUMBER
         appears several times in the file, the FIRST row wins. Fixed columns:
         SR NUMBER, BRANCH NAME, X TECHNICIAN ID, X TECHNICIAN NAME,
-        CDI CATEGORY, ACTIVITY END DATE, Overall Experience — every other
-        column is dynamic (extra_data). BRANCH NAME is the branch the Customer
+        CDI CATEGORY, ACTIVITY END DATE, Overall Experience, ASSET NUMBER —
+        every other column is dynamic (extra_data). BRANCH NAME is the branch the Customer
         Delight Index report (Annual Reports) groups the feedback by: this file
         carries no BRANCH ID, so the name is the only branch it has."""
         contents = file.file.read()
@@ -3018,16 +3552,35 @@ class ImportController:
             for rec in self.db.query(CDIDetailReport).filter(CDIDetailReport.sr_number.in_(chunk)).all():
                 existing[(rec.sr_number or '').strip()] = rec
 
+        # Customer relation: preload every instance the file mentions.
+        all_iids = [self.extract_instance_id(r, 'CDI Detail Report')
+                    for r in unique_rows.values()]
+        customer_cache = self._bulk_load_by_instance_id(Customer, all_iids)
+        linked_iids = set()
+
         imported_count = 0
         updated_count = 0
 
         with self.db.no_autoflush:
             for sr, row in unique_rows.items():
+                instance_id = self.extract_instance_id(row, 'CDI Detail Report')
+                # FIRST occurrence of an instance_id wins: later rows for the
+                # same genset still store their own instance_id, they just do
+                # not re-apply this file's values to the customer master.
+                if instance_id and instance_id not in linked_iids:
+                    linked_iids.add(instance_id)
+                    self.update_or_create_customer(
+                        instance_id, row, 'CDI Detail Report', cache=customer_cache)
+
                 data = {
+                    'instance_id': instance_id,
                     'branch_name': self.truncate_string(val(row, 'BRANCH NAME'), 150),
                     'x_technician_id': self.truncate_string(val(row, 'X TECHNICIAN ID'), 200),
                     'x_technician_name': self.truncate_string(val(row, 'X TECHNICIAN NAME')),
                     'cdi_category': self.truncate_string(val(row, 'CDI CATEGORY'), 200),
+                    'x_account_name': self.truncate_string(val(row, 'X ACCOUNT NAME')),
+                    'feedback_customer_name': self.truncate_string(val(row, 'FEEDBACK TKN CUST NAME')),
+                    'feedback_customer_number': self.truncate_string(val(row, 'FEEDBACK TKN CUST NUM'), 50),
                     'activity_end_date': self.parse_date(val(row, 'ACTIVITY END DATE')),
                     'overall_experience': self.truncate_string(val(row, 'Overall Experience'), 50),
                     'extra_data': self.collect_extra_data(row, extra_cols),
@@ -3049,8 +3602,14 @@ class ImportController:
         return imported_count, updated_count
 
     def import_efsr_report(self, file):
-        """Import 'EFSR Report' — STANDALONE: writes ONLY to efsr_report. The
-        customers table and every other import table are left untouched.
+        """Import 'EFSR Report' — writes to efsr_report and LINKS each row to
+        the customers table on Instance ID (present on 100% of the rows of the
+        real export, and matching an existing customer on 9,895 of 9,929).
+        No other import table is touched.
+
+        The customer link uses the shared empty-safe helper, so a blank cell in
+        this file can never wipe a value the customer master already holds, and
+        only the FIRST row of each instance_id in the file is applied.
 
         The key is the COMBINATION Appointment Number + Service Engineer UID +
         Task Assigned Date & Time: ONE row per unique triple, upserted on
@@ -3075,8 +3634,8 @@ class ImportController:
 
         Fixed columns: SD Branch Code, Service Request No., Appointment Number,
         SR Type, Task Assigned Date & Time, Task End Date, SR Closed Date,
-        SR Status, Service Engineer Name, Service Engineer UID — every other
-        column is dynamic (extra_data)."""
+        SR Status, Service Engineer Name, Service Engineer UID, Instance ID —
+        every other column is dynamic (extra_data)."""
         contents = file.file.read()
         df = read_upload_table(contents)
 
@@ -3166,6 +3725,12 @@ class ImportController:
                 existing[(rec.appointment_number, rec.service_engineer_uid,
                           norm_dt(rec.task_assigned_date))] = rec
 
+        # Customer relation: preload every instance the file mentions.
+        all_iids = [self.extract_instance_id(r, 'EFSR Report')
+                    for _sr, r in unique_rows.values()]
+        customer_cache = self._bulk_load_by_instance_id(Customer, all_iids)
+        linked_iids = set()
+
         imported_count = 0
         updated_count = 0
 
@@ -3177,8 +3742,19 @@ class ImportController:
                 # row or inserting a null.
                 if not sr:
                     sr = appt.split('_')[0] or appt
+
+                instance_id = self.extract_instance_id(row, 'EFSR Report')
+                # FIRST occurrence of an instance_id wins: later task rows for
+                # the same genset still store their own instance_id, they just
+                # do not re-apply this file's values to the customer master.
+                if instance_id and instance_id not in linked_iids:
+                    linked_iids.add(instance_id)
+                    self.update_or_create_customer(
+                        instance_id, row, 'EFSR Report', cache=customer_cache)
+
                 data = {
                     'service_request_no': sr,
+                    'instance_id': instance_id,
                     'sd_branch_code': self.truncate_string(val(row, 'SD Branch Code'), 100),
                     'sr_type': self.truncate_string(val(row, 'SR Type'), 200),
                     'task_assigned_date': assigned,
@@ -3188,6 +3764,12 @@ class ImportController:
                     'sr_status': self.truncate_string(val(row, 'SR Status'), 200),
                     'service_engineer_name': self.truncate_string(val(row, 'Service Engineer Name')),
                     'service_engineer_uid': uid,
+                    'account': self.truncate_string(val(row, 'Account')),
+                    'installation_site_address': self.convert_to_string(
+                        val(row, 'Installation Site Address')),
+                    'customer_name': self.truncate_string(val(row, 'Customer Name')),
+                    'customer_contact_number': self.truncate_string(
+                        val(row, 'Customer contact number'), 50),
                     'extra_data': self.collect_extra_data(row, extra_cols),
                 }
 
@@ -3202,6 +3784,401 @@ class ImportController:
                     self.db.add(rec)
                     existing[(appt, uid, assigned)] = rec
                     imported_count += 1
+
+        self.db.commit()
+        return imported_count, updated_count
+
+
+    def import_amc_expiry_planner(self, file):
+        """Import 'AMC Agreement Expiry Planner' — the agreements coming up for
+        renewal, LINKED to the customers table on INSTANCE ID.
+
+        The key is the COMBINATION Instance Id + Agreement Number: ONE row per
+        pair, upserted on re-import (blank cells never wipe existing data,
+        extra_data is merged). Measured on the real 1,572-row export:
+          INSTANCE ID alone       1,261 unique -> 311 rows (19.8%) lost; a
+                                  genset renews, so it has several agreements.
+          AGREEMENT NUMBER alone  1,550 unique ->  22 rows lost; one agreement
+                                  covers a fleet (600550273 spans 4 gensets).
+          the pair                1,572 unique ->   0 rows lost.
+
+        Fixed columns: Instance Id, Agreement Number, Branch Id, Account Name,
+        Installation Site Address, Agreement End Date. Every other column of
+        the file is dynamic (extra_data).
+
+        Customer master: Account Name -> customer_name, Installation Site
+        Address -> location, Branch Id -> branch_id, keyed on Instance Id."""
+        contents = file.file.read()
+        df = read_upload_table(contents)
+
+        # Flexible headers: map the fixed columns to canonical names; rest dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'AMC Agreement Expiry Planner')
+
+        is_valid, message = self.validate_file_format(df, 'AMC Agreement Expiry Planner')
+        if not is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file format for AMC Agreement Expiry Planner: {message}"
+            )
+
+        def norm_agreement(v):
+            # Same normalization the column is stored with, so a key built from
+            # the file and one rebuilt from a DB row always agree.
+            return self.truncate_string(v, 200)
+
+        # Collapse in-file duplicates on the pair. First wins — a row repeated
+        # verbatim is the only thing this can ever drop (the real export has 0).
+        unique_rows = {}
+        for row in df.to_dict('records'):
+            instance_id = self.extract_instance_id(row, 'AMC Agreement Expiry Planner')
+            if not instance_id:
+                continue
+            agreement_number = norm_agreement(row.get('AGREEMENT NUMBER'))
+            key = (instance_id, agreement_number)
+            if key not in unique_rows:
+                unique_rows[key] = row
+
+        instance_ids = [iid for iid, _ in unique_rows]
+
+        # Existing rows keyed by the same pair. Loaded by instance_id (indexed),
+        # then re-keyed so each agreement of a genset is matched separately.
+        existing = {}
+        unique_iids = list(set(instance_ids))
+        for i in range(0, len(unique_iids), 1000):
+            chunk = unique_iids[i:i + 1000]
+            for rec in self.db.query(AMCExpiryPlanner).filter(
+                    AMCExpiryPlanner.instance_id.in_(chunk)).all():
+                existing[(rec.instance_id, rec.agreement_number)] = rec
+
+        customer_cache = self._bulk_load_by_instance_id(Customer, instance_ids)
+
+        imported_count = 0
+        updated_count = 0
+
+        with self.db.no_autoflush:
+            for (instance_id, agreement_number), row in unique_rows.items():
+                try:
+                    # Link to the customer master (creates the customer if the
+                    # genset has not been seen by any other import yet).
+                    self.update_or_create_customer(
+                        instance_id, row, 'AMC Agreement Expiry Planner',
+                        cache=customer_cache)
+
+                    data = {
+                        'instance_id': instance_id,
+                        'branch_id': self.truncate_string(row.get('BRANCH ID'), 100),
+                        'account_name': self.truncate_string(row.get('ACCOUNT NAME')),
+                        'installation_site_address': self.convert_to_string(
+                            row.get('INSTALLATION SITE ADDRESS')),
+                        'agreement_end_date': self.parse_date(row.get('AGREEMENT END DATE')),
+                        'extra_data': self.collect_extra_data(row, extra_cols),
+                    }
+
+                    rec = existing.get((instance_id, agreement_number))
+                    if rec:
+                        # Empty-safe update: blank cells keep the old value,
+                        # extra_data is merged.
+                        self.update_record(rec, data)
+                        updated_count += 1
+                    else:
+                        rec = AMCExpiryPlanner(agreement_number=agreement_number, **data)
+                        self.db.add(rec)
+                        existing[(instance_id, agreement_number)] = rec
+                        imported_count += 1
+
+                except IntegrityError:
+                    self.db.rollback()
+                    continue
+                except Exception:
+                    continue
+
+        self.db.commit()
+        return imported_count, updated_count
+
+
+    # ==================== LMS Data from Insia ====================
+
+    def _resolve_instance_ids_by_sr(self, sr_numbers):
+        """Map SR number -> instance_id using every import table that carries
+        both columns. 'LMS Data from Insia' has no genset key of its own, so the SR the
+        lead was raised on is the only route from one of its rows to a customer.
+
+        Sources are tried in order and the FIRST hit wins; each is a chunked
+        IN() query, never a lookup per row. An SR that is in none of them yet
+        resolves to nothing at all: that row imports unlinked and picks its
+        instance up on a later upload, once the SR file has been loaded (the
+        upsert is empty-safe, so re-importing the same lead file only fills the
+        blanks in).
+        """
+        wanted = list({sr for sr in sr_numbers if sr})
+        if not wanted:
+            return {}
+
+        sources = [
+            (OpenSRLoadReport, OpenSRLoadReport.service_request_no),
+            (ResponseTimeMaxTTR, ResponseTimeMaxTTR.sr_number),
+            (MaxTTROilChangeSRZeroLabourFlag, MaxTTROilChangeSRZeroLabourFlag.sr_number),
+            (EFSRReport, EFSRReport.service_request_no),
+        ]
+
+        resolved = {}
+        for model, sr_col in sources:
+            remaining = [sr for sr in wanted if sr not in resolved]
+            if not remaining:
+                break
+            for i in range(0, len(remaining), 1000):
+                chunk = remaining[i:i + 1000]
+                rows = self.db.query(sr_col, model.instance_id).filter(
+                    sr_col.in_(chunk), model.instance_id.isnot(None)
+                ).all()
+                for sr, iid in rows:
+                    key = (sr or '').strip()
+                    if key and iid and key not in resolved:
+                        resolved[key] = iid
+        return resolved
+
+    def import_lms_insia(self, file):
+        """Import 'LMS Data from Insia' - the second LMS layout - into lms_insia.
+
+        LEAD NUMBER is the record key: ONE row per lead, upserted on re-import
+        (blank cells never wipe existing data, extra_data is merged). When the
+        same lead appears several times in the file the FIRST row wins - the
+        real export repeats a lead once per PRODUCT LIST / PRODUCT TYPE line,
+        and those two dynamic columns are the only difference in 301 of the 310
+        repeated leads.
+
+        Fixed columns: LEAD NUMBER, LEAD CREATED DATE, BRANCH ID, ACCOUNT NAME,
+        LEAD SR NUMBER, SERVICE ENGINEER NAME, ORDER CREATION DATE. Every other
+        column of the file is dynamic and kept as JSON in extra_data.
+
+        CUSTOMER LINK - this file carries no Instance Id, so each row reaches
+        the customers table through LEAD SR NUMBER: the SR is looked up in the
+        SR tables (Open SR Load Report, Response Time & MaxTTR, MaxTTR Oil
+        Change, EFSR Report) and that row's instance_id is stored on the lead.
+        Only ACCOUNT NAME is contributed back to the customer master, empty-safe
+        and only from the FIRST row of each instance in the file: the lead file
+        has no contact number, e-mail or site address to give. Leads with no SR
+        number (~47% of the real export) or with an SR that has not been
+        uploaded yet import unlinked.
+
+        No other import table is touched."""
+        contents = file.file.read()
+        df = read_upload_table(contents)
+
+        # Flexible headers: map the fixed columns to canonical names; rest dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'LMS Data from Insia')
+
+        is_valid, message = self.validate_file_format(df, 'LMS Data from Insia')
+        if not is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file format for LMS Data from Insia: {message}"
+            )
+
+        norm = {str(c).strip().lower(): c for c in df.columns if pd.notna(c)}
+
+        def col(*names):
+            for n in names:
+                c = norm.get(n.lower())
+                if c is not None:
+                    return c
+            return None
+
+        def val(row, *names):
+            c = col(*names)
+            return row.get(c) if c else None
+
+        lead_col = col('LEAD NUMBER')
+        if not lead_col:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file format for LMS Data from Insia: missing 'LEAD NUMBER' column"
+            )
+
+        # Unique key = LEAD NUMBER, FIRST occurrence in the file wins
+        unique_rows = {}
+        for row in df.to_dict('records'):
+            lead = self.convert_to_string(row.get(lead_col))
+            lead = lead.strip() if lead else None
+            if not lead:
+                continue
+            if lead not in unique_rows:
+                unique_rows[lead] = row
+
+        # Existing rows keyed by lead_number
+        all_leads = list(unique_rows.keys())
+        existing = {}
+        for i in range(0, len(all_leads), 1000):
+            chunk = all_leads[i:i + 1000]
+            for rec in self.db.query(LMSInsia).filter(LMSInsia.lead_number.in_(chunk)).all():
+                existing[(rec.lead_number or '').strip()] = rec
+
+        # Customer relation: resolve every SR the file mentions to an instance
+        # in ONE pass, then preload the customers those instances point at.
+        sr_by_lead = {}
+        for lead, row in unique_rows.items():
+            sr = self.convert_to_string(val(row, 'LEAD SR NUMBER'))
+            sr_by_lead[lead] = sr.strip() if sr else None
+        sr_to_instance = self._resolve_instance_ids_by_sr(sr_by_lead.values())
+        customer_cache = self._bulk_load_by_instance_id(
+            Customer, list(sr_to_instance.values()))
+        linked_iids = set()
+
+        imported_count = 0
+        updated_count = 0
+
+        with self.db.no_autoflush:
+            for lead, row in unique_rows.items():
+                sr = sr_by_lead.get(lead)
+                instance_id = sr_to_instance.get(sr) if sr else None
+
+                # FIRST lead of each instance wins: later leads on the same
+                # genset still store their own instance_id, they just do not
+                # re-apply this file's values to the customer master.
+                if instance_id and instance_id not in linked_iids:
+                    linked_iids.add(instance_id)
+                    self.update_or_create_customer(
+                        instance_id, row, 'LMS Data from Insia', cache=customer_cache)
+
+                data = {
+                    'instance_id': instance_id,
+                    'lead_created_date': self.parse_date(val(row, 'LEAD CREATED DATE')),
+                    'branch_id': self.truncate_string(val(row, 'BRANCH ID'), 100),
+                    'account_name': self.truncate_string(val(row, 'ACCOUNT NAME')),
+                    'lead_sr_number': self.truncate_string(val(row, 'LEAD SR NUMBER'), 200),
+                    'service_engineer_name': self.truncate_string(val(row, 'SERVICE ENGINEER NAME')),
+                    'order_creation_date': self.parse_date(val(row, 'ORDER CREATION DATE')),
+                    'extra_data': self.collect_extra_data(row, extra_cols),
+                }
+
+                rec = existing.get(lead)
+                if rec:
+                    # Empty-safe update: blank cells keep the old value,
+                    # extra_data is merged.
+                    self.update_record(rec, data)
+                    updated_count += 1
+                else:
+                    rec = LMSInsia(lead_number=lead, **data)
+                    self.db.add(rec)
+                    existing[lead] = rec
+                    imported_count += 1
+
+        self.db.commit()
+        return imported_count, updated_count
+
+
+    # ==================== All Invoice Detailed Report ====================
+
+    def import_all_invoice_report(self, file):
+        """Import 'All Invoice Detailed Report' — every invoice LINE the ERP
+        raised — into all_invoice_report.
+
+        INVOICE NUMBER is the record key: ONE row per invoice, upserted on
+        re-import (blank cells never wipe existing data, extra_data is merged).
+        It is genuinely unique — the real 30,242-row export holds 30,242 distinct
+        invoice numbers, with none blank — so nothing collapses on it. When the
+        same number does appear twice the FIRST row wins.
+
+        Fixed columns: Invoice Number, Branch Id, Branch Name, Instance Id,
+        Account Name, Invoice Date, Invoice Status, Invoice Segment, Invoice
+        Type, Invoice Amount. Every other column of the file is dynamic and kept
+        as JSON in extra_data.
+
+        CUSTOMER LINK — rows are linked on INSTANCE ID, but only the Service
+        lines carry one: in the real export all 14,419 Service rows have an
+        Instance Id and all 15,747 OTC + 76 Agreement rows have none (OTC is
+        counter sale, there is no genset). A row without one imports UNLINKED
+        rather than being dropped, or half the file would never land. Account
+        Name is the only customer-master field the file can give, and it is
+        contributed once per instance (the first row of that genset in the
+        file) — re-reading it for all 14k service rows buys nothing.
+
+        Branch Id also tops up customers.branch_id, the same way the other
+        branch-carrying imports do."""
+        contents = file.file.read()
+        df = read_upload_table(contents)
+
+        # Flexible headers: map the fixed columns to canonical names; rest dynamic
+        df, extra_cols = self.canonicalize_dataframe(df, 'All Invoice Detailed Report')
+
+        is_valid, message = self.validate_file_format(df, 'All Invoice Detailed Report')
+        if not is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file format for All Invoice Detailed Report: {message}"
+            )
+
+        # Unique key = INVOICE NUMBER, FIRST occurrence in the file wins.
+        unique_rows = {}
+        for row in df.to_dict('records'):
+            inv = self.convert_to_string(row.get('INVOICE NUMBER'))
+            inv = inv.strip() if inv else None
+            if not inv:
+                continue
+            if inv not in unique_rows:
+                unique_rows[inv] = row
+
+        # Existing rows keyed by invoice_number (indexed).
+        all_invoices = list(unique_rows.keys())
+        existing = {}
+        for i in range(0, len(all_invoices), 1000):
+            chunk = all_invoices[i:i + 1000]
+            for rec in self.db.query(AllInvoiceReport).filter(
+                    AllInvoiceReport.invoice_number.in_(chunk)).all():
+                existing[(rec.invoice_number or '').strip()] = rec
+
+        # Preload the customers the file's Service lines point at, in one pass.
+        instance_ids = [self.extract_instance_id(r, 'All Invoice Detailed Report')
+                        for r in unique_rows.values()]
+        customer_cache = self._bulk_load_by_instance_id(Customer, instance_ids)
+        linked_iids = set()
+
+        imported_count = 0
+        updated_count = 0
+
+        with self.db.no_autoflush:
+            for inv, row in unique_rows.items():
+                try:
+                    instance_id = self.extract_instance_id(row, 'All Invoice Detailed Report')
+
+                    # Link to the customer master ONCE per genset per file
+                    # (creates the customer if no other import has seen it yet).
+                    if instance_id and instance_id not in linked_iids:
+                        self.update_or_create_customer(
+                            instance_id, row, 'All Invoice Detailed Report',
+                            cache=customer_cache)
+                        linked_iids.add(instance_id)
+
+                    data = {
+                        'instance_id': instance_id,
+                        'branch_id': self.truncate_string(row.get('BRANCH ID'), 100),
+                        'branch_name': self.truncate_string(row.get('BRANCH NAME')),
+                        'account_name': self.truncate_string(row.get('ACCOUNT NAME')),
+                        'invoice_date': self.parse_date(row.get('INVOICE DATE')),
+                        'invoice_status': self.truncate_string(row.get('INVOICE STATUS'), 100),
+                        'invoice_segment': self.truncate_string(row.get('INVOICE SEGMENT'), 100),
+                        'invoice_type': self.truncate_string(row.get('INVOICE TYPE'), 100),
+                        'invoice_amount': self.convert_to_float(row.get('INVOICE AMOUNT')),
+                        'extra_data': self.collect_extra_data(row, extra_cols),
+                    }
+
+                    rec = existing.get(inv)
+                    if rec:
+                        # Empty-safe update: blank cells keep the old value,
+                        # extra_data is merged.
+                        self.update_record(rec, data)
+                        updated_count += 1
+                    else:
+                        rec = AllInvoiceReport(invoice_number=inv, **data)
+                        self.db.add(rec)
+                        existing[inv] = rec
+                        imported_count += 1
+
+                except IntegrityError:
+                    self.db.rollback()
+                    continue
+                except Exception:
+                    continue
 
         self.db.commit()
         return imported_count, updated_count
@@ -3225,12 +4202,17 @@ class ImportController:
                 'MaxTTR - Oil Change SR Zero Labour Flag': self.import_maxttr_oil_change_sr,
                 'Response Time & MaxTTR Details': self.import_response_time_maxttr,
                 'CDI Detail Report': self.import_cdi_detail_report,
-                'EFSR Report': self.import_efsr_report
+                'EFSR Report': self.import_efsr_report,
+                'AMC Agreement Expiry Planner': self.import_amc_expiry_planner,
+                'LMS Data from Insia': self.import_lms_insia,
+                'All Invoice Detailed Report': self.import_all_invoice_report
             }
 
-            # Old file-type name still accepted (cached client bundles)
+            # Old file-type names still accepted (cached client bundles)
             if file_type == 'Open SR Data':
                 file_type = 'MaxTTR - Oil Change SR Zero Labour Flag'
+            elif file_type == 'LMS Insia':
+                file_type = 'LMS Data from Insia'
 
             if file_type not in import_functions:
                 raise HTTPException(status_code=400, detail=f"Unknown file type: {file_type}")
@@ -3313,6 +4295,13 @@ def backfill_cdi_activity_end(db: Session, chunk: int = 2000) -> int:
                 continue
             ts = pd.to_datetime(str(raw), errors="coerce")
             if pd.isna(ts):
+                # extra_data written before the Excel-serial fix can still hold
+                # a bare serial ("46368") that pd.to_datetime reads as NaT.
+                serial = excel_serial_to_datetime(raw)
+                if serial is None:
+                    continue
+                rec.activity_end_date = serial
+                moved += 1
                 continue
             rec.activity_end_date = ts.to_pydatetime()
             moved += 1
@@ -3397,6 +4386,13 @@ def backfill_efsr_task_end(db: Session, chunk: int = 2000) -> int:
                 continue
             ts = pd.to_datetime(str(raw), errors="coerce")
             if pd.isna(ts):
+                # extra_data written before the Excel-serial fix can still hold
+                # a bare serial ("46368") that pd.to_datetime reads as NaT.
+                serial = excel_serial_to_datetime(raw)
+                if serial is None:
+                    continue
+                rec.task_end_date = serial
+                moved += 1
                 continue
             rec.task_end_date = ts.to_pydatetime()
             done += 1
@@ -3429,6 +4425,13 @@ def backfill_efsr_task_assigned(db: Session, chunk: int = 2000) -> int:
                 continue
             ts = pd.to_datetime(str(raw), errors="coerce")
             if pd.isna(ts):
+                # extra_data written before the Excel-serial fix can still hold
+                # a bare serial ("46368") that pd.to_datetime reads as NaT.
+                serial = excel_serial_to_datetime(raw)
+                if serial is None:
+                    continue
+                rec.task_assigned_date = serial
+                moved += 1
                 continue
             rec.task_assigned_date = ts.to_pydatetime()
             done += 1

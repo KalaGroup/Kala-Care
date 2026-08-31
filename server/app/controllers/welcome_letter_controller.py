@@ -530,7 +530,7 @@ def _send_email_async(to_email, subject, html, attachments, cc_emails=None):
             smtp_server = os.getenv("SMTP_SERVER")
             smtp_port = int(os.getenv("SMTP_PORT", 587))
             smtp_username = os.getenv("SMTP_USERNAME")
-            smtp_password = os.getenv("SMTP_PASSWORD")
+            smtp_password = mail_utils.smtp_password("SMTP_PASSWORD")
             from_email = os.getenv("FROM_EMAIL", smtp_username)
             if not (smtp_server and smtp_username and smtp_password and to_email):
                 print("[welcome-letter] SMTP not configured or no recipient — email skipped")

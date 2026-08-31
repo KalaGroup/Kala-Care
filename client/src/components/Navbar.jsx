@@ -6,7 +6,7 @@ import axios from 'axios';
 import SitemapModal from './SitemapModal';
 import { prefetchRoute } from '../routePrefetch';
 import { applyTheme } from '../theme';
-import { canAccessPartDetail, canAccessMom, canAccessApproval, canAccessPms, canViewAop } from '../utils/pagePermission';
+import { canAccessPartDetail, canAccessMom, canAccessApproval, canViewAop, canAccessPmsPage, canAccessQuotationTracker } from '../utils/pagePermission';
 import { getSummary as getApprovalSummary } from './approval/approvalApi';
 
 import {
@@ -250,13 +250,16 @@ const partDetailItems = [
   { path: '/maintenance-reports', name: 'Master Report' },
 ];
 
-// PMS dropdown items. Visibility is per user: the module flag (PMS Access)
-// opens the menu, and "AOP & Master" additionally needs its own view/edit right.
+// PMS dropdown items. Visibility is per user AND per page: PMS Access opens the
+// menu, the per-page list (PMS Pages in Profile) says which reports show, and
+// "AOP & Master" is outside that list because it has its own view/edit right.
 const pmsItems = [
   { path: '/aop-master', name: 'AOP & Master' },
   { path: '/sales-labour-report', name: 'Sales & Labour Report' },
   { path: '/employee-productivity', name: 'Employee Productivity' },
   { path: '/sr-allocation', name: 'SR Allocation Report' },
+  { path: '/se-performance', name: 'SE Performance' },
+  { path: '/training-report', name: 'Training Report' },
   { path: '/annual-reports', name: 'Annual Reports' },
 ];
 
@@ -400,11 +403,13 @@ function Navbar({ children }) {
   const canSeePartDetail = canAccessPartDetail(user);
   const canSeeMom = canAccessMom(user);
   const canSeeApproval = canAccessApproval(user);
-  // PMS: the module flag opens the menu; AOP & Master needs its own right, so
-  // it drops out of the list for users who only have the reports.
-  const canSeePms = canAccessPms(user) || canViewAop(user);
-  const visiblePmsItems = pmsItems.filter(
-    (i) => i.path !== '/aop-master' || canViewAop(user));
+  const canSeeQuotationTracker = canAccessQuotationTracker(user);
+  // PMS: each report page is granted on its own (PMS Pages in Profile), and
+  // AOP & Master needs its own right, so the menu is whatever survives both.
+  const visiblePmsItems = pmsItems.filter((i) => (i.path === '/aop-master'
+    ? canViewAop(user)
+    : canAccessPmsPage(i.path, user)));
+  const canSeePms = visiblePmsItems.length > 0;
 
   // NFAs waiting on THIS user's approval (any level L2–L5) — shown as a
   // flashing count on the "Note For Approval" link. Refreshes on every
@@ -1021,6 +1026,17 @@ function Navbar({ children }) {
   // Other standalone pages (not in dropdown) - Filtered by role
   const getOtherPagesItems = () => {
     const allOtherPagesItems = [
+      // FIRST in this list on purpose: the group renders directly under the PMS
+      // menu, so the tracker sits right after PMS the way it was asked for.
+      {
+        path: '/open-quotation-tracker',
+        name: 'Open Quotation Tracker',
+        icon: CurrencyRupeeIcon,
+        description: 'Branch-wise service quotation vs invoicing summary',
+        // any role — but only when Master Admin granted the page
+        allowedRoles: ['master_admin', 'branch_admin', 'employee'],
+        requiresQuotationTrackerAccess: true
+      },
       {
         path: '/mom-tracking',
         name: 'MOM Tracking',
@@ -1060,6 +1076,7 @@ function Navbar({ children }) {
       item.allowedRoles.includes(user?.role)
       && (!item.requiresMomAccess || canSeeMom)
       && (!item.requiresApprovalAccess || canSeeApproval)
+      && (!item.requiresQuotationTrackerAccess || canSeeQuotationTracker)
     );
   };
 
@@ -1081,6 +1098,7 @@ function Navbar({ children }) {
     location.pathname === '/sales-labour-report' ||
     location.pathname === '/employee-productivity' ||
     location.pathname === '/sr-allocation' ||
+    location.pathname === '/training-report' ||
     location.pathname === '/annual-reports';
 
   // Master Admin / IT Admin always have access.
@@ -2414,7 +2432,8 @@ function Navbar({ children }) {
                   )
                 )}
 
-                {/* Other Pages (MOM Tracking, Sales) - Only show if user has access */}
+                {/* Other Pages (Open Quotation Tracker, MOM Tracking, Knowledge Bank,
+                    Note For Approval) - Only show if user has access */}
                 {otherPagesItems.length > 0 && (
                   <div className="mt-1 pt-0">
                     {sidebarOpen ? (

@@ -19,7 +19,10 @@ import { CSS } from '@dnd-kit/utilities';
 import Swal from 'sweetalert2';
 import { verticalListSortingStrategy } from '@dnd-kit/sortable';
 import DraggableScrollButtons from '../components/DraggableScrollButtons';
-import { reflowLetterReferencesHtml } from '../utils/letterReferences';
+import { reflowLetterReferencesHtml, PAIR_FIT_LIMIT } from '../utils/letterReferences';
+import {
+  LETTER_BODY_PADDING, letterHeaderImgStyle, letterBodyTopMm, normalizeLetterBodyHtml
+} from '../utils/letterLayout';
 import {
   CalendarIcon,
   FunnelIcon,
@@ -197,6 +200,10 @@ const CustomerEng2 = () => {
   const [viewLetterBareHtml, setViewLetterBareHtml] = useState('');
   const [viewLetterAttachments, setViewLetterAttachments] = useState([]);
   const [viewLetterSubject, setViewLetterSubject] = useState('');
+  // Recipients of the viewed letter, shown as themed on-screen metadata
+  // (the letter body itself stays white paper — see the Letter modal).
+  const [viewLetterTo, setViewLetterTo] = useState([]);
+  const [viewLetterCc, setViewLetterCc] = useState([]);
 
   // Multi-assets box state
   const [relatedAssets, setRelatedAssets] = useState([]);
@@ -3601,8 +3608,10 @@ const CustomerEng2 = () => {
       try { const f = await loadHtmlImage(footerImgDataUrl); if (f.width) footerH = pageW * (f.height / f.width); } catch (e) { footerH = 0; }
     }
     const SAFE_MM = 4;
-    const contentTop = headerH;
-    const contentH = Math.max(20, pageH - headerH - footerH - SAFE_MM);
+    // Body starts a touch INSIDE the header band — the band's bottom strip is blank
+    // paper, so pulling the text up into it closes the wide gap under the logos.
+    const contentTop = letterBodyTopMm(headerH);
+    const contentH = Math.max(20, pageH - contentTop - footerH - SAFE_MM);
 
     // Render the BODY only (no header, no footer in the flow).
     const holder = document.createElement('div');
@@ -3646,9 +3655,10 @@ const CustomerEng2 = () => {
         const sliceData = c.toDataURL('image/jpeg', 0.92);
         const sliceHmm = thisSliceHpx / pxPerMm;
 
-        pdf.addImage(sliceData, 'JPEG', 0, contentTop, pageW, sliceHmm);
+        // Bands first — the body slice overlaps the header band's blank bottom strip.
         if (headerImgDataUrl && headerH > 0) pdf.addImage(headerImgDataUrl, 'PNG', 0, 0, pageW, headerH);
         if (footerImgDataUrl && footerH > 0) pdf.addImage(footerImgDataUrl, 'PNG', 0, pageH - footerH, pageW, footerH);
+        pdf.addImage(sliceData, 'JPEG', 0, contentTop, pageW, sliceHmm);
       }
 
       return pdf.output('datauristring').split(',')[1];
@@ -3684,8 +3694,10 @@ const CustomerEng2 = () => {
     if (headerUrl) { try { const h = await loadHtmlImage(headerUrl); if (h.width) headerH = pageW * (h.height / h.width); } catch (e) { headerH = 0; } }
     if (footerUrl) { try { const f = await loadHtmlImage(footerUrl); if (f.width) footerH = pageW * (f.height / f.width); } catch (e) { footerH = 0; } }
     const SAFE_MM = 4;
-    const contentTop = headerH;
-    const contentH = Math.max(20, pageH - headerH - footerH - SAFE_MM);
+    // Body starts a touch INSIDE the header band — the band's bottom strip is blank
+    // paper, so pulling the text up into it closes the wide gap under the logos.
+    const contentTop = letterBodyTopMm(headerH);
+    const contentH = Math.max(20, pageH - contentTop - footerH - SAFE_MM);
 
     const holder = document.createElement('div');
     holder.style.position = 'fixed';
@@ -3731,9 +3743,10 @@ const CustomerEng2 = () => {
 
         const sliceData = c.toDataURL('image/jpeg', 0.92);
         const sliceHmm = thisSliceHpx / pxPerMm;
-        pdf.addImage(sliceData, 'JPEG', 0, contentTop, pageW, sliceHmm);
+        // Bands first — the body slice overlaps the header band's blank bottom strip.
         if (headerUrl && headerH > 0) pdf.addImage(headerUrl, 'PNG', 0, 0, pageW, headerH);
         if (footerUrl && footerH > 0) pdf.addImage(footerUrl, 'PNG', 0, pageH - footerH, pageW, footerH);
+        pdf.addImage(sliceData, 'JPEG', 0, contentTop, pageW, sliceHmm);
       }
       // If every slice was blank, keep the single initial page with just the bands.
       if (firstPage) {
@@ -3773,7 +3786,8 @@ const CustomerEng2 = () => {
       let headerMm = 0, footerMm = 0;
       if (headerUrl) { try { const h = await loadHtmlImage(headerUrl); if (h.width) headerMm = PAGE_W_MM * (h.height / h.width); } catch (e) { headerMm = 0; } }
       if (footerUrl) { try { const f = await loadHtmlImage(footerUrl); if (f.width) footerMm = PAGE_W_MM * (f.height / f.width); } catch (e) { footerMm = 0; } }
-      const bodyRegionMm = Math.max(40, PAGE_H_MM - headerMm - footerMm - SAFE_MM);
+      const bodyTopMm = letterBodyTopMm(headerMm);   // pulled into the band's blank strip
+      const bodyRegionMm = Math.max(40, PAGE_H_MM - bodyTopMm - footerMm - SAFE_MM);
 
       holder = document.createElement('div');
       holder.style.position = 'fixed';
@@ -3825,7 +3839,7 @@ const CustomerEng2 = () => {
       const pageDivs = slices.map((s, idx) => `
           <div style="position:relative;width:${PAGE_W_MM}mm;height:${PAGE_H_MM}mm;background:#fff;overflow:hidden;page-break-after:${idx < slices.length - 1 ? 'always' : 'auto'};">
             ${headerHtml}
-            <img src="${s.data}" style="position:absolute;top:${headerMm}mm;left:0;width:${PAGE_W_MM}mm;height:${s.hmm}mm;display:block;" />
+            <img src="${s.data}" style="position:absolute;top:${bodyTopMm}mm;left:0;width:${PAGE_W_MM}mm;height:${s.hmm}mm;display:block;" />
             ${footerHtml}
           </div>`);
       const pagesHtml = pageDivs.join('');
@@ -4434,17 +4448,18 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
   // "References" inner HTML / text — built from the editable rows, skipping removed ones.
   // Rendered as a pair-per-cell table so EVERY configured field shows (bold label + value)
   // instead of one long wrapping pipe-joined line. Uses 3 pairs per row when every
-  // "Label: value" is short enough to share one line three-across; otherwise 2 per row.
+  // "Label: value" is short enough to share one line three-across inside the letter's
+  // text column (PAIR_FIT_LIMIT is derived from it); otherwise 2 per row.
   const buildReferencesHtml = () => {
     const rows = getLetterReferenceRows().filter(r => !letterRefHiddenFields.includes(r.key));
     const pairs = [];
     rows.forEach(r => { const v = letterRefFieldValue(r.key, r.value); if (v) pairs.push({ label: r.label, value: v }); });
     if (pairs.length === 0) return '';
-    const fitsThree = pairs.length >= 3 && pairs.every(p => (p.label.length + p.value.length + 2) <= 34);
+    const fitsThree = pairs.length >= 3 && pairs.every(p => (p.label.length + p.value.length + 2) <= PAIR_FIT_LIMIT);
     const perRow = fitsThree ? 3 : 2;
     const cell = (p) => p
       ? `<td style="padding:2px 10px 2px 0;white-space:nowrap;vertical-align:top;"><strong>${escapeLetterHtml(p.label)}:</strong></td>
-         <td style="padding:2px 16px 2px 0;vertical-align:top;">${escapeLetterHtml(p.value)}</td>`
+         <td style="padding:2px 16px 2px 0;vertical-align:top;overflow-wrap:anywhere;">${escapeLetterHtml(p.value)}</td>`
       : `<td></td><td></td>`;
     let trs = '';
     for (let i = 0; i < pairs.length; i += perRow) {
@@ -4453,7 +4468,7 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
       trs += `<tr>${tds}</tr>`;
     }
     return `<div style="margin-top:6px;color:#333;font-size:12px;">
-      <table style="border-collapse:collapse;font-size:12px;line-height:1.6;">${trs}</table>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;line-height:1.6;">${trs}</table>
     </div>`;
   };
   const buildReferencesText = () => {
@@ -4756,14 +4771,14 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     const headerBlock = omitHeader
       ? ''
       : (headerImgDataUrl
-        ? `<img src="${headerImgDataUrl}" alt="${escapeLetterHtml(COMPANY_FULL)}" style="display:block;width:100%;max-width:780px;height:auto;margin:0 auto;" />`
+        ? `<img src="${headerImgDataUrl}" alt="${escapeLetterHtml(COMPANY_FULL)}" style="${letterHeaderImgStyle()}" />`
         : `<div style="border-bottom:2px solid ${themeColor};padding:0 28px 10px;font-size:18px;font-weight:700;color:${themeColor};">${escapeLetterHtml(COMPANY_NAME)}</div>`);
 
     return `
 <div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:780px;margin:0 auto;${pinFooter ? 'min-height:1040px;display:flex;flex-direction:column;' : ''}">
   ${headerBlock}
 
-  <div style="padding:6px 28px 24px;">
+  <div style="padding:${LETTER_BODY_PADDING};">
     <table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12px;line-height:1.7;">
       <tr>
         <td style="text-align:left;vertical-align:top;"><strong>Ref No:</strong> ${escapeLetterHtml(f.ref_no)}</td>
@@ -4843,7 +4858,8 @@ ${f.start_para}`;
       if (footerImgDataUrl) {
         try { const f = await loadHtmlImage(footerImgDataUrl); if (f.width) footerMm = PAGE_W_MM * (f.height / f.width); } catch (e) { footerMm = 0; }
       }
-      const bodyRegionMm = Math.max(40, PAGE_H_MM - headerMm - footerMm - SAFE_MM);
+      const bodyTopMm = letterBodyTopMm(headerMm);   // pulled into the band's blank strip
+      const bodyRegionMm = Math.max(40, PAGE_H_MM - bodyTopMm - footerMm - SAFE_MM);
 
       holder = document.createElement('div');
       holder.style.position = 'fixed';
@@ -4895,7 +4911,7 @@ ${f.start_para}`;
         pageDivs.push(`
           <div style="position:relative;width:${PAGE_W_MM}mm;height:${PAGE_H_MM}mm;background:#fff;overflow:hidden;page-break-after:${p < totalPages - 1 ? 'always' : 'auto'};">
             ${headerHtml}
-            <img src="${sliceData}" style="position:absolute;top:${headerMm}mm;left:0;width:${PAGE_W_MM}mm;height:${sliceHmm}mm;display:block;" />
+            <img src="${sliceData}" style="position:absolute;top:${bodyTopMm}mm;left:0;width:${PAGE_W_MM}mm;height:${sliceHmm}mm;display:block;" />
             ${footerHtml}
           </div>`);
       }
@@ -5196,7 +5212,9 @@ ${f.start_para}`;
       // listed attachments are only the genuine extra files.
       const atts = stripEmbeddedLetterPdf(r.attachments || [], r.subject || '');
       // Re-flow the stored References table (3 pairs per row when they fit, else 2)
-      const bare = reflowLetterReferencesHtml(r.letter_html) || '<p style="padding:20px;font-family:Arial">No letter content stored.</p>';
+      // and re-apply the current page layout, so an old history letter is laid out
+      // exactly like a freshly sent one (display only — nothing is re-saved).
+      const bare = normalizeLetterBodyHtml(reflowLetterReferencesHtml(r.letter_html)) || '<p style="padding:20px;font-family:Arial">No letter content stored.</p>';
 
       const lf = r.letter_fields || {};
       const toEmails = [];
@@ -5212,29 +5230,15 @@ ${f.start_para}`;
       const ccEmails = ((lf.cc_emails && lf.cc_emails.length) ? lf.cc_emails : (r.cc_emails || []))
         .map(e => (e || '').trim()).filter(Boolean);
 
-      const chip = (e, color) =>
-        `<span style="display:inline-block;background:${color}1a;color:${color};border-radius:4px;padding:2px 8px;margin:2px 4px 2px 0;font-size:11px;">${escapeLetterHtml(e)}</span>`;
-
-      const recipientsHtml = (toEmails.length || ccEmails.length)
-        ? `<div style="max-width:780px;margin:18px auto 0;padding-top:12px;border-top:1px solid #ddd;font-family:Arial,Helvetica,sans-serif;">
-             <div style="font-size:12px;font-weight:700;color:#111;margin-bottom:6px;">Recipients:</div>
-             ${toEmails.length ? `<div style="font-size:12px;margin-bottom:4px;"><span style="font-weight:700;color:#111;">To:</span> ${toEmails.map(e => chip(e, '#2f3192')).join('')}</div>` : ''}
-             ${ccEmails.length ? `<div style="font-size:12px;"><span style="font-weight:700;color:#111;">CC:</span> ${ccEmails.map(e => chip(e, '#16a34a')).join('')}</div>` : ''}
-           </div>`
-        : '';
-
-      const namesHtml = atts.length
-        ? `<div style="max-width:780px;margin:18px auto 0;padding-top:12px;border-top:1px solid #ddd;font-family:Arial,Helvetica,sans-serif;">
-             <div style="font-size:12px;font-weight:700;color:#111;margin-bottom:6px;">Attachments (${atts.length}):</div>
-             <ul style="margin:0;padding-left:18px;font-size:12px;color:#333;line-height:1.7;">
-               ${atts.map(a => `<li>${escapeLetterHtml(a.name)}</li>`).join('')}
-             </ul>
-           </div>`
-        : '';
       setViewLetterBareHtml(bare);
       setViewLetterAttachments(atts);
       setViewLetterSubject(r.subject || '');
-      setViewLetterHtml(bare + recipientsHtml + namesHtml);
+      setViewLetterTo(toEmails);
+      setViewLetterCc(ccEmails);
+      // Only the letter itself is the white `keep-light` paper. The recipients and
+      // attachment strips are screen-only metadata, rendered as themed JSX in the
+      // modal, so dark mode no longer paints that whole area white.
+      setViewLetterHtml(bare);
     } catch (e) {
       toast.dismiss(t);
       toast.error(e.message || 'Failed to load letter');
@@ -7870,7 +7874,7 @@ ${f.start_para}`;
         <div className="sticky top-0 z-20 -mx-1 sm:-mx-2 px-2 sm:px-2 mb-1 sm:mb-2">
           <button
             onClick={handleBackToList}
-            className="flex items-center gap-1 text-[10px] sm:text-xs font-medium px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-md transition-all duration-200 hover:shadow-sm"
+            className="eng-back-btn flex items-center gap-1 text-[10px] sm:text-xs font-medium px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-md transition-all duration-200 hover:shadow-sm"
             style={{
               backgroundColor: '#000000',
               color: 'white',
@@ -10049,7 +10053,39 @@ ${f.start_para}`;
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto p-3 bg-gray-50 custom-scrollbar">
-                <div className="keep-light" dangerouslySetInnerHTML={{ __html: viewLetterHtml }} />
+                <div className="keep-light mx-auto max-w-[780px]" dangerouslySetInnerHTML={{ __html: viewLetterHtml }} />
+                {/* Recipients + attachments are on-screen metadata, never part of the letter
+                  or its PDF — so they follow the app theme instead of sitting on the
+                  letter's white `keep-light` paper. */}
+                {(viewLetterTo.length > 0 || viewLetterCc.length > 0) && (
+                  <div className="mx-auto mt-[18px] max-w-[780px] border-t border-gray-200 pt-3">
+                    <p className="mb-1.5 text-[12px] font-bold text-gray-900">Recipients:</p>
+                    {viewLetterTo.length > 0 && (
+                      <div className="mb-1 text-[12px] text-gray-900">
+                        <span className="font-bold">To:</span>{' '}
+                        {viewLetterTo.map((e) => (
+                          <span key={e} className="mr-1 mb-1 inline-block rounded bg-[#2f3192]/10 px-2 py-0.5 text-[11px] text-[#2f3192]">{e}</span>
+                        ))}
+                      </div>
+                    )}
+                    {viewLetterCc.length > 0 && (
+                      <div className="text-[12px] text-gray-900">
+                        <span className="font-bold">CC:</span>{' '}
+                        {viewLetterCc.map((e) => (
+                          <span key={e} className="mr-1 mb-1 inline-block rounded bg-green-50 px-2 py-0.5 text-[11px] text-green-700">{e}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {viewLetterAttachments.length > 0 && (
+                  <div className="mx-auto mt-[18px] max-w-[780px] border-t border-gray-200 pt-3">
+                    <p className="mb-1.5 text-[12px] font-bold text-gray-900">Attachments ({viewLetterAttachments.length}):</p>
+                    <ul className="pl-[18px] text-[12px] leading-[1.7] text-gray-700">
+                      {viewLetterAttachments.map((a, i) => <li key={i}>{a.name}</li>)}
+                    </ul>
+                  </div>
+                )}
               </div>
             </div>
           </div>

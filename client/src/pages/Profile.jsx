@@ -19,7 +19,7 @@ import * as XLSX from 'xlsx';
 import EmpQuery from '../components/EmpQuery';
 import AdminQueries from '../components/AdminQueries';
 import SeUidMaster from '../components/SeUidMaster';
-import { isAopRightsAdmin, AOP_ADMIN_IDS } from '../utils/pagePermission';
+import { isAopRightsAdmin, AOP_ADMIN_IDS, AOP_TABS, PMS_PAGES, ANNUAL_TABS } from '../utils/pagePermission';
 
 const themeColor = '#2f3192';
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
@@ -1079,9 +1079,13 @@ const Profile = () => {
     const canGrantExpense = isMasterAdmin;
     const canViewCDBUpdate = isMasterAdmin;
     const canExport = isMasterAdmin || (user && user.can_export);
-    // AOP & Master rights may only be granted by the ids in
-    // VITE_PMS_AOP_ADMIN_IDS — they also always hold those rights themselves.
+    // PMS and AOP & Master rights may only be granted by the ids in
+    // VITE_PMS_AOP_ADMIN_IDS — they also always hold every PMS page, every
+    // Annual Reports sheet and full AOP rights themselves. Every other Master
+    // Admin still manages employees, just not these rights (server agrees:
+    // AOP_RIGHTS_ADMIN_IDS).
     const canGrantAop = isAopRightsAdmin(user);
+    const canGrantPms = canGrantAop;
     const RESTRICTED_USER_IDS = (import.meta.env.VITE_RESTRICTED_USER_IDS || '')
         .split(',')
         .map(id => id.trim())
@@ -2066,12 +2070,13 @@ const Profile = () => {
         }
     };
 
-    // Grant/revoke a per-page permission for a user. Master Admin only;
-    // page is 'part_detail' | 'mom' | 'approval' | 'pms'.
+    // Grant/revoke a per-page permission for a user. Master Admin only —
+    // except PMS, which only the PMS/AOP rights admins may hand out.
+    // page is 'part_detail' | 'mom' | 'approval' | 'pms' | 'quotation_tracker'.
     const handleTogglePageAccess = async (id, page, currentStatus) => {
-        const label = { part_detail: 'Part Detail Info', approval: 'Note For Approval',
+        const label = { part_detail: 'Part Detail Info', approval: 'Note For Approval', quotation_tracker: 'Open Quotation Tracker',
             pms: 'PMS' }[page] || 'MOM Tracking';
-        if (!isMasterAdmin) {
+        if (!isMasterAdmin || (page === 'pms' && !canGrantPms)) {
             Swal.fire({
                 title: 'Access Denied',
                 text: `You do not have permission to change ${label} access`,
@@ -2102,11 +2107,18 @@ const Profile = () => {
                     const field = {
                         part_detail: 'can_access_part_detail',
                         approval: 'can_access_approval',
-                        pms: 'can_access_pms'
+                        pms: 'can_access_pms',
+                        quotation_tracker: 'can_access_quotation_tracker'
                     }[page] || 'can_access_mom';
                     const next = { ...editingUser, [field]: !currentStatus };
-                    // Revoking PMS drops the AOP rights with it (server does the same)
-                    if (page === 'pms' && currentStatus) next.aop_access = 'none';
+                    // Revoking PMS drops the AOP rights — and the per-tab
+                    // scoping under them — with it (server does the same)
+                    if (page === 'pms' && currentStatus) {
+                        next.aop_access = 'none';
+                        next.aop_tabs = null;
+                        next.pms_pages = null;
+                        next.annual_tabs = null;
+                    }
                     setEditingUser(next);
                 }
             }
@@ -2155,6 +2167,9 @@ const Profile = () => {
                     setEditingUser({
                         ...editingUser,
                         aop_access: level,
+                        // The server drops the per-tab map when the page is
+                        // hidden, and demoting to "Show only" caps every tab.
+                        aop_tabs: level === 'none' ? null : (response.data.employee?.aop_tabs ?? editingUser.aop_tabs),
                         can_access_pms: level !== 'none' ? true : editingUser.can_access_pms
                     });
                 }
@@ -2168,6 +2183,205 @@ const Profile = () => {
                 confirmButtonColor: '#2f3192'
             });
         }
+    };
+
+    // WHICH report pages inside PMS a user gets. The stored list is null for
+    // users who were never scoped — they hold every report page — so rows are
+    // read through pmsPageOn() and the whole list is sent on every change.
+    // AOP & Master is NOT in this list; it has its own rights below.
+    const pmsPageOn = (emp, pageKey) => {
+        if (!emp || !emp.can_access_pms) return false;
+        const list = emp.pms_pages;
+        if (list === undefined || list === null) return true;   // never scoped = all pages
+        return Array.isArray(list) && list.includes(pageKey);
+    };
+
+    // pages === null clears the scoping (back to "every report page").
+    const savePmsPages = async (id, pages) => {
+        if (!canGrantPms) {
+            Swal.fire({
+                title: 'Access Denied',
+                text: 'You do not have permission to grant PMS rights',
+                icon: 'error',
+                confirmButtonColor: '#2f3192'
+            });
+            return;
+        }
+
+        try {
+            const response = await axios.put(`${API_BASE_URL}/users/employees/${id}/pms-pages`,
+                { pages },
+                { headers: { 'user-id': user.user_id } }
+            );
+
+            if (response.data.success) {
+                showToast('success', response.data.message);
+                await fetchEmployees();
+                if (editingUser && editingUser.id === id) {
+                    setEditingUser({
+                        ...editingUser,
+                        pms_pages: response.data.employee?.pms_pages ?? null,
+                        // Taking the Annual Reports page away clears its sheets
+                        annual_tabs: response.data.employee?.annual_tabs ?? null
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('Set PMS pages error:', err);
+            Swal.fire({
+                title: 'Error!',
+                text: err.response?.data?.detail || 'Failed to update the PMS pages',
+                icon: 'error',
+                confirmButtonColor: '#2f3192'
+            });
+        }
+    };
+
+    // One row toggled — send the full list so a legacy (null) user is written
+    // out explicitly instead of half-scoped.
+    const handleTogglePmsPage = (emp, pageKey) => {
+        const next = PMS_PAGES
+            .filter((pg) => (pg.key === pageKey ? !pmsPageOn(emp, pg.key) : pmsPageOn(emp, pg.key)))
+            .map((pg) => pg.key);
+        savePmsPages(emp.id, next);
+    };
+
+    // WHICH sheets of the Annual Reports page a user gets. That page is four
+    // yearly reports behind one menu item, so its rights go one level deeper
+    // than the other PMS pages. The sheets only read, so it is show / don't
+    // show — no view/edit level. Stored list is null for users who were never
+    // scoped (every sheet), so rows are read through annualTabOn() and the whole
+    // list is sent on every change.
+    const annualTabOn = (emp, tabKey) => {
+        if (!emp) return false;
+        const pages = emp.pms_pages;
+        const pageOn = pages === undefined || pages === null
+            ? !!emp.can_access_pms
+            : Array.isArray(pages) && pages.includes('annual');
+        if (!pageOn) return false;
+        const list = emp.annual_tabs;
+        if (list === undefined || list === null) return true;   // never scoped = all sheets
+        return Array.isArray(list) && list.includes(tabKey);
+    };
+
+    // tabs === null clears the scoping (back to "every sheet").
+    const saveAnnualTabs = async (id, tabs) => {
+        if (!canGrantPms) {
+            Swal.fire({
+                title: 'Access Denied',
+                text: 'You do not have permission to grant PMS rights',
+                icon: 'error',
+                confirmButtonColor: '#2f3192'
+            });
+            return;
+        }
+
+        try {
+            const response = await axios.put(`${API_BASE_URL}/users/employees/${id}/annual-tabs`,
+                { tabs },
+                { headers: { 'user-id': user.user_id } }
+            );
+
+            if (response.data.success) {
+                showToast('success', response.data.message);
+                await fetchEmployees();
+                if (editingUser && editingUser.id === id) {
+                    setEditingUser({
+                        ...editingUser,
+                        annual_tabs: response.data.employee?.annual_tabs ?? null
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('Set Annual Reports sheets error:', err);
+            Swal.fire({
+                title: 'Error!',
+                text: err.response?.data?.detail || 'Failed to update the Annual Reports sheets',
+                icon: 'error',
+                confirmButtonColor: '#2f3192'
+            });
+        }
+    };
+
+    // One row toggled — send the full list so a legacy (null) user is written
+    // out explicitly instead of half-scoped.
+    const handleToggleAnnualTab = (emp, tabKey) => {
+        const next = ANNUAL_TABS
+            .filter((t) => (t.key === tabKey ? !annualTabOn(emp, t.key) : annualTabOn(emp, t.key)))
+            .map((t) => t.key);
+        saveAnnualTabs(emp.id, next);
+    };
+
+    // WHICH tabs of the AOP & Master page a user gets, and at which level.
+    // The stored map is null for users who were never scoped — they hold every
+    // tab at their overall level — so the row values are read through
+    // aopTabValue() below and the whole map is sent on every change.
+    // A tab can never outrank the overall right: "Show only" overall means
+    // every tab is at most "Show only".
+    const aopTabCap = (emp, level) =>
+        ((emp?.aop_access || 'none') === 'view' && level === 'edit' ? 'view' : level);
+
+    const aopTabValue = (emp, tabKey) => {
+        if (!emp) return 'none';
+        const base = emp.aop_access || 'none';
+        if (base === 'none') return 'none';
+        const map = emp.aop_tabs;
+        if (map === undefined || map === null) return base;   // never scoped = all tabs
+        const level = String(map[tabKey] || 'none').toLowerCase();
+        return aopTabCap(emp, ['view', 'edit'].includes(level) ? level : 'none');
+    };
+
+    // tabs === null clears the scoping (back to "all tabs at the overall level").
+    const saveAopTabs = async (id, tabs) => {
+        if (!canGrantAop) {
+            Swal.fire({
+                title: 'Access Denied',
+                text: 'You do not have permission to grant AOP & Master rights',
+                icon: 'error',
+                confirmButtonColor: '#2f3192'
+            });
+            return;
+        }
+
+        try {
+            const response = await axios.put(`${API_BASE_URL}/users/employees/${id}/aop-tabs`,
+                { tabs },
+                { headers: { 'user-id': user.user_id } }
+            );
+
+            if (response.data.success) {
+                // This page's own small toast — a Swal popup is far too big
+                // for a per-tab tick. NOTE: react-hot-toast cannot be used
+                // here, `toast` is already this component's state variable.
+                showToast('success', response.data.message);
+                await fetchEmployees();
+                if (editingUser && editingUser.id === id) {
+                    setEditingUser({
+                        ...editingUser,
+                        aop_tabs: response.data.employee?.aop_tabs ?? null
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('Set AOP tabs error:', err);
+            Swal.fire({
+                title: 'Error!',
+                text: err.response?.data?.detail || 'Failed to update the AOP & Master tabs',
+                icon: 'error',
+                confirmButtonColor: '#2f3192'
+            });
+        }
+    };
+
+    // One row changed — send the full map so a legacy (null) user is written
+    // out explicitly instead of half-scoped.
+    const handleSetAopTab = (emp, tabKey, level) => {
+        const next = {};
+        AOP_TABS.forEach((t) => {
+            const value = t.key === tabKey ? level : aopTabValue(emp, t.key);
+            if (value !== 'none') next[t.key] = aopTabCap(emp, value);
+        });
+        saveAopTabs(emp.id, next);
     };
 
     const handleUpdateProfile = async (e) => {
@@ -2833,11 +3047,11 @@ const Profile = () => {
                                         <div id="employees-table-container" ref={empTableScrollRef} onScroll={mirrorEmpScroll(empTableScrollRef, empTopScrollRef)}
                                             className="overflow-auto max-h-[150vh]" style={{ scrollbarWidth: 'thin' }}>
                                             <table className="border-separate border-spacing-0 min-w-[1420px] w-full">
-                                                <thead className="bg-gray-50 sticky top-0 z-10">
+                                                <thead className="bg-gray-50 sticky top-0 z-20">
                                                     <tr>
-                                                        <th ref={empSrNoThRef} className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-16 max-w-[64px] box-border overflow-hidden sticky left-0 z-20 bg-gray-50">Sr. No.</th>
-                                                        <th ref={empNameThRef} style={{ left: empStickyLefts.name }} className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-[140px] max-w-[140px] box-border overflow-hidden sticky z-20 bg-gray-50">Employee</th>
-                                                        <th style={{ left: empStickyLefts.userId }} className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-[130px] max-w-[130px] box-border overflow-hidden sticky z-20 bg-gray-50">User ID</th>
+                                                        <th ref={empSrNoThRef} className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-16 max-w-[64px] box-border overflow-hidden sticky left-0 top-0 z-30 bg-gray-50">Sr. No.</th>
+                                                        <th ref={empNameThRef} style={{ left: empStickyLefts.name }} className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-[140px] max-w-[140px] box-border overflow-hidden sticky top-0 z-30 bg-gray-50">Employee</th>
+                                                        <th style={{ left: empStickyLefts.userId }} className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200 w-[130px] max-w-[130px] box-border overflow-hidden sticky top-0 z-30 bg-gray-50">User ID</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Mobile</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Email</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Branch Code</th>
@@ -2849,6 +3063,7 @@ const Profile = () => {
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Part Detail Info</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">MOM Tracking</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Note For Approval</th>
+                                                        <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Open Quotation Tracker</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">PMS</th>
                                                         <th className="px-3 py-2 text-center text-xs font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">AOP &amp; Master</th>
                                                         {!isRestrictedUser && (
@@ -2859,7 +3074,7 @@ const Profile = () => {
                                                 <tbody className="bg-white divide-y divide-gray-200">
                                                     {loading ? (
                                                         <tr>
-                                                            <td colSpan={isRestrictedUser ? 16 : 17} className="px-2 py-4 text-center">
+                                                            <td colSpan={isRestrictedUser ? 17 : 18} className="px-2 py-4 text-center">
                                                                 <div className="flex flex-col items-center justify-center space-y-2">
                                                                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#2f3192]"></div>
                                                                     <p className="text-xs text-black">Loading employees...</p>
@@ -2954,23 +3169,69 @@ const Profile = () => {
                                                                         )}
                                                                     </td>
                                                                     <td className="px-2 py-1 text-center border-r border-b border-gray-200">
-                                                                        {emp.role === 'master_admin' || emp.can_access_pms ? (
+                                                                        {emp.role === 'master_admin' || emp.can_access_quotation_tracker ? (
                                                                             <FaCheck className="inline-block text-sm text-green-500" title={emp.role === 'master_admin' ? 'Always Allowed' : 'Allowed'} />
                                                                         ) : (
                                                                             <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />
                                                                         )}
                                                                     </td>
-                                                                    {/* AOP & Master: the rights admins always hold full rights */}
+                                                                    {/* PMS: the count is how many report pages this user
+                                                                        was scoped to (blank = all of them). */}
                                                                     <td className="px-2 py-1 text-center border-r border-b border-gray-200 whitespace-nowrap">
-                                                                        {AOP_ADMIN_IDS.includes(emp.user_id) ? (
-                                                                            <span className="px-1 py-0.5 bg-green-100 text-black rounded text-xs font-medium">Show &amp; edit</span>
-                                                                        ) : emp.aop_access === 'edit' ? (
-                                                                            <span className="px-1 py-0.5 bg-green-100 text-black rounded text-xs font-medium">Show &amp; edit</span>
-                                                                        ) : emp.aop_access === 'view' ? (
-                                                                            <span className="px-1 py-0.5 bg-amber-100 text-black rounded text-xs font-medium">Show only</span>
-                                                                        ) : (
-                                                                            <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />
-                                                                        )}
+                                                                        {(() => {
+                                                                            if (AOP_ADMIN_IDS.includes(emp.user_id)) {
+                                                                                return (
+                                                                                    <span className="inline-flex items-center gap-1" title="Always allowed — every report page">
+                                                                                        <FaCheck className="inline-block text-sm text-green-500" />
+                                                                                    </span>
+                                                                                );
+                                                                            }
+                                                                            const allowed = emp.role === 'master_admin' || emp.can_access_pms;
+                                                                            if (!allowed) {
+                                                                                return <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />;
+                                                                            }
+                                                                            const list = emp.pms_pages;
+                                                                            const scoped = Array.isArray(list);
+                                                                            const picked = scoped ? list.length : PMS_PAGES.length;
+                                                                            if (scoped && picked === 0) {
+                                                                                return <FaTimes className="inline-block text-sm text-gray-300" title="No report page selected" />;
+                                                                            }
+                                                                            return (
+                                                                                <span className="inline-flex items-center gap-1"
+                                                                                    title={`${emp.role === 'master_admin' ? 'Always allowed' : 'Allowed'} — ${picked} of ${PMS_PAGES.length} report pages`}>
+                                                                                    <FaCheck className="inline-block text-sm text-green-500" />
+                                                                                    {scoped && <span className="text-xs text-black">({picked}/{PMS_PAGES.length})</span>}
+                                                                                </span>
+                                                                            );
+                                                                        })()}
+                                                                    </td>
+                                                                    {/* AOP & Master: the rights admins always hold full rights.
+                                                                        The count after the level is how many of the page's tabs
+                                                                        this user was scoped to (blank = all of them). */}
+                                                                    <td className="px-2 py-1 text-center border-r border-b border-gray-200 whitespace-nowrap">
+                                                                        {(() => {
+                                                                            if (AOP_ADMIN_IDS.includes(emp.user_id)) {
+                                                                                return <span className="px-1 py-0.5 bg-green-100 text-black rounded text-xs font-medium">Show &amp; edit</span>;
+                                                                            }
+                                                                            const base = emp.aop_access || 'none';
+                                                                            if (base !== 'view' && base !== 'edit') {
+                                                                                return <FaTimes className="inline-block text-sm text-gray-300" title="Not Allowed" />;
+                                                                            }
+                                                                            const map = emp.aop_tabs;
+                                                                            const scoped = map !== null && map !== undefined;
+                                                                            const picked = scoped ? Object.keys(map).length : AOP_TABS.length;
+                                                                            if (scoped && picked === 0) {
+                                                                                return <FaTimes className="inline-block text-sm text-gray-300" title="No tab selected" />;
+                                                                            }
+                                                                            const label = base === 'edit' ? 'Show & edit' : 'Show only';
+                                                                            return (
+                                                                                <span className={`px-1 py-0.5 rounded text-xs font-medium text-black ${base === 'edit' ? 'bg-green-100' : 'bg-amber-100'}`}
+                                                                                    title={`${label} — ${picked} of ${AOP_TABS.length} tabs`}>
+                                                                                    {label}
+                                                                                    {scoped && <span className="ml-1 font-normal">({picked}/{AOP_TABS.length})</span>}
+                                                                                </span>
+                                                                            );
+                                                                        })()}
                                                                     </td>
                                                                     {!isRestrictedUser && (
                                                                         <td className="px-2 py-1 text-center border-b border-gray-200">
@@ -2998,7 +3259,7 @@ const Profile = () => {
                                                             ))
                                                     ) : (
                                                         <tr>
-                                                            <td colSpan={isRestrictedUser ? 16 : 17} className="px-2 py-6 text-center text-black">
+                                                            <td colSpan={isRestrictedUser ? 17 : 18} className="px-2 py-6 text-center text-black">
                                                                 <div className="flex flex-col items-center gap-1">
                                                                     <FaUsers className="w-5 h-5 text-gray-300" />
                                                                     <p className="text-xs">No employees found</p>
@@ -3016,7 +3277,7 @@ const Profile = () => {
                                                     )}
                                                     {visibleEmployeeCount < filteredEmployees.length && (
                                                         <tr ref={employeeLoadMoreRef}>
-                                                            <td colSpan={isRestrictedUser ? 16 : 17} className="py-3 text-center text-xs text-gray-400">
+                                                            <td colSpan={isRestrictedUser ? 17 : 18} className="py-3 text-center text-xs text-gray-400">
                                                                 Loading more... ({visibleEmployeeCount}/{filteredEmployees.length})
                                                             </td>
                                                         </tr>
@@ -3679,8 +3940,34 @@ const Profile = () => {
                                             </div>
                                         )}
 
-                                        {/* PMS module — one flag for all its pages */}
                                         {isMasterAdmin && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id && (
+                                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg max-sm:flex-wrap max-sm:gap-2">
+                                                <div className="flex items-center space-x-3">
+                                                    <FaBuilding className={`text-sm ${editingUser.can_access_quotation_tracker ? 'text-emerald-500' : 'text-gray-400'}`} />
+                                                    <div>
+                                                        <p className="text-xs font-medium text-black">Open Quotation Tracker Access</p>
+                                                        <p className="text-xs text-black">Show the Open Quotation Tracker page (branch-wise service quotation vs invoicing summary, all branches)</p>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleTogglePageAccess(editingUser.id, 'quotation_tracker', editingUser.can_access_quotation_tracker)}
+                                                    disabled={loading}
+                                                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${editingUser.can_access_quotation_tracker
+                                                        ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                        } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                >
+                                                    {editingUser.can_access_quotation_tracker ? 'Revoke' : 'Grant'}
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {/* PMS module — one flag for all its pages. Only the
+                                            PMS/AOP rights admins (VITE_PMS_AOP_ADMIN_IDS) hand
+                                            this out; other Master Admins never see the block. */}
+                                        {canGrantPms && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id
+                                            && !AOP_ADMIN_IDS.includes(editingUser.user_id) && (
                                             <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg max-sm:flex-wrap max-sm:gap-2">
                                                 <div className="flex items-center space-x-3">
                                                     <FaBuilding className={`text-sm ${editingUser.can_access_pms ? 'text-emerald-500' : 'text-gray-400'}`} />
@@ -3700,6 +3987,139 @@ const Profile = () => {
                                                 >
                                                     {editingUser.can_access_pms ? 'Revoke' : 'Grant'}
                                                 </button>
+                                            </div>
+                                        )}
+
+                                        {/* WHICH report pages inside PMS. Only shown once PMS
+                                            Access is granted above. AOP & Master is NOT in this
+                                            list — it has its own rights block below. */}
+                                        {canGrantPms && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id
+                                            && !AOP_ADMIN_IDS.includes(editingUser.user_id)
+                                            && editingUser.can_access_pms && (
+                                            <div className="p-3 bg-gray-50 rounded-lg space-y-2">
+                                                <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                    <div>
+                                                        <p className="text-xs font-medium text-black">PMS Pages</p>
+                                                        <p className="text-xs text-black">
+                                                            Pick the PMS reports this user opens. AOP &amp; Master is not here — it has its own rights below.
+                                                            {editingUser.pms_pages === null || editingUser.pms_pages === undefined
+                                                                ? ' Right now every report page is open.'
+                                                                : ` ${(editingUser.pms_pages || []).length} of ${PMS_PAGES.length} pages selected.`}
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => savePmsPages(editingUser.id, null)}
+                                                            disabled={loading}
+                                                            title="Show every PMS report page"
+                                                            className={`px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                        >
+                                                            All pages
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => savePmsPages(editingUser.id, [])}
+                                                            disabled={loading}
+                                                            title="Hide every PMS report page (AOP & Master rights are unaffected)"
+                                                            className={`px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                        >
+                                                            Clear all
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                {/* One page per row, names in full — same shape as the
+                                                    AOP tab picker below. */}
+                                                <div className="grid grid-cols-1 gap-1.5">
+                                                    {PMS_PAGES.map((pg) => {
+                                                        const on = pmsPageOn(editingUser, pg.key);
+                                                        return (
+                                                            <div key={pg.key}
+                                                                className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border bg-white ${on ? 'border-emerald-200' : 'border-gray-200'}`}>
+                                                                <span className="text-xs text-black">{pg.name}</span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleTogglePmsPage(editingUser, pg.key)}
+                                                                    disabled={loading}
+                                                                    className={`px-2.5 py-1 rounded-lg text-xs font-medium flex-shrink-0 transition-colors ${on
+                                                                        ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                                        } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                                >
+                                                                    {on ? 'Show' : "Don't show"}
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* WHICH sheets of the Annual Reports page. Only shown once
+                                            that page itself is ticked above — it is four yearly
+                                            reports behind one menu item, so the rights go one level
+                                            deeper. Read-only sheets, so show / don't show; with none
+                                            left the page drops out of the menu. */}
+                                        {canGrantPms && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id
+                                            && !AOP_ADMIN_IDS.includes(editingUser.user_id)
+                                            && editingUser.can_access_pms
+                                            && (editingUser.pms_pages === null || editingUser.pms_pages === undefined
+                                                || (editingUser.pms_pages || []).includes('annual')) && (
+                                            <div className="p-3 bg-gray-50 rounded-lg space-y-2">
+                                                <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                    <div>
+                                                        <p className="text-xs font-medium text-black">Annual Reports — Sheets</p>
+                                                        <p className="text-xs text-black">
+                                                            Pick the reports this user opens inside Annual Reports.
+                                                            {editingUser.annual_tabs === null || editingUser.annual_tabs === undefined
+                                                                ? ' Right now every report is open.'
+                                                                : ` ${(editingUser.annual_tabs || []).length} of ${ANNUAL_TABS.length} reports selected.`}
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => saveAnnualTabs(editingUser.id, null)}
+                                                            disabled={loading}
+                                                            title="Show every Annual Report"
+                                                            className={`px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                        >
+                                                            All reports
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => saveAnnualTabs(editingUser.id, [])}
+                                                            disabled={loading}
+                                                            title="Hide every report — the Annual Reports page disappears for this user"
+                                                            className={`px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                        >
+                                                            Clear all
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                {/* One report per row — same shape as the pickers above. */}
+                                                <div className="grid grid-cols-1 gap-1.5">
+                                                    {ANNUAL_TABS.map((t) => {
+                                                        const on = annualTabOn(editingUser, t.key);
+                                                        return (
+                                                            <div key={t.key}
+                                                                className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border bg-white ${on ? 'border-emerald-200' : 'border-gray-200'}`}>
+                                                                <span className="text-xs text-black">{t.name}</span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleToggleAnnualTab(editingUser, t.key)}
+                                                                    disabled={loading}
+                                                                    className={`px-2.5 py-1 rounded-lg text-xs font-medium flex-shrink-0 transition-colors ${on
+                                                                        ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                                        } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                                >
+                                                                    {on ? 'Show' : "Don't show"}
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
                                             </div>
                                         )}
 
@@ -3725,6 +4145,76 @@ const Profile = () => {
                                                     <option value="view">Show only</option>
                                                     <option value="edit">Show and edit</option>
                                                 </select>
+                                            </div>
+                                        )}
+
+                                        {/* WHICH tabs of that page, and at which level. Only shown
+                                            once the page itself is granted above — a tab left on
+                                            "Don't show" is hidden from this user, and no tab can be
+                                            more than the overall right (so "Show only" above greys
+                                            out every "Show and edit" here). */}
+                                        {canGrantAop && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id
+                                            && !AOP_ADMIN_IDS.includes(editingUser.user_id)
+                                            && (editingUser.aop_access || 'none') !== 'none' && (
+                                            <div className="p-3 bg-gray-50 rounded-lg space-y-2">
+                                                <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                    <div>
+                                                        <p className="text-xs font-medium text-black">AOP &amp; Master — Tabs</p>
+                                                        <p className="text-xs text-black">
+                                                            Pick the tabs this user opens inside AOP &amp; Master, and whether each is read-only.
+                                                            {editingUser.aop_tabs === null || editingUser.aop_tabs === undefined
+                                                                ? ' Right now every tab follows the setting above.'
+                                                                : ` ${Object.keys(editingUser.aop_tabs || {}).length} of ${AOP_TABS.length} tabs selected.`}
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => saveAopTabs(editingUser.id, null)}
+                                                            disabled={loading}
+                                                            title="Every tab at the level chosen above"
+                                                            className={`px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                        >
+                                                            All tabs
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => saveAopTabs(editingUser.id, {})}
+                                                            disabled={loading}
+                                                            title="Hide every tab — the page disappears for this user"
+                                                            className={`px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                        >
+                                                            Clear all
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                {/* One tab per row: the names are long ("SR Type Master
+                                                    (Sales and Labour)") and must read in full, so no
+                                                    two-column grid and no truncation. */}
+                                                <div className="grid grid-cols-1 gap-1.5">
+                                                    {AOP_TABS.map((t) => {
+                                                        const level = aopTabValue(editingUser, t.key);
+                                                        return (
+                                                            <div key={t.key}
+                                                                className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border bg-white ${level === 'none' ? 'border-gray-200' : 'border-emerald-200'}`}>
+                                                                <span className="text-xs text-black">{t.name}</span>
+                                                                <select
+                                                                    value={level}
+                                                                    onChange={(e) => handleSetAopTab(editingUser, t.key, e.target.value)}
+                                                                    disabled={loading}
+                                                                    className={`px-2 py-1 rounded-lg text-xs font-medium border border-gray-200 bg-white text-black flex-shrink-0 ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                                >
+                                                                    <option value="none">Don&apos;t show</option>
+                                                                    <option value="view">Show only</option>
+                                                                    <option value="edit"
+                                                                        disabled={editingUser.aop_access === 'view'}>
+                                                                        Show and edit
+                                                                    </option>
+                                                                </select>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
                                             </div>
                                         )}
 

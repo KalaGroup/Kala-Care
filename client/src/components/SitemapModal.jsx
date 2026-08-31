@@ -49,6 +49,15 @@ const SITEMAP = [
         ],
     },
     {
+        title: 'Welcome Letter', path: '/welcome-letter', color: '#0891b2',
+        desc: 'Commissioning (CC) customers — welcome letter dispatch & report.',
+        features: [
+            { label: 'Pending Letters — Send / Re-send' },
+            { label: 'Branch-wise Report' },
+            { label: 'Master Setup — Letter Body & Default Attachments' },
+        ],
+    },
+    {
         title: 'Customers Data Hub', path: '/customers', color: '#7c3aed',
         desc: 'Browse every imported master table with search & pagination.',
         features: [
@@ -70,6 +79,7 @@ const SITEMAP = [
         desc: 'Excel data upload for all master tables.',
         features: [
             { label: 'Excel Imports (AMC, Asset, Oil Service, LMS…)' },
+            { label: 'PMS Source Files (CDI Detail, EFSR, Response Time & MaxTTR)' },
             { label: 'Preview & Validation Before Upload' },
             { label: 'Last-Update Tracking per File' },
         ],
@@ -94,6 +104,8 @@ const SITEMAP = [
             { label: 'Queries (Admin & Employee Inbox)', state: { openTab: 'queries' } },
             { label: 'CDB Update History', state: { openTab: 'cdb-update' } },
             { label: 'Permissions (Expense, Export, Block)', state: { openTab: 'employees' } },
+            { label: 'PMS Access & Per-Page Rights', state: { openTab: 'employees' } },
+            { label: 'SE UID Master (PMS)', state: { openTab: 'se-uid' } },
             { label: 'Banner Management', state: { openModal: 'banner' } },
         ],
     },
@@ -127,6 +139,20 @@ const SITEMAP = [
         ],
     },
     {
+        title: 'Note For Approval (NFA)', path: '/approval-application', color: '#b91c1c',
+        desc: 'Discounting, Credit & Expense approvals — L2 → L3 → L4 HOD → L5 COO.',
+        features: [
+            { label: 'Raise a New Application' },
+            { label: 'My Applications & Their Status' },
+            { label: 'Pending My Approval (L2 / L3)' },
+            { label: 'HOD (L4) & COO (L5) Approvals' },
+            { label: 'My Approval Limits' },
+            { label: 'Authority Matrix (COO)' },
+            { label: 'Expense Master (COO)' },
+            { label: 'Approval Reports (HOD / COO)' },
+        ],
+    },
+    {
         title: 'Knowledge Bank', path: '/knowledge-book', color: '#a16207',
         desc: 'Shared document library for all branches.',
         features: [
@@ -153,6 +179,85 @@ const SITEMAP = [
             { label: 'Service Coverage Matrix', state: { openTab: 'coverage' } },
             { label: 'Search Activity Log', state: { openTab: 'activity' } },
             { label: 'Excel Export' },
+        ],
+    },
+    {
+        title: 'PMS — AOP & Master', path: '/aop-master', color: '#1d4ed8',
+        desc: 'Branch-wise yearly targets, working days & SR Type mapping the PMS reports print against.',
+        features: [
+            { label: 'Target Master (Spare & Labour, month by month)' },
+            { label: 'SR Type Master (Sales and Labour)' },
+            { label: 'SR Type Master (MaxTTR)' },
+            { label: 'SR Type Master (EFSR)' },
+            { label: 'Lead Category Master' },
+            { label: 'CDI Target Master' },
+            { label: 'AMC & Bandhan AOP' },
+            { label: 'SR Type Master (Service Load)' },
+            { label: 'Service Load AOP' },
+        ],
+    },
+    {
+        title: 'PMS — Sales & Labour Report', path: '/sales-labour-report', color: '#0d9488',
+        desc: 'Spare & Labour sale against the monthly targets, region by region.',
+        features: [
+            { label: 'All (Spare + Labour)' },
+            { label: 'Branch-wise Report' },
+            { label: 'Spares and Labour (FY / Quarterly / Month)' },
+            { label: 'Upload Part Sale & Labour Revenue Files' },
+            { label: 'Uploaded File Preview' },
+            { label: 'Excel Export' },
+        ],
+    },
+    {
+        title: 'PMS — Employee Productivity', path: '/employee-productivity', color: '#7e22ce',
+        desc: 'Service Engineer productivity (EPR), from Labour Revenue + Response Time & MaxTTR.',
+        features: [
+            { label: 'Engineer-wise Productivity Report' },
+            { label: 'Period Filter (FY / Month / Quarter / Custom)' },
+            { label: 'Branch & Region Filters' },
+            { label: 'Excel Export' },
+        ],
+    },
+    {
+        title: 'PMS — SR Allocation Report', path: '/sr-allocation', color: '#c2410c',
+        desc: 'Service Engineer wise EFSR task allocation with assigned & end dates.',
+        features: [
+            { label: 'Engineer-wise SR Allocation' },
+            { label: 'Period Filter (FY / Month / Quarter / Custom)' },
+            { label: 'Branch & Region Filters' },
+            { label: 'Excel Export' },
+        ],
+    },
+    {
+        title: 'PMS — Training Report', path: '/training-report', color: '#ca8a04',
+        desc: 'Service engineer skills & training history — click a row for the full record.',
+        features: [
+            { label: 'By Employee (one row per person)' },
+            { label: 'By Skill' },
+            { label: 'Training Filter (Trained / Untrained)' },
+            { label: 'Status Filter (Active / Inactive)' },
+            { label: 'Upload Training Report File' },
+            { label: 'Excel Export' },
+        ],
+    },
+    {
+        title: 'PMS — Annual Reports', path: '/annual-reports', color: '#4d7c0f',
+        desc: 'The yearly PMS sheets, each printed against the AOP typed in AOP & Master.',
+        features: [
+            { label: 'Service Penetration' },
+            { label: 'AMC & Bandhan Projection' },
+            { label: 'AMC (month by month, per category)' },
+            { label: 'Customer Delight Index (CDI)' },
+            { label: 'Service Load and Response' },
+        ],
+    },
+    {
+        title: 'Open Quotation Tracker', path: '/open-quotation-tracker', color: '#0284c7',
+        desc: 'Branch-wise service quotation vs invoicing summary — labour and parts side by side.',
+        features: [
+            { label: 'Branch rows with Grand Total' },
+            { label: 'Period presets (This / Last FY, This / Last month)' },
+            { label: 'Export to Excel' },
         ],
     },
     {

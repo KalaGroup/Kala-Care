@@ -32,18 +32,19 @@ export const ORIG_HEADERS = [
     'Segment', 'App Code', 'System App Code', 'Engine Model', 'KVA', 'Emission',
     'Part Number', 'Part Description', 'Qty', 'Action', 'Service Hours',
     'Kit Number', 'Kit Description', 'Qty', 'Action', 'Service Hours',
-    'Service schedules',
 ];
 
 // Columns the Import Data parser looks for, in file order — shown as the expected
 // format on the Import tab. Qty / Action / Service Hours appear twice in the file
 // (once for the part, once for the kit), so they are labelled here to tell the
 // pairs apart. 'App Code' is the only one an import cannot proceed without.
+// The file's "Service schedules" column is NOT read: it was always blank and a
+// part is bound to its service by Service Hours, so it is ignored like any
+// other extra column.
 export const IMPORT_COLUMNS = [
     'Segment', 'App Code', 'System App Code', 'Engine Model', 'KVA', 'Emission',
     'Part Number', 'Part Description', 'Qty (part)', 'Action (part)', 'Service Hours (part)',
     'Kit Number', 'Kit Description', 'Qty (kit)', 'Action (kit)', 'Service Hours (kit)',
-    'Service schedules',
 ];
 export const IMPORT_REQUIRED_COLUMN = 'App Code';
 
@@ -142,4 +143,4 @@ export const fmtDateTime = (ts) => {
     // must NOT convert again to the viewer's timezone (that double-counted +5:30).
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }) +
         ' \u00b7 ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
-};
+};

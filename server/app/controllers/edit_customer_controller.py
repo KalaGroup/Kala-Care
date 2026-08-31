@@ -470,7 +470,7 @@ class EditCustomerController:
             smtp_server = os.getenv('SMTP_SERVER')
             smtp_port = int(os.getenv('SMTP_PORT', 587))
             smtp_username = os.getenv('SMTP_USERNAME')
-            smtp_password = os.getenv('SMTP_PASSWORD')
+            smtp_password = mail_utils.smtp_password('SMTP_PASSWORD')
             recipient_emails_raw = os.getenv('REPORT_RECIPIENT_EMAILS', '')
             from_email = os.getenv('FROM_EMAIL', smtp_username)
             

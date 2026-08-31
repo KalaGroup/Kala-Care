@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { canEditAop } from '../utils/pagePermission';
+import { visibleAopTabs, canEditAopTab } from '../utils/pagePermission';
 import {
   PresentationChartLineIcon, PlusIcon, ArrowPathIcon,
   ArrowUpTrayIcon, BuildingOffice2Icon, XMarkIcon,
   TagIcon, CheckIcon, CalendarDaysIcon, WrenchScrewdriverIcon, MapPinIcon,
-  FaceSmileIcon,
+  FaceSmileIcon, ShieldCheckIcon,
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
@@ -14,8 +14,18 @@ import {
 //                            Spare / Labour targets + monthly working days
 //   Tab 2: SR Type Master (Sales and Labour) — SR Type → Head mapping,
 //          synced from the Sales & Labour files
-//   Last tab: CDI Target Master — the AOP column of the Annual Reports'
+//   Tab: CDI Target Master — the AOP column of the Annual Reports'
 //          Customer Delight Index sheet, one % per FY per report row
+//   Last tab: AMC & Bandhan AOP — TWO tables. Per BRANCH: the two columns of
+//          the Annual Reports' AMC & Bandhan Projection sheet that cannot be
+//          counted (the FY's D/BAMC projection and the PREVIOUS FY's actual).
+//          Per AGREEMENT CATEGORY: the AOP of each row of the AMC sheet on that
+//          report's second tab — those rows are categories, not branches, so
+//          their target cannot be a sum of the branch figures.
+//          Plus the CITY MASTER: which branch each city in the Bandhan quote
+//          files belongs to. The quote files are KOEL's and their branch column
+//          is KOEL's, so the report places a paid quote by CITY — and only the
+//          business knows which city is whose territory, so it is picked here
 // Backend: server/app/routes/pms_routes.py (master admin only)
 // ============================================================================
 
@@ -93,8 +103,34 @@ const thQ =
 const thCAct =
   'px-1 py-1.5 text-center text-[10px] font-semibold text-black uppercase tracking-wide whitespace-nowrap bg-green-100 border border-gray-400';
 const tdCAct = 'px-1 py-0.5 border border-gray-400 bg-green-50';
+// Two-line header for a FIXED-width grid: the title may not be held on one line
+// there, because a nowrap title simply overflows onto the column beside it.
+const thWrap =
+  'px-1 py-1 text-center text-[10px] font-semibold text-black uppercase tracking-wide leading-tight bg-gray-50 border border-gray-400';
 const cellInputAct =
   'w-full border border-green-300 rounded px-1 py-0.5 text-xs text-black bg-green-50 focus:outline-none focus:ring-1';
+
+// The 'Service Load and Response' sheet's rows that carry a target of their OWN:
+// a ratio and three percentages, none of which can be summed from the branches
+// the way a count target can. `max` is what the input refuses to go past.
+// `t` is the first header line and `t2` the second — the grid is fixed-width, so
+// a title has to be given its break rather than left to find one.
+const SL_METRICS = [
+  { k: 'productivity', t: 'Productivity', t2: 'Calls PP PD', max: 99 },
+  { k: 'resp4', t: '4 Hrs Response', t2: '%', max: 100 },
+  { k: 'closed24', t: 'SR Closed', t2: 'within 24 Hrs %', max: 100 },
+  { k: 'closed48', t: 'SR Closed', t2: 'within 48 Hrs %', max: 100 },
+  { k: 'ftr', t: 'FTR', t2: 'First Time Right %', max: 100 },
+  { k: 'fvr', t: 'FVR', t2: 'First Visit Report %', max: 100 },
+];
+
+// The two rows of the Service Load and Response sheet nothing in any upload can
+// produce. Their ACTUALS are typed here — a percentage per month and per whole
+// financial year — and the report prints them exactly as entered.
+const SL_MANUAL = [
+  { k: 'ftr', t: '(FIRST TIME RIGHT) FTR %' },
+  { k: 'fvr', t: '(FIRST VISIT REPORT) FVR %' },
+];
 
 // ---- unsaved-change counters ----------------------------------------------
 // Every tab's Save button says how many rows are waiting. A row counts as
@@ -114,6 +150,19 @@ const countChanged = (items, base, keyField, valField) => {
 
 // The badge on a Save button: '' while everything is saved.
 const dirtyBadge = (n) => (n ? ` (${n})` : '');
+
+// The rows a save is about to write that DIFFER from the server's copy — the
+// input to the cross-master offer. Read before the save re-stamps the baseline.
+const changedRows = (items, base) => {
+  if (!base) return [];
+  return (items || []).reduce((out, it) => {
+    const key = String(it.sr_type ?? '');          // the baseline is keyed raw
+    if (key.trim() && String(it.head || '') !== (base.get(key) ?? '')) {
+      out.push({ sr_type: key.trim(), head: it.head || '' });
+    }
+    return out;
+  }, []);
+};
 
 // "Show only" users get this badge instead of the save / master buttons.
 const roBadge =
@@ -170,12 +219,36 @@ const TopScrollbar = ({ scrollRef, watch }) => {
 
 // ---------------------------------------------------------------------------
 
+// The tab bar, in page order. Which of these a user actually gets — and whether
+// read-only or editable — is set per user in Profile -> Edit Employee -> AOP &
+// Master Rights; the names must match AOP_TABS in utils/pagePermission.js.
+const TAB_ICONS = {
+  targets: BuildingOffice2Icon,
+  srtypes: TagIcon,
+  mxtypes: TagIcon,
+  eftypes: TagIcon,
+  leadcats: TagIcon,
+  cditargets: FaceSmileIcon,
+  amctargets: ShieldCheckIcon,
+  sltypes: TagIcon,
+  sltargets: WrenchScrewdriverIcon,
+};
+
 const AOPMaster = () => {
-  // "Show only" users open every tab but cannot change anything: the save /
-  // sync / reset / master buttons are hidden and every cell is read-only.
-  // (The server enforces the same rule — see _require_aop in pms_routes.py.)
-  const readOnly = !canEditAop();
-  const [tab, setTab] = useState('targets'); // 'targets' | 'srtypes'
+  // Rights are PER TAB: a user sees only the tabs granted to them, and each of
+  // those is either "Show only" or "Show and edit". On a "Show only" tab the
+  // save / sync / reset / master buttons are hidden and every cell is
+  // read-only. (The server enforces the same per tab — see _require_aop in
+  // pms_routes.py.)
+  const tabs = useMemo(
+    () => visibleAopTabs().map((t) => ({ ...t, icon: TAB_ICONS[t.key] })), []);
+  const [tab, setTab] = useState(() => (tabs[0]?.key || 'targets'));
+  // The open tab must always be one this user holds — if their rights change
+  // mid-session (or the first tab is not Target Master), fall back to the first.
+  useEffect(() => {
+    if (tabs.length && !tabs.some((t) => t.key === tab)) setTab(tabs[0].key);
+  }, [tabs, tab]);
+  const readOnly = !canEditAopTab(tab);
 
   // ---- Target Master state (whole financial year) ----
   const [fy, setFy] = useState(currentFy());
@@ -296,6 +369,85 @@ const AOPMaster = () => {
   const [loadingCdi, setLoadingCdi] = useState(false);
   const [savingCdi, setSavingCdi] = useState(false);
 
+  // ---- SR Type Master (Service Load) state — the breakdown rows of the
+  //      Annual Reports' 'Service Load and Response' sheet. A THIRD master over
+  //      the same MaxTTR SR Type column: that sheet prints CSP and Dealer AMC as
+  //      rows of their own where Employee Productivity folds them into Warranty
+  //      and AMC, so one shared master would force one of the two to lie.
+  const [slItems, setSlItems] = useState([]);
+  const slBase = useRef(null);      // the server's copy — what 'saved' means
+  const setSlFromServer = (list) => {
+    slBase.current = snapshot(list, 'sr_type', 'head');
+    setSlItems(list);
+  };
+  const [slHeadChoices, setSlHeadChoices] = useState([]);
+  const [slHeads, setSlHeads] = useState([]);
+  const [newSlHead, setNewSlHead] = useState('');
+  const [showSlHeadModal, setShowSlHeadModal] = useState(false);
+  const [loadingSl, setLoadingSl] = useState(false);
+  const [savingSl, setSavingSl] = useState(false);
+
+  // ---- Service Load AOP state — the AOP column of that sheet. Two kinds of
+  //      figure: a MONTHLY SR-closure target per branch, which every AOP COUNT
+  //      on the sheet is a sum of (so branch / region / Total / the month strip
+  //      can never disagree), and the percentage + productivity targets, which
+  //      cannot be summed and so carry one value per report row.
+  const [slTgtRows, setSlTgtRows] = useState([]);       // [{key,name,region,months:{}}]
+  const [slPctBranch, setSlPctBranch] = useState({});   // {branch: {metric: v}}
+  const [slPctRegion, setSlPctRegion] = useState({});   // {'MH'|'KA': {metric: v}}
+  const [slPctOverall, setSlPctOverall] = useState({}); // {metric: v}
+  const slTgtBase = useRef(null);
+  const [loadingSlTgt, setLoadingSlTgt] = useState(false);
+  const [savingSlTgt, setSavingSlTgt] = useState(false);
+  // ---- the SE headcount per branch: the productivity denominator ----
+  const [slSe, setSlSe] = useState([]);          // [{key, name, region, se_count}]
+  const slSeBase = useRef(null);
+  // ---- the typed FTR / FVR actuals: {metric: {period: value}} ----
+  const [slManual, setSlManual] = useState({});
+  const [slManualPeriods, setSlManualPeriods] = useState([]);
+  const slManualBase = useRef(null);
+
+
+  // ---- AMC & Bandhan AOP state — the two TYPED columns of the Annual
+  //      Reports' AMC & Bandhan Projection sheet. One row per branch per FY:
+  //      the year's D/BAMC projection and last year's D/BAMC actual. Region and
+  //      company rows are sums on the report, so they need no input here.
+  const [amcRows, setAmcRows] = useState([]);   // [{key,name,region,proj_nos,prior_nos}]
+  // The second table on the same tab: one AOP per ROW OF THE AMC SHEET (KOEL
+  // Bandhan, KALA AMC, Corporate AMC …). Saved and dirty-counted alongside the
+  // branch rows, so one Save button covers the whole tab.
+  const [amcCats, setAmcCats] = useState([]);   // [{key,name,aop_nos,counted_prior}]
+  // ---- City Master: which branch each quote city belongs to ---------------
+  // The city list is built FROM THE QUOTE FILES by the backend, so nobody has to
+  // know which cities they contain — the only thing entered here is the branch.
+  const [cityRows, setCityRows] = useState([]);
+  const [cityBranches, setCityBranches] = useState([]);
+  const [cityQ, setCityQ] = useState('');
+  const [cityOnlyOpen, setCityOnlyOpen] = useState(true);  // unmapped first, by default
+  const [loadingCity, setLoadingCity] = useState(false);
+  const [savingCity, setSavingCity] = useState(false);
+  const cityBase = useRef(null);
+  const setCitiesFromServer = (d) => {
+    const rows = d.cities || [];
+    cityBase.current = new Map(rows.map((r) => [r.key, r.branch_id || '']));
+    setCityRows(rows);
+    setCityBranches(d.branches || []);
+  };
+  const amcBase = useRef(null);
+  const setAmcFromServer = (d) => {
+    const items = d.items || [];
+    const cats = d.categories || [];
+    const m = new Map();
+    items.forEach((r) => m.set(r.key,
+      `${r.proj_nos ?? ''}|${r.prior_nos ?? ''}|${r.best_nos ?? ''}`));
+    cats.forEach((r) => m.set(`cat|${r.key}`, String(r.aop_nos ?? '')));
+    amcBase.current = m;
+    setAmcRows(items);
+    setAmcCats(cats);
+  };
+  const [loadingAmc, setLoadingAmc] = useState(false);
+  const [savingAmc, setSavingAmc] = useState(false);
+
   // ---------------- Target Master ----------------
 
   const loadHolidays = useCallback(async () => {
@@ -356,8 +508,8 @@ const AOPMaster = () => {
     }
   }, []);
 
-  useEffect(() => { loadTargets(fy); }, [fy, loadTargets]);
-  useEffect(() => { loadHolidays(); }, [loadHolidays]);
+  useEffect(() => { if (tab === 'targets') loadTargets(fy); }, [tab, fy, loadTargets]);
+  useEffect(() => { if (tab === 'targets') loadHolidays(); }, [tab, loadHolidays]);
 
   const setCell = (idx, metric, month, value) => {
     setRows((prev) => prev.map((r, i) => (i === idx
@@ -519,6 +671,77 @@ const AOPMaster = () => {
     }
   };
 
+  // ---------------- The same SR Type in more than one master ----------------
+  // The four SR Type masters (Sales and Labour, MaxTTR, EFSR, Service Load)
+  // share ONE head list and overlap heavily on SR Type. After a save the server
+  // says where else the SR Types just mapped live and what head they carry
+  // there; the user ticks which of those to carry this head across to. Nothing
+  // is written unless they tick it — 'also present' is not 'must be the same',
+  // and a report is allowed its own grouping (Service Load prints CSP as a row
+  // of its own where Employee Productivity folds it into Warranty).
+  const [crossOffer, setCrossOffer] = useState(null);   // {source, rows:[…]}
+  const [crossBusy, setCrossBusy] = useState(false);
+
+  // One head list behind all four tabs: an add / delete in any of them is what
+  // every tab's dropdown now offers.
+  const spreadHeadNames = (items) => {
+    const names = (items || []).map((h) => h.name);
+    setHeadChoices(names);
+    setMxHeadChoices(names);
+    setEfHeadChoices(names);
+    setSlHeadChoices(names);
+  };
+
+  const offerCrossUpdate = async (source, changed) => {
+    if (!changed || !changed.length) return;
+    try {
+      const res = await fetch(`${API}/pms/sr-types/cross-check`, {
+        method: 'POST', headers: jsonHeaders(),
+        body: JSON.stringify({ source, items: changed }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) return;
+      const rows = [];
+      (data.matches || []).forEach((m) => (m.targets || []).forEach((t) => rows.push({
+        sr_type: m.sr_type, head: m.head || '', master: t.master,
+        label: t.label, current_head: t.current_head || '', pick: true,
+      })));
+      if (rows.length) setCrossOffer({ source, rows });
+    } catch (e) {
+      /* the mapping itself is saved — the offer is a bonus, never a failure */
+    }
+  };
+
+  const setCrossPick = (i, v) => setCrossOffer((p) => (
+    p ? { ...p, rows: p.rows.map((r, j) => (j === i ? { ...r, pick: v } : r)) } : p));
+
+  const applyCrossUpdate = async () => {
+    const picks = (crossOffer?.rows || []).filter((r) => r.pick);
+    if (!picks.length) { setCrossOffer(null); return; }
+    setCrossBusy(true);
+    try {
+      const res = await fetch(`${API}/pms/sr-types/cross-apply`, {
+        method: 'POST', headers: jsonHeaders(),
+        body: JSON.stringify({
+          targets: picks.map((r) => ({ master: r.master, sr_type: r.sr_type, head: r.head })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Update failed');
+      const where = Object.entries(data.by_master || {})
+        .map(([label, n]) => `${label} (${n})`).join(', ');
+      toast.success(data.applied ? `Updated in ${where}` : 'Nothing left to update');
+      if ((data.blocked || []).length) {
+        toast.error(`No edit rights on ${data.blocked.join(', ')} — not updated there`);
+      }
+      setCrossOffer(null);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setCrossBusy(false);
+    }
+  };
+
   // ---------------- SR Type Master ----------------
 
   const loadSrTypes = useCallback(async () => {
@@ -554,9 +777,9 @@ const AOPMaster = () => {
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Add failed');
       setHeads(data.items || []);
-      setHeadChoices((data.items || []).map((h) => h.name));
+      spreadHeadNames(data.items);
       setNewHead('');
-      toast.success(`Head “${name}” added`);
+      toast.success(data.message || `Head “${name}” added`);
     } catch (e) {
       toast.error(e.message);
     }
@@ -568,8 +791,8 @@ const AOPMaster = () => {
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Delete failed');
       setHeads(data.items || []);
-      setHeadChoices((data.items || []).map((x) => x.name));
-      toast.success(`Head “${h.name}” removed`);
+      spreadHeadNames(data.items);
+      toast.success(data.message || `Head “${h.name}” removed`);
     } catch (e) {
       toast.error(e.message);
     }
@@ -588,6 +811,9 @@ const AOPMaster = () => {
   };
 
   const saveSrTypes = async () => {
+    // read BEFORE the save re-stamps the baseline — these are the rows
+    // the cross-master offer is about
+    const changed = changedRows(srItems, srBase.current);
     setSavingSr(true);
     try {
       const res = await fetch(`${API}/pms/sr-types`, {
@@ -598,6 +824,7 @@ const AOPMaster = () => {
       if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Save failed');
       setSrFromServer(data.items || []);
       toast.success('SR Type mapping saved');
+      await offerCrossUpdate('sales', changed);
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -641,9 +868,9 @@ const AOPMaster = () => {
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Add failed');
       setEfHeads(data.items || []);
-      setEfHeadChoices((data.items || []).map((h) => h.name));
+      spreadHeadNames(data.items);
       setNewEfHead('');
-      toast.success(`Head @LQ@${name}@RQ@ added`);
+      toast.success(data.message || `Head “${name}” added`);
     } catch (e) {
       toast.error(e.message);
     }
@@ -655,8 +882,8 @@ const AOPMaster = () => {
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Delete failed');
       setEfHeads(data.items || []);
-      setEfHeadChoices((data.items || []).map((x) => x.name));
-      toast.success(`Head @LQ@${h.name}@RQ@ removed`);
+      spreadHeadNames(data.items);
+      toast.success(data.message || `Head “${h.name}” removed`);
     } catch (e) {
       toast.error(e.message);
     }
@@ -675,6 +902,9 @@ const AOPMaster = () => {
   };
 
   const saveEfTypes = async () => {
+    // read BEFORE the save re-stamps the baseline — these are the rows
+    // the cross-master offer is about
+    const changed = changedRows(efItems, efBase.current);
     setSavingEf(true);
     try {
       const res = await fetch(`${API}/pms/efsr-sr-types`, {
@@ -685,6 +915,7 @@ const AOPMaster = () => {
       if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Save failed');
       setEfFromServer(data.items || []);
       toast.success('EFSR SR Type mapping saved');
+      await offerCrossUpdate('efsr', changed);
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -728,9 +959,9 @@ const AOPMaster = () => {
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Add failed');
       setMxHeads(data.items || []);
-      setMxHeadChoices((data.items || []).map((h) => h.name));
+      spreadHeadNames(data.items);
       setNewMxHead('');
-      toast.success(`Head @LQ@${name}@RQ@ added`);
+      toast.success(data.message || `Head “${name}” added`);
     } catch (e) {
       toast.error(e.message);
     }
@@ -742,8 +973,8 @@ const AOPMaster = () => {
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Delete failed');
       setMxHeads(data.items || []);
-      setMxHeadChoices((data.items || []).map((x) => x.name));
-      toast.success(`Head @LQ@${h.name}@RQ@ removed`);
+      spreadHeadNames(data.items);
+      toast.success(data.message || `Head “${h.name}” removed`);
     } catch (e) {
       toast.error(e.message);
     }
@@ -762,6 +993,9 @@ const AOPMaster = () => {
   };
 
   const saveMxTypes = async () => {
+    // read BEFORE the save re-stamps the baseline — these are the rows
+    // the cross-master offer is about
+    const changed = changedRows(mxItems, mxBase.current);
     setSavingMx(true);
     try {
       const res = await fetch(`${API}/pms/maxttr-sr-types`, {
@@ -772,6 +1006,7 @@ const AOPMaster = () => {
       if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Save failed');
       setMxFromServer(data.items || []);
       toast.success('MaxTTR SR Type mapping saved');
+      await offerCrossUpdate('maxttr', changed);
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -935,6 +1170,288 @@ const AOPMaster = () => {
     }
   };
 
+  // ---------------- SR Type Master (Service Load) ----------------
+  // The 'Service Load and Response' sheet (Annual Reports) splits the MaxTTR
+  // file's SR Types into ITS OWN heads — CSP and Dealer AMC are rows there, not
+  // folded into Warranty and AMC as the Employee Productivity master folds them.
+  // An SR Type left with NO head still counts in the sheet's 'all types' line;
+  // it simply gets no breakdown row, and the sheet prints the difference.
+
+  const loadSlTypes = useCallback(async () => {
+    setLoadingSl(true);
+    try {
+      const res = await fetch(`${API}/pms/service-load-sr-types`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Failed to load Service Load SR types');
+      setSlFromServer(data.items || []);
+      setSlHeadChoices(data.head_choices || []);
+      setSlHeads(data.heads || []);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setLoadingSl(false);
+    }
+  }, []);
+
+  useEffect(() => { if (tab === 'sltypes') loadSlTypes(); }, [tab, loadSlTypes]);
+
+  const setSlItem = (idx, value) => {
+    setSlItems((prev) => prev.map((it, i) => (i === idx ? { ...it, head: value } : it)));
+  };
+
+  const addSlHead = async () => {
+    const name = newSlHead.trim();
+    if (!name) { toast.error('Enter a head name'); return; }
+    try {
+      const res = await fetch(`${API}/pms/service-load-heads`, {
+        method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Add failed');
+      setSlHeads(data.items || []);
+      spreadHeadNames(data.items);
+      setNewSlHead('');
+      toast.success(data.message || `Head “${name}” added`);
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+
+  const deleteSlHead = async (h) => {
+    try {
+      const res = await fetch(`${API}/pms/service-load-heads/${h.id}`, {
+        method: 'DELETE', headers: authHeaders(),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Delete failed');
+      setSlHeads(data.items || []);
+      spreadHeadNames(data.items);
+      toast.success(data.message || `Head “${h.name}” removed`);
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+
+  const slAction = async (path, okMsg) => {
+    try {
+      const res = await fetch(`${API}/pms/service-load-sr-types/${path}`, {
+        method: 'POST', headers: jsonHeaders(),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Action failed');
+      setSlFromServer(data.items || []);
+      toast.success(okMsg(data));
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+
+  const saveSlTypes = async () => {
+    // read BEFORE the save re-stamps the baseline — these are the rows
+    // the cross-master offer is about
+    const changed = changedRows(slItems, slBase.current);
+    setSavingSl(true);
+    try {
+      const res = await fetch(`${API}/pms/service-load-sr-types`, {
+        method: 'POST', headers: jsonHeaders(),
+        body: JSON.stringify({ items: slItems.filter((i) => String(i.sr_type || '').trim()) }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Save failed');
+      setSlFromServer(data.items || []);
+      toast.success('Service Load SR Type mapping saved');
+      await offerCrossUpdate('service_load', changed);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSavingSl(false);
+    }
+  };
+
+  // ---------------- Service Load AOP ----------------
+  // The AOP column of the Service Load and Response sheet. The monthly grid is
+  // the ONLY place a count target is entered: the sheet's branch AOP is that
+  // branch's twelve months, its MH / KA AOP the region's branches, its Total
+  // every branch, and the 'Service Request Closure (Nos.)' strip one month
+  // across every branch. One figure, every rollup consistent by construction.
+
+  const setSlTargetsFromServer = (d) => {
+    const items = (d.items || []).map((r) => ({ ...r, months: { ...(r.months || {}) } }));
+    const bp = d.branch_pct || {};
+    const rp = d.region_pct || {};
+    const op = d.overall_pct || {};
+    const m = new Map();
+    items.forEach((r) => m.set(`m|${r.key}`,
+      months.map((mm) => String(r.months?.[mm] ?? '')).join('|')));
+    SL_METRICS.forEach(({ k }) => {
+      m.set(`p|overall|ALL|${k}`, String(op[k] ?? ''));
+      ['MH', 'KA'].forEach((rg) => m.set(`p|region|${rg}|${k}`, String(rp[rg]?.[k] ?? '')));
+      items.forEach((r) => m.set(`p|branch|${r.key}|${k}`, String(bp[r.key]?.[k] ?? '')));
+    });
+    slTgtBase.current = m;
+    setSlTgtRows(items);
+    setSlPctBranch(bp);
+    setSlPctRegion(rp);
+    setSlPctOverall(op);
+  };
+
+  const setSlSeFromServer = (d) => {
+    const items = (d.items || []).map((r) => ({ ...r }));
+    slSeBase.current = new Map(items.map((r) => [r.key, String(r.se_count ?? '')]));
+    setSlSe(items);
+  };
+
+  const setSlSeCell = (idx, value) => {
+    const v = slNosInput(value);
+    if (v === null) return;
+    setSlSe((prev) => prev.map((r, i) => (i === idx ? { ...r, se_count: v } : r)));
+  };
+
+  const setSlManualFromServer = (d) => {
+    const vals = d.values || {};
+    const periods = d.periods || [];
+    const m = new Map();
+    (d.metrics || []).forEach((k) => periods.forEach((p) =>
+      m.set(`${k}|${p}`, String(vals[k]?.[p] ?? ''))));
+    slManualBase.current = m;
+    setSlManualPeriods(periods);
+    setSlManual(vals);
+  };
+
+  const loadSlTargets = useCallback(async () => {
+    setLoadingSlTgt(true);
+    try {
+      // The AOP figures and the typed FTR / FVR actuals are two endpoints but
+      // one tab, so they load together and one Save writes both.
+      const [tRes, mRes, sRes] = await Promise.all([
+        fetch(`${API}/pms/service-load-targets?fy=${fy}`, { headers: authHeaders() }),
+        fetch(`${API}/pms/service-load-manual?fy=${fy}`, { headers: authHeaders() }),
+        fetch(`${API}/pms/service-load-se-counts`, { headers: authHeaders() }),
+      ]);
+      const data = await tRes.json();
+      if (!tRes.ok || !data.success) throw new Error(data.detail || 'Failed to load Service Load AOP');
+      setSlTargetsFromServer(data);
+      const md = await mRes.json();
+      if (mRes.ok && md.success) setSlManualFromServer(md);
+      const sd = await sRes.json();
+      if (sRes.ok && sd.success) setSlSeFromServer(sd);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setLoadingSlTgt(false);
+    }
+  }, [fy]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { if (tab === 'sltargets') loadSlTargets(); }, [tab, loadSlTargets]);
+
+  // A whole number of SRs, or '' — anything else is simply not typed.
+  const slNosInput = (v) => {
+    const s = String(v ?? '').trim();
+    if (s === '') return '';
+    return /^\d{0,6}$/.test(s) ? s : null;
+  };
+  // A ratio or a percentage, capped at the metric's own ceiling.
+  const slNumInput = (v, max) => {
+    const s = String(v ?? '').trim();
+    if (s === '') return '';
+    if (!/^\d{0,3}(\.\d{0,2})?$/.test(s)) return null;
+    return parseFloat(s) > max ? null : s;
+  };
+
+  const setSlMonth = (idx, m, value) => {
+    const v = slNosInput(value);
+    if (v === null) return;
+    setSlTgtRows((prev) => prev.map((r, i) => (i === idx
+      ? { ...r, months: { ...r.months, [m]: v } } : r)));
+  };
+
+  const setSlManualCell = (metric, period, value) => {
+    const v = slNumInput(value, 100);
+    if (v === null) return;
+    setSlManual((p) => ({ ...p, [metric]: { ...(p[metric] || {}), [period]: v } }));
+  };
+
+  // A region's target is the mean of its branches', and the company's the mean
+  // of every branch — so MH, KA and the Grand Total are read, never typed, and
+  // can never disagree with the rows they sit over. A blank branch is 'not set',
+  // not zero, so it is left out of the mean. If NO branch in the group carries a
+  // figure, whatever was saved for that row before is kept: that is what stops a
+  // master whose branch cells are still empty from being wiped on the next save.
+  const slPctRollup = (metric, keys, saved) => {
+    const vals = keys
+      .map((k) => parseFloat(slPctBranch[k]?.[metric]))
+      .filter((v) => Number.isFinite(v));
+    if (!vals.length) return saved ?? '';
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    return String(Math.round(mean * 100) / 100);
+  };
+  const slRegionKeys = (rg) => slTgtRows
+    .filter((r) => (r.region || 'MH') === rg).map((r) => r.key);
+  const slAllKeys = () => slTgtRows.map((r) => r.key);
+
+  const setSlPct = (scope, key, metric, value, max) => {
+    const v = slNumInput(value, max);
+    if (v === null) return;
+    if (scope === 'overall') setSlPctOverall((p) => ({ ...p, [metric]: v }));
+    else if (scope === 'region') {
+      setSlPctRegion((p) => ({ ...p, [key]: { ...(p[key] || {}), [metric]: v } }));
+    } else setSlPctBranch((p) => ({ ...p, [key]: { ...(p[key] || {}), [metric]: v } }));
+  };
+
+  const saveSlTargets = async () => {
+    setSavingSlTgt(true);
+    try {
+      const items = [];
+      slTgtRows.forEach((r) => months.forEach((m) => items.push({
+        key: r.key, month: m, sr_target: r.months?.[m] ?? '',
+      })));
+      const pct_items = [];
+      SL_METRICS.forEach(({ k }) => {
+        // The summary rows are stored as what the grid SHOWS, so the report can
+        // go on reading one saved value per row and never has to average.
+        pct_items.push({ metric: k, scope: 'overall', key: 'ALL',
+          target_value: slPctRollup(k, slAllKeys(), slPctOverall[k]) });
+        ['MH', 'KA'].forEach((rg) => pct_items.push({ metric: k, scope: 'region',
+          key: rg,
+          target_value: slPctRollup(k, slRegionKeys(rg), slPctRegion[rg]?.[k]) }));
+        slTgtRows.forEach((r) => pct_items.push({ metric: k, scope: 'branch',
+          key: r.key, target_value: slPctBranch[r.key]?.[k] ?? '' }));
+      });
+      const manual_items = [];
+      SL_MANUAL.forEach(({ k }) => slManualPeriods.forEach((pr) =>
+        manual_items.push({ metric: k, period: pr,
+          value: slManual[k]?.[pr] ?? '' })));
+
+      const [res, mres, sres] = await Promise.all([
+        fetch(`${API}/pms/service-load-targets`, {
+          method: 'POST', headers: jsonHeaders(),
+          body: JSON.stringify({ fy, items, pct_items }),
+        }),
+        fetch(`${API}/pms/service-load-manual`, {
+          method: 'POST', headers: jsonHeaders(),
+          body: JSON.stringify({ fy, items: manual_items }),
+        }),
+        fetch(`${API}/pms/service-load-se-counts`, {
+          method: 'POST', headers: jsonHeaders(),
+          body: JSON.stringify({ items: slSe.map(
+            (r) => ({ key: r.key, se_count: r.se_count ?? '' })) }),
+        }),
+      ]);
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Save failed');
+      setSlTargetsFromServer(data);
+      const md = await mres.json();
+      if (mres.ok && md.success) setSlManualFromServer(md);
+      const sd = await sres.json();
+      if (sres.ok && sd.success) setSlSeFromServer(sd);
+      toast.success(`Service Load AOP saved for FY ${fyLabel(fy)}`);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSavingSlTgt(false);
+    }
+  };
+
   // Copy the overall target into every empty cell — the usual case is one
   // number for the whole company, typed once.
   const fillCdiTargets = () => {
@@ -948,10 +1465,168 @@ const AOPMaster = () => {
     toast.success(`${v}% applied to every row — press Save to keep it`);
   };
 
+  // ---------------- AMC & Bandhan AOP ----------------
+  // Two figures per branch per financial year. Both are WHOLE NUMBERS of
+  // agreements: the projection for the year, and last year's actual — which is
+  // typed rather than counted because the AMC Population file keeps only each
+  // genset's LATEST agreement, so a closed year's count shrinks as gensets
+  // renew. A cell left EMPTY means "not set": the report shows a dash, not 0.
+
+  const loadAmcTargets = useCallback(async () => {
+    setLoadingAmc(true);
+    try {
+      const res = await fetch(`${API}/pms/amc-targets?fy=${fy}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.detail || 'Failed to load AMC targets');
+      setAmcFromServer(data);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setLoadingAmc(false);
+    }
+  }, [fy]);
+
+  useEffect(() => { if (tab === 'amctargets') loadAmcTargets(); }, [tab, loadAmcTargets]);
+
+  // The City Master does NOT depend on the financial year — a territory is a
+  // territory — so it is loaded once with the tab rather than on every FY change.
+  const loadCities = useCallback(async () => {
+    setLoadingCity(true);
+    try {
+      const res = await fetch(`${API}/pms/quote-city-map`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.detail || 'Failed to load the City Master');
+      setCitiesFromServer(data);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setLoadingCity(false);
+    }
+  }, []);
+
+  useEffect(() => { if (tab === 'amctargets') loadCities(); }, [tab, loadCities]);
+
+  const setCityBranch = (key, branchId) => {
+    setCityRows((prev) => prev.map((r) => (r.key === key
+      ? { ...r, branch_id: branchId || null } : r)));
+  };
+
+  // What the table actually shows: the search, and the 'still to map' filter.
+  // Unmapped rows already sort first from the backend, so the filter is a way to
+  // hide the finished ones rather than a way to find the unfinished ones.
+  const cityShown = (() => {
+    const q = cityQ.trim().toLowerCase();
+    return cityRows.filter((r) => (!cityOnlyOpen || !r.branch_id)
+      && (!q || r.name.toLowerCase().includes(q)));
+  })();
+  const cityUnmapped = cityRows.filter((r) => !r.branch_id).length;
+  const cityUnmappedPaid = cityRows.reduce((t, r) => t + (r.branch_id ? 0 : r.paid || 0), 0);
+
+  const cityDirty = (() => {
+    const b = cityBase.current;
+    if (!b) return 0;
+    return cityRows.filter((r) => (r.branch_id || '') !== (b.get(r.key) ?? '')).length;
+  })();
+
+  const saveCities = async () => {
+    setSavingCity(true);
+    try {
+      // Only what CHANGED is sent: the file can carry a few hundred cities, and
+      // a save should not rewrite every row to move one.
+      const b = cityBase.current || new Map();
+      const items = cityRows
+        .filter((r) => (r.branch_id || '') !== (b.get(r.key) ?? ''))
+        .map((r) => ({ city_key: r.key, city_name: r.name, branch_id: r.branch_id || '' }));
+      const res = await fetch(`${API}/pms/quote-city-map`, {
+        method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ items }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Save failed');
+      setCitiesFromServer(data);
+      toast.success(`City Master saved — ${data.mapped} mapped, ${data.unmapped} still to do`);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSavingCity(false);
+    }
+  };
+
+  // A count of agreements: up to 5 digits, nothing else is typed.
+  const amcNosInput = (v) => {
+    const t = String(v ?? '').trim();
+    if (t === '') return '';
+    return /^\d{0,5}$/.test(t) ? t : null;
+  };
+  const setAmcCell = (idx, field, value) => {
+    const v = amcNosInput(value);
+    if (v === null) return;
+    setAmcRows((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: v } : r)));
+  };
+  const setAmcCatCell = (idx, value) => {
+    const v = amcNosInput(value);
+    if (v === null) return;
+    setAmcCats((prev) => prev.map((r, i) => (i === idx ? { ...r, aop_nos: v } : r)));
+  };
+
+  const saveAmcTargets = async () => {
+    setSavingAmc(true);
+    try {
+      const items = amcRows.map((r) => ({
+        key: r.key, proj_nos: r.proj_nos, prior_nos: r.prior_nos,
+        best_nos: r.best_nos,
+      }));
+      const categories = amcCats.map((r) => ({ key: r.key, aop_nos: r.aop_nos }));
+      const res = await fetch(`${API}/pms/amc-targets`, {
+        method: 'POST', headers: jsonHeaders(),
+        body: JSON.stringify({ fy, items, categories }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Save failed');
+      setAmcFromServer(data);
+      toast.success(`AMC & Bandhan AOP saved for FY ${fyLabel(fy)}`);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSavingAmc(false);
+    }
+  };
+
   const dirtyCount = rows.filter((r) => r._dirty).length;
   const srDirty = countChanged(srItems, srBase.current, 'sr_type', 'head');
   const efDirty = countChanged(efItems, efBase.current, 'sr_type', 'head');
   const mxDirty = countChanged(mxItems, mxBase.current, 'sr_type', 'head');
+  const slDirty = countChanged(slItems, slBase.current, 'sr_type', 'head');
+  // Service Load AOP keeps a month grid and three blocks of percentages, so it
+  // counts itself: a branch's twelve months are ONE change however many cells
+  // moved, while each percentage cell counts on its own.
+  const slTgtDirty = (() => {
+    const b = slTgtBase.current;
+    if (!b) return 0;
+    let n = 0;
+    slTgtRows.forEach((r) => {
+      const cur = months.map((m) => String(r.months?.[m] ?? '')).join('|');
+      if (cur !== (b.get(`m|${r.key}`) ?? '')) n += 1;
+    });
+    const pdiff = (k, v) => (String(v ?? '') !== (b.get(k) ?? '') ? 1 : 0);
+    const sb = slSeBase.current;
+    if (sb) {
+      slSe.forEach((r) => {
+        if (String(r.se_count ?? '') !== (sb.get(r.key) ?? '')) n += 1;
+      });
+    }
+    const mb = slManualBase.current;
+    if (mb) {
+      SL_MANUAL.forEach(({ k }) => slManualPeriods.forEach((pr) => {
+        if (String(slManual[k]?.[pr] ?? '') !== (mb.get(`${k}|${pr}`) ?? '')) n += 1;
+      }));
+    }
+    SL_METRICS.forEach(({ k }) => {
+      n += pdiff(`p|overall|ALL|${k}`, slPctOverall[k]);
+      ['MH', 'KA'].forEach((rg) => { n += pdiff(`p|region|${rg}|${k}`, slPctRegion[rg]?.[k]); });
+      slTgtRows.forEach((r) => { n += pdiff(`p|branch|${r.key}|${k}`, slPctBranch[r.key]?.[k]); });
+    });
+    return n;
+  })();
   const leadDirty = countChanged(leadItems, leadBase.current, 'lead_raised_for', 'category');
   // CDI keeps its rows in three pieces of state, so it counts them itself.
   const cdiDirty = (() => {
@@ -962,6 +1637,28 @@ const AOPMaster = () => {
       + cdiRegions.reduce((n, r) => n + diff(`region|${r.key}`, r.target_pct), 0)
       + diff('overall|ALL', cdiOverall.target_pct);
   })();
+
+  // Two figures in one row, so a row counts as ONE change however many of its
+  // cells moved — the badge counts branches to re-save, not keystrokes.
+  const amcDirty = (() => {
+    const b = amcBase.current;
+    if (!b) return 0;
+    return amcRows.filter((r) =>
+      `${r.proj_nos ?? ''}|${r.prior_nos ?? ''}|${r.best_nos ?? ''}`
+        !== (b.get(r.key) ?? '')).length
+      // A category row is ONE figure, so it counts on its own.
+      + amcCats.filter((r) =>
+        String(r.aop_nos ?? '') !== (b.get(`cat|${r.key}`) ?? '')).length;
+  })();
+
+  // Both regions in one figure. The report closes its branch block with a KCGL
+  // TOTAL row that is exactly MH + KA added together, so the master shows the
+  // same number it will print. An empty box contributes nothing, like the
+  // region totals.
+  const amcTotal = (f) => amcRows.reduce((n, r) => {
+    const v = parseInt(r[f], 10);
+    return Number.isFinite(v) ? n + v : n;
+  }, 0);
 
   // Column totals of a metric (Lakh) + grand totals of both.
   const colTotal = (metric, m) =>
@@ -1027,14 +1724,7 @@ const AOPMaster = () => {
         {/* flex-wrap: the five tab names no longer fit one row on a narrow
             window, and the buttons are flex-shrink-0 so they would overflow */}
         <div className="flex flex-wrap items-center gap-1.5 mb-3">
-          {[
-            { key: 'targets', name: 'Target Master', icon: BuildingOffice2Icon },
-            { key: 'srtypes', name: 'SR Type Master (Sales and Labour)', icon: TagIcon },
-            { key: 'mxtypes', name: 'SR Type Master (MaxTTR)', icon: TagIcon },
-            { key: 'eftypes', name: 'SR Type Master (EFSR)', icon: TagIcon },
-            { key: 'leadcats', name: 'Lead Category Master', icon: TagIcon },
-            { key: 'cditargets', name: 'CDI Target Master', icon: FaceSmileIcon },
-          ].map((t) => (
+          {tabs.map((t) => (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold flex-shrink-0 transition ${
                 tab === t.key ? 'text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
@@ -1044,6 +1734,17 @@ const AOPMaster = () => {
             </button>
           ))}
         </div>
+
+        {/* Rights can leave a user with no tab at all — say so instead of
+            showing an empty page. */}
+        {tabs.length === 0 && (
+          <div className="bg-white rounded-2xl border border-gray-200 px-4 py-8 text-center">
+            <p className="text-sm font-semibold text-gray-700">No AOP &amp; Master tab is open to you</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Ask the admin to pick your tabs in Profile → Edit Employee → AOP &amp; Master Rights.
+            </p>
+          </div>
+        )}
 
       {/* ================= TARGET MASTER ================= */}
       {tab === 'targets' && (
@@ -1671,14 +2372,14 @@ const AOPMaster = () => {
                   </thead>
                   <tbody>
                     <tr style={{ backgroundColor: '#EEF0FA' }}>
-                      <td className={`${tdCls} text-center text-gray-500`}>—</td>
+                      <td className={`${tdCls} text-center text-gray-500`}>-</td>
                       <td className={`${tdCls} font-bold text-gray-900`}>
                         CUSTOMER DELIGHT INDEX (CDI)
                       </td>
                       <td className={tdCls}>
                         <input type="text" inputMode="decimal" value={cdiOverall.target_pct ?? ''}
                           onChange={(e) => setCdiAll(e.target.value)}
-                          disabled={readOnly} placeholder="—"
+                          disabled={readOnly} placeholder="-"
                           className={`${cellInput} text-center font-semibold`}
                           style={{ '--tw-ring-color': themeColor }} />
                       </td>
@@ -1704,14 +2405,14 @@ const AOPMaster = () => {
                         </thead>
                         <tbody>
                           <tr className="bg-gray-100">
-                            <td className={`${tdCls} text-center text-gray-500`}>—</td>
+                            <td className={`${tdCls} text-center text-gray-500`}>-</td>
                             <td className={`${tdCls} font-bold text-gray-900`}>
                               CUSTOMER DELIGHT INDEX (CDI) ({rg})
                             </td>
                             <td className={tdCls}>
                               <input type="text" inputMode="decimal" value={reg.target_pct ?? ''}
                                 onChange={(e) => setCdiRegion(rg, e.target.value)}
-                                disabled={readOnly} placeholder="—"
+                                disabled={readOnly} placeholder="-"
                                 className={`${cellInput} text-center font-semibold`}
                                 style={{ '--tw-ring-color': themeColor }} />
                             </td>
@@ -1727,7 +2428,7 @@ const AOPMaster = () => {
                                 <td className={tdCls}>
                                   <input type="text" inputMode="decimal" value={r.target_pct ?? ''}
                                     onChange={(e) => setCdiBranch(idx, e.target.value)}
-                                    disabled={readOnly} placeholder="—"
+                                    disabled={readOnly} placeholder="-"
                                     className={`${cellInput} text-center`}
                                     style={{ '--tw-ring-color': themeColor }} />
                                 </td>
@@ -1741,12 +2442,881 @@ const AOPMaster = () => {
                 })}
               </div>
 
+              {/* MH + KA on ONE line, spanning both tables. The report closes
+                  the sheet with a CDI (OVERALL) row, and that row takes the
+                  SAME target as the company row heading this master — so this
+                  shows that figure rather than asking for it twice. It is
+                  neither the sum nor the average of the two regions: every row
+                  is scored from its own feedback. */}
+              {cdiRows.length > 0 && (
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full text-xs border-collapse min-w-[330px]">
+                    <tbody>
+                      <tr className="font-bold text-white" style={{ backgroundColor: themeColor }}>
+                        <td className="px-2 py-1 border border-gray-400 text-center"
+                          style={{ width: 55 }}>-</td>
+                        <td className={tdCls}
+                          title="The same target as the CDI row at the top — the report prints it both as the CDI row heading the sheet and as the closing (OVERALL) row.">
+                          CUSTOMER DELIGHT INDEX (CDI) (OVERALL) — MH + KA
+                        </td>
+                        <td className={`${tdCls} text-center`} style={{ width: 120 }}>
+                          {cdiOverall.target_pct === '' || cdiOverall.target_pct == null
+                            ? '-' : `${cdiOverall.target_pct}%`}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
               <p className="mt-2 text-[11px] text-gray-500">
                 The report scores every row from its <b>own</b> feedback —
                 (Promotor − Detractor) ÷ all feedback — so a region target is not the
                 average of its branches. Targets are read by the financial year
                 picked on the report.
               </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ================= SR TYPE MASTER (SERVICE LOAD) ================= */}
+      {tab === 'sltypes' && (
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-gray-100 flex flex-wrap items-center gap-2">
+            <p className="text-xs text-gray-500 flex-1 min-w-[220px]">
+              Map each MaxTTR <b>SR Type</b> to a Head — one breakdown row per head on the
+              <b> Service Load and Response</b> sheet.
+            </p>
+            {readOnly ? <span className={roBadge}>View only</span> : (
+              <>
+              <button onClick={() => slAction('sync', (d) => `Synced — ${d.added} new SR type(s) from MaxTTR`)}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
+                <ArrowPathIcon className="h-3.5 w-3.5" /> Sync from data
+              </button>
+              <button onClick={() => slAction('reset', () => 'Default mapping restored')}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
+                <ArrowPathIcon className="h-3.5 w-3.5" /> Reset defaults
+              </button>
+              <button onClick={() => setShowSlHeadModal(true)}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
+                <TagIcon className="h-3.5 w-3.5" /> Head Master
+              </button>
+              <button onClick={saveSlTypes} disabled={savingSl}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white rounded-md hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: themeColor }}>
+                <CheckIcon className="h-3.5 w-3.5" /> {savingSl ? 'Saving…' : `Save${dirtyBadge(slDirty)}`}
+              </button>
+              </>
+            )}
+          </div>
+
+          {loadingSl ? (
+            <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
+              <ArrowPathIcon className="h-7 w-7 animate-spin" />
+              <p className="text-sm">Loading SR types…</p>
+            </div>
+          ) : slItems.length === 0 ? (
+            <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
+              <TagIcon className="h-8 w-8" />
+              <p className="text-sm">No SR types yet — upload the MaxTTR file, then Sync from data.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-3 p-3">
+              {[slItems.slice(0, Math.ceil(slItems.length / 2)),
+                slItems.slice(Math.ceil(slItems.length / 2))].map((half, hIdx) => {
+                const offset = hIdx === 0 ? 0 : Math.ceil(slItems.length / 2);
+                return (
+                  <div key={hIdx} className="overflow-x-auto self-start">
+                    <table className="w-full text-xs border-collapse min-w-[380px]">
+                      <thead>
+                        <tr>
+                          <th className={thCls} style={{ width: 55 }}>Sr. No.</th>
+                          <th className={thCls}>SR Type (from MaxTTR)</th>
+                          <th className={thCls} style={{ width: 160 }}>Head</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {half.map((it, i) => {
+                          const idx = offset + i;
+                          return (
+                            <tr key={it.id ?? `new-${idx}`} className="border-b border-gray-100 hover:bg-gray-50/60">
+                              <td className={`${tdCls} text-center text-gray-500`}>{idx + 1}</td>
+                              <td className={`${tdCls} text-gray-700`}>{it.sr_type || '-'}</td>
+                              <td className={tdCls}>
+                                <select value={it.head || ''} onChange={(e) => setSlItem(idx, e.target.value)} disabled={readOnly}
+                                  className={inputCls} style={{ '--tw-ring-color': themeColor }}>
+                                  <option value="">no head (all-types line only)</option>
+                                  {slHeadChoices.map((h) => <option key={h} value={h}>{h}</option>)}
+                                </select>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {slItems.length > 0 && (
+            <div className="px-4 py-2 border-t border-gray-100 flex flex-wrap gap-4 text-[11px] text-gray-600">
+              <span>SR types: <b>{slItems.length}</b></span>
+              <span>Heads: <b>{slHeadChoices.length}</b></span>
+              {slItems.some((i) => !i.head) && (
+                <span className="text-amber-700">
+                  <b>{slItems.filter((i) => !i.head).length}</b> with no head — those SRs count in
+                  the sheet’s <b>all-types</b> line and in nothing else, and the sheet prints the
+                  difference as its own row
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ================= SERVICE LOAD AOP ================= */}
+      {tab === 'sltargets' && (
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="px-3 py-2 border-b border-gray-100 flex flex-wrap items-center gap-1.5">
+            <select value={fy} onChange={(e) => setFy(parseInt(e.target.value, 10))}
+              title="Financial Year (Apr–Mar)"
+              className={inputCls} style={{ '--tw-ring-color': themeColor, width: 170 }}>
+              {fyChoices.sort((a, b) => a - b).map((y) => (
+                <option key={y} value={y}>FY {fyLabel(y)} (Apr–Mar)</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 flex-1 min-w-[240px] px-1">
+              The <b>AOP</b> column of the Annual Reports → <b>Service Load and Response</b> sheet.
+              An empty cell means no target.
+            </p>
+            {readOnly ? <span className={roBadge}>View only</span> : (
+              <>
+                <button onClick={saveSlTargets} disabled={savingSlTgt || loadingSlTgt}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white rounded-md hover:opacity-90 disabled:opacity-50"
+                  style={{ backgroundColor: themeColor }}>
+                  <CheckIcon className="h-3.5 w-3.5" /> {savingSlTgt ? 'Saving…' : `Save${dirtyBadge(slTgtDirty)}`}
+                </button>
+              </>
+            )}
+          </div>
+
+          {loadingSlTgt ? (
+            <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
+              <ArrowPathIcon className="h-7 w-7 animate-spin" />
+              <p className="text-sm">Loading Service Load AOP…</p>
+            </div>
+          ) : (
+            <div className="p-3 space-y-4">
+              {/* ---- 1. the MONTHLY SR-closure target, per branch ---------- */}
+              {/* Only place a COUNT target is entered. The sheet's branch, MH /
+                  KA, Total and month-strip AOPs are all sums of this grid, so
+                  they cannot disagree with each other. */}
+              <div>
+                <p className="mb-1 text-[11px] font-bold text-gray-800">
+                  Service Request Closure (Nos.) — monthly target per branch
+                  <span className="ml-2 font-normal text-gray-400">
+                    the sheet sums these for every AOP count
+                  </span>
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border-collapse min-w-[980px]">
+                    <thead>
+                      <tr>
+                        <th className={thC} style={{ width: 46 }}>Sr.</th>
+                        <th className={thC} style={{ minWidth: 170, textAlign: 'left' }}>Branch</th>
+                        {months.map((m) => (
+                          <th key={m} className={m === activeMonth ? thCAct : thC}
+                            style={{ width: 62 }}>{monthLabel(m)}</th>
+                        ))}
+                        <th className={thC} style={{ width: 74 }}>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {['MH', 'KA'].map((rg) => {
+                        const list = slTgtRows.filter((r) => (r.region || 'MH') === rg);
+                        if (!list.length) return null;
+                        const colSum = (m) => list.reduce((s, r) => s + (parseInt(r.months?.[m], 10) || 0), 0);
+                        const regTotal = months.reduce((s, m) => s + colSum(m), 0);
+                        return (
+                          <React.Fragment key={rg}>
+                            <tr style={{ backgroundColor: 'var(--aop-sub)' }}>
+                              <td className={`${tdC} text-center text-gray-500`}>-</td>
+                              <td className={`${tdC} font-bold text-gray-900`}>
+                                {rg} — region total
+                              </td>
+                              {months.map((m) => (
+                                <td key={m} className={`${tdC} text-center font-semibold text-gray-800 tabular-nums`}>
+                                  {dash(colSum(m))}
+                                </td>
+                              ))}
+                              <td className={`${tdC} text-center font-bold text-gray-900 tabular-nums`}>{dash(regTotal)}</td>
+                            </tr>
+                            {list.map((r, i) => {
+                              const idx = slTgtRows.indexOf(r);
+                              const rowTot = months.reduce((s, m) => s + (parseInt(r.months?.[m], 10) || 0), 0);
+                              return (
+                                <tr key={r.key} className="hover:bg-gray-50/60">
+                                  <td className={`${tdC} text-center text-gray-500`}>{i + 1}</td>
+                                  <td className={`${tdC} text-gray-700 whitespace-nowrap`}>{r.key}_{r.name}</td>
+                                  {months.map((m) => (
+                                    <td key={m} className={m === activeMonth ? tdCAct : tdC}>
+                                      <input type="text" inputMode="numeric"
+                                        value={r.months?.[m] ?? ''}
+                                        onChange={(e) => setSlMonth(idx, m, e.target.value)}
+                                        disabled={readOnly}
+                                        title={`${monthLabel(m)} — SR closures targeted`}
+                                        className={`${m === activeMonth ? cellInputAct : cellInput} text-center`}
+                                        style={{ '--tw-ring-color': themeColor }} />
+                                    </td>
+                                  ))}
+                                  <td className={`${tdC} text-center font-semibold text-gray-800 tabular-nums`}>{dash(rowTot)}</td>
+                                </tr>
+                              );
+                            })}
+                          </React.Fragment>
+                        );
+                      })}
+                      {slTgtRows.length > 0 && (() => {
+                        const colSum = (m) => slTgtRows.reduce((s, r) => s + (parseInt(r.months?.[m], 10) || 0), 0);
+                        const all = months.reduce((s, m) => s + colSum(m), 0);
+                        return (
+                          <tr style={{ backgroundColor: themeColor }}>
+                            <td className={`${tdC} text-center text-white`}>-</td>
+                            <td className={`${tdC} font-bold text-white`}>Total (all branches)</td>
+                            {months.map((m) => (
+                              <td key={m} className={`${tdC} text-center font-bold text-white tabular-nums`}>
+                                {dash(colSum(m))}
+                              </td>
+                            ))}
+                            <td className={`${tdC} text-center font-bold text-white tabular-nums`}>{dash(all)}</td>
+                          </tr>
+                        );
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* ---- 2. the percentage / productivity targets -------------- */}
+              {/* A percentage cannot be summed, so every row of the sheet that
+                  carries one needs its own — the same reason the CDI target is
+                  keyed per report row rather than per branch. */}
+              <div>
+                <p className="mb-1 text-[11px] font-bold text-gray-800">
+                  Productivity &amp; response targets
+                  <span className="ml-2 font-normal text-gray-400">
+                    type the branches — MH, KA and the Grand Total are their averages
+                  </span>
+                </p>
+                {/* Six columns, no min-width, table-fixed: they share whatever the
+                    page gives them, so this grid never grows a scrollbar of its
+                    own. Contents is the only column with a set share, and it is
+                    the one that truncates when the page is narrow. */}
+                <table className="w-full text-xs border-collapse table-fixed">
+                  <thead>
+                    <tr>
+                      <th className={thCls} style={{ width: '5%' }}>Sr.</th>
+                      <th className={thCls} style={{ width: '27%', textAlign: 'left' }}>Contents</th>
+                      {SL_METRICS.map((mt) => (
+                        <th key={mt.k} className={thWrap} title={`${mt.t} — ${mt.t2}`}>
+                          {mt.t}
+                          <span className="block font-medium normal-case tracking-normal text-[9.5px] text-gray-500">
+                            {mt.t2}
+                          </span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {['MH', 'KA'].map((rg) => {
+                      const list = slTgtRows.filter((r) => (r.region || 'MH') === rg);
+                      if (!list.length) return null;
+                      const keys = list.map((r) => r.key);
+                      return (
+                        <React.Fragment key={rg}>
+                          <tr style={{ backgroundColor: 'var(--aop-sub)' }}>
+                            <td className={`${tdCls} text-center text-gray-500`}>-</td>
+                            <td className={`${tdCls} font-bold text-gray-900`}>
+                              {rg} — average
+                            </td>
+                            {SL_METRICS.map((mt) => (
+                              <td key={mt.k}
+                                className={`${tdCls} text-center font-bold text-gray-900 tabular-nums`}
+                                title={`Average of the ${rg} branches below`}>
+                                {slPctRollup(mt.k, keys, slPctRegion[rg]?.[mt.k]) || '-'}
+                              </td>
+                            ))}
+                          </tr>
+                          {list.map((r, i) => (
+                            <tr key={r.key} className="border-b border-gray-100 hover:bg-gray-50/60">
+                              <td className={`${tdCls} text-center text-gray-500`}>{i + 1}</td>
+                              <td className={`${tdCls} text-gray-700 truncate`}
+                                title={`${r.key}_${r.name}`}>{r.key}_{r.name}</td>
+                              {SL_METRICS.map((mt) => (
+                                <td key={mt.k} className={tdCls}>
+                                  <input type="text" inputMode="decimal"
+                                    value={slPctBranch[r.key]?.[mt.k] ?? ''}
+                                    onChange={(e) => setSlPct('branch', r.key, mt.k, e.target.value, mt.max)}
+                                    disabled={readOnly}
+                                    className={`${cellInput} text-center`}
+                                    style={{ '--tw-ring-color': themeColor }} />
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </React.Fragment>
+                      );
+                    })}
+                    {/* the company row CLOSES the table, the way a grand total does */}
+                    <tr style={{ backgroundColor: themeColor }}>
+                      <td className={`${tdCls} text-center text-white`}>-</td>
+                      <td className={`${tdCls} font-bold text-white`}>
+                        Grand Total (all branches)
+                      </td>
+                      {SL_METRICS.map((mt) => (
+                        <td key={mt.k}
+                          className={`${tdCls} text-center font-bold text-white tabular-nums`}
+                          title="Average of every branch in the grid">
+                          {slPctRollup(mt.k, slAllKeys(), slPctOverall[mt.k]) || '-'}
+                        </td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* ---- 3. the two rows that are TYPED, not counted --------- */}
+              <div>
+                <p className="mb-1 text-[11px] font-bold text-gray-800">
+                  FTR / FVR actuals (All Branches)
+                  <span className="ml-2 font-normal text-gray-400">
+                    nothing uploaded can produce these — the report prints what you enter
+                  </span>
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border-collapse min-w-[1120px]">
+                    <thead>
+                      <tr>
+                        <th className={thC} style={{ minWidth: 190, textAlign: 'left' }}>Contents</th>
+                        {slManualPeriods.map((pr) => (
+                          <th key={pr} className={pr === activeMonth ? thCAct : thC}
+                            style={{ width: 66 }}>
+                            {pr.startsWith('FY')
+                              ? `Cumm ${fyLabel(parseInt(pr.slice(2), 10))}`
+                              : monthLabel(pr)}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {SL_MANUAL.map((mt, i) => (
+                        <tr key={mt.k}
+                          style={{ backgroundColor: i ? 'var(--aop-alt)' : 'var(--aop-row)' }}>
+                          <td className={`${tdC} font-semibold text-gray-900 whitespace-nowrap`}>
+                            {mt.t}
+                          </td>
+                          {slManualPeriods.map((pr) => (
+                            <td key={pr} className={pr === activeMonth ? tdCAct : tdC}>
+                              <input type="text" inputMode="decimal"
+                                value={slManual[mt.k]?.[pr] ?? ''}
+                                onChange={(e) => setSlManualCell(mt.k, pr, e.target.value)}
+                                disabled={readOnly}
+                                title={pr.startsWith('FY')
+                                  ? `Cumulative FY ${fyLabel(parseInt(pr.slice(2), 10))}`
+                                  : monthLabel(pr)}
+                                className={`${pr === activeMonth ? cellInputAct : cellInput} text-center`}
+                                style={{ '--tw-ring-color': themeColor }} />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-gray-500">
+                Productivity is a <b>ratio</b> (1.3 = 1.3 calls per person per day); every
+                other figure here is a <b>percentage</b> (85 = 85%). An empty FTR / FVR cell
+                shows a dash on the report — which is not the same statement as 0%.
+              </p>
+              {/* ---- 4. the SE headcount: the productivity denominator -----
+                   Last, and MH beside KA rather than one long list: the two
+                   regions are independent establishments, so side by side halves
+                   the scrolling and lets them be compared at a glance — the same
+                   shape the CDI Target Master uses. */}
+              <div>
+                <p className="mb-1 text-[11px] font-bold text-gray-800">
+                  SE Headcount per branch
+                  <span className="ml-2 font-normal text-gray-400">
+                    productivity = closures ÷ (headcount × working days) — the engineers
+                    the branch employs, not only those who closed something
+                  </span>
+                </p>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  {['MH', 'KA'].map((rg) => {
+                    const list = slSe.filter((r) => (r.region || 'MH') === rg);
+                    if (!list.length) return null;
+                    const tot = list.reduce(
+                      (a, r) => a + (parseInt(r.se_count, 10) || 0), 0);
+                    return (
+                      <div key={rg} className="overflow-x-auto self-start">
+                        <table className="w-full text-xs border-collapse min-w-[330px]">
+                          <thead>
+                            <tr>
+                              <th className={thCls} style={{ width: 46 }}>Sr.</th>
+                              <th className={thCls} style={{ textAlign: 'left' }}>Branch ({rg})</th>
+                              <th className={thCls} style={{ width: 110 }}>SE Count</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr style={{ backgroundColor: 'var(--aop-sub)' }}>
+                              <td className={`${tdCls} text-center text-gray-500`}>-</td>
+                              <td className={`${tdCls} font-bold text-gray-900`}>
+                                {rg} — total
+                              </td>
+                              <td className={`${tdCls} text-center font-bold text-gray-900 tabular-nums`}>
+                                {dash(tot)}
+                              </td>
+                            </tr>
+                            {list.map((r, i) => {
+                              const idx = slSe.indexOf(r);
+                              return (
+                                <tr key={r.key} className="border-b border-gray-100 hover:bg-gray-50/60">
+                                  <td className={`${tdCls} text-center text-gray-500`}>{i + 1}</td>
+                                  <td className={`${tdCls} text-gray-700 whitespace-nowrap`}>
+                                    {r.key}_{r.name}
+                                  </td>
+                                  <td className={tdCls}>
+                                    <input type="text" inputMode="numeric"
+                                      value={r.se_count ?? ''}
+                                      onChange={(e) => setSlSeCell(idx, e.target.value)}
+                                      disabled={readOnly}
+                                      title={`Service engineers employed at ${r.key}_${r.name}`}
+                                      className={`${cellInput} text-center`}
+                                      style={{ '--tw-ring-color': themeColor }} />
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-1.5 text-[11px] text-gray-500">
+                  A branch left blank has no headcount on record, and the report shows a
+                  dash for its productivity rather than dividing by a guess.
+                </p>
+              </div>
+
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ================= AMC & BANDHAN AOP ================= */}
+      {tab === 'amctargets' && (
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="px-3 py-2 border-b border-gray-100 flex flex-wrap items-center gap-1.5">
+            <select value={fy} onChange={(e) => setFy(parseInt(e.target.value, 10))}
+              title="Financial Year (Apr–Mar)"
+              className={inputCls} style={{ '--tw-ring-color': themeColor, width: 170 }}>
+              {fyChoices.sort((a, b) => a - b).map((y) => (
+                <option key={y} value={y}>FY {fyLabel(y)} (Apr–Mar)</option>
+              ))}
+            </select>
+            {readOnly ? <span className={`${roBadge} ml-auto`}>View only</span> : (
+              <div className="ml-auto flex items-center gap-1.5">
+                <button onClick={saveAmcTargets} disabled={savingAmc || loadingAmc}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white rounded-md hover:opacity-90 disabled:opacity-50"
+                  style={{ backgroundColor: themeColor }}>
+                  <CheckIcon className="h-3.5 w-3.5" /> {savingAmc ? 'Saving…' : `Save${dirtyBadge(amcDirty)}`}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {loadingAmc ? (
+            <div className="h-72 flex flex-col items-center justify-center gap-2 text-gray-400">
+              <ArrowPathIcon className="h-7 w-7 animate-spin" />
+              <p className="text-sm">Loading AMC &amp; Bandhan AOP…</p>
+            </div>
+          ) : (
+            <div className="p-3">
+              {/* Short by request. The full reasoning — what D/BAMC counts, and why
+                  a counted closed year understates — is in the block comments on
+                  PmsAmcTarget and _annual_amc_bandhan_data. */}
+
+              {/* MH left, KA right — the same side-by-side the CDI tab uses, so
+                  the two regions can be compared without scrolling. */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {['MH', 'KA'].map((rg) => {
+                  const list = amcRows.filter((r) => (r.region || 'MH') === rg);
+                  if (!list.length) return null;
+                  // an empty box contributes nothing: these are the figures
+                  // the business has entered, and the report sums them the same
+                  // way, so this total always matches the sheet
+                  const sum = (f) => list.reduce((n, r) => {
+                    const v = parseInt(r[f], 10);
+                    return Number.isFinite(v) ? n + v : n;
+                  }, 0);
+                  return (
+                    <div key={rg} className="overflow-x-auto self-start">
+                      <table className="w-full text-xs border-collapse min-w-[330px]">
+                        <thead>
+                          <tr>
+                            {/* px-1 rather than the shared px-2: 'Sr. No.' needs
+                                its width from the text, not from padding */}
+                            <th className="px-1 py-1.5 text-center text-[11px] font-semibold text-black uppercase tracking-wide whitespace-nowrap bg-gray-50 border border-gray-400"
+                              style={{ width: 50 }}>Sr. No.</th>
+                            <th className={thCls}>Branch ({rg})</th>
+                            <th className={thCls} style={{ width: 72 }}
+                              title="Last year's actual. Counted already — type only to override it.">
+                              F{String(fy).slice(-2)} ACT
+                              <span className="block font-normal normal-case tracking-normal text-[9px] text-gray-500">
+                                override
+                              </span>
+                            </th>
+                            <th className={thCls} style={{ width: 72 }}
+                              title="This year's AOP target, in D/BAMC numbers.">
+                              F{String(fy + 1).slice(-2)} AOP
+                              <span className="block font-normal normal-case tracking-normal text-[9px] text-gray-500">
+                                target
+                              </span>
+                            </th>
+                            <th className={thCls} style={{ width: 68 }}
+                              title={`Best single month reached up to FY ${fyLabel(fy)}. Raised automatically; type to re-seed.`}>
+                              BEST (M)
+                              <span className="block font-normal normal-case tracking-normal text-[9px] text-gray-500">
+                                till FY {String(fy + 1).slice(-2)}
+                              </span>
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {list.map((r, i) => {
+                            // The setter needs the row's place in amcRows; the
+                            // Sr. No. counts within this region's own table.
+                            const idx = amcRows.indexOf(r);
+                            return (
+                              <tr key={r.key} className="border-b border-gray-100 hover:bg-gray-50/60">
+                                <td className="px-1 py-1 border border-gray-400 text-center text-gray-500">{i + 1}</td>
+                                {/* no truncation: this is the flexible column and
+                                    has the room, so the full name shows */}
+                                <td className={`${tdCls} text-gray-700 whitespace-nowrap`}>
+                                  {r.key}_{r.name}
+                                </td>
+                                {/* An empty box means NOT SET: the report prints a
+                                    dash for it, never a figure of its own. */}
+                                <td className={tdCls}>
+                                  <input type="text" inputMode="numeric" value={r.prior_nos ?? ''}
+                                    onChange={(e) => setAmcCell(idx, 'prior_nos', e.target.value)}
+                                    disabled={readOnly} placeholder="—"
+                                    title={r.prior_by
+                                      ? `Set by ${r.prior_by}${r.prior_at ? ' on ' + r.prior_at.slice(0, 10) : ''}`
+                                      : 'Not set — the report shows a dash for this branch.'}
+                                    className={`${cellInput} text-center`}
+                                    style={{ '--tw-ring-color': themeColor }} />
+                                </td>
+                                <td className={tdCls}>
+                                  <input type="text" inputMode="numeric" value={r.proj_nos ?? ''}
+                                    onChange={(e) => setAmcCell(idx, 'proj_nos', e.target.value)}
+                                    disabled={readOnly} placeholder="-"
+                                    className={`${cellInput} text-center font-semibold`}
+                                    style={{ '--tw-ring-color': themeColor }} />
+                                </td>
+                                {/* the mark the report has already reached is the
+                                    placeholder; typing re-seeds it from there */}
+                                <td className={tdCls}>
+                                  <input type="text" inputMode="numeric" value={r.best_nos ?? ''}
+                                    onChange={(e) => setAmcCell(idx, 'best_nos', e.target.value)}
+                                    disabled={readOnly} placeholder="-"
+                                    title={r.best_month
+                                      ? `Reached in ${r.best_month}` : 'Not reached yet'}
+                                    className={`${cellInput} text-center`}
+                                    style={{ '--tw-ring-color': themeColor }} />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {/* The region total is a SUM, shown not typed: the
+                              report adds its branches up the same way. */}
+                          <tr className="bg-gray-100 font-bold">
+                            <td className="px-1 py-1 border border-gray-400 text-center text-gray-500">-</td>
+                            <td className={`${tdCls} text-gray-900`}>{rg} TOTAL</td>
+                            <td className={`${tdCls} text-center text-gray-900`}>
+                              {sum('prior_nos') || '—'}
+                            </td>
+                            <td className={`${tdCls} text-center text-gray-900`}>
+                              {sum('proj_nos') || '—'}
+                            </td>
+                            {/* no total for the mark: the peaks fall in different
+                                months, so adding them would invent a month */}
+                            <td className={`${tdCls} text-center text-gray-400`}>-</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* KCGL TOTAL — the two regions on ONE line, spanning both tables
+                  so it reads as their sum and not as a third region. The report
+                  closes its branch block with the same row. The number columns
+                  keep their widths, so they land under the KA table's own. */}
+              {amcRows.length > 0 && (
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full text-xs border-collapse min-w-[330px]">
+                    <tbody>
+                      <tr className="font-bold text-white" style={{ backgroundColor: themeColor }}>
+                        <td className="px-1 py-1 border border-gray-400 text-center"
+                          style={{ width: 50 }}>-</td>
+                        <td className={tdCls}>KCGL TOTAL (MH + KA)</td>
+                        <td className={`${tdCls} text-center`} style={{ width: 72 }}>
+                          {amcTotal('prior_nos') || '—'}
+                        </td>
+                        <td className={`${tdCls} text-center`} style={{ width: 72 }}>
+                          {amcTotal('proj_nos') || '—'}
+                        </td>
+                        {/* no total for the mark: the peaks fall in different
+                            months, so adding them would invent a month */}
+                        <td className={`${tdCls} text-center text-white/60`}
+                          style={{ width: 68 }}>-</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* ===== AMC REPORT AOP — the Annual Reports' AMC sheet =====
+                  Its rows are AGREEMENT CATEGORIES, not branches, so this cannot
+                  be derived from the tables above: KALA AMC and KOEL Corporate
+                  AMC are not any branch's D/BAMC target, and the Bandhan MH /
+                  KA split is a different cut of the same year.
+
+                  Halved side by side, the same way the branch tables above are,
+                  so eight short rows do not run down the page on their own. The
+                  split falls where the sheet's own meaning changes: the four
+                  SALES rows on the left, then Corporate AMC, the expiry and
+                  renewal counts and the Live total on the right. Sr. No. keeps
+                  counting 1..8 across both, so it stays the sheet's row order. */}
+              <div className="mt-4 pt-3 border-t border-gray-200">
+                <div className="flex flex-wrap items-baseline gap-x-2 mb-1.5">
+                  <p className="text-xs font-bold text-gray-900">AMC Report AOP</p>
+                  <p className="text-[11px] text-gray-500">
+                    the AOP column of the <b>Annual Reports → AMC</b> sheet
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  {[[0, 4], [4, 8]].map(([from, to]) => (
+                    <div key={from} className="overflow-x-auto self-start">
+                      <table className="w-full text-xs border-collapse min-w-[300px]">
+                        <thead>
+                          <tr>
+                            <th className="px-1 py-1.5 text-center text-[11px] font-semibold text-black uppercase tracking-wide whitespace-nowrap bg-gray-50 border border-gray-400"
+                              style={{ width: 50 }}>Sr. No.</th>
+                            <th className={thCls}>AMC sheet row</th>
+                            <th className={thCls} style={{ width: 92 }}
+                              title={'This year\u2019s AOP target for the row, in numbers.'
+                                + ' The box\u2019s placeholder is what the SAME row counted'
+                                + ' over the PREVIOUS financial year \u2014 a hint for setting'
+                                + ' the target, never a figure the sheet prints.'}>
+                              F{String(fy + 1).slice(-2)} AOP
+                              <span className="block font-normal normal-case tracking-normal text-[9px] text-gray-500">
+                                target
+                              </span>
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {amcCats.slice(from, to).map((r, j) => {
+                            // The setter needs the row's place in amcCats; the
+                            // Sr. No. is that same place, so both come from it.
+                            const idx = from + j;
+                            return (
+                              <tr key={r.key} className="border-b border-gray-100 hover:bg-gray-50/60">
+                                <td className="px-1 py-1 border border-gray-400 text-center text-gray-500">
+                                  {idx + 1}
+                                </td>
+                                <td className={`${tdCls} text-gray-700 whitespace-nowrap`}>
+                                  {r.name}
+                                </td>
+                                <td className={tdCls}>
+                                  <input type="text" inputMode="numeric" value={r.aop_nos ?? ''}
+                                    onChange={(e) => setAmcCatCell(idx, e.target.value)}
+                                    disabled={readOnly}
+                                    placeholder={r.counted_prior ? String(r.counted_prior) : '-'}
+                                    title={r.aop_by
+                                      ? `Set by ${r.aop_by} · FY ${fyLabel(fy - 1)} counted:`
+                                        + ` ${r.counted_prior ?? 0}`
+                                      : `Not set. FY ${fyLabel(fy - 1)} counted: ${r.counted_prior ?? 0}`}
+                                    className={`${cellInput} text-center font-semibold`}
+                                    style={{ '--tw-ring-color': themeColor }} />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ===== CITY MASTER — which branch each quote city belongs to =====
+                  The four Bandhan quote files are KOEL's: their branch column
+                  knows KOEL's structure, not ours, so the Projection sheet
+                  places a paid quote by the customer's CITY instead. Only the
+                  business knows whose territory a city is, so it is picked here
+                  and never derived. The CITY LIST comes from the files, so the
+                  job is only ever 'choose a branch', never 'remember the cities'.
+
+                  Not tied to the financial year - a territory is a territory -
+                  so it has its own Save rather than riding on the AOP one. */}
+              <div className="mt-4 pt-3 border-t border-gray-200">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 mb-2">
+                  <p className="text-xs font-bold text-gray-900">City Master</p>
+                  <p className="text-[11px] text-gray-500 mr-auto">
+                    which branch each city in the Bandhan quote files belongs to
+                  </p>
+                  {!readOnly && (
+                    <button onClick={saveCities} disabled={savingCity || loadingCity}
+                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white rounded-md hover:opacity-90 disabled:opacity-50"
+                      style={{ backgroundColor: themeColor }}>
+                      <CheckIcon className="h-3.5 w-3.5" />
+                      {savingCity ? 'Saving…' : `Save${dirtyBadge(cityDirty)}`}
+                    </button>
+                  )}
+                </div>
+
+                {cityUnmapped > 0 && (
+                  <p className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900">
+                    <b>{cityUnmapped}</b> cit{cityUnmapped === 1 ? 'y is' : 'ies are'} not
+                    mapped yet, carrying <b>{cityUnmappedPaid}</b> paid quote
+                    {cityUnmappedPaid === 1 ? '' : 's'}. Those sit on the report's
+                    <b> Unmapped Branch</b> row until a branch is picked here.
+                  </p>
+                )}
+
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <input value={cityQ} onChange={(e) => setCityQ(e.target.value)}
+                    placeholder="Search a city"
+                    className={inputCls} style={{ '--tw-ring-color': themeColor, width: 200 }} />
+                  <label className="flex items-center gap-1.5 text-[11px] text-gray-700 cursor-pointer">
+                    <input type="checkbox" checked={cityOnlyOpen}
+                      onChange={(e) => setCityOnlyOpen(e.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-gray-300"
+                      style={{ accentColor: themeColor }} />
+                    Show only the ones still to map
+                  </label>
+                  <span className="text-[11px] text-gray-400">
+                    {cityShown.length} of {cityRows.length} shown
+                  </span>
+                </div>
+
+                {loadingCity ? (
+                  <div className="h-32 flex flex-col items-center justify-center gap-2 text-gray-400">
+                    <ArrowPathIcon className="h-6 w-6 animate-spin" />
+                    <p className="text-xs">Reading the cities out of the quote files…</p>
+                  </div>
+                ) : cityRows.length === 0 ? (
+                  <p className="text-[11px] text-gray-500">
+                    No cities yet — upload the Bandhan quote files on the Data Upload page
+                    and they will appear here.
+                  </p>
+                ) : cityShown.length === 0 ? (
+                  <p className="text-[11px] text-gray-500">
+                    Nothing to show — every city is mapped. Untick the filter above to see
+                    them all.
+                  </p>
+                ) : (
+                  /* Two half-tables side by side, rows split left/right — the same
+                     shape the SR Type master uses, so the two read as one kind of
+                     job: a list that came out of the files, and one thing to pick
+                     for each row. Sr. No. counts straight through both halves. */
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-3">
+                    {[cityShown.slice(0, Math.ceil(cityShown.length / 2)),
+                      cityShown.slice(Math.ceil(cityShown.length / 2))].map((half, hIdx) => {
+                      const offset = hIdx === 0 ? 0 : Math.ceil(cityShown.length / 2);
+                      if (!half.length) return null;
+                      return (
+                        <div key={hIdx} className="overflow-x-auto self-start">
+                          <table className="w-full text-xs border-collapse min-w-[380px]">
+                            <thead>
+                              <tr>
+                                <th className={thCls} style={{ width: 55 }}>Sr. No.</th>
+                                <th className={thCls}>City (from the quote files)</th>
+                                <th className={thCls} style={{ width: 190 }}>Branch</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {half.map((r, i) => {
+                                const idx = offset + i;
+                                return (
+                                  <tr key={r.key}
+                                    className={`border-b border-gray-100 hover:bg-gray-50/60 ${
+                                      r.branch_id ? '' : 'bg-amber-50/40'}`}>
+                                    <td className={`${tdCls} text-center text-gray-500`}>
+                                      {idx + 1}
+                                    </td>
+                                    {/* The city comes from the quote files — plain
+                                        text, not editable. Its quote counts ride in
+                                        the hover rather than in columns of their
+                                        own: they say how much a wrong branch would
+                                        cost, which is worth knowing but is not the
+                                        thing being decided. */}
+                                    <td className={`${tdCls} text-gray-700`}
+                                      title={`${r.paid || 0} paid quote${r.paid === 1 ? '' : 's'}`
+                                        + ` · ${r.rows || 0} row${r.rows === 1 ? '' : 's'} in all`
+                                        + (r.by ? ` · mapped by ${r.by}` : '')}>
+                                      {r.name}
+                                      {r.paid > 0 && (
+                                        <span className="ml-1.5 text-[9.5px] text-gray-400 tabular-nums">
+                                          {r.paid}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className={tdCls}>
+                                      <select value={r.branch_id || ''}
+                                        onChange={(e) => setCityBranch(r.key, e.target.value)}
+                                        disabled={readOnly}
+                                        className={inputCls}
+                                        style={{ '--tw-ring-color': themeColor }}>
+                                        <option value="">— select branch —</option>
+                                        {cityBranches.map((bb) => (
+                                          <option key={bb.key} value={bb.key}>
+                                            {bb.key}_{bb.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <p className="mt-1.5 text-[11px] text-gray-600">
+                  The list comes from the files — nothing is mapped in code. Case and
+                  punctuation do not matter (<b>Ch. Sambhaji Nagar</b> and
+                  <b> CH SAMBHAJINAGAR</b> are one city), but a genuinely different
+                  spelling is its own row and needs its own branch. The grey number
+                  beside a city is its paid quotes. A city left unmapped is never
+                  guessed onto a nearby branch — its quotes are still counted, on the
+                  report&apos;s Unmapped Branch row.
+                </p>
+              </div>
+
             </div>
           )}
         </div>
@@ -1987,6 +3557,80 @@ const AOPMaster = () => {
       )}
 
       {/* ================= HEAD MASTER MODAL ================= */}
+      {/* ====== SAME SR TYPE IN ANOTHER MASTER — the post-save offer ====== */}
+      {crossOffer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-lg shadow-2xl max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="px-4 py-2.5 border-b border-gray-200 flex justify-between items-center">
+              <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+                <TagIcon className="h-4 w-4" style={{ color: themeColor }} />
+                Same SR Type in another master
+              </h2>
+              <button onClick={() => setCrossOffer(null)} className="p-1 rounded hover:bg-gray-100">
+                <XMarkIcon className="h-4 w-4 text-gray-500" />
+              </button>
+            </div>
+            <div className="p-4 flex-1 overflow-y-auto">
+              <p className="text-[11px] text-gray-500 mb-3">
+                Saved. The SR Type(s) below are <b>also in</b> the master(s) listed, where they
+                carry a different head today. Tick the ones that should take the same head there
+                — leave a row unticked to keep it as it is: each report is allowed its own
+                grouping.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr>
+                      <th className={thCls} style={{ width: 40 }}>
+                        <input type="checkbox"
+                          checked={crossOffer.rows.every((r) => r.pick)}
+                          onChange={(e) => setCrossOffer((p) => (p ? {
+                            ...p, rows: p.rows.map((r) => ({ ...r, pick: e.target.checked })),
+                          } : p))} />
+                      </th>
+                      <th className={thCls}>SR Type</th>
+                      <th className={thCls} style={{ width: 150 }}>Head set here</th>
+                      <th className={thCls}>Also in</th>
+                      <th className={thCls} style={{ width: 150 }}>Head there now</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {crossOffer.rows.map((r, i) => (
+                      <tr key={`${r.master}|${r.sr_type}`} className="border-b border-gray-100 hover:bg-gray-50/60">
+                        <td className={`${tdCls} text-center`}>
+                          <input type="checkbox" checked={r.pick}
+                            onChange={(e) => setCrossPick(i, e.target.checked)} />
+                        </td>
+                        <td className={`${tdCls} text-gray-800 font-medium`}>{r.sr_type}</td>
+                        <td className={`${tdCls} font-semibold`} style={{ color: themeColor }}>
+                          {r.head || <span className="text-gray-400 font-normal">— none —</span>}
+                        </td>
+                        <td className={`${tdCls} text-gray-700`}>{r.label}</td>
+                        <td className={`${tdCls} text-gray-500`}>
+                          {r.current_head || <span className="text-gray-400">— none —</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-end gap-2">
+              <button onClick={() => setCrossOffer(null)}
+                className="px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
+                Not now
+              </button>
+              <button onClick={applyCrossUpdate} disabled={crossBusy}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white rounded-md hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: themeColor }}>
+                <CheckIcon className="h-3.5 w-3.5" />
+                {crossBusy ? 'Updating…' : `Update selected (${crossOffer.rows.filter((r) => r.pick).length})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showHeadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-lg shadow-2xl max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col">
@@ -2000,8 +3644,10 @@ const AOPMaster = () => {
             </div>
             <div className="p-4 flex-1 overflow-y-auto">
               <p className="text-[11px] text-gray-500 mb-3">
-                These heads appear in the Head dropdown of the SR Type mapping. A head
-                that is in use by SR types cannot be removed.
+                One <b>shared</b> list — these heads are the Head dropdown of
+                <b> all four</b> SR Type masters (Sales and Labour, MaxTTR, EFSR,
+                Service Load). Add or remove one here and every one of them follows.
+                A head still mapped to an SR type in any of the four cannot be removed.
               </p>
               <div className="space-y-1.5">
                 {heads.map((h) => (
@@ -2099,8 +3745,11 @@ const AOPMaster = () => {
             </div>
             <div className="p-4 flex-1 overflow-y-auto">
               <p className="text-[11px] text-gray-500 mb-3">
-                These heads are the <b>SR Type</b> columns of the Employee Productivity report,
-                in this order. A head already mapped to an SR type cannot be removed.
+                The heads mapped here are the <b>SR Type</b> columns of the Employee Productivity report, in this order.
+                The list itself is <b>shared</b> with the other three SR Type masters —
+                add or remove one and they all follow; a head no SR Type here maps to is
+                simply not a column of this report. A head still mapped anywhere in the
+                four cannot be removed.
               </p>
               <div className="space-y-1.5">
                 {mxHeads.map((h) => (
@@ -2133,6 +3782,57 @@ const AOPMaster = () => {
           </div>
         </div>
       )}
+      {/* ================= SERVICE LOAD HEAD MASTER MODAL ================= */}
+      {showSlHeadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-lg shadow-2xl max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="px-4 py-2.5 border-b border-gray-200 flex justify-between items-center">
+              <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+                <TagIcon className="h-4 w-4" style={{ color: themeColor }} /> Head Master (Service Load)
+              </h2>
+              <button onClick={() => setShowSlHeadModal(false)} className="p-1 rounded hover:bg-gray-100">
+                <XMarkIcon className="h-4 w-4 text-gray-500" />
+              </button>
+            </div>
+            <div className="p-4 flex-1 overflow-y-auto">
+              <p className="text-[11px] text-gray-500 mb-3">
+                The heads mapped here are the <b>breakdown rows</b> of the Service Load and Response sheet, in this order.
+                The list itself is <b>shared</b> with the other three SR Type masters —
+                add or remove one and they all follow; a head no SR Type here maps to is
+                simply not a column of this report. A head still mapped anywhere in the
+                four cannot be removed.
+              </p>
+              <div className="space-y-1.5">
+                {slHeads.map((h) => (
+                  <div key={h.id}
+                    className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50/60">
+                    <span className="text-xs font-medium text-gray-800">{h.name}</span>
+                    <button onClick={() => deleteSlHead(h)} title={`Remove “${h.name}”`}
+                      className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-600">
+                      <XMarkIcon className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+                {slHeads.length === 0 && (
+                  <p className="text-xs text-gray-400 text-center py-4">No heads yet.</p>
+                )}
+              </div>
+            </div>
+            <div className="px-4 py-3 border-t border-gray-200 flex items-center gap-2">
+              <input value={newSlHead} onChange={(e) => setNewSlHead(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') addSlHead(); }}
+                placeholder="New head name…"
+                className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-xs text-black focus:outline-none focus:ring-1"
+                style={{ '--tw-ring-color': themeColor }} />
+              <button onClick={addSlHead}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white rounded-md hover:opacity-90"
+                style={{ backgroundColor: themeColor }}>
+                <PlusIcon className="h-3.5 w-3.5" /> Add Head
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* ================= EFSR HEAD MASTER MODAL ================= */}
       {showEfHeadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -2147,8 +3847,11 @@ const AOPMaster = () => {
             </div>
             <div className="p-4 flex-1 overflow-y-auto">
               <p className="text-[11px] text-gray-500 mb-3">
-                These heads are the <b>Allocate SR Type</b> columns of the Employee Productivity report,
-                in this order. A head already mapped to an SR type cannot be removed.
+                The heads mapped here are the <b>Allocate SR Type</b> columns of the Employee Productivity report, in this order.
+                The list itself is <b>shared</b> with the other three SR Type masters —
+                add or remove one and they all follow; a head no SR Type here maps to is
+                simply not a column of this report. A head still mapped anywhere in the
+                four cannot be removed.
               </p>
               <div className="space-y-1.5">
                 {efHeads.map((h) => (

@@ -1,0 +1,1589 @@
+% ============================================================================
+%  KCGL ERP - Development Documentation
+%  Module: PMS (Performance Management System)
+%  Template: same layout as the MOM Tracking document (MOM.pdf)
+%  Compile with pdfLaTeX on Overleaf. No external assets required - screenshots
+%  are optional and drop into ./screens/ (see \screenshot below).
+% ============================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[a4paper,margin=1in,headheight=15pt,headsep=18pt]{geometry}
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{amssymb}
+\usepackage{caption}
+\usepackage[hidelinks]{hyperref}
+
+% ---- page furniture --------------------------------------------------------
+\definecolor{kcglblue}{HTML}{2F3192}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Kala Care ERP}
+\fancyhead[R]{\small PMS -- Performance Management System}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\fancypagestyle{plain}{%
+  \fancyhf{}\fancyfoot[C]{\thepage}\renewcommand{\headrulewidth}{0pt}}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+
+\captionsetup{font=small,labelfont=bf}
+
+% ---- helpers ---------------------------------------------------------------
+% Requirement list: R1., R2., ... with a hanging indent (same as MOM.pdf)
+\newlist{reqlist}{enumerate}{1}
+\setlist[reqlist]{label=\textbf{R\arabic*.},leftmargin=3.1em,itemsep=6pt,
+                  topsep=6pt,labelsep=0.6em}
+
+% Bulleted lists
+\setlist[itemize]{leftmargin=1.6em,itemsep=3pt,topsep=4pt}
+
+% A screenshot that degrades to a framed placeholder when the image is absent,
+% so the document always compiles. Drop the PNG into ./screens/ to fill it in.
+\newcommand{\screenshot}[2]{%
+  \begin{figure}[H]\centering
+  \IfFileExists{#1}%
+    {\includegraphics[width=\linewidth,keepaspectratio]{#1}}%
+    {\setlength{\fboxsep}{0pt}%
+     \fbox{\parbox[c][42mm][c]{0.98\linewidth}{\centering\small\itshape
+       Screenshot placeholder\\[2pt]\normalfont\ttfamily #1}}}%
+  \caption{#2}\end{figure}}
+
+% Section-opening helpers, worded exactly like the MOM document
+\newcommand{\covers}[1]{\textit{Covers requirements #1.}\par}
+\newcommand{\purpose}[1]{\textbf{Purpose.} #1\par}
+\newcommand{\devproc}{\textbf{Development process.}\par}
+\newcommand{\handle}[1]{\textbf{How to handle.} #1\par}
+\newcommand{\builtfrom}[1]{\textbf{Built from.} #1\par}
+
+% Quoted text (avoids raw backtick quotes in the source)
+
+\newcommand{\qt}[1]{\textquotedblleft #1\textquotedblright}
+
+% Shorthands used throughout the tables
+\newcommand{\file}[1]{\texttt{\small #1}}
+\newcommand{\col}[1]{\textsc{\small #1}}
+
+\begin{document}
+
+% ============================== TITLE =======================================
+\begin{center}
+  {\LARGE\bfseries PMS -- Performance Management System}\\[10pt]
+  {\large Development Documentation, Kala Care ERP System}\\[14pt]
+  {\normalsize Prepared by: Vishal Chavan \& Nikhil Reddy \quad$|$\quad Date: August 2026}
+\end{center}
+
+\vspace{10pt}
+
+% ============================== 1. INTRO ====================================
+\section{Introduction}
+
+This document describes the \textbf{PMS (Performance Management System)} module of the
+Kala Care ERP. PMS is the module that turns the KOEL and ERP data exports into the
+management sheets the business actually reviews: branch sales against the annual
+operating plan (AOP), service-engineer productivity, SR allocation and closure,
+the training master, and the yearly reports -- Service Penetration, AMC \& Bandhan
+Projection, Customer Delight Index and Service Load \& Response.
+
+Everything PMS prints is either \emph{counted} from an uploaded file or \emph{asserted}
+in the AOP \& Master page. The module never invents a figure: a target that nobody has
+entered prints a dash, and a value that no upload can produce (last year's closed
+actual, FTR / FVR) is typed by a person and marked as such. Where a file's own column
+disagrees with a value the module could recompute, the file's column wins and the
+reason is recorded.
+
+The module is organised into the following pages:
+\begin{itemize}
+  \item \textbf{AOP \& Master} -- every target and every mapping table PMS reads (9 tabs).
+  \item \textbf{Sales \& Labour Report} -- Spare and Labour sale against the monthly AOP.
+  \item \textbf{Employee Productivity} -- service-engineer-wise SR closure, leads and CDI.
+  \item \textbf{SR Allocation Report} -- SRs allocated vs closed, engineer and date wise.
+  \item \textbf{Training Report} -- the engineers' skill / training master.
+  \item \textbf{Annual Reports} -- one page holding the four yearly sheets.
+\end{itemize}
+
+The document is organised the same way the MOM Tracking document is: first the roles
+and the requirements received from the client, then the data model and the source
+files, then the development explained \textbf{page by page and report by report} --
+each section naming the source file, the exact columns that report reads, the files in
+the codebase responsible for it, and the screenshot of the delivered screen.
+
+% ============================== 2. ROLES ====================================
+\section{Roles \& Access}
+
+PMS is not a role, it is a \emph{right}. Any user can be given \qt{PMS Access} from
+Profile $\rightarrow$ Edit Employee; the Master Admin always has it. The AOP \& Master
+page is narrowed further, \textbf{per tab}, so a user can be given (say) only the CDI
+Target tab, and only in read-only mode.
+
+\begin{table}[H]\centering\small
+\begin{tabularx}{\linewidth}{@{}p{3.4cm}X@{}}
+\toprule
+\textbf{Role / Right} & \textbf{Capabilities} \\
+\midrule
+Master Admin &
+Full access to every PMS page and every AOP \& Master tab; uploads and clears data;
+manages the SE UID Master on the Profile page; grants PMS rights to other users. \\
+\addlinespace
+PMS Access (any role) &
+Opens the PMS pages granted to them -- Sales \& Labour, Employee Productivity,
+SR Allocation, Training Report, Annual Reports. AOP \& Master opens only if at least
+one tab is granted. \\
+\addlinespace
+AOP right: \textit{view} &
+The granted tabs open read-only: the save / sync / reset / master buttons are hidden
+and every cell is locked. Enforced again on the server, per tab. \\
+\addlinespace
+AOP right: \textit{edit} &
+The granted tabs can be edited and saved. \\
+\addlinespace
+AOP rights admins &
+The user ids listed in \file{VITE\_PMS\_AOP\_ADMIN\_IDS} /
+\file{AOP\_RIGHTS\_ADMIN\_IDS} always hold every tab at \textit{edit}. \\
+\addlinespace
+Export &
+Excel export is available to the Master Admin always, and to other users when the
+\file{can\_export} permission is enabled on their account. \\
+\bottomrule
+\end{tabularx}
+\caption{Role- and right-based access for the PMS module}
+\end{table}
+
+The nine AOP \& Master tabs that rights are granted on are: \textit{Target Master},
+\textit{SR Type Master (Sales and Labour)}, \textit{SR Type Master (MaxTTR)},
+\textit{SR Type Master (EFSR)}, \textit{Lead Category Master}, \textit{CDI Target
+Master}, \textit{AMC \& Bandhan AOP}, \textit{SR Type Master (Service Load)} and
+\textit{Service Load AOP}. The same nine keys exist in three places and must stay in
+step: \file{client/src/utils/pagePermission.js} (\texttt{AOP\_TABS}),
+\file{server/app/controllers/user\_controller.py} (\texttt{AOP\_TAB\_KEYS}) and the
+\texttt{tab=} argument every AOP endpoint passes to \texttt{\_require\_aop} in
+\file{server/app/routes/pms\_routes.py}.
+
+% ============================== 3. REQUIREMENTS =============================
+\section{Client Requirements}
+
+The following requirements were received from the client and finalised for the PMS
+module. They are referenced by number in the page-wise sections that follow.
+
+\begin{reqlist}
+
+\item \textbf{Accumulating Spare / Labour upload.} Two Excel files feed the sales side --
+the \emph{Part Sale} (spares) file and the \emph{Labour Revenue} file. Rows accumulate
+across daily / weekly / monthly extracts, and a re-upload of the same line must never
+double-count: identity is \col{claim invoice number} plus the file's line discriminator
+(\col{part number} for spares, \col{sr number} + \col{labour part num} for labour). A
+changed line updates in place, an identical line is reported as a duplicate, and a row
+with no invoice number falls back to a full-content hash.
+
+\item \textbf{Flexible column matching.} Headers are matched on their alphanumeric
+skeleton, so \qt{Claim Invoice Date} and \qt{CLAIM  INVOICE DATE.} are one column. Only
+three columns are critical -- \col{branch id}, \col{claim invoice date} and
+\col{net taxable amount}; a file missing any of them is rejected with the missing names,
+and every unrecognised column is preserved rather than dropped.
+
+\item \textbf{Cancelled invoices.} An invoice can be cancelled from the preview. The row
+stays in the database as an audit trail but is excluded from every generated report, and
+can be restored.
+
+\item \textbf{AOP Target Master.} Branch-wise \emph{Spare} and \emph{Labour} targets for a
+whole financial year (April--March) on one grid, entered and displayed in Lakh and stored
+in rupees. The responsible person shown on the report is the branch's Branch Admin, and
+the branch list follows the ERP's own branch master.
+
+\item \textbf{Working-days calendar.} A month's target is spread over its \emph{working}
+days, never its calendar days: Sundays are off, and the actual holidays are ticked on a
+calendar. Maharashtra and Karnataka keep separate calendars, so a region's branches are
+measured on their own days. A month with nothing ticked falls back to a typed count, and
+that in turn to a universal per-calendar-month master.
+
+\item \textbf{Sales and Labour report for any period.} Month-to-date by default, and any
+week, month, quarter or year on the period picker. For every branch the report shows the
+period Target, the Daily Target, the sale on the last day, the prorated Target till date,
+the Achievement till date, the invoice count, \% Achieved, Short-Fall and the Balance for
+the month.
+
+\item \textbf{Independent as-on dates.} The Part Sale and the Labour files usually end on
+different dates. Each side must be measured against the targets up to \emph{its own} last
+data date, so a labour file that is a week behind does not read as a shortfall.
+
+\item \textbf{Breakdown tables.} The same period broken down Region-wise (with its AOP
+target), Segment-wise, Service-Report-Type-wise (through the SR Type Master) and
+Category-wise (spares only, with quantity and line items).
+
+\item \textbf{Branch-wise report.} One or more branches picked by hand, with Week-wise,
+Month-wise, Segment-wise, Service-Report-Type-wise and Category-wise detail computed from
+only those branches' rows.
+
+\item \textbf{Whole-year report.} FY, Quarterly and Month-wise target-vs-achievement for
+the full financial year, independent of the period picker, including the run-rate needed
+to close the year.
+
+\item \textbf{SR Type to Head masters.} The raw Service Report Types of the uploaded files
+are grouped into reporting heads. Four separate masters are needed because four files
+carry different vocabularies and two reports group the \emph{same} file differently --
+Sales and Labour, MaxTTR, EFSR and Service Load. Values are synced out of the uploaded
+data, mapped by hand, and an unmapped type must remain visible as an \qt{Unmapped} bucket
+rather than being silently merged.
+
+\item \textbf{SE UID Master.} The files identify a service engineer in two different ways
+-- by \col{se name} (MaxTTR, CDI) and by \col{service engineer uid} (LMS, EFSR). One
+master, maintained by hand or by Excel import on the Profile page, bridges the two,
+matching on the squashed upper-case name so spacing and case never split one engineer into
+two. It also holds the branch used to pin an engineer no file can place.
+
+\item \textbf{Employee Productivity report.} Per service engineer: SRs closed (split by SR
+Type head), working days, days present, productivity, CDI feedback, leads raised (split by
+product category) and the spare / labour conversion amounts -- rolled up by branch, branch
+group, region and overall.
+
+\item \textbf{Attendance on task end, not close.} Days present must count the days the
+engineer finished the job in the field (\col{sr task end date}), not the day the office
+closed the SR -- the latter lands late and in batches.
+
+\item \textbf{Lead attribution through the master only.} A lead counts for an engineer
+because its \col{service engineer uid} is that engineer's UID \emph{in the SE UID Master}.
+A UID no master row carries must be reported as an unlinked lead, not guessed.
+
+\item \textbf{SR Allocation report.} From the EFSR Report: SRs \emph{allocated} on
+\col{task assigned date} and SRs \emph{closed} on \col{task end date}, engineer wise, with
+the date columns bucketed by day, week or month, plus the branch-wise open SR load.
+
+\item \textbf{Training Report.} The KOEL Training Report export imported as a master --
+eight fixed columns and every other column dynamic -- searchable two ways: by employee
+(their skills and full record) and by skill (everyone who holds it).
+
+\item \textbf{Annual: Service Penetration.} How much of the installed base was touched by
+a closed service call -- IND and PG population from the asset master, unique assets with a
+closed SR from the MaxTTR file, and the penetration \%.
+
+\item \textbf{Annual: AMC and Bandhan Projection.} Per branch: last year's actual, this
+year's AOP projection and the best month (all typed), the live AMC population and the
+month's payments (both counted).
+
+\item \textbf{Annual: AMC monthly sheet.} The same AMC file read by agreement
+\emph{category} instead of by branch -- Bandhan (with its MH / KAR split), KALA AMC, KOEL
+Corporate AMC (cumulative), expiries, renewals and Live AMC -- one financial year wide,
+with the running month opened up into its weeks.
+
+\item \textbf{Annual: Customer Delight Index.} Promotor / Passive / Detractor feedback per
+branch, scored as (Promotor $-$ Detractor) $\div$ all $\times$ 100, against the CDI AOP
+target, with the two previous financial years as cumulative columns.
+
+\item \textbf{Annual: Service Load and Response.} SR load by type and by branch,
+productivity (calls per person per day), the 4-hour response and the 24 / 48-hour closure
+compliance, and the FTR / FVR figures -- as six tabs of one sheet.
+
+\item \textbf{Typed figures where nothing can be counted.} FTR \%, FVR \%, last year's
+closed actual and every AOP target are entered by a person in AOP and Master and printed
+exactly as entered. An unset period shows a dash, which is not the same statement as 0\%.
+
+\item \textbf{Excel export everywhere.} Every report exports to a formatted workbook that
+mirrors the screen -- the ERP blue band, the header row, region totals and the overall row
+-- respecting the \file{can\_export} permission. Dates export as real Excel dates so date
+filters keep working.
+
+\item \textbf{Per-user PMS rights.} PMS access is granted per user, and the AOP and Master
+page per tab (none / view / edit), enforced on both the screen and the server.
+
+\item \textbf{Performance over a remote database.} The database sits across the network,
+so every report aggregates \emph{in SQL} and returns a few thousand grouped records at
+most; results are cached against a data fingerprint and re-used until an upload changes
+it. The payloads stay raw per-day, so changing the period, the granularity or a filter
+re-aggregates in the browser without another round trip.
+
+\item \textbf{Branch identity discipline.} Branches are resolved by \col{branch id}, never
+by name -- files spell the same branch differently and the spelling changes between
+imports. A branch code no KALA master knows (another dealer's code, which the EFSR file
+carries on about 1\% of its rows) must fold into a single visible \qt{Unmapped Branch}
+bucket rather than growing a ghost branch row.
+
+\item \textbf{Consistent India-local timestamps.} Every stored timestamp is India local
+time, so a date reads the same for every user whatever the server or browser timezone.
+
+\end{reqlist}
+
+% ============================== 4. SOURCE FILES =============================
+\section{Source Files -- What Feeds PMS}
+
+PMS reads two kinds of input. The \emph{Sales} files are uploaded on the Sales and Labour
+page itself and the Training file on the Training Report page; every other file is
+uploaded on the ERP's \textbf{Import} page and is shared with the rest of the ERP.
+
+\begin{table}[H]\centering\small
+\begin{tabularx}{\linewidth}{@{}p{4.5cm}p{3.3cm}X@{}}
+\toprule
+\textbf{File} & \textbf{Uploaded on} & \textbf{Which PMS reports read it} \\
+\midrule
+Part Sale (spares) & Sales and Labour & Sales and Labour report, all views \\
+Labour Revenue & Sales and Labour & Sales and Labour report, all views \\
+Training Report & Training Report & Training Report (By Employee / By Skill) \\
+\addlinespace
+Response Time \& MaxTTR Details & Import page & Employee Productivity; SR Allocation (home
+branch); Service Penetration (serviced assets); Service Load and Response \\
+EFSR Report & Import page & SR Allocation; Employee Productivity (Allocate SR) \\
+LMS Data for ERP & Import page & Employee Productivity (leads and conversion amounts) \\
+CDI Detail Report & Import page & Employee Productivity (CDI); Annual CDI sheet \\
+Asset Detailed Report & Import page & Service Penetration (population) \\
+AMC Population Report & Import page & AMC and Bandhan Projection; AMC monthly sheet \\
+Anubandhan Plus / Anubandhan / BandhanPlus / Regular Bandhan quotes &
+Import page & AMC and Bandhan Projection (the month's payments) \\
+Open SR Load Report & Import page & SR Allocation (branch-wise open SR) \\
+\bottomrule
+\end{tabularx}
+\caption{The uploaded files behind the PMS reports}
+\end{table}
+
+Two rules apply to every file. Dates are read \emph{date-only} and never parsed
+day-first when the value is year-first, so \file{2026-07-01} can never become 7 January.
+Branch ids are normalised to the underscore form used across the ERP, so
+\file{420435-1}, \file{420435 1} and \file{420435\_1} are one branch.
+
+% ============================== 5. DATA MODEL ===============================
+\section{Data Model (Overview)}
+
+Every table below lives in \file{server/app/models/pms\_model.py}. The rule that shapes
+the whole model: \emph{counts} are stored per branch and rolled up, while
+\emph{percentages and ratios} need a target of their own at branch, region and company
+level, because a percentage cannot be summed.
+
+\begin{longtable}{@{}p{5.2cm}p{10.0cm}@{}}
+\caption{Key entities of the PMS module}\\
+\toprule
+\textbf{Table} & \textbf{Purpose} \\
+\midrule
+\endfirsthead
+\multicolumn{2}{@{}l}{\small\itshape Table \thetable{} -- continued}\\
+\toprule
+\textbf{Table} & \textbf{Purpose} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\file{pms\_sales\_records} & Every invoice line of the Part Sale and Labour files, with
+the dedupe key, the cancelled flag and the full standard columns as real columns. \\
+\file{pms\_upload\_batches} & One row per upload -- file name, total / inserted / updated
+/ duplicate / skipped rows, who and when. Shared with the Training import. \\
+\file{pms\_branch\_targets} & AOP Master Target tab: one row per (month, branch) with the
+Spare and Labour target, region and responsible person. \\
+\file{pms\_month\_settings} & A month's working days, per region, with a universal
+\file{ALL-MM} fallback row. \\
+\file{pms\_holidays} & One row per (date, region) -- the days that carry no target. \\
+\file{pms\_heads}, \file{pms\_sr\_type\_map} & SR Type to Head master for the Sales and
+Labour report. \\
+\file{pms\_maxttr\_heads}, \file{pms\_maxttr\_sr\_type\_map} & The same for the MaxTTR
+file (Employee Productivity). \\
+\file{pms\_efsr\_heads}, \file{pms\_efsr\_sr\_type\_map} & The same for the EFSR file
+(SR Allocation, Allocate SR). \\
+\file{pms\_service\_load\_heads}, \file{pms\_service\_load\_sr\_type\_map} & The same
+MaxTTR column grouped a second, different way for the Service Load sheet. \\
+\file{pms\_lead\_categories}, \file{pms\_lead\_raised\_for\_map} & Lead Raised For to
+product category -- the Product Wise Lead Count columns. \\
+\file{pms\_se\_uid\_master} & Service engineer NAME to UID (and an optional pinned
+branch); the bridge between the name-keyed and UID-keyed files. \\
+\file{pms\_cdi\_targets} & The CDI AOP \%, per (FY, scope, key) -- branch, region or
+overall. \\
+\file{pms\_amc\_targets} & Per (FY, branch): last year's actual, the year's projection and
+the best month -- all typed. \\
+\file{pms\_amc\_category\_targets} & The AOP of each row of the AMC monthly sheet, whose
+rows are agreement categories rather than branches. \\
+\file{pms\_service\_load\_targets} & The monthly SR-closure target per branch -- the one
+figure every Service Load rollup is derived from. \\
+\file{pms\_service\_load\_pct\_targets} & The AOP of the Service Load sheet's percentage
+and ratio rows, per (FY, metric, scope, key). \\
+\file{pms\_service\_load\_manual} & The typed FTR / FVR percentages, per metric and
+period (a month or a financial year). \\
+\file{pms\_training\_records} & The Training Report master -- eight fixed columns plus
+every other column of the file kept verbatim. \\
+\end{longtable}
+
+% ============================== 6. PAGE-WISE ================================
+\section{Page-wise Development Process}
+
+This section explains, page by page and report by report, what each screen does, which
+client requirements it covers, \textbf{which file and which columns it reads}, which files
+in the codebase are responsible for it, and the screenshot of the delivered screen.
+
+% ---------------------------------------------------------------------------
+\subsection{AOP and Master -- Target Master}
+\covers{R4, R5, R27}
+
+\purpose{The annual operating plan itself: every branch's Spare and Labour target for a
+whole financial year, and the calendar those targets are spread over.}
+
+\builtfrom{Screen \file{client/src/pages/AOPMaster.jsx} (tab \texttt{targets}).
+API \texttt{GET/POST /pms/targets/year}, \texttt{GET/POST /pms/holidays}.
+Server \file{pms\_controller.py} -- \texttt{get\_targets\_year\_payload},
+\texttt{save\_targets\_year}, \texttt{list\_holidays}, \texttt{save\_holidays}.
+Tables \file{pms\_branch\_targets}, \file{pms\_month\_settings}, \file{pms\_holidays}.}
+
+\devproc
+\begin{itemize}
+  \item The grid is a whole financial year at once, April to March, one row per branch and
+  two rows of inputs per branch (Spare, Labour), with quarter and year totals computed as
+  the user types.
+  \item Targets are \emph{entered and shown in Lakh} and stored in rupees, which is what
+  the report arithmetic uses. A zero target comes back as an empty cell rather than a wall
+  of noughts.
+  \item The branch list, the branch names and the responsible person are taken from the
+  ERP's own branch master and the branch admins, so the AOP grid and the rest of the ERP
+  always name a branch identically. The AOP spelling is then treated as canonical by every
+  PMS report.
+  \item Working days are set per month \emph{and per region}: Maharashtra and Karnataka
+  have different holidays. Ticking the actual dates on the calendar makes any part-period
+  exact -- the working days of a range are the days in it, minus Sundays, minus the dates
+  ticked for that region.
+  \item Precedence is deliberate: a month with dates ticked uses the calendar (it knows
+  \emph{which} days, not just how many); a month with nothing ticked uses its own typed
+  count; failing that the universal \file{ALL-MM} master; failing that, all days except
+  Sundays.
+\end{itemize}
+
+\handle{Pick the financial year, type the Spare and Labour targets in Lakh, open the month
+calendar to tick holidays for MH / KA, then Save. Every Sales and Labour figure --
+Target, Daily Target, Target till date, \% Achieved -- follows from this tab.}
+
+\screenshot{screens/aop-target-master.png}{AOP and Master -- Target Master: the financial-year
+grid and the working-days calendar}
+
+% ---------------------------------------------------------------------------
+\subsection{AOP and Master -- the four SR Type Masters}
+\covers{R11}
+
+\purpose{Group the raw Service Report Types that arrive in the uploaded files into the
+reporting heads each report prints.}
+
+\builtfrom{Screen \file{AOPMaster.jsx} (tabs \texttt{srtypes}, \texttt{mxtypes},
+\texttt{eftypes}, \texttt{sltypes}).
+API \texttt{/pms/sr-types}, \texttt{/pms/maxttr-sr-types}, \texttt{/pms/efsr-sr-types},
+\texttt{/pms/service-load-sr-types} (each with \texttt{/sync}, \texttt{/reset} and a heads
+endpoint). Server \file{pms\_controller.py}. Tables as listed in Section 5.}
+
+There are four masters and not one, and the reason matters:
+
+\begin{table}[H]\centering\small
+\begin{tabularx}{\linewidth}{@{}p{3.6cm}p{3.5cm}X@{}}
+\toprule
+\textbf{Tab} & \textbf{Reads which column} & \textbf{Heads} \\
+\midrule
+SR Type Master\newline (Sales and Labour) &
+Part Sale \col{claim invoice sr type}; Labour \col{sr type} &
+Warranty, Post Warranty, AMC, KOEL AMC, OTC Order \\
+\addlinespace
+SR Type Master\newline (MaxTTR) &
+MaxTTR \col{sr type} &
+Warranty, Post Warranty, AMC, KOEL AMC, Courtesy Visit, Others \\
+\addlinespace
+SR Type Master\newline (EFSR) &
+EFSR \col{sr type} &
+the same six; the EFSR file adds Commercial and RECD Kit \\
+\addlinespace
+SR Type Master\newline (Service Load) &
+MaxTTR \col{sr type}, grouped a \emph{second} way &
+CSP, Post Warranty, Warranty, KOEL AMC, Dealer AMC, Courtesy Visit, Others \\
+\bottomrule
+\end{tabularx}
+\caption{Why four SR Type masters exist}
+\end{table}
+
+\devproc
+\begin{itemize}
+  \item Each tab lists the distinct SR Types found in \emph{its own} file --
+  \textbf{Sync} rescans the uploaded data and adds any new value, so a type that appears
+  for the first time is never silently lost.
+  \item \textbf{Reset} restores the defaults the business gave; the live mapping the
+  reports read is always the database table, and the built-in defaults only seed it.
+  \item A head can be added or deleted from the Head master beside the list, so the
+  reporting buckets can change without a code change.
+  \item An SR Type with no head is \emph{not} dropped: it lands in a visible
+  \qt{Unmapped} bucket, so the head breakdown always adds up to the total and the gap is
+  reported instead of hidden.
+  \item Sales and Labour, and Service Load, group the same MaxTTR column differently on
+  purpose: Employee Productivity folds CSP into Warranty and Dealer AMC into AMC, while
+  the Service Load sheet prints CSP and Dealer AMC as rows of their own. Sharing one
+  master would force one of the two reports to lie.
+\end{itemize}
+
+\handle{Open the tab, press Sync after a new upload, give every unmapped type its head,
+Save. The change takes effect on the next report generation.}
+
+\screenshot{screens/aop-sr-type-master.png}{AOP and Master -- SR Type Master: the synced
+types and their heads}
+
+% ---------------------------------------------------------------------------
+\subsection{AOP and Master -- Lead Category Master}
+\covers{R13, R15}
+
+\purpose{Turn the LMS file's \col{lead raised for} values into the columns of the
+Employee Productivity report's \emph{Product Wise Lead Count} group.}
+
+\builtfrom{Screen \file{AOPMaster.jsx} (tab \texttt{leadcats}). API
+\texttt{/pms/lead-categories} with \texttt{/sync}, \texttt{/reset}, \texttt{/lead-cats}.
+Server \file{pms\_controller.py} -- \texttt{list\_lead\_map}, \texttt{save\_lead\_map},
+\texttt{sync\_lead\_map}. Tables \file{pms\_lead\_categories},
+\file{pms\_lead\_raised\_for\_map}.}
+
+\devproc
+\begin{itemize}
+  \item The category list is the report's column list, in master order -- Allied Oil,
+  Allied Product, AMC, Battery, Coolant, DEF, K-Oil, Others, Spares, Whole Goods, plus
+  anything added later.
+  \item Every distinct \col{lead raised for} value in the LMS upload is synced into the
+  mapping table and given a category by hand (for example \emph{BD Spares} to
+  \emph{Spares}, \emph{New DG} to \emph{Whole Goods}).
+  \item A value with no category lands in an \qt{Unmapped} column, so the product split
+  always adds up to the lead count.
+\end{itemize}
+
+\handle{Sync after an LMS upload, map the new values, Save.}
+
+\screenshot{screens/aop-lead-category-master.png}{AOP and Master -- Lead Category Master}
+
+% ---------------------------------------------------------------------------
+\subsection{AOP and Master -- CDI Target Master}
+\covers{R21, R23}
+
+\purpose{The AOP column of the Annual Reports' Customer Delight Index sheet -- one
+percentage per financial year and per row of that report.}
+
+\builtfrom{Screen \file{AOPMaster.jsx} (tab \texttt{cditargets}). API
+\texttt{GET/POST /pms/cdi-targets}. Server \texttt{list\_cdi\_targets},
+\texttt{save\_cdi\_targets}. Table \file{pms\_cdi\_targets}.}
+
+\devproc
+\begin{itemize}
+  \item A CDI score is a percentage, and percentages cannot be added up, so the target is
+  keyed on a \emph{scope} pair rather than on a branch: \texttt{branch} with the branch
+  id, \texttt{region} with MH or KA, and \texttt{overall} with \texttt{ALL} for the KCGL
+  Overall row.
+  \item The printed sheet sets the target at region and overall level only; branch targets
+  are optional and stay empty until somebody fills them in. Nothing is derived from
+  anything else -- an unset row simply shows no AOP.
+\end{itemize}
+
+\handle{Pick the financial year, type the target \% on the rows the business sets, Save.}
+
+\screenshot{screens/aop-cdi-target.png}{AOP and Master -- CDI Target Master}
+
+% ---------------------------------------------------------------------------
+\subsection{AOP and Master -- AMC and Bandhan AOP}
+\covers{R19, R20, R23}
+
+\purpose{The figures of the two AMC sheets that the business \emph{asserts} rather than
+counts. The tab carries two tables, because the two sheets have different rows.}
+
+\builtfrom{Screen \file{AOPMaster.jsx} (tab \texttt{amctargets}). API
+\texttt{GET/POST /pms/amc-targets}. Server \texttt{list\_amc\_targets},
+\texttt{save\_amc\_targets}. Tables \file{pms\_amc\_targets} (per branch),
+\file{pms\_amc\_category\_targets} (per agreement category).}
+
+\devproc
+\begin{itemize}
+  \item \textbf{Per branch} (first table) -- three columns of the AMC and Bandhan
+  Projection sheet: \emph{F26 ACT D/BAMC} (last year's actual), \emph{F27 PROJ AOP D/BAMC}
+  (this year's projection) and \emph{BEST ACT AOP D/BAMC (M)} (the year's best month).
+  All three come from here and nowhere else; an empty cell prints a dash rather than a
+  figure derived behind the reader's back.
+  \item Last year's actual is typed for a concrete reason: the AMC Population Report is a
+  \emph{snapshot} keyed on instance id -- one row per genset carrying only its latest
+  agreement -- so a renewal overwrites the agreement it replaced and a closed year's count
+  shrinks every month. Who set that figure, and when, is stamped on the row.
+  \item \textbf{Per agreement category} (second table) -- the AOP of each row of the AMC
+  monthly sheet, whose rows are categories (KOEL Bandhan, KALA AMC, KOEL Corporate AMC,
+  expiries, renewals, Live AMC) and therefore cannot take a sum of branch targets.
+  \item Region and company rows need no target of their own here: these are counts, so the
+  report adds its branches up. (The CDI target is a percentage, which is exactly why that
+  one needs a target per row.)
+\end{itemize}
+
+\handle{Pick the financial year, fill the branch table and the category table, Save. The
+figures appear on the Annual Reports' two AMC tabs.}
+
+\screenshot{screens/aop-amc-bandhan.png}{AOP and Master -- AMC and Bandhan AOP: the branch
+table and the category table}
+
+% ---------------------------------------------------------------------------
+\subsection{AOP and Master -- Service Load AOP}
+\covers{R22, R23}
+
+\purpose{Every target the Service Load and Response sheet is measured against, plus the
+two rows nothing uploaded can produce.}
+
+\builtfrom{Screen \file{AOPMaster.jsx} (tab \texttt{sltargets}). API
+\texttt{GET/POST /pms/service-load-targets}, \texttt{GET/POST /pms/service-load-manual}.
+Server \texttt{list\_service\_load\_targets}, \texttt{save\_service\_load\_targets},
+\texttt{list\_service\_load\_manual}, \texttt{save\_service\_load\_manual}. Tables
+\file{pms\_service\_load\_targets}, \file{pms\_service\_load\_pct\_targets},
+\file{pms\_service\_load\_manual}.}
+
+\devproc
+\begin{itemize}
+  \item \textbf{SR closure target} -- one number per (month, branch). Everything else on
+  that sheet rolls up from it: a branch row is its twelve months summed, a region row is
+  those months across the region's branches, the Total row is the same across every
+  branch, and the sheet's monthly \emph{AOP Target} strip is one month across every
+  branch. One table, every rollup consistent by construction.
+  \item \textbf{Percentage and ratio targets} -- Productivity (Calls PP PD), 4 HRS
+  RESPONSE, SR CLOSED WITHIN 24 HRS and SR CLOSED WITHIN 48 HRS. These cannot be summed,
+  so each takes a value per (FY, metric, scope, key), the same scope idea the CDI target
+  uses.
+  \item \textbf{FTR / FVR} -- typed per month and per cumulative financial year, with
+  absolute keys, so a figure entered for FY25--26 keeps meaning FY25--26 when the report
+  moves on to the next year. A period nobody has filled in shows a dash, which is not the
+  same statement as 0\%.
+\end{itemize}
+
+\handle{Enter the monthly SR-closure targets per branch, the percentage AOPs at region /
+overall level, and the FTR / FVR figures the business supplies. Save.}
+
+\screenshot{screens/aop-service-load.png}{AOP and Master -- Service Load AOP}
+
+% ---------------------------------------------------------------------------
+\subsection{Profile -- SE UID Master (Master Admin only)}
+\covers{R12, R15, R27}
+
+\purpose{The bridge between the files that name a service engineer and the files that
+number one. Without it, no lead and no allocated SR can be attributed.}
+
+\builtfrom{Screen: the Profile page's admin tab. API \texttt{GET /pms/se-uid},
+\texttt{POST /pms/se-uid}, \texttt{POST /pms/se-uid/sync},
+\texttt{POST /pms/se-uid/import}, \texttt{DELETE /pms/se-uid/\{id\}}. Server
+\file{pms\_controller.py} -- \texttt{se\_uid\_payload}, \texttt{sync\_se\_uids},
+\texttt{import\_se\_uids}. Table \file{pms\_se\_uid\_master}.}
+
+\devproc
+\begin{itemize}
+  \item The Response Time \& MaxTTR file carries only the engineer's \col{se name}, while
+  the LMS and EFSR files identify them by \col{service engineer uid}. The master stores
+  both, keyed on the squashed upper-case name, so spacing or case differences between
+  files never split one engineer into two.
+  \item \textbf{Sync} scans the uploaded files for engineer names and adds the ones the
+  master does not yet have, stamping which file each was found in (MaxTTR / LMS / EFSR).
+  A UID can also be imported in bulk from an Excel sheet.
+  \item One master row may carry more than one UID -- an engineer who appears under two
+  ids in the source systems is still one person on the reports.
+  \item The row also holds an optional \textbf{branch}. It is the last-resort answer for
+  an engineer whose files give no valid KALA branch code, and is the only manual way to
+  place such a person on a report.
+  \item This master stays \emph{Master Admin only}, whatever PMS rights a user holds.
+\end{itemize}
+
+\handle{After a new import, press Sync, fill in the missing UIDs, and pin a branch for any
+engineer the reports show under Unmapped Branch.}
+
+\screenshot{screens/profile-se-uid-master.png}{Profile -- SE UID Master}
+
+% ---------------------------------------------------------------------------
+\subsection{Sales and Labour Report -- Upload and Preview}
+\covers{R1, R2, R3}
+
+\purpose{Get the Part Sale and Labour Revenue files into the system safely, and let the
+user see exactly what is stored.}
+
+\builtfrom{Screen \file{client/src/pages/SalesLabourReport.jsx} (the two upload boxes and
+the \emph{Uploaded File Preview}). API \texttt{POST /pms/upload},
+\texttt{GET /pms/upload/progress}, \texttt{GET /pms/uploads},
+\texttt{GET /pms/data/summary}, \texttt{GET /pms/data/preview},
+\texttt{POST /pms/data/cancel-row}, \texttt{DELETE /pms/data}. Server
+\file{pms\_controller.py} -- \texttt{validate\_file}, \texttt{import\_file},
+\texttt{preview\_rows}, \texttt{set\_row\_cancelled}. Tables
+\file{pms\_sales\_records}, \file{pms\_upload\_batches}.}
+
+\devproc
+\begin{itemize}
+  \item \textbf{Check file format} runs a dry run: it reports which canonical columns were
+  found, which are missing and a small sample, and writes nothing. The panel lists the
+  full standard column list of each file, with the three critical columns marked.
+  \item The import runs in a worker thread and reports live progress, so a large file
+  never blocks the page.
+  \item Identity is \col{claim invoice number} plus the file's line discriminator. The
+  Part Sale file has one row per part line (\col{part number}); the Labour file has one
+  row per labour line -- a single SR is billed as several lines sharing one
+  \col{sr number}, so the SR alone is not unique and the discriminator adds
+  \col{labour part num}. Keying on the SR alone once kept only the last line of each SR
+  and made the labour report read under the file's own total.
+  \item Every upload returns inserted / updated / duplicate / skipped counts and is kept
+  as a batch row, so the history of what was loaded is auditable.
+  \item The preview shows the stored rows in the same column order as the standard Excel
+  file, with a search box, and lets an invoice be \textbf{cancelled}: the row stays in the
+  database and is excluded from every report until it is restored.
+\end{itemize}
+
+\handle{Check the format, upload the Part Sale and Labour files (any period, as often as
+needed), read the preview to confirm, and cancel any invoice the business has withdrawn.}
+
+\screenshot{screens/sales-upload-preview.png}{Sales and Labour -- upload boxes and the
+Uploaded File Preview}
+
+The two files are stored column for column. The layout below is also the order the
+preview and the exported workbook use.
+
+\begin{table}[H]\centering\small
+\begin{tabularx}{\linewidth}{@{}p{6.5cm}X@{}}
+\toprule
+\textbf{Part Sale (spares) file} & \textbf{Labour Revenue file} \\
+\midrule
+ZONE NAME, SD ID, SD NAME, \textbf{BRANCH ID*}, BRANCH NAME, INSTANCE ID, SEGMENT,
+PRODUCT SEGMENT, APPLICATION CODE, ENGINE SERIAL NO, CLAIM INVOICE NUMBER,
+\textbf{CLAIM INVOICE DATE*}, CLAIM INVOICE SR TYPE, CLAIM INVOICE SR SUB TYPE, CATEGORY,
+PART CATEGORY, PART NUMBER, PART DESCTRIPTION, QUANTITY,
+\textbf{NET TAXABLE AMOUNT*}
+&
+ZONE NAME, SD ID, SD NAME, \textbf{BRANCH ID*}, BRANCH NAME, CLAIM INVOICE NUMBER,
+\textbf{CLAIM INVOICE DATE*}, PRODUCT SEGMENT, SEGMENT, SERIES, SR NUMBER, SR TYPE,
+SR SUBTYPE, \textbf{NET TAXABLE AMOUNT*} \\
+\bottomrule
+\end{tabularx}
+\caption{The two sales files. * marks the three critical columns; every other column is
+stored as well, and anything unrecognised is preserved rather than dropped}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\subsection{Sales and Labour Report -- All (Spare + Labour)}
+\covers{R5, R6, R7, R8, R24}
+
+\purpose{The headline report: every branch's Spare and Labour sale for the chosen period,
+measured against the AOP, with four breakdown tables underneath.}
+
+\builtfrom{Screen \file{SalesLabourReport.jsx} (report type \emph{All}). API
+\texttt{GET /pms/report}. Server \file{pms\_controller.py} --
+\texttt{generate\_report} / \texttt{\_generate\_report}. Reads
+\file{pms\_sales\_records} against \file{pms\_branch\_targets},
+\file{pms\_month\_settings}, \file{pms\_holidays} and \file{pms\_sr\_type\_map}.}
+
+\devproc
+\begin{itemize}
+  \item The period defaults to month-to-date and can be any range -- week, month, quarter
+  or year. The Part Sale and Labour sides each carry their \emph{own} as-on date, so a
+  file that is a week behind is measured only against the targets up to its own last data
+  date.
+  \item Targets come from every month the period touches, and are prorated on
+  \emph{working days} of the branch's own region -- Sundays and the ticked holidays carry
+  no target.
+  \item The whole aggregation is done in SQL: branch, region, segment, head and category
+  buckets come back as a few dozen grouped rows rather than every sales row travelling
+  over the network. Invoice counts are distinct counts of \col{claim invoice number}
+  (falling back to the row id when the file left it blank).
+  \item Cancelled invoices are excluded everywhere.
+\end{itemize}
+
+The branch tables (one for Spare, one for Labour) carry these columns, and every figure
+is spelled out on the screen so the reader never has to guess a formula:
+
+\begin{table}[H]\centering\small
+\begin{tabularx}{\linewidth}{@{}p{4.4cm}X@{}}
+\toprule
+\textbf{Column} & \textbf{How it is worked out} \\
+\midrule
+Responsible Person & the branch's Branch Admin, from the AOP Target Master \\
+Branch ID / Branch Name / Region & the AOP Target Master, falling back to the file \\
+Target (period) & the full monthly targets of every month the period touches, summed \\
+Daily Target & Target $\div$ the working days of the period, in the branch's own region \\
+Achi. on \textit{date} & \col{net taxable amount} on the period's last day \\
+Target till \textit{date} & each month's target $\times$ (its working days inside the
+period $\div$ its working days) \\
+Achi. till \textit{date} & \col{net taxable amount} summed over the period \\
+Invoice Count till & distinct \col{claim invoice number} in the period \\
+\% Achieved & Achi. till $\div$ Target till $\times$ 100 \\
+Short-Fall & Target till $-$ Achi. till (a negative figure means ahead of plan) \\
+Balance / Month & Target $-$ Achi. till \\
+\bottomrule
+\end{tabularx}
+\caption{Sales and Labour -- the branch table columns}
+\end{table}
+
+Four breakdown tables follow, all for the same period:
+
+\begin{itemize}
+  \item \textbf{Region-wise Sales} -- MH first, then KA, in a fixed order, each with its
+  own AOP target in front of the sale, because a region target is simply the sum of its
+  branches' targets.
+  \item \textbf{Segment-wise Sales} -- the row's \col{segment}, falling back to
+  \col{product segment}; a row with neither is OTC business.
+  \item \textbf{Service Report Type-wise Sales} -- the head an SR Type maps to in the SR
+  Type Master (Sales and Labour). Segment and Service Head have no target dimension in the
+  AOP, so their \% column is a share of the column total rather than an achievement.
+  \item \textbf{Category-wise Sales (Spare)} -- spares only, since the Labour file has no
+  \col{category} column: sale, quantity, line items and invoice count per category.
+\end{itemize}
+
+\handle{Set the period, press Generate, read the two branch tables, then the breakdowns.
+Export to Excel for a copy that mirrors the screen -- Spare and Labour side by side,
+region by region.}
+
+\screenshot{screens/sales-report-all.png}{Sales and Labour -- All (Spare + Labour): the
+branch tables and the breakdowns}
+
+% ---------------------------------------------------------------------------
+\subsection{Sales and Labour Report -- Branch-wise Report}
+\covers{R9, R24}
+
+\purpose{The same period, but for a hand-picked set of branches, with the detail a branch
+review actually needs.}
+
+\builtfrom{Screen \file{SalesLabourReport.jsx} (report type \emph{Branch-wise}). API
+\texttt{GET /pms/report/branch-detail}. Server \texttt{branch\_detail\_report} /
+\texttt{\_branch\_detail\_report}.}
+
+\devproc
+\begin{itemize}
+  \item The view opens with every branch pre-selected and narrows as branches are ticked;
+  the branch tables above shrink to the selection.
+  \item Five detail sections are recomputed from \emph{only} those branches' rows:
+  \textbf{Week-wise} (the period cut into seven-day chunks, with Spare, Labour and invoice
+  count), \textbf{Month-wise}, \textbf{Segment-wise}, \textbf{Service Report Type-wise} and
+  \textbf{Category-wise (Spare)}.
+  \item Each week also carries its slice of the AOP target: a month's target spread over
+  its working days and the days of that week added up -- the same calendar the main report
+  uses, so Sundays and ticked holidays carry no target. When the selection spans both
+  regions a day counts as off only when it is off in every region selected.
+\end{itemize}
+
+\handle{Choose Branch-wise, tick the branches, open the sections needed, export.}
+
+\screenshot{screens/sales-report-branchwise.png}{Sales and Labour -- Branch-wise Report}
+
+% ---------------------------------------------------------------------------
+\subsection{Sales and Labour Report -- FY / Quarterly / Month-wise}
+\covers{R10, R24}
+
+\purpose{The whole financial year on one screen: how the year is tracking, quarter by
+quarter and month by month, and what run-rate is needed to close it.}
+
+\builtfrom{Screen \file{SalesLabourReport.jsx} (report type \emph{Spares and Labour (FY /
+Quarterly / Month)}). API \texttt{GET /pms/report/fy-summary}. Server
+\texttt{fy\_summary\_report} / \texttt{\_fy\_summary\_report}.}
+
+\devproc
+\begin{itemize}
+  \item These three panels ignore the period picker entirely -- they always cover the full
+  financial year that is asked for, April to March.
+  \item Targets are the AOP Master's \emph{full} monthly values, never prorated here;
+  achievement is aggregated in SQL by branch, month and record type, with cancelled rows
+  excluded.
+  \item The report also returns how far into the year the sales data actually reaches, and
+  the year's working days split into elapsed and remaining, per region. That is what makes
+  the run-rate columns honest: they rest on the same calendar the targets do.
+  \item Quarters are the financial ones -- Q1 is April to June, Q4 is January to March.
+  \item The export writes three sheets in one workbook: the FY table, Quarterly and
+  Month-wise, with Spare and Labour across the year.
+\end{itemize}
+
+\handle{Pick the financial year, open the FY, Quarterly or Month panel, export.}
+
+\screenshot{screens/sales-report-fy.png}{Sales and Labour -- FY / Quarterly / Month-wise}
+
+% ---------------------------------------------------------------------------
+\subsection{Employee Productivity (Service Engineer Productivity)}
+\covers{R12, R13, R14, R15, R24, R27}
+
+\purpose{One row per service engineer answering: how much did they close, how many days
+did they work, how happy were the customers, and how much business did they raise.}
+
+\builtfrom{Page \file{client/src/pages/EmployeeProductivity.jsx} (owns the period picker);
+table \file{client/src/components/EmployeeProductivityReport.jsx}. API
+\texttt{GET /pms/report/employee-productivity}. Server \file{pms\_controller.py} --
+\texttt{employee\_productivity\_data} / \texttt{\_employee\_productivity\_data}.}
+
+\textbf{The MaxTTR file is the source.} Every SR in the \emph{Response Time \& MaxTTR
+Details} import that has a close date and an engineer name counts once for that engineer
+on that date. The labour file is not involved: an SR is counted because the engineer
+closed it, not because it was billed. Four files and four masters then hang off that
+spine.
+
+\begin{table}[H]\centering\small
+\begin{tabularx}{\linewidth}{@{}p{3.1cm}p{4.3cm}X@{}}
+\toprule
+\textbf{Group of columns} & \textbf{Source file} & \textbf{Columns read} \\
+\midrule
+Close SR, and its SR Type split &
+Response Time \& MaxTTR Details &
+\col{se name}, \col{branch id}, \col{branch name}, \col{sr close date}, \col{sr type}
+(through the SR Type Master (MaxTTR)) \\
+\addlinespace
+Days present on Task end &
+Response Time \& MaxTTR Details &
+distinct \col{sr task end date} per engineer \\
+\addlinespace
+Allocated SR and its split &
+EFSR Report &
+\col{service engineer uid}, \col{sd branch code}, \col{task assigned date},
+\col{sr type} (through the SR Type Master (EFSR)) \\
+\addlinespace
+CDI (Passive, Detractor, \%) &
+CDI Detail Report &
+\col{x technician name}, \col{activity end date}, \col{cdi category} \\
+\addlinespace
+Number of Lead, Product Wise Lead Count, Spare / Labour Conv. Amount &
+LMS Data for ERP &
+\col{lead number}, \col{service engineer uid}, \col{branch id},
+\col{lead created date}, \col{lead raised for} (through the Lead Category Master),
+\col{part invoice amount}, \col{labour invoice amount} \\
+\addlinespace
+Working Days &
+AOP and Master &
+the month-wise working-days master, per region, prorated to the picked period \\
+\bottomrule
+\end{tabularx}
+\caption{Employee Productivity -- every column and the column it comes from}
+\end{table}
+
+\devproc
+\begin{itemize}
+  \item \textbf{Identity.} An engineer is their letters-only name plus their branch, so
+  \emph{Vijaykumar Jadhav}, \emph{VijaykumarJadhav} and \emph{VIJAYKUMAR  JADHAV} are
+  always one engineer however the files spell them; the best-spaced spelling seen is kept
+  for display.
+  \item \textbf{Branch} is the MaxTTR row's own \col{branch id}, never the branch name --
+  files spell the same branch differently and the spelling changes between imports, while
+  the id does not. The name is only a label, and the AOP master's spelling is used so this
+  report and the Sales report label a branch identically.
+  \item \textbf{Leads} are attributed strictly through the SE UID Master: an LMS row's
+  \col{service engineer uid} is looked up there to find the engineer, and is never matched
+  against the MaxTTR names. A UID in no master row is counted as an \emph{unlinked lead}
+  and reported, so the master can be fixed. Leads are counted once per distinct
+  \col{lead number}.
+  \item \textbf{Allocated SR} is counted on \col{task assigned date}, not on a closed
+  date: the closed date is null for exactly the SRs this column is meant to show -- the
+  ones assigned but not yet finished. (The columns are hidden on the current screen; the
+  payload and every rollup still carry them.)
+  \item \textbf{Days present} counts distinct \col{sr task end date} values -- the day the
+  engineer finished the job in the field. The close date is an office event that often
+  lands days later and in a batch, so it would overstate attendance.
+  \item \textbf{Productivity} is Close SR $\div$ \emph{Working Days}, not $\div$ days
+  present: days present is attendance, while the target is the available man-days from the
+  AOP master. Hiding the Working Days column does not change the division.
+  \item \textbf{CDI \%} is (Promotor $-$ Detractor) $\div$ all feedback $\times$ 100. The
+  screen shows Passive and Detractor; Promotor is still counted and still drives the \%.
+  \item \textbf{Working Days and Days present print on engineer rows only.} Every rollup
+  row -- branch, group, region, Grand Total -- leaves both blank rather than summing
+  man-days into a number nobody would read.
+  \item \textbf{Rollups.} Branches roll into the configured branch groups, then into MH /
+  KA, then into the Grand Total. A branch code no KALA master knows folds into the single
+  \qt{Unmapped Branch} bucket, so the report still adds up to the file.
+  \item \textbf{One fetch.} The payload is raw per-day records; changing the period, the
+  weekly split or any filter re-aggregates in the browser without another request.
+\end{itemize}
+
+\handle{Set the period at the top, use the toolbar to show the weekly split, hide Working
+Days, or fold the SR Type / CDI / Lead Count bands, then export. The \% and count columns
+carry their formula in the header, so a figure can always be traced.}
+
+\screenshot{screens/employee-productivity.png}{Employee Productivity -- service engineer
+rows with SR Type, CDI and lead bands}
+
+% ---------------------------------------------------------------------------
+\subsection{SR Allocation Report}
+\covers{R16, R24, R27}
+
+\purpose{What was given to each engineer and what they finished -- and therefore what is
+still open.}
+
+\builtfrom{Page \file{client/src/pages/SRAllocation.jsx}; table
+\file{client/src/components/SRAllocationReport.jsx}. API
+\texttt{GET /pms/report/sr-allocation}. Server \texttt{sr\_allocation\_data} /
+\texttt{\_sr\_allocation\_data}.}
+
+\begin{table}[H]\centering\small
+\begin{tabularx}{\linewidth}{@{}p{3.4cm}p{3.6cm}X@{}}
+\toprule
+\textbf{Measure} & \textbf{Source file} & \textbf{Columns read} \\
+\midrule
+Allocated Total Task & EFSR Report &
+\col{service engineer uid}, \col{task assigned date}, \col{sr type},
+\col{sd branch code} \\
+Closed Total Task & EFSR Report &
+the same rows, counted on \col{task end date} \\
+Open SR (branch wise) & Open SR Load Report &
+\col{instance id [asset \#]} joined to the customer master for its \col{branch id}, and
+\col{sr created date} \\
+Home branch fallback & Response Time \& MaxTTR &
+\col{se name}, \col{branch id} \\
+SE Name / SE UID & SE UID Master & UID to the engineer's canonical name \\
+SR Type rows & SR Type Master (EFSR) & the head each \col{sr type} maps to \\
+\bottomrule
+\end{tabularx}
+\caption{SR Allocation -- sources and columns}
+\end{table}
+
+\devproc
+\begin{itemize}
+  \item One EFSR row normally counts \emph{twice}: once on its assigned date and once on
+  its task end date. The two totals differ by the SRs assigned inside the period but
+  closed outside it, or not closed at all -- and that gap is the open backlog.
+  \item \textbf{Closed} deliberately uses \col{task end date}, the day the engineer
+  finished, not the back-office \col{sr closed date}, which lands days later and never
+  arrives at all for about a third of the tasks the engineer has actually completed.
+  \item Rows are attributed through the SE UID Master, so the SE Name and SE UID read
+  exactly the same here as on the Employee Productivity report. A UID the master does not
+  know still counts, under the file's own engineer name, so the report always adds up to
+  the file; how many such rows there are is reported.
+  \item \textbf{Home branch.} The EFSR file carries the SD branch code of the SR, and on
+  about 1\% of rows that is another dealer's code. Grouping straight on it would scatter
+  one engineer across ghost branches, so the report groups by the \emph{engineer}: every
+  SR of theirs counts in the branch they belong to, resolved as (1) the KALA branch they
+  have the most EFSR rows in, (2) the branch the MaxTTR file puts them in, (3) the branch
+  pinned on their SE UID Master row, (4) the single Unmapped Branch bucket.
+  \item The \textbf{Open SR} grid uses exactly two columns of the Open SR Load Report and
+  counts the whole accumulated table -- it answers \qt{SRs open in this branch}, not
+  \qt{in today's upload}.
+  \item The date columns can be bucketed by day, week or month, and the \emph{Date split}
+  control chooses whether they carry Allocated, Closed or both; the two totals are always
+  shown.
+\end{itemize}
+
+\handle{Set the period, choose the granularity and the date split, open an engineer's
+row for the SR-Type-wise breakdown, export.}
+
+\screenshot{screens/sr-allocation.png}{SR Allocation Report -- allocated vs closed, engineer
+and date wise}
+
+% ---------------------------------------------------------------------------
+\subsection{Training Report}
+\covers{R17, R24}
+
+\purpose{The service engineers' skill and training master, readable from either end:
+\qt{what has this person been trained on} and \qt{who holds this skill}.}
+
+\builtfrom{Screen \file{client/src/pages/TrainingReport.jsx}. API
+\texttt{POST /pms/training/upload}, \texttt{GET /pms/training/report},
+\texttt{GET /pms/training/summary}, \texttt{DELETE /pms/training/data}. Server
+\file{server/app/controllers/pms\_training\_controller.py}. Table
+\file{pms\_training\_records}; the upload audit shares \file{pms\_upload\_batches} with
+\texttt{record\_type = training}.}
+
+\devproc
+\begin{itemize}
+  \item \textbf{Eight columns are fixed} and stored as real columns: \col{uid no},
+  \col{employee ticket number}, \col{full name}, \col{occupation}, \col{skill},
+  \col{branch name}, \col{branch id}, \col{hire date}. Only \col{uid no} and
+  \col{full name} are critical.
+  \item \textbf{Every other column of the file is dynamic} -- zone name, job title,
+  category, training date, training end date, SD name / id, the bank block and so on --
+  kept verbatim and rendered from there, so the export can gain or lose a column without
+  a code change. The server then splits the dynamic columns into the ones that describe
+  the \emph{person} and the ones that describe the \emph{training}.
+  \item \textbf{Identity} is \col{uid no} + \col{skill} + \col{training date} +
+  \col{category}. Verified against the real 407-row export: UID + skill alone collapsed
+  114 rows, and adding the training date still collapsed 107, because the same training is
+  recorded under more than one category; all four together drop none. The two extra
+  columns are read for the key even though they stay dynamic -- the key has to be stable,
+  the storage does not.
+  \item It is a \emph{master}, not a period report: rows accumulate across uploads and a
+  re-uploaded row with changed values updates in place, so the page always shows the whole
+  training history. An engineer with no training yet still gets a row, with the skill
+  blank, so the master lists everyone the file carries.
+  \item \textbf{By Employee} lists one row per person; clicking opens their skills first,
+  then every other detail the file carries. \textbf{By Skill} pivots the same payload in
+  the browser and lists one row per skill; clicking opens everyone who holds it. Searching
+  either way is instant and never hits the server.
+  \item The search compares on the squashed name form, so \qt{nilesh salunke},
+  \qt{NILESHSALUNKE} and \qt{Nilesh  Salunke} all find the same person.
+\end{itemize}
+
+\handle{Upload the Training Report export whenever KOEL issues a new one, then search by
+employee name or by skill and click the row for the full record. Export to Excel as
+needed.}
+
+\screenshot{screens/training-report.png}{Training Report -- By Employee and By Skill}
+
+% ---------------------------------------------------------------------------
+\subsection{Annual Reports -- the page}
+\covers{R18, R19, R20, R21, R22}
+
+\purpose{One page holding the yearly management sheets. The report picker chooses which
+sheet is shown; the period picker at the top owns the reporting period for all of them.}
+
+\builtfrom{Page \file{client/src/pages/AnnualReports.jsx}, with one component per sheet:
+\file{ServicePenetrationReport.jsx}, \file{AmcBandhanProjectionReport.jsx},
+\file{AmcMonthlyReport.jsx}, \file{CustomerDelightIndexReport.jsx},
+\file{ServiceLoadResponseReport.jsx}; shared workbook chrome in
+\file{client/src/utils/pmsExport.js} and shared table chrome in
+\file{client/src/components/reportChrome.jsx}.}
+
+Each sheet has its own source file, so each brings its own date range: the period picker
+re-defaults to the financial year of whichever report is open, and offers only the
+financial years that report's file actually covers. The AMC report is two tabs of one
+report rather than two entries in the picker, because both tabs read the same file.
+
+% ---------------------------------------------------------------------------
+\subsection{Annual Reports -- Service Penetration}
+\covers{R18}
+
+\purpose{How much of the installed base was actually touched by a closed service call.}
+
+\builtfrom{\file{ServicePenetrationReport.jsx}; API
+\texttt{GET /pms/report/annual/service-penetration}; server
+\texttt{\_annual\_service\_penetration\_data}.}
+
+\begin{table}[H]\centering\small
+\begin{tabularx}{\linewidth}{@{}p{3.3cm}p{3.4cm}X@{}}
+\toprule
+\textbf{Block} & \textbf{Source file} & \textbf{Columns read} \\
+\midrule
+Ind / PG Population, Grand Total & Asset Detailed Report &
+\col{branch id}, \col{segment} (IND / PG), \col{commissioning date},
+\col{asset operational status} \\
+UNQ AST SR CLOSED & Response Time \& MaxTTR &
+\col{branch id}, \col{segment}, \col{instance id} (or \col{engine serial no}),
+\col{sr close date} \\
+Pen \% & derived & closed $\div$ population $\times$ 100 \\
+\bottomrule
+\end{tabularx}
+\caption{Service Penetration -- sources and columns}
+\end{table}
+
+\devproc
+\begin{itemize}
+  \item The population is \emph{cumulative}: each asset counts once, in its own branch, on
+  its commissioning date, and the sheet reads the installed base \emph{as on} the end of
+  the period, not what was commissioned inside it.
+  \item Assets the ERP has retired (operational status \emph{Inactive}) are out of the
+  base; an asset with no commissioning date cannot be placed on the calendar and is
+  reported rather than dropped.
+  \item \textbf{Unique means unique}: an asset with five closed SRs counts once. Because a
+  distinct-asset count cannot be added up day by day the way a population can, the payload
+  ships one row per asset carrying the days it was serviced on, and the report counts the
+  assets with at least one day inside the period. Every period is therefore exact and
+  still needs no refetch.
+  \item An asset is counted under the branch and segment its \emph{own SR row} names, so
+  nothing is lost when the asset master has not caught up yet.
+  \item Only the Total Pen \% cell is shaded, against a threshold that is deliberately not
+  printed anywhere on the sheet -- it is a fill rule, not a figure.
+\end{itemize}
+
+\handle{Pick the period; read population, serviced assets and Pen \% per branch, with MH,
+KA and overall totals. Export mirrors the screen.}
+
+\screenshot{screens/annual-service-penetration.png}{Annual Reports -- Service Penetration}
+
+% ---------------------------------------------------------------------------
+\subsection{Annual Reports -- AMC and Bandhan Projection (tab 1)}
+\covers{R19, R23}
+
+\purpose{Per branch: the year's AMC position against the plan, and the month's business
+actually done.}
+
+\builtfrom{\file{AmcBandhanProjectionReport.jsx}; API
+\texttt{GET /pms/report/annual/amc-bandhan}; server \texttt{\_annual\_amc\_bandhan\_data}.}
+
+\begin{table}[H]\centering\small
+\begin{tabularx}{\linewidth}{@{}p{4.6cm}p{3.4cm}X@{}}
+\toprule
+\textbf{Column} & \textbf{Source} & \textbf{How it is produced} \\
+\midrule
+F\textit{nn} ACT D/BAMC & AOP and Master & typed -- last year's actual \\
+F\textit{nn} PROJ AOP D/BAMC & AOP and Master & typed -- this year's projection \\
+BEST ACT AOP D/BAMC (M) & AOP and Master & typed -- the year's best month \\
+F\textit{nn} YTD ACT AMC NOS & AMC Population Report &
+counted: \col{agreement status} is Active \emph{and} \col{agreement end date} is not
+past -- a population, so neither the year nor the month moves it \\
+\textit{Mon}-\textit{yy} Act & the four Bandhan quote files &
+counted: one row per quote on \col{payment update date and time}, branch wise \\
+\bottomrule
+\end{tabularx}
+\caption{AMC and Bandhan Projection -- where each column comes from}
+\end{table}
+
+\devproc
+\begin{itemize}
+  \item The sheet asks two different questions and no one file answers both, so it reads
+  two sources: the agreement population and the money received.
+  \item \textbf{The month's business is payments, not cover starting.} Counted on the
+  quote files' payment date the figures tie up with the business's own sheet (Mar-26 145,
+  Apr-26 105, Jun-26 104 against 144 / 108 / 106), whereas the agreements' start months
+  are 15 to 30 out. This is the only column the month picker moves.
+  \item \textbf{The first three columns are the AOP master's and nothing else's.} Last
+  year's actual could not be counted honestly anyway: the AMC file is a snapshot keyed on
+  instance id, one row per genset carrying only its latest agreement, so a renewal
+  overwrites the agreement it replaced -- FY26 counts 937 from today's file against the
+  1,353 the business closed it with.
+  \item \textbf{Best month} follows the monthly payment series, and a region or company
+  row takes the best month of \emph{its own} monthly totals -- never the sum of its
+  branches' best months, which fall in different months and would invent a month nobody
+  had.
+  \item Every other rollup is a plain sum of the branches. The typed figures stay null
+  until at least one branch has one, so an unfilled region reads as empty rather than as a
+  target of zero.
+\end{itemize}
+
+\handle{Open the AMC report, stay on the Projection tab, pick how far into the year to
+read, export.}
+
+\screenshot{screens/annual-amc-projection.png}{Annual Reports -- AMC and Bandhan Projection}
+
+% ---------------------------------------------------------------------------
+\subsection{Annual Reports -- AMC (tab 2, the monthly sheet)}
+\covers{R20, R23}
+
+\purpose{The same AMC file read by agreement \emph{category} instead of by branch, one
+financial year wide.}
+
+\builtfrom{\file{AmcMonthlyReport.jsx}; API \texttt{GET /pms/report/annual/amc-monthly};
+server \texttt{\_annual\_amc\_monthly\_data}. Reads \col{branch id},
+\col{agreement type}, \col{agreement start date}, \col{agreement end date},
+\col{agreement status} and \col{last agreement number} from the AMC Population Report.}
+
+\begin{table}[H]\centering\small
+\begin{tabularx}{\linewidth}{@{}p{5.4cm}X@{}}
+\toprule
+\textbf{Row} & \textbf{What it counts} \\
+\midrule
+KOEL Bandhan Total & the MH and KAR rows added up \\
+KOEL Bandhan MH / KAR & the KOEL Bandhan family, split on the branch's region \\
+KALA AMC & agreement type \emph{Dealer Agreement} -- the dealership's own AMC \\
+KOEL Corporate AMC & agreement type \emph{KOEL Agreement}, printed cumulative \\
+AMC Expired During the Month & counted on \col{agreement end date} \\
+AMC Renewed During the Month & rows that carry a \col{last agreement number} \\
+Live AMC (KOEL+KALA) OVERALL & KOEL Bandhan + KALA AMC \\
+\bottomrule
+\end{tabularx}
+\caption{The AMC monthly sheet's rows}
+\end{table}
+
+\devproc
+\begin{itemize}
+  \item Columns are: the AOP (from AOP and Master), the year so far, one column per month
+  reached, and the working month \emph{also} broken into its Monday-to-Sunday weeks --
+  beside its month column, not instead of it, which is how the business prints the sheet.
+  \item \textbf{Closed years are deliberately not shown.} Counted from today's snapshot
+  the Bandhan rows give 235 for FY24--25 and 858 for FY25--26 against the 837 and 1,302
+  the business closed those years with. A column that wrong is worse than no column, so
+  the sheet prints only the running year, which is counted live and is sound.
+  \item Any agreement type the row mapping does not know is reported rather than dropped,
+  so a new type from KOEL shows up instead of vanishing.
+  \item The second table, \emph{KCGL Total AMC}, plans against the sum of every branch's
+  projection from the AOP master's first table, spread equally across the twelve months --
+  so the yearly plan lives in exactly one place and the company row is derived from it
+  rather than typed a second time and left to drift.
+\end{itemize}
+
+\handle{Open the AMC report and switch to the AMC tab. The AOP comes from AOP and
+Master $\rightarrow$ AMC and Bandhan AOP (the category table).}
+
+\screenshot{screens/annual-amc-monthly.png}{Annual Reports -- the AMC monthly sheet}
+
+% ---------------------------------------------------------------------------
+\subsection{Annual Reports -- Customer Delight Index (CDI)}
+\covers{R21, R23}
+
+\purpose{The customer feedback score per branch, against its AOP, for the financial year.}
+
+\builtfrom{\file{CustomerDelightIndexReport.jsx}; API \texttt{GET /pms/report/annual/cdi};
+server \texttt{\_annual\_cdi\_data}. Reads \col{branch name}, \col{activity end date} and
+\col{cdi category} from the CDI Detail Report, and the AOP from
+\file{pms\_cdi\_targets}.}
+
+\devproc
+\begin{itemize}
+  \item Every feedback row falls into one of three buckets, read off the \emph{leading
+  word} of \col{cdi category} so the score range in brackets can change without breaking:
+  \emph{Promotor(09-10)}, \emph{Detractor(00 - 06)}, and everything else Passive.
+  \item The score of any set of rows is (Promotor $-$ Detractor) $\div$ (Promotor +
+  Passive + Detractor) $\times$ 100. It is therefore \textbf{not} an average of the rows
+  beneath it: every total row is scored from its own feedback counts, which is why a
+  region row can sit outside the range of its branches.
+  \item The CDI Detail Report is the only PMS import that carries no branch id -- it names
+  its branch (\qt{KALA Care Global LLP - Ahmednagar}) and nothing else. The name-to-id map
+  is therefore built \emph{from the other files}, which carry both, so when the ERP renames
+  a branch the map follows on the next upload with no code change. The AOP master's own
+  spelling is registered against the same id as well, so either wording resolves.
+  \item Feedback whose branch no master knows folds into the Unmapped Branch bucket, and
+  rows with no activity end date cannot be placed on the calendar at all; both are
+  reported.
+  \item The columns follow the financial year the period lands in: the two previous
+  financial years as cumulative columns, the AOP, the year so far, one column per whole
+  month, and the working month split into its Monday-to-Sunday weeks. A finished year
+  reads as twelve month columns and no weeks.
+\end{itemize}
+
+\handle{Pick the financial year, read branch, region and overall scores against the AOP,
+export.}
+
+\screenshot{screens/annual-cdi.png}{Annual Reports -- Customer Delight Index}
+
+% ---------------------------------------------------------------------------
+\subsection{Annual Reports -- Service Load and Response}
+\covers{R22, R23, R24}
+
+\purpose{The service department's own scorecard: how much load was closed, how fast it was
+responded to, and how productive the engineers were.}
+
+\builtfrom{\file{ServiceLoadResponseReport.jsx}; API
+\texttt{GET /pms/report/annual/service-load}; server
+\texttt{\_annual\_service\_load\_data}. \textbf{One file only} -- Response Time \& MaxTTR
+Details -- with three masters on top: the SR Type Master (Service Load), the Service Load
+AOP targets and the typed FTR / FVR figures.}
+
+The printed sheet is four pages; the screen is \textbf{six tabs}, because its response page
+carries two independent measures and its closing blocks summarise the whole sheet:
+
+\begin{table}[H]\centering\small
+\begin{tabularx}{\linewidth}{@{}p{3.9cm}X@{}}
+\toprule
+\textbf{Tab} & \textbf{What it shows} \\
+\midrule
+Service Load & the SR-type-wise breakdown and its Total, then the same load by branch
+under MH / KA, closing on the Grand Total \\
+Productivity & Calls PP PD per region, branch and overall, plus the
+\emph{Service Request Closure (Nos.)} month strip \\
+4 Hrs Response & 4 HRS RESPONSE \% per region and branch \\
+SR Closed 24 Hrs & SR CLOSED WITHIN 24 HRS \% \\
+SR Closed 48 Hrs & SR CLOSED WITHIN 48 HRS \% \\
+Overall and FTR/FVR & MAX TTR Overall, and the FTR / FVR figures typed in AOP and Master \\
+\bottomrule
+\end{tabularx}
+\caption{Service Load and Response -- the six tabs}
+\end{table}
+
+\devproc
+\begin{itemize}
+  \item Everything is counted on \col{sr close date}, per \col{branch id}. \emph{Total
+  Service Load Available} is every SR of the period whatever its type; the breakdown rows
+  are that same population split by the head master. An SR Type with no head still counts
+  in the total but gets no breakdown row, so the gap is visible on the sheet rather than
+  swallowed.
+  \item \textbf{All three compliance percentages read one column} -- \col{response time} --
+  over every SR of the period: $\le 4$, $\le 24$, $\le 48$ hours.
+  \item \textbf{\col{sr open date} is never used}, and this is the single most important
+  decision on the sheet. In the live file 8,721 of 45,279 rows carry an open date
+  \emph{after} their close date, always at midnight: they are the scheduled dates of
+  planned work that was closed early. The file's own arithmetic turns those into a
+  negative response time. So response and TTR are read from the file's own columns and
+  never recomputed from open to close.
+  \item \textbf{A negative response time counts as zero hours.} The job was closed before
+  it was due, so it is inside every window -- which is exactly how the source file scores
+  it. Clamping rather than dropping keeps the denominator equal to the load count, so the
+  sheet's SR total and its percentages describe one population; a cell says on hover how
+  many of its SRs were clamped.
+  \item \textbf{Every percentage row is scored from its own SRs}, never averaged from the
+  rows beneath it -- a region row divides the region's compliant SRs by the region's SRs.
+  Productivity is the same: a region's closures over the region's man-days.
+  \item \textbf{Productivity} is closures $\div$ (working days $\times$ the engineers who
+  closed something in that window). A distinct engineer count cannot be summed across
+  days, so the payload ships one triple per engineer-day and the page counts the distinct
+  engineers inside each window itself.
+  \item \textbf{FTR / FVR are not counted.} First Time Right and First Visit Report are
+  judgements KOEL makes about a job, and the two files that once carried them were
+  withdrawn -- so the sheet prints what a person entered in AOP and Master, and a period
+  nobody filled in shows a dash.
+  \item 45k rows are aggregated in SQL down to (branch, day, SR type) -- about 12k records
+  -- and the FY cumulatives, month columns, weekly split and every region rollup are
+  derived in the browser from those, with no second request.
+\end{itemize}
+
+\handle{Pick the financial year, switch tabs for load, productivity and each response
+window, and read the AOP column beside every measure. Export writes the tab you are on.}
+
+\screenshot{screens/annual-service-load.png}{Annual Reports -- Service Load and Response}
+
+% ============================== 7. CROSS-CUTTING ============================
+\section{Cross-cutting Behaviour}
+
+\subsection{Access rights}
+\covers{R25}
+PMS access is a per-user flag; the AOP and Master page is granted per tab at
+\emph{none} / \emph{view} / \emph{edit}. On a view-only tab the save, sync, reset and
+master buttons are hidden and every cell is locked -- and the server enforces the same per
+tab, so a user granted only one tab cannot read or write another tab's data by calling its
+endpoint directly. Three registries hold the tab keys and must stay in step:
+\file{pagePermission.js} on the client, \file{user\_controller.py} and the \texttt{tab=}
+argument of \texttt{\_require\_aop} in \file{pms\_routes.py}. The SE UID Master stays
+Master-Admin-only whatever PMS rights a user holds.
+
+\subsection{Performance on a remote database}
+\covers{R26}
+The database sits across the network, so the rule is: aggregate in SQL, ship the small
+result. Every report groups its rows server-side and returns raw per-day records, and the
+page derives periods, granularities, weeks and rollups from those without another request.
+Results are cached against a fingerprint of the data; an upload changes the fingerprint
+and the next report rebuilds. A new PMS report must add its tables to that fingerprint
+query, or it will serve a stale cache after an import.
+
+\subsection{Nothing is dropped silently}
+Every report reports its own gaps rather than hiding them: unmapped SR Types and lead
+values get a visible \qt{Unmapped} bucket, branch codes no KALA master knows fold into one
+\qt{Unmapped Branch} row, LMS UIDs missing from the SE UID Master are counted as unlinked
+leads, rows with no usable date are reported as such, and clamped or excluded rows are
+named in the report's meta. A figure the module cannot produce honestly is typed by a
+person and marked as typed.
+
+\subsection{Excel export}
+\covers{R24}
+Every report exports through the shared chrome in \file{client/src/utils/pmsExport.js}: one
+ERP blue band carrying the report and its period, a grey-blue header row, branch rows, the
+MH / KA region totals and a dark overall row. The workbook uses the light palette as
+literal colours -- it is read and printed on its own and must not follow the app's dark
+theme. \file{exceljs} is loaded on demand, so opening a page never pays for it. Date
+columns are written as real Excel dates through the shared date utility, because a date
+written the naive way lands ten seconds off midnight and silently breaks Excel's date
+filters. Export respects the \file{can\_export} permission.
+
+\subsection{The colour language of the reports}
+The PMS grids share one palette, defined once as CSS variables so screen and workbook
+agree and both themes work:
+
+\begin{table}[H]\centering\small
+\begin{tabularx}{\linewidth}{@{}p{3.4cm}p{2.4cm}X@{}}
+\toprule
+\textbf{Element} & \textbf{Light value} & \textbf{Meaning} \\
+\midrule
+ERP band, Grand Total & \texttt{\#2F3192} / \texttt{\#23255F} & the report's own identity
+row \\
+Header cells & \texttt{\#E8F3FC} & every column header \\
+Row A / Row B & \texttt{\#FBFDFF} / \texttt{\#F1F8FE} & engineer or branch rows \\
+Sub Total / Group Total & \texttt{\#DCEBF9} / \texttt{\#CBE1F5} & a group heading its own
+rows \\
+Region total (MH / KA) & \texttt{\#5E8FC2} & region rollups, white text \\
+SR Type block & \texttt{\#E4F0FB} & the type-wise band \\
+Selected row & \texttt{\#BFDCF7} & the open or picked row \\
+\% at or above target & \texttt{\#86EFAC} & green \\
+\% within a fifth of target & \texttt{\#FDE047} & yellow \\
+\% further below & \texttt{\#FDBA74} & amber \\
+\bottomrule
+\end{tabularx}
+\caption{The shared PMS colour language}
+\end{table}
+
+A dash is never painted -- an absent figure stays neutral, because \qt{not entered} is not
+a performance judgement.
+
+\subsection{India-local timestamps}
+\covers{R28}
+Every stored timestamp is India local time, written through the module's own time helper,
+so meeting dates, upload stamps and audit trails read the same for every user whatever the
+server or browser timezone.
+
+% ============================== 8. FILE MAP =================================
+\section{File Map -- Which File is Responsible for What}
+
+\begin{longtable}{@{}p{4.2cm}p{4.8cm}p{5.8cm}@{}}
+\caption{PMS pages and the files that implement them}\\
+\toprule
+\textbf{Page / Report} & \textbf{Frontend} & \textbf{Backend} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{@{}l}{\small\itshape Table \thetable{} -- continued}\\
+\toprule
+\textbf{Page / Report} & \textbf{Frontend} & \textbf{Backend} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+AOP and Master\newline\file{/aop-master} &
+\file{pages/AOPMaster.jsx},\newline \file{utils/pagePermission.js} &
+\file{routes/pms\_routes.py},\newline \file{controllers/pms\_controller.py},\newline
+\file{models/pms\_model.py} \\
+\addlinespace
+Sales and Labour Report\newline\file{/sales-labour-report} &
+\file{pages/SalesLabourReport.jsx} &
+\texttt{import\_file}, \texttt{\_generate\_report}, \texttt{\_fy\_summary\_report},
+\texttt{\_branch\_detail\_report} \\
+\addlinespace
+Employee Productivity\newline\file{/employee-productivity} &
+\file{pages/EmployeeProductivity.jsx},\newline
+\file{components/EmployeeProductivityReport.jsx} &
+\texttt{\_employee\_productivity\_data} \\
+\addlinespace
+SR Allocation Report\newline\file{/sr-allocation} &
+\file{pages/SRAllocation.jsx},\newline \file{components/SRAllocationReport.jsx} &
+\texttt{\_sr\_allocation\_data} \\
+\addlinespace
+Training Report\newline\file{/training-report} &
+\file{pages/TrainingReport.jsx} &
+\file{controllers/pms\_training\_controller.py} \\
+\addlinespace
+Annual: Service Penetration &
+\file{components/ServicePenetrationReport.jsx} &
+\texttt{\_annual\_service\_penetration\_data} \\
+\addlinespace
+Annual: AMC and Bandhan &
+\file{components/AmcBandhanProjectionReport.jsx} &
+\texttt{\_annual\_amc\_bandhan\_data} \\
+\addlinespace
+Annual: AMC monthly &
+\file{components/AmcMonthlyReport.jsx} &
+\texttt{\_annual\_amc\_monthly\_data} \\
+\addlinespace
+Annual: CDI &
+\file{components/CustomerDelightIndexReport.jsx} &
+\texttt{\_annual\_cdi\_data} \\
+\addlinespace
+Annual: Service Load &
+\file{components/ServiceLoadResponseReport.jsx} &
+\texttt{\_annual\_service\_load\_data} \\
+\addlinespace
+Shared chrome / export &
+\file{components/reportChrome.jsx},\newline \file{utils/pmsExport.js},\newline
+\file{utils/excelDateColumns.js} & --- \\
+\addlinespace
+Routing and navigation &
+\file{App.jsx}, \file{components/Navbar.jsx} & --- \\
+\end{longtable}
+
+% ============================== APPENDIX ====================================
+\appendix
+\section{API Endpoint Map}
+
+Every endpoint below is mounted under \file{/pms} and defined in
+\file{server/app/routes/pms\_routes.py}. All of them require PMS access; the AOP endpoints
+additionally check the tab they belong to.
+
+\begin{longtable}{@{}p{7.4cm}p{8.0cm}@{}}
+\caption{PMS API endpoints}\\
+\toprule
+\textbf{Endpoint} & \textbf{Serves} \\
+\midrule
+\endfirsthead
+\multicolumn{2}{@{}l}{\small\itshape Table \thetable{} -- continued}\\
+\toprule
+\textbf{Endpoint} & \textbf{Serves} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{GET/POST /targets/year}, \texttt{/targets/year/bulk} & Target Master grid \\
+\texttt{GET/POST /holidays} & the working-days calendar \\
+\texttt{/sr-types}, \texttt{/heads} (+ \texttt{/sync}, \texttt{/reset}) & SR Type Master
+(Sales and Labour) \\
+\texttt{/maxttr-sr-types}, \texttt{/maxttr-heads} & SR Type Master (MaxTTR) \\
+\texttt{/efsr-sr-types}, \texttt{/efsr-heads} & SR Type Master (EFSR) \\
+\texttt{/service-load-sr-types}, \texttt{/service-load-heads} & SR Type Master (Service
+Load) \\
+\texttt{/lead-categories}, \texttt{/lead-cats} & Lead Category Master \\
+\texttt{/se-uid} (+ \texttt{/sync}, \texttt{/import}) & SE UID Master (Master Admin only) \\
+\texttt{POST /upload}, \texttt{GET /upload/progress}, \texttt{GET /uploads} & the Spare /
+Labour import and its progress \\
+\texttt{GET /data/summary}, \texttt{/data/preview}, \texttt{POST /data/cancel-row},
+\texttt{DELETE /data} & stored data, preview and cancellation \\
+\texttt{POST /training/upload}, \texttt{GET /training/report}, \texttt{/training/summary},
+\texttt{DELETE /training/data} & Training Report \\
+\texttt{GET /report} & Sales and Labour -- All / Branch tables \\
+\texttt{GET /report/fy-summary} & FY / Quarterly / Month-wise \\
+\texttt{GET /report/branch-detail} & Branch-wise Report \\
+\texttt{GET /report/employee-productivity} & Employee Productivity \\
+\texttt{GET /report/sr-allocation} & SR Allocation \\
+\texttt{GET /report/annual/service-penetration} & Service Penetration \\
+\texttt{GET /report/annual/cdi} & Customer Delight Index \\
+\texttt{GET /report/annual/amc-bandhan} & AMC and Bandhan Projection \\
+\texttt{GET /report/annual/amc-monthly} & the AMC monthly sheet \\
+\texttt{GET /report/annual/service-load} & Service Load and Response \\
+\texttt{GET/POST /cdi-targets}, \texttt{/amc-targets}, \texttt{/service-load-targets},
+\texttt{/service-load-manual} & the AOP figures those sheets are measured against \\
+\end{longtable}
+
+\vspace{12pt}
+\begin{center}\small\itshape End of document\end{center}
+
+\end{document}

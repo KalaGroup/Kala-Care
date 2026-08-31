@@ -53,7 +53,7 @@ class EngagementController:
         self.smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
         self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
         self.sender_email = os.getenv("COMPANY_EMAIL")  # Company email as sender
-        self.sender_password = os.getenv("COMPANY_EMAIL_PASSWORD")
+        self.sender_password = mail_utils.smtp_password("COMPANY_EMAIL_PASSWORD", "SMTP_PASSWORD")
     
     # ==================== Follow-up Flags ====================
     

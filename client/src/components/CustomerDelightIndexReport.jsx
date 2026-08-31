@@ -1,11 +1,11 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { ArrowUpTrayIcon } from '@heroicons/react/24/outline';
 import { canExportExcel } from '../utils/exportPermission';
 import {
   XL, A, CENTER, LEFT, loadExcelJS, newSheet, saveBook,
 } from '../utils/pmsExport';
-import { GRID, THEME, TopScrollbar } from './reportChrome';
+import { GRID, THEME, HScrollBox } from './reportChrome';
 
 /* ----------------------------------------------------------------------------
    Annual Reports → CUSTOMER DELIGHT INDEX (CDI).
@@ -69,7 +69,10 @@ const scoreOf = (t) => {
   const total = t[0] + t[1] + t[2];
   return total ? ((t[0] - t[1]) / total) * 100 : null;
 };
-const pct = (v) => (v === null ? '–' : `${Math.round(v)}%`);
+// The sheet is ALL percentages, so the '%' sign is said ONCE at the top of
+// the table instead of on every one of the hundreds of cells: the columns then
+// read as plain comparable numbers. No feedback at all stays a dash, not 0.
+const pct = (v) => (v === null ? '–' : `${Math.round(v)}`);
 const addTo = (a, b) => { a[0] += b[0]; a[1] += b[1]; a[2] += b[2]; };
 
 // Mon–Sun calendar weeks of ONE month, clipped to the period. Week-1 is the
@@ -95,10 +98,24 @@ const weeksOfMonth = (ym, winStart, winEnd) => {
 };
 
 const CustomerDelightIndexReport = ({ data, fy: pickedFy }) => {
+  // How much room the grid actually has. Columns were a fixed 76px, so a year
+  // with its weeks open ran past the page and the last ones simply could not be
+  // seen. They now share what is available and only fall back to scrolling when
+  // even the minimum will not fit.
+  const boxRef = useRef(null);
+  const [boxW, setBoxW] = useState(0);
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return undefined;
+    const read = () => setBoxW(el.clientWidth);
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const { branches = [], branch_ids: ids = [], branch_regions: regions = [],
     records = [], targets = {}, meta = {} } = data || {};
-
-  const scrollRef = useRef(null);
 
   const agg = useMemo(() => {
     const dataMin = meta.min_date || '';
@@ -141,7 +158,8 @@ const CustomerDelightIndexReport = ({ data, fy: pickedFy }) => {
     for (let m = 0; m < 12; m += 1) {
       const y = m < 9 ? fy : fy + 1;
       const ym = `${y}-${String(((3 + m) % 12) + 1).padStart(2, '0')}`;
-      if (ym === working) continue;                    // shown as weeks below
+      // The working month keeps its own column AND is opened by week after it:
+      // the month is what the business reports, the weeks are how it is watched.
       const mStart = `${ym}-01`;
       const mEnd = monthEndOf(ym);
       if (mStart > winEnd) continue;
@@ -222,7 +240,9 @@ const CustomerDelightIndexReport = ({ data, fy: pickedFy }) => {
   // them and fits on one line. The three long region / overall labels wrap onto
   // a second line instead, which costs three rows of height and buys every data
   // column ~80px of width.
-  const W_NAME = 170;
+  const nCols = (agg && agg.cols) ? agg.cols.length : 1;
+  const W_NAME = (boxW && boxW < 900) ? 140 : 170;
+  const W_COL = Math.max(58, Math.floor(((boxW || 1200) - W_NAME - 6) / nCols));
 
   const exportExcel = async () => {
     if (!agg) return;
@@ -251,21 +271,52 @@ const CustomerDelightIndexReport = ({ data, fy: pickedFy }) => {
       });
       ws.getRow(2).height = 30;
 
+      // Every number on this sheet is judged against an AOP, so — as on screen —
+      // the ROW stays light and the CELL carries the verdict. A dark blue region
+      // row would print its tone under white text, which hides the one thing on
+      // the row worth reading.
       const STYLE = {
-        region: { fill: XL.REGION, font: { bold: true, color: A('FFFFFF') } },
-        overall: { fill: XL.BRAND, font: { bold: true, color: A('FFFFFF') } },
+        region: { fill: XL.SC_REGION, font: { bold: true } },
+        overall: { fill: XL.SC_TOT, font: { bold: true } },
+      };
+      // met the AOP · within 5 points of it · further short. The AOP column is
+      // never scored against itself.
+      const toneXl = (cells, cell) => {
+        if (cell.aop || cell.score === null) return null;
+        const aopCell = cells.find((c) => c.aop);
+        const aop = aopCell ? aopCell.score : null;
+        if (aop === null || aop === undefined) return null;
+        if (cell.score >= aop) return { fill: XL.OK, ink: XL.OK_INK };
+        if (cell.score >= aop - 5) return { fill: XL.NEAR, ink: XL.NEAR_INK };
+        return { fill: XL.MISS, ink: XL.MISS_INK };
       };
       let r = 3;
       agg.rows.forEach((row, ri) => {
         const o = STYLE[row.kind] || { fill: ri % 2 ? XL.ROW_B : XL.ROW_A };
         put(r, 1, row.label, { ...o, align: LEFT });
-        agg.cells[ri].forEach((cell, ci) => put(r, ci + 2,
+        agg.cells[ri].forEach((cell, ci) => {
           // a real number, formatted as a percentage, so the sheet can be
           // charted and sorted; no feedback stays an empty cell
-          cell.score === null ? '' : cell.score / 100,
-          { ...o, align: CENTER, fmt: '0%' }));
+          const value = cell.score === null ? '' : cell.score / 100;
+          const tn = toneXl(agg.cells[ri], cell);
+          put(r, ci + 2, value, tn
+            ? { ...o, align: CENTER, fmt: '0%', fill: tn.fill,
+              font: { ...(o.font || {}), bold: true, color: A(tn.ink) } }
+            : { ...o, align: CENTER, fmt: '0%' });
+        });
         r += 1;
       });
+
+      // A workbook has no tooltips to hover, so the sheet says on itself what
+      // its three tints mean — the same key the screen carries.
+      r += 1;
+      put(r, 1, 'AOP key — each cell against its own AOP target',
+        { align: LEFT, font: { bold: true } });
+      [['Met AOP', XL.OK, XL.OK_INK],
+        ['Within 5%', XL.NEAR, XL.NEAR_INK],
+        ['Over 5% below', XL.MISS, XL.MISS_INK],
+      ].forEach(([t, fill, ink], i) => put(r, i + 2, t,
+        { fill, align: CENTER, font: { bold: true, color: A(ink) } }));
 
       await saveBook(wb, `PMS_Customer_Delight_Index_${agg.winStart}_to_${agg.winEnd}.xlsx`);
       toast.success('Customer Delight Index exported');
@@ -292,26 +343,68 @@ const CustomerDelightIndexReport = ({ data, fy: pickedFy }) => {
     );
   }
 
+  // A score is tinted by how it did against its own AOP:
+  //   met it            green
+  //   within 5 points   yellow
+  //   further short     amber
+  // No AOP on the row, no tint — an untargeted row is not failing at anything.
+  const toneOf = (cells, cell) => {
+    if (cell.aop || cell.score === null) return null;
+    const aopCell = cells.find((c) => c.aop);
+    const aop = aopCell ? aopCell.score : null;
+    if (aop === null || aop === undefined) return null;
+    if (cell.score >= aop) return { background: GRID.ok, color: GRID.okInk };
+    if (cell.score >= aop - 5) return { background: GRID.near, color: GRID.nearInk };
+    return { background: GRID.miss, color: GRID.missInk };
+  };
+
+  // No strong blue bands here: every number on this sheet is judged against an
+  // AOP, and a white-on-blue region row fought its own tint for attention. The
+  // hierarchy is carried by weight and a light step of tint instead.
   const rowStyle = (row, ri) => {
-    if (row.kind === 'region') return { background: GRID.region, color: '#fff' };
-    if (row.kind === 'overall') return { background: GRID.grand, color: '#fff' };
+    if (row.kind === 'overall') return { background: GRID.grpTot };
+    if (row.kind === 'region') return { background: GRID.subTot };
     return { background: ri % 2 ? GRID.rowB : GRID.rowA };
   };
   const rowCls = (row) => (row.kind === 'region' || row.kind === 'overall'
-    ? '!text-white font-bold' : '');
+    ? 'font-bold' : '');
 
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
-      <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <div className="py-0.5 mr-auto">
-          <p className="text-xs font-bold text-gray-800">
+      <div className="px-3 py-1.5 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        <div className="mr-auto min-w-0">
+          <p className="text-[12.5px] font-bold text-black leading-tight">
             Customer Delight Index (CDI) — <span style={{ color: THEME }}>{fyShort(agg.fy)}</span>
+            <span className="ml-1.5 font-semibold text-gray-500">· all values %</span>
           </p>
-          <p className="text-[10px] text-gray-400">
+          <p className="text-[10px] text-gray-600 leading-tight">
             {fmtDayYr(agg.winStart)} → {fmtDayYr(agg.winEnd)} ·
             {' '}score = (Promotor − Detractor) ÷ all feedback × 100
-            {agg.working && ` · ${monthLabel(agg.working)} is still running, so it is split by week`}
+            {agg.working && ` · ${monthLabel(agg.working)} is still running, so its weeks follow it`}
           </p>
+        </div>
+        {/* The AOP key, on the right with the other controls. Each chip carries
+            the exact rule as well as a label: a colour people act on has to say
+            what it means rather than be learned. */}
+        <div className="flex items-center gap-1 shrink-0">
+          <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 mr-0.5">
+            AOP
+          </span>
+          <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold whitespace-nowrap"
+            style={{ background: GRID.ok, color: GRID.okInk }}
+            title="On target — met or beat this row's AOP">
+            Met AOP
+          </span>
+          <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold whitespace-nowrap"
+            style={{ background: GRID.near, color: GRID.nearInk }}
+            title="Short of the AOP, but within 5%">
+            Within 5%
+          </span>
+          <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold whitespace-nowrap"
+            style={{ background: GRID.miss, color: GRID.missInk }}
+            title="More than 5% below the AOP">
+            Over 5% below
+          </span>
         </div>
         {meta.unmapped_branch_rows > 0 && (
           <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
@@ -333,21 +426,29 @@ const CustomerDelightIndexReport = ({ data, fy: pickedFy }) => {
         )}
       </div>
 
-      <div className="p-2">
-        <TopScrollbar scrollRef={scrollRef} watch={agg.cols.length} />
-        <div ref={scrollRef} className="border border-gray-400 rounded-xl overflow-hidden overflow-x-auto">
+      <div className="p-2" ref={boxRef}>
+        {/* the header row rides down the page, so the column a score sits under
+            is still readable at the bottom of a long branch list */}
+        <HScrollBox watch={`${agg.cols.length}-${agg.rows.length}`}>
+          {/* the frame goes on a wrapper, not the table — see the note in
+              ServiceLoadResponseReport: a table border doubles the right-hand
+              rule and the square header cells paint over its rounded corners */}
+          <div className="border border-gray-400 rounded-xl overflow-hidden">
           <table className="pms-grid border-separate [border-spacing:0]"
             style={{ minWidth: '100%' }}>
-            <thead>
+            <thead className="relative" style={{ zIndex: 25 }}>
               <tr>
-                <th className={`${TH} !border-l-0 sticky left-0 z-20`}
+                <th className={`${TH} !border-l-0 sticky left-0 z-30`}
                   style={{ background: GRID.head, width: W_NAME, minWidth: W_NAME }}>
                   Contents
+                  <span className="block font-normal text-[8.5px] text-gray-600">
+                    all values in %
+                  </span>
                 </th>
-                {agg.cols.map((c, i) => (
+                {agg.cols.map((c) => (
                   <th key={c.key}
-                    className={`${TH}${i === agg.cols.length - 1 ? ' border-r' : ''}`}
-                    style={{ background: GRID.head, width: 76, minWidth: 76 }}>
+                    className={TH}
+                    style={{ background: GRID.head, width: W_COL, minWidth: W_COL }}>
                     {c.label}
                     {c.sub && (
                       <span className="block font-normal text-[8.5px] text-gray-600">{c.sub}</span>
@@ -367,22 +468,27 @@ const CustomerDelightIndexReport = ({ data, fy: pickedFy }) => {
                       title={row.label}>
                       <div style={{ maxWidth: W_NAME - 16 }}>{row.label}</div>
                     </td>
-                    {agg.cells[ri].map((cell, ci) => (
-                      <td key={agg.cols[ci].key}
-                        className={`${CELL} ${cls}${ci === agg.cols.length - 1 ? ' border-r' : ''}`}
-                        title={cell.counts
-                          ? `Promotor ${cell.counts[0]} · Passive ${cell.counts[2]} · `
-                            + `Detractor ${cell.counts[1]} · total ${cell.counts[0] + cell.counts[1] + cell.counts[2]}`
-                          : undefined}>
-                        {pct(cell.score)}
-                      </td>
-                    ))}
+                    {agg.cells[ri].map((cell, ci) => {
+                      const tone = toneOf(agg.cells[ri], cell);
+                      return (
+                        <td key={agg.cols[ci].key}
+                          className={`${CELL} ${tone ? '!font-semibold' : cls}`}
+                          style={tone || undefined}
+                          title={cell.counts
+                            ? `Promotor ${cell.counts[0]} · Passive ${cell.counts[2]} · `
+                              + `Detractor ${cell.counts[1]} · total ${cell.counts[0] + cell.counts[1] + cell.counts[2]}`
+                            : undefined}>
+                          {pct(cell.score)}
+                        </td>
+                      );
+                    })}
                   </tr>
                 );
               })}
             </tbody>
           </table>
-        </div>
+          </div>
+        </HScrollBox>
       </div>
     </div>
   );

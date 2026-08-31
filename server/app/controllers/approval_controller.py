@@ -2094,12 +2094,20 @@ async def update_application(db: Session, user_id: str, app_id: int, fields: dic
 
     if app_row.created_by != user.user_id:
         raise HTTPException(status_code=403, detail="Only the creator can edit this application")
-    # REJECTED records can be corrected and resubmitted by their creator —
-    # the old trail is cleared and the record re-enters the flow fresh
-    # (keeping its App No).
-    if app_row.status not in ("draft", "rejected"):
-        raise HTTPException(status_code=400, detail="Only drafts and rejected applications can be edited")
+    # The creator may edit:
+    #   draft      — not filed yet;
+    #   rejected   — corrected and resubmitted, keeping its App No;
+    #   pending    — ONLY while nobody has approved it yet. The moment any level
+    #                acts, the record is locked: an approver must never find the
+    #                figures changed under an approval they already gave.
     was_rejected = app_row.status == "rejected"
+    pending_untouched = app_row.status.startswith("pending") and not (
+        app_row.l2_action_by or app_row.l3_action_by
+        or app_row.l4_action_by or app_row.l5_action_by)
+    if app_row.status != "draft" and not was_rejected and not pending_untouched:
+        raise HTTPException(
+            status_code=400,
+            detail="This application has already been approved at a level — it can no longer be edited")
 
     request_type = (fields.get("request_type") or "").strip()
     if request_type not in REQUEST_TYPES:
@@ -2170,6 +2178,12 @@ async def update_application(db: Session, user_id: str, app_id: int, fields: dic
             data=content,
             uploaded_by=user.user_id,
         ))
+
+    if pending_untouched:
+        # nothing was approved, but earlier auto-skip notes would otherwise
+        # stick around after the edited record re-routes
+        for lvl in ("l2", "l3", "l4", "l5"):
+            setattr(app_row, f"{lvl}_action_remark", None)
 
     if was_rejected:
         # wipe the previous run's trail so the record starts clean

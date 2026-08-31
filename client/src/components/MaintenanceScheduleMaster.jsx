@@ -4,7 +4,8 @@ import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
 import {
     Cog6ToothIcon, ArrowLeftIcon, MagnifyingGlassIcon, PlusIcon,
-    PencilSquareIcon, TrashIcon, ChevronRightIcon, ChevronDownIcon, ArrowPathIcon,
+    PencilSquareIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon,
+    ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ChevronDownIcon, ArrowPathIcon,
     CircleStackIcon, WrenchScrewdriverIcon, ArrowUpTrayIcon, CheckIcon, XMarkIcon, DocumentTextIcon,
     ArrowsRightLeftIcon, Squares2X2Icon, CheckCircleIcon, ExclamationTriangleIcon,
     CubeIcon, FunnelIcon, ClockIcon,
@@ -403,13 +404,13 @@ const MasterData = ({ onMasterChanged }) => {
                 p.partNumber || '', p.partDesc || '', p.qty || '', p.action || '', p.serviceHours || '',
                 k && first ? (k.kitNumber || '') : '', k && first ? (k.kitDesc || '') : '',
                 k && first ? (k.qty || '') : '', k && first ? (k.action || '') : '',
-                k && first ? (k.serviceHours || '') : '', p.schedule || '',
+                k && first ? (k.serviceHours || '') : '',
             ]);
             kitsOf(a).forEach((k) => (k.parts || []).forEach((p, i) => push(p, k, i === 0)));
             loosePartsOf(a).forEach((p) => push(p, looseAsKit(p), true));
         });
         const ws = XLSX.utils.aoa_to_sheet(aoa);
-        ws['!cols'] = ORIG_HEADERS.map((h, i) => ({ wch: [8, 12, 14, 16, 6, 9, 16, 40, 5, 7, 9, 14, 30, 5, 7, 9, 16][i] || 12 }));
+        ws['!cols'] = ORIG_HEADERS.map((h, i) => ({ wch: [8, 12, 14, 16, 6, 9, 16, 40, 5, 7, 9, 14, 30, 5, 7, 9][i] || 12 }));
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'MASTER_DATA');
         XLSX.writeFile(wb, `MASTER_DATA_${codes ? `selected_${codes.length}` : `all_${list.length}`}.xlsx`);
@@ -852,6 +853,65 @@ const AppCodeSuggest = ({ value, onChange, onPick, remaining, disabled, fieldCls
     );
 };
 
+/* ------------- Table pager -------------
+   Pages a long table instead of growing it with a "Show more" button: rows-per-
+   page picker and the record range on the left, first / prev / numbered / next /
+   last on the right. Page numbers collapse to 1 … n-1 n n+1 … last past seven
+   pages. Paging is display only — Export always writes the whole list. */
+const PAGE_SIZES = [50, 100, 200, 500];
+const TablePager = ({ page, pageSize, total, onPage, onPageSize }) => {
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const nums = useMemo(() => {
+        const out = [];
+        if (totalPages <= 7) { for (let i = 1; i <= totalPages; i++) out.push(i); return out; }
+        if (page <= 4) { for (let i = 1; i <= 5; i++) out.push(i); out.push('…', totalPages); return out; }
+        if (page >= totalPages - 3) { out.push(1, '…'); for (let i = totalPages - 4; i <= totalPages; i++) out.push(i); return out; }
+        out.push(1, '…', page - 1, page, page + 1, '…', totalPages);
+        return out;
+    }, [page, totalPages]);
+    const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
+    const to = Math.min(page * pageSize, total);
+    const navCls = 'p-1.5 rounded-lg border border-gray-300 bg-white text-gray-600 transition hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed';
+    return (
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-t border-gray-200 bg-gray-50 max-md:px-2">
+            <div className="flex items-center gap-2 text-[11.5px] text-gray-600">
+                <span>
+                    Showing <b className="font-semibold text-gray-800">{from.toLocaleString()}</b>–<b className="font-semibold text-gray-800">{to.toLocaleString()}</b>
+                    {' '}of <b className="font-semibold text-gray-800">{total.toLocaleString()}</b> records
+                </span>
+                <select value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} title="Rows per page"
+                    className="rounded-lg border border-gray-200 bg-white px-1.5 py-1 text-[11.5px] text-gray-700 outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition">
+                    {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} / page</option>)}
+                </select>
+                <span className="text-gray-400">Page {page} of {totalPages}</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 max-sm:w-full max-sm:justify-center">
+                <button type="button" onClick={() => onPage(1)} disabled={page === 1} title="First page" className={navCls}>
+                    <ChevronDoubleLeftIcon className="h-3.5 w-3.5" />
+                </button>
+                <button type="button" onClick={() => onPage(page - 1)} disabled={page === 1} title="Previous page" className={navCls}>
+                    <ChevronLeftIcon className="h-3.5 w-3.5" />
+                </button>
+                {nums.map((n, i) => (
+                    <button key={`${n}-${i}`} type="button" disabled={n === '…'} onClick={() => typeof n === 'number' && onPage(n)}
+                        className={`min-w-[26px] px-2 py-1 rounded-lg text-[11.5px] font-semibold transition ${n === '…'
+                            ? 'cursor-default text-gray-400'
+                            : n === page ? 'text-white shadow-sm' : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+                        style={n === page ? { backgroundColor: themeColor } : undefined}>
+                        {n}
+                    </button>
+                ))}
+                <button type="button" onClick={() => onPage(page + 1)} disabled={page >= totalPages} title="Next page" className={navCls}>
+                    <ChevronRightIcon className="h-3.5 w-3.5" />
+                </button>
+                <button type="button" onClick={() => onPage(totalPages)} disabled={page >= totalPages} title="Last page" className={navCls}>
+                    <ChevronDoubleRightIcon className="h-3.5 w-3.5" />
+                </button>
+            </div>
+        </div>
+    );
+};
+
 /* ------------- App Mapping (Asset Detailed codes vs master) ------------- */
 const AppMapping = ({ onMasterChanged }) => {
     const [map, setMap] = useState(null);       // { uniqueAssetCodes, uploadedCount, remainingCount, remaining[] }
@@ -994,50 +1054,46 @@ const AppMapping = ({ onMasterChanged }) => {
         return m;
     }, [rows, services]);
 
-    // Export ALL data of every stat box — one workbook, one sheet per box, with
-    // the same columns each box shows on screen (search/sort filters ignored).
+    // Export ONLY the box that is open — every one of its records (all pages,
+    // exactly the search + sort on screen) on ONE sheet. Paging is a screen-only
+    // concern — it never splits the file.
     // Gated by canExportExcel() like every other Export button in the app.
+    const SHEET_BASE = { all: 'All Codes', remaining: 'Remaining', master: 'In Master', uploaded: 'Matched', notmatched: 'Not Matched' };
     const exportXlsx = () => {
-        const wb = XLSX.utils.book_new();
-        const EXPORT_VIEWS = [
-            ['all', 'All Application Codes'],
-            ['remaining', 'Remaining'],
-            ['master', 'Total in Master'],
-            ['uploaded', 'Match in Master'],
-            ['notmatched', 'Not Matched'],
+        if (!remaining.length) { toast.error('Nothing to export'); return; }
+        const withSvc = view !== 'remaining';        // Remaining shows no coverage columns on screen
+        const masterSide = view === 'master' || view === 'notmatched';
+        // For asset-side boxes the flag means "already in the master"; for
+        // master-side boxes it means "matched in the asset data".
+        const flagLabel = masterSide ? 'In Asset Data' : 'In Master';
+        const header = [
+            'Sr.', 'App Code', 'Engine Model', 'Segment', 'KVA Rating', 'Emission Norm',
+            'Commissioning Date', 'Assets', flagLabel,
+            ...(withSvc ? svcCols.map((c) => c.short) : []),
         ];
-        EXPORT_VIEWS.forEach(([v, sheetName]) => {
-            const withSvc = v !== 'remaining';           // Remaining shows no coverage columns on screen
-            const masterSide = v === 'master' || v === 'notmatched';
-            // For asset-side boxes the flag means "already in the master"; for
-            // master-side boxes it means "matched in the asset data".
-            const flagLabel = masterSide ? 'In Asset Data' : 'In Master';
-            const aoa = [[
-                'Sr.', 'App Code', 'Engine Model', 'Segment', 'KVA Rating', 'Emission Norm',
-                'Commissioning Date', 'Assets', flagLabel,
-                ...(withSvc ? svcCols.map((c) => c.short) : []),
-            ]];
-            rowsForView(v).forEach((r, i) => {
-                const ids = svcCoverage.get(String(r.appCode || '').trim().toLowerCase());
-                aoa.push([
-                    i + 1, r.appCode, r.engineModel || '', r.segment || '',
-                    assetKva(r.kva) ? `${assetKva(r.kva)} KVA` : '',
-                    emissionOf(r) || '',
-                    commissioningOf(r) ? fmtDMY(commissioningOf(r)) : '',
-                    r.assets ?? 0,
-                    r.uploaded ? 'Yes' : 'No',
-                    ...(withSvc ? svcCols.map((c) => (ids && ids.has(c.id) ? 'Yes' : 'No')) : []),
-                ]);
-            });
-            const ws = XLSX.utils.aoa_to_sheet(aoa);
-            ws['!cols'] = [
-                { wch: 5 }, { wch: 14 }, { wch: 18 }, { wch: 10 }, { wch: 11 }, { wch: 13 },
-                { wch: 15 }, { wch: 7 }, { wch: 12 },
-                ...(withSvc ? svcCols.map(() => ({ wch: 8 })) : []),
+        const cols = [
+            { wch: 5 }, { wch: 14 }, { wch: 18 }, { wch: 10 }, { wch: 11 }, { wch: 13 },
+            { wch: 15 }, { wch: 7 }, { wch: 12 },
+            ...(withSvc ? svcCols.map(() => ({ wch: 8 })) : []),
+        ];
+        const line = (r, sr) => {
+            const ids = svcCoverage.get(String(r.appCode || '').trim().toLowerCase());
+            return [
+                sr, r.appCode, r.engineModel || '', r.segment || '',
+                assetKva(r.kva) ? `${assetKva(r.kva)} KVA` : '',
+                emissionOf(r) || '',
+                commissioningOf(r) ? fmtDMY(commissioningOf(r)) : '',
+                r.assets ?? 0,
+                r.uploaded ? 'Yes' : 'No',
+                ...(withSvc ? svcCols.map((c) => (ids && ids.has(c.id) ? 'Yes' : 'No')) : []),
             ];
-            XLSX.utils.book_append_sheet(wb, ws, sheetName);
-        });
-        XLSX.writeFile(wb, 'App_Mapping.xlsx');
+        };
+        const base = SHEET_BASE[view] || 'Data';
+        const ws = XLSX.utils.aoa_to_sheet([header, ...remaining.map((r, i) => line(r, i + 1))]);
+        ws['!cols'] = cols;
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, base);
+        XLSX.writeFile(wb, `App_Mapping_${base.replace(/\s+/g, '_')}.xlsx`);
     };
 
     const { sort, toggle } = useSort();
@@ -1052,13 +1108,16 @@ const AppMapping = ({ onMasterChanged }) => {
         uploaded: (r) => (r.uploaded ? 0 : 1),
     });
 
-    // Lazy row rendering: only the first chunk mounts (the coverage columns make
-    // each row expensive); "Show more" reveals the rest. Resets when the data
-    // slice changes. Pure display concern — sorting/filtering logic untouched.
-    const ROWS_CHUNK = 100;
-    const [rowLimit, setRowLimit] = useState(ROWS_CHUNK);
-    useEffect(() => { setRowLimit(ROWS_CHUNK); }, [remaining]);
-    const visibleRows = rowLimit < remaining.length ? remaining.slice(0, rowLimit) : remaining;
+    // Paged rows: only one page mounts (the coverage columns make each row
+    // expensive). Back to page 1 whenever the slice changes — box, search, sort
+    // or page size. Pure display concern — sorting/filtering logic untouched.
+    const [pageSize, setPageSize] = useState(100);
+    const [page, setPage] = useState(1);
+    useEffect(() => { setPage(1); }, [remaining, pageSize]);
+    const totalPages = Math.max(1, Math.ceil(remaining.length / pageSize));
+    const curPage = Math.min(page, totalPages);
+    const pageStart = (curPage - 1) * pageSize;
+    const visibleRows = useMemo(() => remaining.slice(pageStart, pageStart + pageSize), [remaining, pageStart, pageSize]);
 
     // Totals for the pinned footer row — computed over the WHOLE filtered list,
     // not just the chunk currently mounted, so "Show more" never changes them.
@@ -1086,6 +1145,12 @@ const AppMapping = ({ onMasterChanged }) => {
     const mirrorScroll = (from, to) => () => {
         if (from.current && to.current && to.current.scrollLeft !== from.current.scrollLeft)
             to.current.scrollLeft = from.current.scrollLeft;
+    };
+
+    // Moving to another page parks the scroll box back at its first row.
+    const goPage = (p) => {
+        setPage(Math.max(1, Math.min(p, totalPages)));
+        bodyScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
     if (loading) return <Loading />;
@@ -1144,7 +1209,7 @@ const AppMapping = ({ onMasterChanged }) => {
                                 className="w-56 max-sm:w-full rounded-lg border border-gray-200 bg-white pl-8 pr-2.5 py-1.5 text-[12px] outline-none focus:border-gray-300 focus:ring-2 focus:ring-indigo-100 transition" />
                         </div>
                         {canExportExcel() && (
-                            <button onClick={exportXlsx} title="Export every box (all / remaining / master / matched / not matched) into one Excel file"
+                            <button onClick={exportXlsx} title="Export every record of the box that is open — all pages on one sheet"
                                 className="export-btn inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-90"
                                 style={{ backgroundColor: themeColor }}>
                                 <ArrowUpTrayIcon className="h-3.5 w-3.5" /> Export
@@ -1192,7 +1257,7 @@ const AppMapping = ({ onMasterChanged }) => {
                             <tbody>
                                 {visibleRows.map((r, i) => (
                                     <tr key={r.appCode} className="hover:bg-indigo-50/40 transition">
-                                        <td className="px-3 py-2 border border-gray-200 font-mono font-semibold text-gray-500 text-center">{i + 1}</td>
+                                        <td className="px-3 py-2 border border-gray-200 font-mono font-semibold text-gray-500 text-center">{pageStart + i + 1}</td>
                                         <td className="px-3 py-2 border border-gray-200 font-mono font-semibold text-gray-800 whitespace-nowrap">
                                             {rowInMaster(r) ? (
                                                 <button type="button" onClick={() => openView(r)}
@@ -1280,15 +1345,8 @@ const AppMapping = ({ onMasterChanged }) => {
                             </tfoot>
                         </table>
                     </div>
-                    {remaining.length > rowLimit && (
-                        <div className="flex justify-center py-2 border-t border-gray-100 bg-white">
-                            <button onClick={() => setRowLimit((l) => l + ROWS_CHUNK)}
-                                className="px-4 py-1.5 rounded-lg text-[12px] font-semibold transition hover:opacity-90"
-                                style={{ backgroundColor: themeSoft, color: themeColor }}>
-                                Show more ({remaining.length - rowLimit} remaining)
-                            </button>
-                        </div>
-                    )}
+                    <TablePager page={curPage} pageSize={pageSize} total={remaining.length}
+                        onPage={goPage} onPageSize={setPageSize} />
 
                     {/* Floating scroll to top / bottom buttons — draggable horizontally along the bottom */}
                     <ScrollArrows storageKey="appMappingScrollBtnsPos" targetRef={bodyScrollRef} />
@@ -1419,7 +1477,7 @@ const recordToModel = (rec) => {
 const modelToPayload = (parts, kits) => ({
     parts: parts.map((p) => ({
         partNumber: p.partNumber.trim(), partDesc: p.partDesc.trim(), qty: String(p.qty).trim(),
-        action: p.action.trim(), serviceHours: String(p.serviceHours).trim(), schedule: '',
+        action: p.action.trim(), serviceHours: String(p.serviceHours).trim(),
         altPartNo: '', altDesc: '', altQty: '', altAction: '', altServiceHours: '',
     })),
     kits: kits.map((k) => ({
@@ -2703,7 +2761,7 @@ const MasterOfService = ({ onMasterChanged }) => {
     return (
         <div>
             <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 mb-4 text-[12px] text-amber-900/80 leading-relaxed">
-                Your file's <b>Service schedules</b> column is currently blank, so each part is mapped to a service by its <b>Service Hours</b>.
+                Each part is mapped to a service by its <b>Service Hours</b>.
                 These names are the catalogue; renaming one updates every screen. Only the name is editable.
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -2803,7 +2861,7 @@ const ImportData = ({ onMasterChanged }) => {
         const C = {
             seg: col('segment'), app: col('appcode'), sys: col('systemappcode'), eng: col('enginemodel'), kva: col('kva'),
             emi: col('emmission') >= 0 ? col('emmission') : col('emission'), pn: col('partnumber'), pd: col('partdescription'),
-            qty: qtyCols[0] ?? -1, act: actCols[0] ?? -1, hrs: hrsCols[0] ?? -1, sch: col('serviceschedules'),
+            qty: qtyCols[0] ?? -1, act: actCols[0] ?? -1, hrs: hrsCols[0] ?? -1,
             kitNo, kitDesc,
             kitQty: kitDesc >= 0 ? after(qtyCols, kitDesc) : (qtyCols[1] ?? -1),
             kitAct: kitDesc >= 0 ? after(actCols, kitDesc) : (actCols[1] ?? -1),
@@ -2840,7 +2898,7 @@ const ImportData = ({ onMasterChanged }) => {
                 // blank and the kit block spans them correctly.
                 groups[code].parts.push({
                     partNumber: g(r, C.pn), partDesc: g(r, C.pd), qty: g(r, C.qty), action: g(r, C.act),
-                    serviceHours: g(r, C.hrs), schedule: g(r, C.sch),
+                    serviceHours: g(r, C.hrs),
                     altPartNo: kNo, altDesc: kDe, altQty: kQ, altAction: kA,
                     altServiceHours: (kNo || kDe || kQ || kA) ? kv(r, C.kitHrs) : '',
                 });

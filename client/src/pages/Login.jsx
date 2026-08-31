@@ -218,9 +218,14 @@ const Login = () => {
                     can_access_expense: response.data.user.can_access_expense === true,  // <-- new
                     can_access_part_detail: response.data.user.can_access_part_detail === true,  // <-- page permission
                     can_access_mom: response.data.user.can_access_mom === true,                  // <-- page permission
+                    // Open Quotation Tracker page — granted from Profile.
+                    can_access_quotation_tracker: response.data.user.can_access_quotation_tracker === true,
                     can_access_approval: response.data.user.can_access_approval === true,        // <-- page permission
                     can_access_pms: response.data.user.can_access_pms === true,                  // <-- PMS module
+                    pms_pages: response.data.user.pms_pages ?? null, // which PMS report pages; null = all
+                    annual_tabs: response.data.user.annual_tabs ?? null, // which Annual Reports sheets; null = all
                     aop_access: response.data.user.aop_access || 'none',                         // 'none'|'view'|'edit'
+                    aop_tabs: response.data.user.aop_tabs ?? null,   // {tab:'view'|'edit'} — which AOP tabs; null = all
                     session_id: response.data.user.session_id,  // <-- login session for logout tracking
                     theme: response.data.user.theme || 'light', // <-- saved UI theme (dark/light)
                     branches: branches                      // <-- all accessible branches

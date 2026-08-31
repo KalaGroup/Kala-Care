@@ -7,7 +7,7 @@ import { Plus, Search, Inbox } from 'lucide-react';
 import { getApplications, errText } from './approvalApi';
 import {
     ApplicationsTable, ApplicationDetailModal, CreateApplicationModal,
-    SummaryCards, TypeTabs, STATUS_META, statusLabel, BRAND,
+    SummaryCards, TypeTabs, STATUS_META, statusLabel, BRAND, canCreatorDelete,
 } from './ApprovalShared';
 import ApprovalReports from './ApprovalReports';
 
@@ -62,12 +62,9 @@ export default function EmployeeApprovalView() {
         filteredBase.filter(a => a.request_type === typeFilter),
         [filteredBase, typeFilter]);
 
-    // An application can be withdrawn only while it is pending and NOBODY has
-    // acted on it yet (chains vary per employee via the Authority Matrix).
-    const canDelete = (app) =>
-        app.created_by === user.user_id &&
-        app.status.startsWith('pending') &&
-        !app.l2_action_by && !app.l3_action_by && !app.l4_action_by && !app.l5_action_by;
+    // Withdrawable only while pending and untouched — the shared rule, so the
+    // employee view and the approver workspace agree.
+    const canDelete = (app) => canCreatorDelete(app, user.user_id);
 
     return (
         <div>

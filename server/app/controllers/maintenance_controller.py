@@ -18,7 +18,6 @@ def serialize_part(p: MaintenancePart):
         "altQty": p.alt_qty or "", "altAction": p.alt_action or "",
         "altServiceHours": p.alt_service_hours or "",
         "serviceHours": p.service_hours or "500", "consumable": p.consumable or "",
-        "schedule": p.schedule or "",
     }
 
 
@@ -180,7 +179,7 @@ def _insert_app(db: Session, a: dict, created_by=None):
             alt_qty=p.get("altQty"), alt_action=p.get("altAction"),
             alt_service_hours=p.get("altServiceHours"),
             service_hours=str(p.get("serviceHours") or "500"),
-            consumable=p.get("consumable"), schedule=p.get("schedule"), sort_order=i,
+            consumable=p.get("consumable"), sort_order=i,
         ))
     for k in a.get("kits") or []:
         if str(k.get("serviceHours") or "").strip():
@@ -281,7 +280,7 @@ def update_app(db: Session, app_code: str, payload: dict):
                 alt_qty=p.get("altQty"), alt_action=p.get("altAction"),
                 alt_service_hours=p.get("altServiceHours"),
                 service_hours=str(p.get("serviceHours") or "500"),
-                consumable=p.get("consumable"), schedule=p.get("schedule"), sort_order=i,
+                consumable=p.get("consumable"), sort_order=i,
             ))
     db.commit()
     db.refresh(row)
